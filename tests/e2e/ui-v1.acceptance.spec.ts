@@ -1,8 +1,9 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
+import { expect, test, type AuthorSession } from "./author-oauth-fixture";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { appendManuscript, createWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readPersistenceDrafts, replaceManuscript, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readPersistenceDrafts, replaceManuscript, manuscriptEditor as editor, readManuscriptMarkdown as markdown, writingFixturePath } from "./postgres-fixture";
 
 const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
 type TestPostgresClient = {
@@ -28,19 +29,20 @@ async function previewLegacy(page: Page) {
   await expect(page.getByRole("region", { name: "旧Draftのプレビュー" })).toBeVisible();
 }
 async function sourceExists(page: Page) { return page.evaluate((key) => localStorage.getItem(key) !== null, legacyKey); }
-async function persistedMarkdown(page: Page, projectId: string, documentId: string): Promise<string> {
-  const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
+async function persistedMarkdown(author: AuthorSession, projectId: string, documentId: string): Promise<string> {
+  const response = await author.fetch(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
   if (!response.ok()) return "";
   return ((await response.json()) as { revision: { markdown: string } }).revision.markdown;
 }
-async function seedManuscriptRevisions(page: Page, documentPath: string, manuscripts: string[]) {
+async function seedManuscriptRevisions(author: AuthorSession, documentPath: string, manuscripts: string[]) {
   const clientId = "revision-history-fixture";
-  const initial = await page.request.get(documentPath);
+  const initial = await author.fetch(documentPath);
   expect(initial.ok()).toBe(true);
   let current = (await initial.json() as { revision: { id: string; markdown: string } }).revision;
   for (const manuscript of manuscripts) {
-    const response = await page.request.patch(documentPath, {
-      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": clientId },
+    const response = await author.fetch(documentPath, {
+      method: "PATCH",
+      headers: { Origin: author.origin, "Idempotency-Key": randomUUID(), "X-Client-Id": clientId },
       data: {
         baseRevisionId: current.id,
         changes: [{ fromUtf16: 0, toUtf16: current.markdown.length, insert: manuscript }],
@@ -68,8 +70,8 @@ async function denyWrites(page: Page, enabled: boolean) {
   }, enabled);
 }
 
-test("legacy draft import preserves active input when its journal debounce is pending", async ({ page }) => {
-  const { scene } = await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page);
+test("legacy draft import preserves active input when its journal debounce is pending", async ({ page, authorizeAuthor }) => {
+  const { scene } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   const text = "現在入力中の原稿を旧記録で消さない。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
@@ -78,8 +80,8 @@ test("legacy draft import preserves active input when its journal debounce is pe
   await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown === text)).toBe(true);
 });
 
-test("legacy draft import can be canceled, reloads its source, and removes it only after journal durability", async ({ page }) => {
-  const { scene } = await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page);
+test("legacy draft import can be canceled, reloads its source, and removes it only after journal durability", async ({ page, authorizeAuthor }) => {
+  const { scene } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await page.getByRole("button", { name: "取り込みをキャンセル" }).click(); expect(await sourceExists(page)).toBe(true);
   await seedLegacy(page, "再読込した元原稿。");
   await page.getByRole("button", { name: "legacy-project / legacy-scene", exact: true }).click();
@@ -94,8 +96,8 @@ test("legacy draft import can be canceled, reloads its source, and removes it on
 // Keep the original fill-based acceptance intact while comparing it with a
 // user-facing selection + typing path. This isolates the automation boundary
 // without weakening the canonical persisted-body assertion.
-test("keyboard select-all replacement saves exactly the intended manuscript", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page);
+test("keyboard select-all replacement saves exactly the intended manuscript", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const text = "先に確定した本文。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await editor(page).click();
@@ -104,13 +106,13 @@ test("keyboard select-all replacement saves exactly the intended manuscript", as
   await expectMarkdown(page, text);
   const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
   await expect.poll(async () => {
-    const response = await page.request.get(url);
+    const response = await author.fetch(url);
     return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
   }).toBe(text);
 });
 
-test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page); const text = "先に確定した本文。";
+test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); const text = "先に確定した本文。";
   // Use the same user-facing replacement path that passes in WebKit. The
   // legacy fill probe was diagnostic only and can append to a contenteditable
   // document in WebKit while Chromium masks the automation difference.
@@ -121,19 +123,19 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
   // completes. Pin only a revision whose canonical PostgreSQL body is this text.
   const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
   await expect.poll(async () => {
-    const response = await page.request.get(url);
+    const response = await author.fetch(url);
     return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
   }).toBe(text);
-  const before = await page.request.get(url); const original = await before.json();
+  const before = await author.fetch(url); const original = await before.json();
   await seedLegacy(page); await previewLegacy(page); await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
   await expectServerSaved(page);
-  const pinned = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}?revision=${original.revision.id}`);
+  const pinned = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}?revision=${original.revision.id}`);
   expect((await pinned.json()).revision.markdown).toBe(text); expect(await sourceExists(page)).toBe(false);
 });
 
-test("legacy draft import preserves input after its strict journal write fails", async ({ page }) => {
-  await createWritingFixture(page); const original = await editor(page).innerText(); await seedLegacy(page); await previewLegacy(page); await denyWrites(page, true);
+test("legacy draft import preserves input after its strict journal write fails", async ({ page, authorizeAuthor }) => {
+  await createOAuthWritingFixture(authorizeAuthor, page); const original = await editor(page).innerText(); await seedLegacy(page); await previewLegacy(page); await denyWrites(page, true);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   // Import is asynchronous. Keep the synthetic IndexedDB failure enabled until
   // the application confirms the failed durable write; otherwise the pending
@@ -146,8 +148,8 @@ test("legacy draft import preserves input after its strict journal write fails",
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
 });
 
-test("legacy draft import reports a rejected composition flush and keeps its source", async ({ page }) => {
-  await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page); const text = await editor(page).innerText();
+test("legacy draft import reports a rejected composition flush and keeps its source", async ({ page, authorizeAuthor }) => {
+  await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page); const text = await editor(page).innerText();
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expectMarkdown(page, text); expect(await sourceExists(page)).toBe(true);
@@ -155,8 +157,8 @@ test("legacy draft import reports a rejected composition flush and keeps its sou
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
 });
 
-test("legacy draft composition cannot write old scene text into a newly selected scene", async ({ page }) => {
-  const { second } = await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page);
+test("legacy draft composition cannot write old scene text into a newly selected scene", async ({ page, authorizeAuthor }) => {
+  const { second } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
@@ -164,23 +166,25 @@ test("legacy draft composition cannot write old scene text into a newly selected
   await expect(editor(page)).toContainText("最初の本文。"); expect(await sourceExists(page)).toBe(true);
 });
 
-test("the launcher remembers an explicit choice while direct Shell links keep the preference", async ({ page }) => {
-  await page.goto("/"); await page.getByRole("button", { name: /Desktop|デスクトップ/u }).first().click();
+test("the launcher remembers an explicit choice while direct Shell links keep the preference", async ({ page, authorServer, authorizeAuthor }) => {
+  await page.goto(authorServer.apiOrigin); await page.getByRole("button", { name: /Desktop|デスクトップ/u }).first().click();
   await expect(page).toHaveURL(/desktop/u);
-  await page.goto("/mobile/"); await expect(page.getByLabel("アクセス・トークン")).toBeVisible();
-  await page.goto("/"); await expect(page).toHaveURL(/desktop/u);
+  await authorizeAuthor("mobile", page, { path: "/mobile/?view=library" });
+  await expect(page.locator(".mobile-shell-page")).toHaveAttribute("data-mobile-view", "library");
+  await page.goto(authorServer.apiOrigin); await expect(page).toHaveURL(/desktop/u);
 });
 
-test("revision history responses and errors stay bound to the scene that requested them", async ({ page }) => {
-  const { project, scene, second } = await createWritingFixture(page);
+test("revision history responses and errors stay bound to the scene that requested them", async ({ page, authorizeAuthor }) => {
+  const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const aPast = "Aだけにある過去本文。";
   const aCurrent = "Aの現在本文。";
   const bPast = "Bだけにある過去本文。";
   const bCurrent = "Bの現在本文。";
   const sceneApi = `/api/v1/persistence/projects/${project.id}/documents`;
-  await seedManuscriptRevisions(page, `${sceneApi}/${scene.id}`, [aPast, aCurrent]);
-  await seedManuscriptRevisions(page, `${sceneApi}/${second.id}`, [bPast, bCurrent]);
+  await seedManuscriptRevisions(author, `${sceneApi}/${scene.id}`, [aPast, aCurrent]);
+  await seedManuscriptRevisions(author, `${sceneApi}/${second.id}`, [bPast, bCurrent]);
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectMarkdown(page, aCurrent);
 
   const historyUrl = (url: URL) => url.pathname === `${sceneApi}/${scene.id}/revisions`;
@@ -256,12 +260,12 @@ test("revision history responses and errors stay bound to the scene that request
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true }).getByRole("status")).toHaveCount(0);
 });
 
-test("revision history restarts a blocked page after a save on the same scene", async ({ page }) => {
+test("revision history restarts a blocked page after a save on the same scene", async ({ page, authorizeAuthor }) => {
   test.setTimeout(90_000);
-  const { project, scene } = await createWritingFixture(page);
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
-  const current = await seedManuscriptRevisions(page, documentPath, Array.from({ length: 50 }, (_, index) => `Revision ${index + 2}.`));
-  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  const current = await seedManuscriptRevisions(author, documentPath, Array.from({ length: 50 }, (_, index) => `Revision ${index + 2}.`));
+  await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
   await expect(editor(page)).toContainText(current.markdown);
   await openRevisionHistory(page);
   const history = page.getByRole("region", { name: "Revision履歴", exact: true });
@@ -289,7 +293,7 @@ test("revision history restarts a blocked page after a save on the same scene", 
   await pageStarted;
   const savedMarkdown = "A new receipt arrives while history is loading.";
   await replaceManuscript(page, savedMarkdown);
-  await expect.poll(async () => persistedMarkdown(page, project.id, scene.id)).toBe(savedMarkdown);
+  await expect.poll(async () => persistedMarkdown(author, project.id, scene.id)).toBe(savedMarkdown);
   await expect(page.getByRole("button", { name: "今すぐ保存", exact: true })).toBeDisabled();
   releasePage();
   await refreshStarted;
@@ -298,12 +302,12 @@ test("revision history restarts a blocked page after a save on the same scene", 
   await expect(history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true })).toBeEnabled();
 });
 
-test("revision history pages tied PostgreSQL revisions through retry, navigation, and restore", async ({ page }) => {
+test("revision history pages tied PostgreSQL revisions through retry, navigation, and restore", async ({ page, authorizeAuthor }) => {
   test.setTimeout(120_000);
-  const { project, scene, second } = await createWritingFixture(page);
+  const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
   const historyUrl = (url: URL) => url.pathname === `${documentPath}/revisions`;
-  const documentResponse = await page.request.get(documentPath);
+  const documentResponse = await author.fetch(documentPath);
   expect(documentResponse.ok()).toBe(true);
   let revision = (await documentResponse.json() as { revision: { id: string; markdown: string } }).revision;
   const initialRevision = revision;
@@ -312,7 +316,8 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   async function seedTo(count: number): Promise<void> {
     while (revisionCount < count) {
       const markdown = `Stored revision ${String(revisionCount + 1).padStart(3, "0")}.`;
-      const response = await page.request.patch(documentPath, {
+      const response = await author.fetch(documentPath, {
+        method: "PATCH",
         headers: {
           Origin: new URL(page.url()).origin,
           "Idempotency-Key": randomUUID(),
@@ -351,7 +356,7 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   }
 
   async function reopenScene(): Promise<void> {
-    await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+    await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
     await expect(editor(page)).toContainText(revision.markdown);
   }
 
@@ -421,7 +426,7 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).not.toContainText("Stored revision");
 
   await page.setViewportSize({ width: 360, height: 800 });
-  await page.goto(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`);
+  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
   await expect(editor(page)).toContainText(revision.markdown);
   await openRevisionHistory(page);
   const mobileHistory = page.getByRole("region", { name: "Revision履歴", exact: true });
@@ -443,7 +448,7 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元", exact: true }).click();
   await expect(editor(page)).toContainText("最初の本文。");
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
-  const restoredResponse = await page.request.get(documentPath);
+  const restoredResponse = await author.fetch(documentPath);
   expect(restoredResponse.ok()).toBe(true);
   const restored = (await restoredResponse.json() as { document: { headRevisionId: string }; revision: { id: string; markdown: string } });
   expect(restored.revision.markdown).toBe(initialRevision.markdown);
@@ -452,13 +457,14 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
 });
 
-test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page }) => {
-  await ownerLogin(page);
+test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page, authorizeAuthor }) => {
+  const author = await authorizeAuthor("desktop");
   const headers = { Origin: new URL(page.url()).origin };
-  const createdProject = await page.request.post("/api/v1/persistence/projects", { headers, data: { title: `Knowledge failure ${crypto.randomUUID()}` } });
+  const createdProject = await author.fetch("/api/v1/persistence/projects", { method: "POST", headers, data: { title: `Knowledge failure ${crypto.randomUUID()}` } });
   expect(createdProject.status()).toBe(201);
   const { project } = await createdProject.json() as { project: { id: string } };
-  const createdDocument = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+  const createdDocument = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents`, {
+    method: "POST",
     headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
     data: { kind: "scene", title: "唯一のシーン", orderKey: "a", markdown: "初期本文。" },
   });
@@ -481,7 +487,7 @@ test("a failed Knowledge list does not block the initial document and can be ret
     await route.continue();
   });
   const documentListResponse = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents`);
-  await page.goto(`/desktop/projects/${project.id}`);
+  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}` });
   await documentListResponse;
   await knowledgeRequestStarted;
   releaseKnowledgeFailure();
@@ -492,7 +498,7 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await expect(manuscript).toContainText("初期本文。");
   const draft = "Knowledge一覧が使えなくても編集して保存できる。";
   await manuscript.fill(draft);
-  await expect.poll(() => persistedMarkdown(page, project.id, document.id)).toBe(draft);
+  await expect.poll(() => persistedMarkdown(author, project.id, document.id)).toBe(draft);
 
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   const panelMenu = toolbar.locator("details");
@@ -505,11 +511,12 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await expect(manuscript).toContainText(draft);
 });
 
-test("same-named scenes show their chapter in the desktop and mobile writing headers", async ({ page }) => {
-  const { project } = await createWritingFixture(page);
+test("same-named scenes show their chapter in the desktop and mobile writing headers", async ({ page, authorizeAuthor }) => {
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const origin = new URL(page.url()).origin;
   const add = async (data: { kind: "chapter" | "scene"; title: string; orderKey: string; parentId?: string }) => {
-    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents`, {
+      method: "POST",
       headers: { Origin: origin, "Idempotency-Key": randomUUID() },
       data: { ...data, markdown: "" },
     });
@@ -525,7 +532,7 @@ test("same-named scenes show their chapter in the desktop and mobile writing hea
     await page.setViewportSize({ width: mode === "desktop" ? 1280 : 390, height: 844 });
     const context = page.locator(mode === "desktop" ? ".pg-editor-heading .eyebrow" : ".mobile-shell-context");
     for (const [document, chapter] of [[writing, "第三章"], [source, "第一章"]] as const) {
-      await page.goto(`${origin}/${mode}/projects/${project.id}/scenes/${document.id}${mode === "mobile" ? "?view=writing" : ""}`);
+      await authorizeAuthor(mode, page, { path: `/${mode}/projects/${project.id}/scenes/${document.id}${mode === "mobile" ? "?view=writing" : ""}` });
       await expect(editor(page)).toBeVisible();
       await expect(context).toBeVisible();
       await expect(context).toHaveText(`${chapter} / ${project.title}`);
@@ -533,9 +540,9 @@ test("same-named scenes show their chapter in the desktop and mobile writing hea
   }
 });
 
-test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page }) => {
+test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await createWritingFixture(page, "mobile");
+  await createOAuthWritingFixture(authorizeAuthor, page, "mobile");
   const pageRoot = page.locator("#ion-view-container-root");
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
 
@@ -571,8 +578,8 @@ test("mobile reference sheet has a named dialog and excludes the background from
   await expect(inspectorTrigger).toBeFocused();
 });
 
-test("mobile outline reveal keeps its title, tabs, and dismiss control visible at narrow widths", async ({ page }) => {
-  const { project } = await createWritingFixture(page, "mobile", "作業中の初期シーン");
+test("mobile outline reveal keeps its title, tabs, and dismiss control visible at narrow widths", async ({ page, authorizeAuthor }) => {
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", "作業中の初期シーン");
   const origin = new URL(page.url()).origin;
   async function createDocument(input: {
     kind: "volume" | "chapter" | "scene";
@@ -580,7 +587,8 @@ test("mobile outline reveal keeps its title, tabs, and dismiss control visible a
     orderKey: string;
     parentId?: string;
   }): Promise<{ id: string }> {
-    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents`, {
+      method: "POST",
       headers: { Origin: origin, "Idempotency-Key": randomUUID() },
       data: { markdown: "", ...input },
     });
@@ -594,7 +602,7 @@ test("mobile outline reveal keeps its title, tabs, and dismiss control visible a
   const scene = await createDocument({ kind: "scene", title, orderKey: "00", parentId: chapter.id });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`, page.url()).toString());
+  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
   await expect(editor(page)).toBeVisible();
   const currentTitle = page.locator(".mobile-shell-current-title");
   await expect(currentTitle).toHaveText(title);
@@ -657,9 +665,9 @@ test("mobile outline reveal keeps its title, tabs, and dismiss control visible a
   }
 });
 
-test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page }) => {
+test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const { project } = await createWritingFixture(page, "mobile");
+  const { project } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile");
   const failure = "Knowledge候補を保存できませんでした。";
   await page.route(`**/api/v1/persistence/projects/${project.id}/nodes/*`, async (route) => {
     if (route.request().method() === "PUT") {
@@ -690,10 +698,10 @@ test("mobile Knowledge write failures stay visible in the global status after le
   await expect(page.getByRole("alert")).toHaveCount(1);
 });
 
-test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page }) => {
+test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 320, height: 844 });
   const title = "320pxでも切れずに参照できる長い作品名".repeat(4);
-  const { project, scene } = await createWritingFixture(page, "desktop", title);
+  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", title);
   const desktopShell = page.locator(".st-desktop-shell");
   const modeSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
 
@@ -714,9 +722,10 @@ test("desktop mode switch stays visible and operable at 320 CSS pixels", async (
   expect(pointerBox).not.toBeNull();
   await page.mouse.click(pointerBox!.x + pointerBox!.width / 2, pointerBox!.y + pointerBox!.height / 2);
   await expect(page).toHaveURL(/\/mobile\//u);
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await expect(editor(page)).toContainText("最初の本文。");
 
-  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
   for (let attempt = 0; attempt < 24; attempt += 1) {
     if (await modeSwitch.evaluate((element) => document.activeElement === element)) break;
     await page.keyboard.press("Tab");
@@ -733,11 +742,12 @@ test("desktop mode switch stays visible and operable at 320 CSS pixels", async (
   expect(focusState.right).toBeLessThanOrEqual(320);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/mobile\//u);
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await expect(editor(page)).toContainText("最初の本文。");
 });
 
-test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page);
+test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const text = "頁を隠しても残る日本語のDraft。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
@@ -751,16 +761,16 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", async (
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
   await expectMarkdown(page, text);
   await expect.poll(async () => {
-    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
     return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
   }).toBe(text);
   await expectServerSaved(page);
 });
 
-test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page }) => {
+test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page, authorizeAuthor }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
-    const { project, scene } = await createWritingFixture(page, mode, undefined, "");
+    const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, mode, undefined, "");
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
     await editor(page).click();
     await page.keyboard.insertText(text);
@@ -768,13 +778,14 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+      const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
       return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
     }).toBe(text);
     await page.getByRole("button", { name: "読む", exact: true }).click();
     await expect(page.getByRole("region", { name: "原稿の閲覧" })).toContainText("東京");
     await page.getByRole("button", { name: "編集へ戻る" }).click(); await expectMarkdown(page, text);
     await page.reload();
+    await authorizeAuthor(mode, page, { continueCurrentPage: true });
     if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
     await expectMarkdown(page, text);
   }
@@ -792,12 +803,12 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
   });
 }
 
-test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page, browserName }) => {
+test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page, browserName, authorizeAuthor }) => {
   for (const width of [320, 390]) {
     for (const direction of ["horizontal", "vertical"] as const) {
       await page.setViewportSize({ width, height: 844 });
       const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
-      await createWritingFixture(page, "mobile", undefined, text);
+      await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, text);
       await page.getByRole("button", { name: "読む", exact: true }).click();
       const displayMenu = page.locator(".pg-editor-display-menu");
       if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
@@ -859,9 +870,9 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
   }
 });
 
-test("profile-selected workspace panels remain discoverable in the PostgreSQL workspace", async ({ page }) => {
-  const { project } = await createWritingFixture(page);
-  const response = await page.request.get(`/api/projects/${project.id}/contributions`); expect(response.ok()).toBe(true);
+test("profile-selected workspace panels remain discoverable in the PostgreSQL workspace", async ({ page, authorizeAuthor }) => {
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page);
+  const response = await author.fetch(`/api/projects/${project.id}/contributions`); expect(response.ok()).toBe(true);
   const catalog = await response.json();
   const contributions = Array.isArray(catalog) ? catalog : catalog.contributions;
   expect(Array.isArray(contributions)).toBe(true);
@@ -876,8 +887,8 @@ test("profile-selected workspace panels remain discoverable in the PostgreSQL wo
   await expect(editor(page)).toBeVisible();
 });
 
-test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", async ({ page }) => {
-  await createWritingFixture(page); await editor(page).evaluate((element) => { element.dataset.originalEditor = "retained"; });
+test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", async ({ page, authorizeAuthor }) => {
+  await createOAuthWritingFixture(authorizeAuthor, page); await editor(page).evaluate((element) => { element.dataset.originalEditor = "retained"; });
   await replaceManuscript(page, "保存応答でも選択と同じエディタを保持する。");
   await expectServerSaved(page);
   await expect(editor(page)).toHaveAttribute("data-original-editor", "retained");
@@ -887,19 +898,19 @@ test("UX canon keeps the manuscript visible and stable through PostgreSQL save r
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
 });
 
-test("UX canon puts Japanese prose before optional chrome at every shell width", async ({ page }) => {
+test("UX canon puts Japanese prose before optional chrome at every shell width", async ({ page, authorizeAuthor }) => {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     const prose = "本文を中心に読める幅と余白を保つ。".repeat(20);
-    await createWritingFixture(page, width < 640 ? "mobile" : "desktop", undefined, prose);
+    await createOAuthWritingFixture(authorizeAuthor, page, width < 640 ? "mobile" : "desktop", undefined, prose);
     await expectMarkdown(page, prose);
     const box = await editor(page).boundingBox(); expect(box).not.toBeNull(); expect(box!.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
   }
 });
 
-test("UX canon preserves focus and recovery when journal storage fails and returns", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page); await denyWrites(page, true);
+test("UX canon preserves focus and recovery when journal storage fails and returns", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); await denyWrites(page, true);
   const text = "保存領域が戻るまで失わない原稿。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
   await denyWrites(page, false); await editor(page).press("End"); await editor(page).press("!");
@@ -907,16 +918,16 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
   await expect.poll(async () => {
     const drafts = await readPersistenceDrafts(page);
     if (drafts.some(draft => draft.documentId === scene.id && draft.markdown === expectedMarkdown)) return true;
-    return await persistedMarkdown(page, project.id, scene.id) === expectedMarkdown;
+    return await persistedMarkdown(author, project.id, scene.id) === expectedMarkdown;
   }).toBe(true);
   await expect(editor(page)).toContainText(text);
 });
 
-test("UX canon keeps explicit shells usable with long Japanese titles and enlarged text", async ({ page }) => {
+test("UX canon keeps explicit shells usable with long Japanese titles and enlarged text", async ({ page, authorizeAuthor }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
     const prose = "大きな文字でも読み書きできる。".repeat(10);
-    await createWritingFixture(page, mode, "長い日本語の章題".repeat(8), prose);
+    await createOAuthWritingFixture(authorizeAuthor, page, mode, "長い日本語の章題".repeat(8), prose);
     await expectMarkdown(page, prose);
     const displayMenu = page.locator(".pg-editor-display-menu");
     if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
@@ -927,8 +938,12 @@ test("UX canon keeps explicit shells usable with long Japanese titles and enlarg
   }
 });
 
-test("guarded shell switches remember completed choices and keep the manuscript without preference storage", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page, "desktop");
+test("guarded shell switches remember completed choices and keep the manuscript without preference storage", async ({ page, authorizeAuthor }) => {
+  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop");
+  const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  await page.route((url) => url.pathname === documentPath, (route) => route.request().method() === "PATCH"
+    ? route.fulfill({ status: 503, json: { error: "Manuscript saving temporarily unavailable" } })
+    : route.continue());
   const firstDraft = "切替前の現在の原稿を保持する。";
   await page.evaluate(() => localStorage.setItem("scriptorium:ui-mode", "desktop"));
   await replaceManuscript(page, firstDraft);
@@ -944,24 +959,28 @@ test("guarded shell switches remember completed choices and keep the manuscript 
 
   await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await expectMarkdown(page, firstDraft);
   expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
-  await page.goto("/");
+  await page.goto(new URL("/", page.url()).href);
   await expect.poll(() => new URL(page.url()).pathname.startsWith("/mobile")).toBe(true);
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await expect(page.locator(".mobile-shell")).toBeVisible();
 
-  await page.goto(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`);
+  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
   await expectMarkdown(page, firstDraft);
   await page.getByRole("button", { name: "設定を開く", exact: true }).click();
   await page.getByRole("button", { name: "Desktop版へ切り替え", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectMarkdown(page, firstDraft);
   expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
-  await page.goto("/");
+  await page.goto(new URL("/", page.url()).href);
   await expect.poll(() => new URL(page.url()).pathname.startsWith("/desktop")).toBe(true);
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.locator(".st-desktop-shell")).toBeVisible();
 
-  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
   const secondDraft = "保存先が使えなくても移動経路と原稿を保持する。";
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
@@ -977,12 +996,13 @@ test("guarded shell switches remember completed choices and keep the manuscript 
   });
   await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await expectMarkdown(page, secondDraft);
 });
 
-test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page }) => {
+test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The terminology resolver is selected by the Full profile.");
-  const { project } = await createWritingFixture(page);
+  const { project } = await createOAuthWritingFixture(authorizeAuthor, page);
   const resolverPath = `/api/projects/${project.id}/actions/search.terms.resolve`;
   const manuscript = "Lantern Harborの用語を確認する。";
   const targetsManuscript = (request: Request) =>
@@ -1022,8 +1042,8 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", as
   }
 });
 
-test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page }) => {
-  await createWritingFixture(page); const text = "東京《とうきょう》の用語と変換を保持する。";
+test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page, authorizeAuthor }) => {
+  await createOAuthWritingFixture(authorizeAuthor, page); const text = "東京《とうきょう》の用語と変換を保持する。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
   await expectMarkdown(page, text);
@@ -1034,13 +1054,14 @@ test("Full WebKit terminology stays safe across a held native Shell departure wi
   await editor(page).dispatchEvent("compositionend", { data: "東京" });
   await page.getByRole("button", { name: "モバイル ↗" }).click();
   await expect(page).toHaveURL(/mobile/u);
+  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
   await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
   await expectMarkdown(page, text);
 });
 
 
-test("desktop author can download a portable work and import it without replacing the source", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page);
+test("desktop author can download a portable work and import it without replacing the source", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
   await transfer.locator("summary").click();
   const [download] = await Promise.all([
@@ -1061,17 +1082,17 @@ test("desktop author can download a portable work and import it without replacin
   await expect(page.getByText("新しい作品としてJSONを取り込みました。", { exact: false })).toBeVisible();
   const currentProject = await page.getByLabel("作品", { exact: true }).inputValue();
   expect(currentProject).not.toBe(project.id);
-  const imported = await page.request.get("/api/v1/persistence/projects/" + currentProject + "/documents");
+  const imported = await author.fetch("/api/v1/persistence/projects/" + currentProject + "/documents");
   expect(imported.ok()).toBe(true);
   const body = await imported.json() as { documents: Array<{ id: string; title: string }> };
   expect(body.documents.some((item) => item.id === scene.id)).toBe(true);
-  const original = await page.request.get("/api/v1/persistence/projects/" + project.id + "/documents/" + scene.id);
+  const original = await author.fetch("/api/v1/persistence/projects/" + project.id + "/documents/" + scene.id);
   expect(original.ok()).toBe(true);
   expect((await original.json() as { revision: { markdown: string } }).revision.markdown).toContain("最初の本文。");
 });
 
-test("keeps the manuscript near its scene title with one concise protection status", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page);
+test("keeps the manuscript near its scene title with one concise protection status", async ({ page, authorizeAuthor }) => {
+  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const measured: Array<{ mode: string; width: number; height: number; top: number; protectionCount: number; pageWidth: number }> = [];
   for (const sample of [
     { mode: "desktop" as const, width: 1440, height: 900 },
@@ -1081,7 +1102,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
   ]) {
     await page.setViewportSize({ width: sample.width, height: sample.height });
     const path = `/${sample.mode}/projects/${project.id}/scenes/${scene.id}${sample.mode === "mobile" ? "?view=writing" : ""}`;
-    await page.goto(new URL(path, page.url()).toString());
+    await authorizeAuthor(sample.mode, page, { path });
     await expect(editor(page)).toBeVisible();
     const geometry = await page.evaluate(() => {
       const firstLine = document.querySelector<HTMLElement>(".pg-editor .cm-line");
@@ -1119,8 +1140,8 @@ test("keeps the manuscript near its scene title with one concise protection stat
   expect(await page.locator(".pg-editor-actions").count()).toBe(1);
 });
 
-test("journal writes do not spam live save status while a server receipt remains exact", async ({ page }) => {
-  const { project, scene } = await createWritingFixture(page, "mobile", undefined, "");
+test("journal writes do not spam live save status while a server receipt remains exact", async ({ page, authorizeAuthor }) => {
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, "");
   const details = await openProtectionDetails(page);
   await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
@@ -1146,16 +1167,16 @@ test("journal writes do not spam live save status while a server receipt remains
   const changes = await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? []);
   expect(changes.length).toBeLessThanOrEqual(3);
   expect(changes).not.toContain("このブラウザーに下書きあり");
-  expect(await persistedMarkdown(page, project.id, scene.id)).toBe("abcdefgh");
+  expect(await persistedMarkdown(author, project.id, scene.id)).toBe("abcdefgh");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   await expect(details.locator("summary")).toHaveText("作品に保存済み");
 });
 
-test("save details keep the confirmed work version separate from later device input", async ({ page }) => {
+test("save details keep the confirmed work version separate from later device input", async ({ page, authorizeAuthor }) => {
   const initial = "A。作品に保存した文。";
   const firstAddition = "\nB。先に送信した文。";
   const secondAddition = "\nC。その後に入力した文。";
-  const { project, scene } = await createWritingFixture(page, "mobile", undefined, initial);
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, initial);
   const details = await openProtectionDetails(page);
   const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
   let releaseFirst!: () => void;
@@ -1182,15 +1203,15 @@ test("save details keep the confirmed work version separate from later device in
     await expect(details).toContainText("現在の編集をこのブラウザーに記録しました");
     await expect(details).toContainText("送信後の入力は今回の保存に含まれません");
     await expect(details.locator("summary")).toHaveAttribute("aria-live", "off");
-    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial);
+    await expect.poll(() => persistedMarkdown(author, project.id, scene.id)).toBe(initial);
 
     releaseFirst();
-    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition);
+    await expect.poll(() => persistedMarkdown(author, project.id, scene.id)).toBe(initial + firstAddition);
     await expect(details).toContainText("直前に確認した版は作品に保存されています");
     await expect(details.locator("summary")).not.toHaveText("作品に保存済み");
 
     releaseSecond();
-    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition + secondAddition);
+    await expect.poll(() => persistedMarkdown(author, project.id, scene.id)).toBe(initial + firstAddition + secondAddition);
     await expect(details.locator("summary")).toHaveText("作品に保存済み");
   } finally {
     releaseFirst();
