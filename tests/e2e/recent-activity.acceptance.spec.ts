@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { expect, test, type AuthorSession, type AuthorizeAuthor } from "./author-oauth-fixture";
-import { createOAuthWritingFixture, expectServerSaved, manuscriptEditor, replaceManuscript, writingFixturePath } from "./postgres-fixture";
+import { createOAuthWritingFixture, manuscriptEditor, writingFixturePath } from "./postgres-fixture";
 
 
 async function unusedTcpPort(): Promise<number> {
@@ -144,10 +144,8 @@ async function remotePosition(author: AuthorSession, projectId: string, sceneId:
 const originalMarkdown = "最初の本文。\n次の文章です。";
 
 async function longFixture(authorizeAuthor: AuthorizeAuthor, page: Page) {
-  const f = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, originalMarkdown);
-  await replaceManuscript(page, "読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
-  await expectServerSaved(page);
-  return f;
+  return createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined,
+    "読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
 }
 async function nativeFixture() {
   requireNativeVisibilityCoverage();
