@@ -31,11 +31,13 @@ export default class BrowserCoverageReporter {
     let error;
     try {
       summary = summarizeBrowserCoverage({ expected: this.discovered.length, outcomes });
+      if (summary.executed === 0) error = "No browser case executed";
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     }
     const complete = Boolean(summary)
       && result.status === "passed"
+      && summary.executed > 0
       && summary.failed === 0
       && summary.notRun === 0;
     const report = {

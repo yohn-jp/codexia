@@ -21,12 +21,20 @@ test("candidate aggregation preserves source reading, per-entity occurrence coun
   assert.deepEqual(candidates, [{ term: "銀河", reading: "ギンカワ", sourceEntityIds: ["character-1", "scene-1"], occurrenceCount: 3 }]);
 });
 
-test("term variants preserve known-term first match and choose the highest-frequency cluster representative", () => {
+test("term variants prefer a known canonical term even when an unknown variant is more frequent", () => {
+  assert.deepEqual(
+    suggestTermVariants([{ term: "王都街道筋", count: 20 }], new Set(["王都街道", "王都街道筋線"])),
+    [{ candidate: "王都街道筋", canonical: "王都街道", count: 20 }],
+  );
+});
+
+test("an unknown variant cluster uses its most frequent member as the canonical term", () => {
   assert.deepEqual(suggestTermVariants([
-    { term: "王都街道", count: 5 },
     { term: "王都街道筋", count: 2 },
+    { term: "王都街道", count: 5 },
     { term: "王都街道脇", count: 3 },
-  ], new Set(["王都街道" ])), [
+    { term: "銀色飛行艇", count: 10 },
+  ], new Set()), [
     { candidate: "王都街道筋", canonical: "王都街道", count: 2 },
     { candidate: "王都街道脇", canonical: "王都街道", count: 3 },
   ]);

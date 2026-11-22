@@ -50,11 +50,23 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
   assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@db.example.test/codexia_auth_test"), /disposable/u);
   assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@127.0.0.1/codexia_auth"), /disposable/u);
   assert.doesNotThrow(() => assertDisposableAuthFixtureDatabaseUrl(databaseUrl));
+  const callerNodeEnv = process.env.NODE_ENV;
+  delete process.env.NODE_ENV;
+  let closeFixture: (() => Promise<void>) | undefined;
+  t.after(async () => {
+    try {
+      await closeFixture?.();
+      assert.equal(Object.hasOwn(process.env, "NODE_ENV"), false, "the fixture restores an unset NODE_ENV");
+    } finally {
+      if (callerNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = callerNodeEnv;
+    }
+  });
   const fixture = await startBetterAuthFixture({
     databaseUrl,
     staticDirectory: new URL("../../app/dist", import.meta.url).pathname,
   });
-  t.after(() => fixture.close());
+  closeFixture = () => fixture.close();
 
   const origin = fixture.apiOrigin;
   const baseAuth = `${origin}/api/auth`;

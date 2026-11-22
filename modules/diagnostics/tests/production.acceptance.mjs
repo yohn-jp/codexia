@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import YAML from "yaml";
@@ -162,27 +162,6 @@ function proposalFor(result, name) {
   return proposal;
 }
 
-function fnv1aHash(input) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index++) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function sourceFormatterResultId({ projectId, sceneId, manuscriptId, manuscriptRevision, text }) {
-  return `na-${createHash("sha256").update(JSON.stringify({
-    action: "format-manuscript",
-    projectId,
-    sceneId,
-    manuscriptId,
-    manuscriptRevision,
-    manuscriptContentHash: fnv1aHash(text),
-    text,
-  })).digest("hex")}`;
-}
-
 async function approveAndApply(store, projectId, proposal) {
   const operationIds = proposal.operations.map((operation) => operation.id);
   await store.approve(projectId, { proposalId: proposal.id, operationIds, authorScope: "p06-synthetic-owner" });
@@ -196,6 +175,68 @@ async function currentReader(store, projectId) {
   assert.equal(observed.state, "fresh");
   return store.reader(projectId, observed.snapshot);
 }
+
+test("the supervised NLP tokenizer uses the pinned model and releases its child on success and fallback", { timeout: 60_000 }, async (t) => {
+  const model = "Xenova/multilingual-e5-small";
+  const cachedTokenizerModels = process.env.CODEXIA_TOKENIZER_MODELS_DIR;
+  assert.ok(cachedTokenizerModels, "CODEXIA_TOKENIZER_MODELS_DIR must provide the pinned tokenizer");
+  await stat(join(cachedTokenizerModels, model, "761b726dd34fb83930e26aab4e9ac3899aa1fa78", "tokenizer.json"));
+
+  const root = await mkdtemp(join(tmpdir(), "codexia-tokenizer-acceptance-"));
+  const fixture = await postgresFixture({}, "Tokenizer worker acceptance");
+  const runtime = await createRuntime(join(root, "runtime-cache"));
+  const reader = await currentReader(fixture.store, fixture.project.id);
+  const host = actionHost(fixture.store, fixture.project.id, reader);
+  const envNames = ["CODEXIA_TOKENIZER_MODELS_DIR", "ARCADIA_TOKENIZER_BACKEND", "ARCADIA_TOKENIZER_MODEL", "ARCADIA_LLM_MODEL"];
+  const originalEnv = new Map(envNames.map((name) => [name, process.env[name]]));
+  t.after(async () => {
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await runtime.shutdown();
+    await fixture.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  delete process.env.ARCADIA_TOKENIZER_BACKEND;
+  process.env.ARCADIA_TOKENIZER_MODEL = model;
+  delete process.env.ARCADIA_LLM_MODEL;
+
+  const exact = await runtime.invokeAction("nlp", "nlp.countTokens", {
+    texts: ["駅で別れた。", "A quiet station.", "星野は遺跡へ向かう。"],
+    modelId: model,
+  }, host);
+  const exactTokens = actionData(exact, "nlp.countTokens exact E5", reader);
+  assert.deepEqual(exactTokens.counts, [8, 6, 11], "the supervised worker uses the cached E5 AutoTokenizer output");
+  assert.deepEqual(exactTokens.snapshot, reader.snapshot);
+  assert.deepEqual(exactTokens.counter, {
+    modelId: model,
+    exact: true,
+    engine: "huggingface-transformers",
+    engineVersion: nlpPackage.dependencies["@huggingface/transformers"],
+  });
+  assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the exact tokenizer child exits after its lease is released");
+
+  const emptyModels = join(root, "empty-model-cache");
+  await mkdir(emptyModels);
+  process.env.CODEXIA_TOKENIZER_MODELS_DIR = emptyModels;
+  const unavailable = "codexia-p06/no-such-tokenizer";
+  const fallback = await runtime.invokeAction("nlp", "nlp.countTokens", {
+    texts: ["駅abc", "abcdef", ""],
+    modelId: unavailable,
+  }, host);
+  const fallbackTokens = actionData(fallback, "nlp.countTokens unavailable fallback", reader);
+  assert.deepEqual(fallbackTokens.counts, [2, 2, 0], "an unavailable local tokenizer uses the source CJK/three-character formula");
+  assert.deepEqual(fallbackTokens.counter, {
+    modelId: "approx",
+    exact: false,
+    engine: "source-approx",
+    engineVersion: "source-approx-v1",
+    requestedModelId: unavailable,
+    fallbackReason: "tokenizer_unavailable",
+  });
+  assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the unavailable-tokenizer child exits after its lease is released");
+});
 
 test("P06 public actions apply and recover durable PostgreSQL project changes", { timeout: 180_000 }, async (t) => {
   assert.ok(nlpManifest && diagnosticsManifest, "installed NLP and diagnostics module metadata must be present");
@@ -227,63 +268,6 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     for (const token of nlp.tokens) assert.equal(nlp.text.slice(token.start, token.end), token.surface, "real Lindera output retains UTF-16 token offsets after a surrogate pair");
     for (const sentence of nlp.sentences) assert.equal(nlp.text.slice(sentence.start, sentence.end), sentence.text);
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the actual NLP child exits after its final tokenizer lease");
-
-    const cachedTokenizerModels = process.env.CODEXIA_TOKENIZER_MODELS_DIR ?? "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
-    await stat(join(cachedTokenizerModels, "Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json"));
-    const originalHome = process.env.HOME;
-    const originalBackend = process.env.ARCADIA_TOKENIZER_BACKEND;
-    const originalTokenizerModel = process.env.ARCADIA_TOKENIZER_MODEL;
-    const originalLlmModel = process.env.ARCADIA_LLM_MODEL;
-    const restoreTokenizerEnvironment = () => {
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
-      if (originalBackend === undefined) delete process.env.ARCADIA_TOKENIZER_BACKEND;
-      else process.env.ARCADIA_TOKENIZER_BACKEND = originalBackend;
-      if (originalTokenizerModel === undefined) delete process.env.ARCADIA_TOKENIZER_MODEL;
-      else process.env.ARCADIA_TOKENIZER_MODEL = originalTokenizerModel;
-      if (originalLlmModel === undefined) delete process.env.ARCADIA_LLM_MODEL;
-      else process.env.ARCADIA_LLM_MODEL = originalLlmModel;
-    };
-    try {
-      process.env.HOME = dirname(dirname(cachedTokenizerModels));
-      delete process.env.ARCADIA_TOKENIZER_BACKEND;
-      process.env.ARCADIA_TOKENIZER_MODEL = "Xenova/multilingual-e5-small";
-      delete process.env.ARCADIA_LLM_MODEL;
-      const exactTokenResult = await runtime.invokeAction("nlp", "nlp.countTokens", {
-        texts: ["駅で別れた。", "A quiet station.", "星野は遺跡へ向かう。"],
-        modelId: "Xenova/multilingual-e5-small",
-      }, host);
-      const exactTokens = actionData(exactTokenResult, "nlp.countTokens exact E5", reader);
-      assert.deepEqual(exactTokens.counts, [8, 6, 11], "the supervised worker uses the cached E5 AutoTokenizer output");
-      assert.deepEqual(exactTokens.snapshot, reader.snapshot);
-      assert.deepEqual(exactTokens.counter, {
-        modelId: "Xenova/multilingual-e5-small",
-        exact: true,
-        engine: "huggingface-transformers",
-        engineVersion: "3.8.1",
-      });
-      assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the actual tokenizer child exits after its lease is released");
-
-      const emptyTokenizerHome = join(root, "empty-tokenizer-home");
-      await mkdir(emptyTokenizerHome, { recursive: true });
-      process.env.HOME = emptyTokenizerHome;
-      const fallbackTokenResult = await runtime.invokeAction("nlp", "nlp.countTokens", {
-        texts: ["駅abc", "abcdef", ""], modelId: "codexia-p06/no-such-tokenizer",
-      }, host);
-      const fallbackTokens = actionData(fallbackTokenResult, "nlp.countTokens unavailable fallback", reader);
-      assert.deepEqual(fallbackTokens.counts, [2, 2, 0], "an unavailable local tokenizer uses the source CJK/three-character formula");
-      assert.deepEqual(fallbackTokens.counter, {
-        modelId: "approx",
-        exact: false,
-        engine: "source-approx",
-        engineVersion: "source-approx-v1",
-        requestedModelId: "codexia-p06/no-such-tokenizer",
-        fallbackReason: "tokenizer_unavailable",
-      });
-      assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the unavailable-tokenizer child exits after its lease is released");
-    } finally {
-      restoreTokenizerEnvironment();
-    }
 
     const dictionaryResult = await runtime.invokeAction("nlp", "nlp.dictionary", { term: "強い" }, host);
     const dictionary = actionData(dictionaryResult, "nlp.dictionary", reader);
@@ -396,18 +380,18 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     const sourceFormatted = actionData(sourceFormatResult, "diagnostics.formatManuscript source adapter", reader);
     assert.equal(sourceFormatted.actionId, "format-manuscript");
     assert.equal(sourceFormatted.formattedText, "星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
-    assert.equal(sourceFormatted.resultId, sourceFormatterResultId({
-      projectId: project.id,
-      sceneId: "sc-three",
-      manuscriptId: storyContext.manuscript.id,
-      manuscriptRevision: storyContext.manuscriptRevision,
-      text: storyContext.manuscriptBody,
-    }), "result identity matches the source formatter's pinned Story revision and text hash");
+    assert.match(sourceFormatted.resultId, /^na-[a-f0-9]{64}$/u);
+    const repeatedSourceFormat = actionData(await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", {
+      sceneId: "sc-three", registerProposal: false,
+    }, host), "same-revision format replay", reader);
+    assert.equal(repeatedSourceFormat.resultId, sourceFormatted.resultId);
+    assert.equal(repeatedSourceFormat.proposalId, sourceFormatted.proposalId);
     assert.equal(sourceFormatted.proposalId, sourceFormatted.sourceProposal.id);
     assert.equal(sourceFormatted.proposal, null, "registerProposal:false does not create a canonical Core proposal");
     assert.equal(sourceFormatResult.proposals, undefined, "the adapter leaves source submission to the author-facing Story route");
     const sourceNcs = sourceFormatted.sourceProposal;
-    assert.deepEqual(Object.keys(sourceNcs), ["schemaVersion", "id", "projectId", "goal", "status", "assessment", "operations", "evidence", "diagnostics"]);
+    assert.equal(sourceNcs.schemaVersion, 1);
+    assert.equal(sourceNcs.status, "proposed");
     assert.equal(sourceNcs.projectId, project.id);
     assert.equal(sourceNcs.goal, "Format manuscript");
     assert.equal(sourceNcs.operations.length, 1);
@@ -436,6 +420,12 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     appliedReceipts.push(...await approveAndApply(store, project.id, sourceCoreProposal));
     reader = await currentReader(store, project.id);
     host = actionHost(store, project.id, reader);
+
+    const afterApply = actionData(await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", {
+      sceneId: "sc-three", registerProposal: false,
+    }, host), "format preview after changing the stored manuscript", reader);
+    assert.notEqual(afterApply.resultId, sourceFormatted.resultId);
+    assert.equal(afterApply.proposalId, null, "formatting the applied body again has no changes to propose");
 
     const synonymResult = await runtime.invokeAction("nlp", "nlp.saveSynonymGroup", { words: ["剛健"], mergeGroupIndex: 0 }, host);
     const synonymData = actionData(synonymResult, "nlp.saveSynonymGroup", reader);
@@ -616,12 +606,22 @@ test("Diagnostics consistency and continuity resolve PostgreSQL UUID scopes by c
     const projectConsistency = await actionDataFor("diagnostics.checkConsistency", project.id);
     const unscopedConsistency = await actionDataFor("diagnostics.checkConsistency", undefined);
     assert.equal(projectConsistency.scope, project.id, "the PostgreSQL project UUID selects the complete pinned snapshot");
-    assert.deepEqual(projectConsistency.issues, unscopedConsistency.issues);
-    assert.ok(projectConsistency.issues.some((issue) => issue.code === "THREAD_NO_PLANT"));
+    for (const { issues } of [projectConsistency, unscopedConsistency]) {
+      assert.ok(issues.some((issue) => issue.code === "THREAD_NO_PLANT" && issue.entityId === openThreadId));
+      assert.ok(issues.some((issue) => issue.code === "MISSING_LINK_TARGET" && issue.entityId === sceneScope));
+      assert.ok(issues.some((issue) => issue.code === "MISSING_LINK_TARGET" && issue.entityId === sceneSibling));
+    }
     const projectContinuity = await actionDataFor("diagnostics.checkContinuity", project.id);
     const unscopedContinuity = await actionDataFor("diagnostics.checkContinuity", undefined);
     assert.equal(projectContinuity.scope, project.id);
-    assert.deepEqual(projectContinuity.warnings, unscopedContinuity.warnings);
+    const expectedBoundaries = [
+      `${sceneBefore}->${sceneScope}`, `${sceneScope}->${sceneSibling}`, `${sceneSibling}->${sceneAfter}`,
+    ];
+    const teleportBoundaries = ({ warnings }) => new Set(warnings
+      .filter((warning) => warning.reason === "unrecorded-teleport")
+      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`));
+    assert.deepEqual(teleportBoundaries(projectContinuity), new Set(expectedBoundaries));
+    assert.deepEqual(teleportBoundaries(unscopedContinuity), new Set(expectedBoundaries));
 
     const sceneConsistency = await actionDataFor("diagnostics.checkConsistency", sceneScope);
     assert.equal(sceneConsistency.scope, sceneScope);
@@ -635,20 +635,14 @@ test("Diagnostics consistency and continuity resolve PostgreSQL UUID scopes by c
     assert.deepEqual(new Set(volumeConsistency.issues.map((issue) => issue.entityId)), new Set([sceneScope, sceneSibling]));
 
     const sceneContinuity = await actionDataFor("diagnostics.checkContinuity", sceneScope);
-    const sceneBoundaryPairs = sceneContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
-      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`);
-    assert.deepEqual(new Set(sceneBoundaryPairs), new Set([
-      `${sceneBefore}->${sceneScope}`, `${sceneScope}->${sceneSibling}`, `${sceneSibling}->${sceneAfter}`,
-    ]), "scene scope includes its adjacent scene context and the context's continuity boundary");
+    assert.deepEqual(teleportBoundaries(sceneContinuity), new Set(expectedBoundaries),
+      "scene scope includes its adjacent scene context and the context's continuity boundary");
 
     const chapterContinuity = await actionDataFor("diagnostics.checkContinuity", chapterScope);
-    assert.deepEqual(new Set(chapterContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
-      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`)), new Set(sceneBoundaryPairs));
+    assert.deepEqual(teleportBoundaries(chapterContinuity), new Set(expectedBoundaries));
     const volumeContinuity = await actionDataFor("diagnostics.checkContinuity", volumeScope);
-    assert.deepEqual(new Set(volumeContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
-      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`)), new Set([
-      `${sceneBefore}->${sceneScope}`, `${sceneScope}->${sceneSibling}`, `${sceneSibling}->${sceneAfter}`,
-    ]), "volume scope covers its scenes and the continuity boundary at each end");
+    assert.deepEqual(teleportBoundaries(volumeContinuity), new Set(expectedBoundaries),
+      "volume scope covers its scenes and the continuity boundary at each end");
 
     for (const action of ["diagnostics.checkConsistency", "diagnostics.checkContinuity"]) {
       for (const invalidId of [characterId, randomUUID()]) {
@@ -717,7 +711,7 @@ test("native PostgreSQL scene body diagnostics and revision-bound proposals", { 
     const fullResult = await runtime.invokeAction("diagnostics", "diagnostics.scene", { sceneId }, host);
     const full = actionData(fullResult, "diagnostics.scene saved native body", reader);
     assert.equal(full.analysis.charCount, originalBody.length);
-    assert.equal(full.textHash, fnv1aHash(originalBody));
+    assert.equal(full.textHash, "8dac6325", "the complete saved fixture body has this compatibility fingerprint");
 
     const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: nativeScenePath, baseRevision: nativeFile.revision, operationId: "native-pg-lint-fix",

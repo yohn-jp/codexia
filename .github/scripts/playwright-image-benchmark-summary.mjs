@@ -96,10 +96,12 @@ const lines = [
 ];
 const problems = [];
 for (const {browser, source} of expected) {
-  const r = result.find(row => row.browser === browser && row.source === source);
-  lines.push(`| ${browser} | ${source} | ${format(r?.pull ?? null)} | ${format(r?.init ?? null)} | ${format(r?.test ?? null)} | ${format(r?.total ?? null)} | ${r?.conclusion ?? 'missing'} |`);
+  const matches = result.filter(row => row.browser === browser && row.source === source);
+  const r = matches.length === 1 ? matches[0] : null;
+  const conclusion = r?.conclusion ?? (matches.length > 1 ? 'ambiguous' : 'missing');
+  lines.push(`| ${browser} | ${source} | ${format(r?.pull ?? null)} | ${format(r?.init ?? null)} | ${format(r?.test ?? null)} | ${format(r?.total ?? null)} | ${conclusion} |`);
   if (!r) {
-    problems.push(`${source}/${browser}: job missing`);
+    problems.push(`${source}/${browser}: ${matches.length > 1 ? 'duplicate jobs' : 'job missing'}`);
     continue;
   }
   const missing = [['Pull', r.pull], ['Initialize containers', r.init], ['Browser test', r.test], ['Job elapsed', r.total]]

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createSearchDocument, lexicalTokens, searchDocuments, searchTerms } from "./search-ranking.js";
+import { createSearchDocument, searchDocuments, searchTerms } from "./search-ranking.js";
 
 test("lexical search ranks exact names and full text, applies scope and result bounds", () => {
   const documents = [
@@ -36,11 +36,17 @@ test("lexical search materializes snippets only for the highest ranked documents
   assert.deepEqual(reads, ["manuscript/harbor.md", "manuscript/a.md"]);
 });
 
-test("Japanese full-text tokens retain useful character pairs and optional word hints", () => {
-  assert.deepEqual(lexicalTokens("青い駅前"), ["青い", "い駅", "駅前"]);
-  const document = createSearchDocument("manuscript/vol-1/ch-1/a.md", "d".repeat(64), "青い駅前で待つ");
-  assert.equal(searchDocuments([document], "駅前", "fulltext", 10).length, 1);
-  assert.equal(searchDocuments([document], "待ち合わせ", "fulltext", 10, undefined, ["待つ"]).length, 1);
+test("Japanese lexical search finds an unspaced prefix and uses explicit word hints", () => {
+  const station = createSearchDocument("manuscript/a.md", "station-revision", "青い駅前で待つ");
+  const harbor = createSearchDocument("manuscript/b.md", "harbor-revision", "青い港を散歩する");
+  const documents = [station, harbor];
+
+  assert.deepEqual(searchDocuments(documents, "駅前", "prefix", 10).map((hit) => hit.path), [station.path]);
+  assert.deepEqual(searchDocuments(documents, "待ち合わせ", "fulltext", 10), []);
+  assert.deepEqual(
+    searchDocuments(documents, "待ち合わせ", "fulltext", 10, undefined, ["待つ"]).map((hit) => hit.path),
+    [station.path],
+  );
 });
 
 test("exact and prefix terminology lookups return only available scoped targets", () => {

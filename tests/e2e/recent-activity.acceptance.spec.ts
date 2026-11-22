@@ -154,6 +154,14 @@ async function nativeFixture() {
   return native;
 }
 
+async function openContinuePanel(page: Page) {
+  const disclosure = page.locator(".pg-library-continue");
+  if (!await disclosure.evaluate((element: HTMLDetailsElement) => element.open)) {
+    await disclosure.locator("summary").click();
+  }
+  return page.getByRole("region", { name: "続きから" });
+}
+
 for (const kind of ["writing", "reading", "superseded reading"] as const) {
   test(`a delayed scene handles the chosen remote ${kind} position`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -257,6 +265,7 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
     const f = await longFixture(page); let requests = 0;
     page.on("request", (request) => { if (request.method() === "GET" && request.url().endsWith("/recent-activity")) requests += 1; });
     await page.reload(); await expect.poll(() => requests).toBeGreaterThan(0);
+    const panel = await openContinuePanel(page);
     background = await context.newPage(); await background.goto("about:blank"); await background.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
     const hidden = requests;
@@ -264,8 +273,9 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
     await remotePosition(page, f.project.id, f.scene.id);
     await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     await expect.poll(() => requests).toBeGreaterThan(hidden);
-    await expect(page.getByText(/スマホでたった今まで編集していました/u)).toBeVisible();
-    const visible = requests; await page.waitForTimeout(15_500); expect(requests).toBe(visible + 1);
+    await expect(panel.getByText(/スマホでたった今まで編集していました/u)).toBeVisible();
+    const visible = requests;
+    await expect.poll(() => requests, { timeout: 20_000 }).toBe(visible + 1);
   } finally { await background?.close(); await native.close(); }
 });
 
@@ -274,35 +284,71 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
   let background: Page | undefined;
   let release!: () => void;
   try {
-    const f = await longFixture(page); let started!: () => void;
+    const f = await longFixture(page);
+    const path = `/api/projects/${f.project.id}/recent-activity`;
+    await remotePosition(page, f.project.id, f.scene.id);
+    let started!: () => void;
     const pending = new Promise<void>((resolve) => { started = resolve; });
     const held = new Promise<void>((resolve) => { release = resolve; });
     let first = true;
-    await page.route(`**/api/projects/${f.project.id}/recent-activity`, async (route) => {
+    await page.route((url) => url.pathname === path, async (route) => {
       if (route.request().method() !== "GET" || !first) return route.continue();
       first = false; started(); await held;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ sceneId: f.second.id, sentenceOffset: 999, pageIndex: null, deviceType: "mobile", updatedAt: new Date().toISOString() }] }) }).catch(() => undefined);
+      await route.fulfill({
+        headers: { "x-test-activity": "stale" },
+        json: { items: [{ sceneId: f.second.id, sentenceOffset: 3, pageIndex: null, deviceType: "mobile", updatedAt: new Date().toISOString() }] },
+      });
     });
-    await page.evaluate(() => window.dispatchEvent(new Event("focus"))); await pending;
-    background = await context.newPage(); await background.goto("about:blank"); await background.bringToFront();
+    await page.reload();
+    await pending;
+    await expect(manuscriptEditor(page)).toBeVisible();
+    const panel = await openContinuePanel(page);
+    await expect(panel).not.toContainText(f.second.title);
+    await panel.evaluate((element, staleTitle) => {
+      const recordStaleEntry = () => {
+        if (element.textContent?.includes(staleTitle)) element.setAttribute("data-observed-stale-entry", "true");
+      };
+      const observer = new MutationObserver(recordStaleEntry);
+      observer.observe(element, { childList: true, subtree: true, characterData: true });
+      recordStaleEntry();
+    }, f.second.title);
+
+    background = await context.newPage();
+    await background.goto("about:blank");
+    await background.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
-    release(); await page.waitForTimeout(100);
-    await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
-    await expect(page.locator(".continue-panel")).not.toContainText("999");
+    const staleResponse = page.waitForResponse((response) => response.headers()["x-test-activity"] === "stale");
+    release();
+    expect(await (await staleResponse).finished()).toBeNull();
+
+    const freshResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === path && response.request().method() === "GET");
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
+    expect((await freshResponse).ok()).toBe(true);
+    await expect(panel).toContainText(f.scene.title);
+    await expect(panel).not.toHaveAttribute("data-observed-stale-entry", "true");
     await expect(manuscriptEditor(page)).toContainText("読書位置");
   } finally { release?.(); await background?.close(); await native.close(); }
 });
 
 test("recent activity coalesces repeated positions and records 50 input reports", async ({ page }) => {
-  const f = await longFixture(page); const writes: Record<string, unknown>[] = [];
+  const initialTime = Date.now();
+  await page.clock.install({ time: initialTime });
+  const f = await longFixture(page);
+  await page.clock.pauseAt(initialTime + 60_000);
+  const writes: Record<string, unknown>[] = [];
   page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/recent-activity")) writes.push(request.postDataJSON()); });
   const editor = manuscriptEditor(page); await editor.press("Control+End");
+  await page.clock.runFor(5_000);
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBeGreaterThan(0);
-  await page.waitForTimeout(2_100); const count = writes.length;
+  const count = writes.length;
   await page.locator(".cm-scroller").evaluate((element) => { for (let n = 0; n < 50; n += 1) element.dispatchEvent(new Event("scroll")); });
+  await page.clock.runFor(5_000);
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBe(count + 1);
   expect(writes.at(-1)).toEqual(writes.at(-2));
   const inputCount = writes.length; await editor.press("End"); await page.keyboard.type("x".repeat(50), { delay: 0 });
+  await page.clock.runFor(5_000);
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBe(inputCount + 1);
   expect((await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id)).toBe(true);
 });

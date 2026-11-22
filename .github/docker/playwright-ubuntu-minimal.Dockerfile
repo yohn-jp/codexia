@@ -12,6 +12,7 @@ RUN set -eux; \
     case "$BROWSER" in chromium|webkit) ;; *) exit 1;; esac; \
     test "$PLAYWRIGHT_VERSION" = '1.65.1'; \
     apt-get update; apt-get install -y --no-install-recommends ca-certificates git; \
+    useradd --create-home --uid 10001 --shell /usr/sbin/nologin codexia-browser; \
     mkdir -p /tmp/pw-install; \
     npm install --prefix /tmp/pw-install --no-audit --no-fund --no-save "playwright@${PLAYWRIGHT_VERSION}"; \
     if [ "$BROWSER" = chromium ]; then \
@@ -20,10 +21,9 @@ RUN set -eux; \
       node /tmp/pw-install/node_modules/playwright/cli.js install --with-deps webkit; \
     fi; \
     git --version; \
-    BROWSER="$BROWSER" node -e 'const pw=require("/tmp/pw-install/node_modules/playwright"); (async()=>{const b=await pw[process.env.BROWSER].launch({headless:true});const p=await b.newPage();await p.setContent("<title>smoke</title>");if(await p.title()!=="smoke")throw Error("smoke failed");await b.close()})().catch(e=>{console.error(e);process.exitCode=1})'; \
+    runuser -u codexia-browser -- env HOME=/home/codexia-browser BROWSER="$BROWSER" node -e 'const pw = require("/tmp/pw-install/node_modules/playwright"); (async () => { if (process.getuid() === 0) throw new Error("Browser smoke must use the runtime account"); const browser = await pw[process.env.BROWSER].launch({headless:true}); const page = await browser.newPage(); await page.setContent("<title>minimal-playwright-smoke</title>"); if (await page.title() !== "minimal-playwright-smoke") throw new Error("Browser smoke assertion failed"); await browser.close(); })().catch(err => { console.error(err); process.exitCode = 1; });'; \
     rm -rf /tmp/pw-install /root/.npm /root/.cache /var/lib/apt/lists/*
 # Runtime tools and installed browsers must execute without root privileges.
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin codexia-browser
 ENV HOME=/home/codexia-browser
 USER codexia-browser
 LABEL org.opencontainers.image.source="https://github.com/yohn-jp/codexia"

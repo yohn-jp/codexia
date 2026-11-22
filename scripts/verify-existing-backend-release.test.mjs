@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { buildComponentReleaseRecord } from './component-release-record.mjs';
 import { assertExistingBackendReleaseBinding, backendReleaseSourceTree, successfulPublicationJobs } from './verify-existing-backend-release.mjs';
@@ -7,11 +11,31 @@ import { readComponentVersion } from './component-release-version.mjs';
 const sha=char=>char.repeat(40),image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
 const compatibility={apiEpoch:1,persistenceFormat:1};
 
-test('resolves historical release tree from its certified source SHA instead of the current checkout',()=>{
-  const sourceSha=sha('a'),tree=sha('b'),calls=[];
-  assert.equal(backendReleaseSourceTree(sourceSha,(...args)=>{calls.push(args);return tree+'\n';}),tree);
-  assert.deepEqual(calls,[["git",['rev-parse',sourceSha+'^{tree}'],{encoding:'utf8'}]]);
-  assert.throws(()=>backendReleaseSourceTree('HEAD'),/source SHA is invalid/u);
+test('resolves the historical Git tree bound to a release even after a newer checkout', async t => {
+  const repository = await mkdtemp(path.join(tmpdir(), 'codexia-release-tree-'));
+  t.after(() => rm(repository, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.name', 'Release Test');
+  git('config', 'user.email', 'release-test@example.invalid');
+  const file = path.join(repository, 'artifact-input.txt');
+  await writeFile(file, 'certified source\n');
+  git('add', 'artifact-input.txt');
+  const certifiedTree = git('write-tree');
+  git('commit', '-qm', 'Certified source');
+  const certifiedSha = git('rev-parse', 'HEAD');
+  await writeFile(file, 'newer source\n');
+  git('add', 'artifact-input.txt');
+  assert.notEqual(git('write-tree'), certifiedTree);
+  git('commit', '-qm', 'Newer source');
+
+  const module = new URL('./verify-existing-backend-release.mjs', import.meta.url);
+  const result = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { backendReleaseSourceTree } from ${JSON.stringify(module.href)};
+    console.log(backendReleaseSourceTree(process.argv[1]));
+  `, certifiedSha], { cwd: repository, encoding: 'utf8' });
+  assert.equal(result.trim(), certifiedTree);
+  assert.throws(() => backendReleaseSourceTree('HEAD'), /source SHA is invalid/u);
 });
 
 function promotedFixture(){
@@ -74,7 +98,6 @@ test('existing digest requires successful prior main publication jobs for its pa
   assert.equal(successfulPublicationJobs(main,false,true),true);
   assert.equal(successfulPublicationJobs(promoted,true),true);
   assert.equal(successfulPublicationJobs(promoted,false),false);
-  assert.equal(successfulPublicationJobs(main,false,true),true);
   assert.equal(successfulPublicationJobs(main.map(job=>job.name.includes('(core)')?{...job,conclusion:'failure'}:job),false),false);
 });
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveBuildCatalogSelection, type ProducerBuildCatalog, type TrustedBuildModule } from "./build-catalog.js";
+import { resolveBuildCatalogSelection, type ProducerBuildCatalog, type ProducerBuildModule, type TrustedBuildModule } from "./build-catalog.js";
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
 const resources = { cpuMilli: 0, memoryMiB: 0, ephemeralStorageMiB: 0 };
@@ -66,7 +66,21 @@ const trustedModules: TrustedBuildModule[] = [
   },
 ];
 
-function catalogFor(modules: readonly TrustedBuildModule[]): ProducerBuildCatalog {
+function catalogModule(id: string, artifactDigest: string, requires: string[] = []): ProducerBuildModule {
+  return {
+    id,
+    version: "0.1.0",
+    artifactDigest,
+    requires,
+    conflicts: [],
+    contractRange: "^1",
+    exclusiveResources: { ...resources },
+    sharedResourceGroupIds: [],
+    workerLimits: {},
+  };
+}
+
+function producerCatalog(): ProducerBuildCatalog {
   return {
     contractVersion: "codexia-build/v1",
     producerRevision: "1".repeat(40),
@@ -76,18 +90,11 @@ function catalogFor(modules: readonly TrustedBuildModule[]): ProducerBuildCatalo
     lockDigest: digest("4"),
     sourceDigest: digest("5"),
     supportedPlatforms: ["linux/amd64"],
-    modules: modules.map(({ manifest, artifactDigest, contractRange, conflicts, exclusiveResources,
-      sharedResourceGroupIds, workerLimits }) => ({
-      id: manifest.id,
-      version: manifest.version,
-      artifactDigest,
-      requires: [...manifest.dependencies].sort(),
-      conflicts: [...conflicts],
-      contractRange,
-      exclusiveResources: { ...exclusiveResources },
-      sharedResourceGroupIds: [...sharedResourceGroupIds],
-      workerLimits: { ...workerLimits },
-    })),
+    modules: [
+      catalogModule("story", digest("a")),
+      catalogModule("nlp", digest("b")),
+      catalogModule("semantic", digest("c"), ["nlp", "story"]),
+    ],
     baseResources: { ...resources },
     sharedResourceGroups: [],
     resourceProfiles: [],
@@ -95,27 +102,48 @@ function catalogFor(modules: readonly TrustedBuildModule[]): ProducerBuildCatalo
 }
 
 test("producer catalog resolves arbitrary selections through the exact module dependency closure", () => {
-  const result = resolveBuildCatalogSelection(catalogFor(trustedModules), ["semantic"], trustedModules);
+  const result = resolveBuildCatalogSelection(producerCatalog(), ["semantic"], trustedModules);
   assert.deepEqual(result.requestedModules, ["semantic"]);
-  assert.deepEqual(result.resolvedModules.map(({ id }) => id), ["nlp", "semantic", "story"]);
+  assert.deepEqual(result.resolvedModules, [
+    { id: "nlp", version: "0.1.0", artifactDigest: digest("b") },
+    { id: "semantic", version: "0.1.0", artifactDigest: digest("c") },
+    { id: "story", version: "0.1.0", artifactDigest: digest("a") },
+  ]);
   assert.deepEqual(result.moduleOrder, ["story", "nlp", "semantic"]);
   assert.deepEqual(result.resourceRequirements, resources);
 });
 
 test("producer catalog rejects changed trusted identities and unknown ABI fields", () => {
-  const catalog = catalogFor(trustedModules);
+  const catalog = producerCatalog();
   const changedDigest = structuredClone(catalog);
   changedDigest.modules[0]!.artifactDigest = digest("f");
   assert.throws(() => resolveBuildCatalogSelection(changedDigest, ["semantic"], trustedModules), /differs from the shipped module manifest/);
+
+  const omittedDependency = structuredClone(catalog);
+  omittedDependency.modules[2]!.requires = ["nlp"];
+  assert.throws(() => resolveBuildCatalogSelection(omittedDependency, ["semantic"], trustedModules), /differs from the shipped module manifest/);
 
   const withUnknownField = { ...catalog, unrecognized: true };
   assert.throws(() => resolveBuildCatalogSelection(withUnknownField, [], trustedModules), /identity or collections are invalid/);
 });
 
+test("producer catalog rejects malformed entries using its public error contract", () => {
+  const catalog = producerCatalog();
+  for (const modules of [
+    [null, ...catalog.modules.slice(1)],
+    [catalog.modules[1], ...catalog.modules.slice(1)],
+  ]) {
+    assert.throws(() => resolveBuildCatalogSelection({ ...catalog, modules }, ["semantic"], trustedModules), {
+      code: "invalid_build_catalog",
+    });
+  }
+});
+
 test("producer catalog accepts resource IDs from the shared contract slug namespace", () => {
   const modules = structuredClone(trustedModules);
   modules[1]!.sharedResourceGroupIds = ["worker-runtime"];
-  const catalog = catalogFor(modules);
+  const catalog = producerCatalog();
+  catalog.modules[1]!.sharedResourceGroupIds = ["worker-runtime"];
   catalog.sharedResourceGroups = [{
     id: "worker-runtime",
     resources: { cpuMilli: 10, memoryMiB: 20, ephemeralStorageMiB: 30 },
@@ -134,5 +162,7 @@ test("producer catalog accepts resource IDs from the shared contract slug namesp
 
   const invalidReferenceModules = structuredClone(modules);
   invalidReferenceModules[1]!.sharedResourceGroupIds = ["Worker-runtime"];
-  assert.throws(() => resolveBuildCatalogSelection(catalogFor(invalidReferenceModules), ["nlp"], invalidReferenceModules), /invalid module descriptor/u);
+  const invalidReference = structuredClone(catalog);
+  invalidReference.modules[1]!.sharedResourceGroupIds = ["Worker-runtime"];
+  assert.throws(() => resolveBuildCatalogSelection(invalidReference, ["nlp"], invalidReferenceModules), /invalid module descriptor/u);
 });

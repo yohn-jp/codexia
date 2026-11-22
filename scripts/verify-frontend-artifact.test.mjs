@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { verifiedSourceRun } from './release-policy.mjs';
-import * as frontendArtifact from './verify-frontend-artifact.mjs';
-const { assertFrontendArtifactEvidence, assertFrontendPromotionArtifactEvidence, shouldPromoteFrontendArtifact, selectFrontendProducerRun, selectExactMainVerifyRun } = frontendArtifact;
+import { assertFrontendArtifactEvidence, assertFrontendPromotionArtifactEvidence, shouldPromoteFrontendArtifact, selectFrontendProducerRun, selectExactMainVerifyRun } from './verify-frontend-artifact.mjs';
 
 const sourceSha='a'.repeat(40);
 const artifactDigest='b'.repeat(64);
@@ -33,7 +32,6 @@ test('Verify completion can build an exact source behind the workflow engine hea
 });
 
 test('frontend promotion accepts a full-plan merged-tree PR producer only from its current successful UI attempt',()=>{
-  assert.equal(typeof assertFrontendPromotionArtifactEvidence,'function','promotion evidence verifier is missing');
   const producerSha='c'.repeat(40), tree='d'.repeat(40), mergeSha='e'.repeat(40);
   const run={id:12345,run_number:91,run_attempt:2,workflow_id:72,path:'.github/workflows/frontend-release.yml',
     event:'pull_request',head_branch:'feature/ui',head_sha:producerSha,status:'completed',conclusion:'success',
@@ -65,7 +63,6 @@ test('frontend promotion accepts a full-plan merged-tree PR producer only from i
 });
 
 test('frontend promotion falls back for stale semver and rejects equal-version source conflicts',()=>{
-  assert.equal(typeof shouldPromoteFrontendArtifact,'function','promotion admission check is missing');
   const deployed={format:'codexia-frontend-identity/v1',version:'0.1.20',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
   const newer={...deployed,version:'0.1.21',sourceSha:'b'.repeat(40)};
   assert.equal(shouldPromoteFrontendArtifact(newer,deployed),true);
@@ -74,7 +71,6 @@ test('frontend promotion falls back for stale semver and rejects equal-version s
 });
 
 test('frontend promotion selects only the newest same-repository workflow run and never revives an older success',()=>{
-  assert.equal(typeof selectFrontendProducerRun,'function','frontend producer run resolver is missing');
   const sourceSha='c'.repeat(40), common={workflow_id:72,path:'.github/workflows/frontend-release.yml',event:'pull_request',
     head_sha:sourceSha,repository:{id:42},head_repository:{id:42}};
   const successful={...common,id:10,run_number:10,run_attempt:1,status:'completed',conclusion:'success'};

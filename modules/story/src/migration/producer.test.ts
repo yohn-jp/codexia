@@ -83,32 +83,24 @@ test("imports canonical YAML and Markdown byte-for-byte at their source paths", 
 
   const result = await createStoryMigrationProducer().inspect(context);
 
-  assert.equal(result.operations.length, 4);
-  assert.equal(result.recovery.length, 0);
+  const sourcePaths = [
+    "bible/characters/hero/profile.yaml",
+    "manuscript/vol-1/ch-1/scene-17.md",
+    "meta/project.yaml",
+    "plot/volumes/vol-1/scenes/scene-17.yaml",
+  ] as const;
+  assert.equal(result.operations.length, sourcePaths.length);
+  assert.deepEqual(result.recovery, []);
   assert.deepEqual(
     result.operations.flatMap((operation) => operation.writes.map(({ path, content }) => ({ path, content })))
       .sort((a, b) => a.path.localeCompare(b.path)),
-    Object.entries(files)
-      .filter(([path]) => path.endsWith(".yaml") || path.endsWith(".md"))
-      .map(([path, content]) => ({ path, content }))
-      .sort((a, b) => a.path.localeCompare(b.path)),
+    sourcePaths.map((path) => ({ path, content: files[path] })),
   );
-  assert.ok(
-    result.operations.some((operation) =>
-      operation.writes.some(({ path, content }) =>
-        path === "plot/volumes/vol-1/scenes/scene-17.yaml" &&
-        content === "id: scene-17\ntype: scene\nfuture_story_field:\n  nested: preserved\n",
-      ),
-    ),
+  assert.deepEqual(
+    result.entries.map(({ source, category, disposition }) => ({ source, category, disposition }))
+      .sort((a, b) => a.source.localeCompare(b.source)),
+    sourcePaths.map((source) => ({ source, category: "authoritative", disposition: "planned" })),
   );
-  assert.ok(
-    result.operations.some((operation) =>
-      operation.writes.some(({ path, content }) =>
-        path === "manuscript/vol-1/ch-1/scene-17.md" && content === markdown,
-      ),
-    ),
-  );
-  assert.ok(result.entries.every(({ category, disposition }) => category === "authoritative" && disposition === "planned"));
 });
 
 test("preserves source Story files opaquely while the module is disabled", async () => {

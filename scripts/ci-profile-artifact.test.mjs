@@ -4,30 +4,41 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { createVerificationPlan,planDigest } from './ci-impact.mjs';
-import { packProfile,profileRoots,restoreProfile,validateBundle,assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
+import { packProfile,restoreProfile,validateBundle,assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 
 async function fixture(t,profile='core'){
   const root=await mkdtemp(path.join(tmpdir(),'codexia-profile-test-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const output=path.join(root,'producer');const consumer=path.join(root,'consumer');
-  const entries=profileRoots(profile).map(dir=>dir+'/index.js').concat(
+  const fullProfile = JSON.parse(await readFile(new URL('../profiles/full.json', import.meta.url), 'utf8'));
+  const optionalOutputs = fullProfile.modules.map(module => 'modules/' + module + '/dist/index.js');
+  const entries = [
+    'packages/contracts/dist/index.js', 'packages/persistence-contracts/dist/index.js',
+    'packages/persistence-postgres/dist/index.js', 'packages/module-runtime/dist/index.js',
+    'packages/core/dist/index.js', 'packages/migration/dist/index.js',
     'app/dist/index.html','app/dist/desktop/index.html','app/dist/mobile/index.html',
     'packages/api/dist/server.js','profiles/'+profile+'/generated/server.mjs',
-    'profiles/'+profile+'/generated/browser.mjs','profiles/'+profile+'/generated/module-manifests.json');
-  for(const entry of new Set(entries)){
+    'profiles/'+profile+'/generated/browser.mjs','profiles/'+profile+'/generated/module-manifests.json',
+    ...optionalOutputs,
+  ];
+  for(const entry of entries){
     await mkdir(path.dirname(path.join(output,entry)),{recursive:true});
     await writeFile(path.join(output,entry),'fixture '+entry);
   }
   await mkdir(consumer);
   const identity={profile,sourceSha:'a'.repeat(40),producerAttempt:1};
-  return {output,consumer,identity,bundle:await packProfile(output,identity)};
+  return {output,consumer,identity,optionalOutputs,bundle:await packProfile(output,identity)};
 }
 test('exact profile output round trips, with no optional modules in core',async t=>{
   for(const profile of ['core','full']){
-    const {consumer,identity,bundle}=await fixture(t,profile);
-    assert.equal(bundle.files.some(file=>file.path.startsWith('modules/')),profile==='full');
+    const {consumer,identity,optionalOutputs,bundle}=await fixture(t,profile);
+    assert.deepEqual(bundle.files.map(file => file.path).filter(file => file.startsWith('modules/')).sort(),
+      profile === 'core' ? [] : optionalOutputs.sort());
     await restoreProfile(consumer,bundle,identity);
     assert.equal(await readFile(path.join(consumer,'app/dist/mobile/index.html'),'utf8'),'fixture app/dist/mobile/index.html');
+    const migration=path.join(consumer,'packages/migration/dist/index.js');
+    if(profile==='core') await assert.rejects(readFile(migration),{code:'ENOENT'});
+    else assert.equal(await readFile(migration,'utf8'),'fixture packages/migration/dist/index.js');
     await assert.rejects(restoreProfile(consumer,bundle,identity),/already exists/);
   }
 });

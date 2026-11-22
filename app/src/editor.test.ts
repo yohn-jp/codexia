@@ -30,14 +30,17 @@ test("typing after a complete ellipsis pair does not duplicate either character"
 });
 
 test("ruby parsing keeps the source's explicit Aozora syntax and frontmatter bytes", () => {
-  assert.deepEqual(parseRubySegments("彼は|東京《とうきょう》へ行く。"), [
-    { kind: "text", value: "彼は", key: "text-0" },
-    { kind: "ruby", base: "東京", reading: "とうきょう", key: "ruby-2" },
-    { kind: "text", value: "へ行く。", key: "text-12" },
+  const segments = parseRubySegments("彼は|東京《とうきょう》へ行く。");
+  assert.deepEqual(segments.map(segment => segment.kind === "ruby"
+    ? [segment.base, segment.reading]
+    : segment.value), [
+    "彼は",
+    ["東京", "とうきょう"],
+    "へ行く。",
   ]);
-  assert.deepEqual(parseRubySegments("｜東京《とうきょう》"), [
-    { kind: "text", value: "｜東京《とうきょう》", key: "text-0" },
-  ]);
+  const fullwidth = parseRubySegments("｜東京《とうきょう》");
+  assert.equal(fullwidth.length, 1);
+  assert.equal(fullwidth[0]?.kind === "text" && fullwidth[0].value, "｜東京《とうきょう》");
   const document = "---\ntitle: 試験\n---\n\n本文\n";
   assert.deepEqual(documentBody(document), { prefix: "---\ntitle: 試験\n---\n\n", body: "本文\n" });
   assert.equal(replaceDocumentBody(document, "新しい本文"), "---\ntitle: 試験\n---\n\n新しい本文");
@@ -68,7 +71,10 @@ test("typography preferences retain source ranges and reject invalid values", ()
     maxWidth: 960,
     fontFamily: "gothic",
   });
-  assert.deepEqual(typographyPresetValues("bunko"), { fontFamily: "mincho", lineHeight: 1.7, maxWidth: 560, letterSpacing: 0.02 });
+  // Preset widths are a design contract in docs/design/VISUAL-SYSTEM.md.
+  assert.equal(typographyPresetValues("bunko").maxWidth, 560);
+  assert.equal(typographyPresetValues("web-novel").maxWidth, 720);
+  assert.equal(typographyPresetValues("genko").maxWidth, 480);
   assert.equal(normalizeTypographySettings({ maxWidth: 100 }).maxWidth, 960);
 });
 

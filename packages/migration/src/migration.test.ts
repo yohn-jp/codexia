@@ -8,7 +8,7 @@ import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { ChangeOperation, SnapshotId, SnapshotReader } from "@codexia/contracts";
-import { assertChangeOperation, BUILTIN_MODULE_IDS } from "@codexia/contracts";
+import { assertChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, MigrationProducerRegistry, planExactFileImport, proposeMigrationImport } from "./index.js";
 
 const snapshot: SnapshotId = { projectId: "new-project", projectVersion: 1 };
@@ -72,17 +72,26 @@ test("legacy inspection defaults to all built-in modules and preserves an explic
   t.after(() => fs.rm(sourceRoot, { recursive: true, force: true }));
   const registry = new MigrationProducerRegistry();
   const observed: string[][] = [];
+  const mappings = { "legacy-source": snapshot.projectId };
+  const mappingCopies: Readonly<Record<string, string>>[] = [];
   registry.register({
     id: "module-fixture",
-    async inspect({ enabledModules }) {
+    async inspect({ enabledModules, legacyProjectMappings }) {
       observed.push([...enabledModules]);
+      assert.ok(legacyProjectMappings, "the selected migration mapping reaches the producer");
+      mappingCopies.push(legacyProjectMappings);
       return { entries: [], operations: [], recovery: [] };
     },
   });
-  const options = { sourceRoot, registry, target: targetReader(new Map()) };
+  const options = { sourceRoot, registry, target: targetReader(new Map()), legacyProjectMappings: mappings };
   await inspectLegacyProject(options);
   await inspectLegacyProject({ ...options, enabledModules: ["search"] });
-  assert.deepEqual(observed, [BUILTIN_MODULE_IDS, ["search"]]);
+  const { modules } = JSON.parse(await fs.readFile(new URL("../../../profiles/full.json", import.meta.url), "utf8")) as { modules: string[] };
+  assert.deepEqual(observed.map(ids => [...ids].sort()), [[...modules].sort(), ["search"]]);
+  for (const copy of mappingCopies) {
+    assert.deepEqual(copy, { "legacy-source": snapshot.projectId });
+    assert.notEqual(copy, mappings, "producers receive a defensive copy of legacy identity mappings");
+  }
 });
 
 function applyOperations(files: TargetFiles, operations: ChangeOperation[]): void {
@@ -283,6 +292,7 @@ async function seedGitHistory(sourceRoot: string): Promise<void> {
   await fs.mkdir(path.join(seed, "docs"), { recursive: true });
   await fs.writeFile(path.join(seed, "story", "scene.md"), "remote scene\n");
   await fs.writeFile(path.join(seed, "story", "delete-me.md"), "remote file to delete locally\n");
+  await fs.writeFile(path.join(seed, "story", "delete-staged.md"), "remote file to stage for removal\n");
   await fs.writeFile(path.join(seed, "notes", "reading.md"), "remote reading note\n");
   await fs.writeFile(path.join(seed, "docs", "typechange.md.target"), "symlink target\n");
   await fs.symlink("typechange.md.target", path.join(seed, "docs", "typechange.md"));
@@ -308,6 +318,7 @@ async function seedGitHistory(sourceRoot: string): Promise<void> {
   await fs.writeFile(path.join(sourceRoot, "notes", "staged-added.md"), "staged addition\n");
   runGit(sourceRoot, ["add", "docs/typechange.md", "notes/staged-added.md"]);
   await fs.unlink(path.join(sourceRoot, "story", "delete-me.md"));
+  runGit(sourceRoot, ["rm", "story/delete-staged.md"]);
   await fs.writeFile(path.join(sourceRoot, ".npmrc"), "//registry.npmjs.org/:_authToken=DO_NOT_EXPORT_NPM_SECRET_SENTINEL\n");
   await writeFile(sourceRoot, "scratch/attachment.bin", Buffer.from([0, 255, 1, 2, 10]));
   await writeFile(sourceRoot, ".env", "DO_NOT_EXPORT_GIT_SECRET_SENTINEL=secret\n");
@@ -404,6 +415,7 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   const files: TargetFiles = new Map([
     ["story/scene.md", { content: "remote scene\n", revision: digest("remote scene\n") }],
     ["story/delete-me.md", { content: "remote file to delete locally\n", revision: digest("remote file to delete locally\n") }],
+    ["story/delete-staged.md", { content: "remote file to stage for removal\n", revision: digest("remote file to stage for removal\n") }],
     ["notes/reading.md", { content: "remote reading note\n", revision: digest("remote reading note\n") }],
   ]);
   const originalTarget = new Map(files);
@@ -424,6 +436,7 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   assert.ok(inspection.pendingWorkspace.stagedPaths.includes("notes/staged-added.md"), "staged additions must be listed");
   assert.ok(inspection.pendingWorkspace.stagedPaths.includes("docs/typechange.md"), "staged type changes must be listed");
   assert.ok(inspection.pendingWorkspace.workingTreePaths.includes("story/delete-me.md"));
+  assert.ok(inspection.pendingWorkspace.stagedPaths.includes("story/delete-staged.md"));
   const excludedGitCredentialPaths = [".npmrc", ".ssh/id_ed25519", ".ssh/id_rsa", ".git-credentials", ".config/git/credentials", ".config/gh/hosts.yml", "gcloud/credentials.db", ".config/gcloud/legacy_credentials/user/adc.json", ".aws/credentials", ".azure/accessTokens.json", ".docker/config.json", ".kube/config"];
   const pendingGitFiles = await createLegacySourceReader(sourceRoot).readGitPendingFiles(inspection.pendingWorkspace);
   for (const pathName of excludedGitCredentialPaths) {
@@ -544,6 +557,8 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   assert.equal(writes.find(({ path: writePath }) => writePath.endsWith("assistant/model-settings.json"))?.content,
     '{"defaultPresetId":"selected-small-model","presets":[{"id":"selected-small-model","model":"local/model","label":"selected"}],"featurePresetIds":{"state":"selected-small-model"},"privateExtension":{"retain":7}}\n');
   assert.equal(writes.find(({ path: writePath }) => writePath === "story/scene.md")?.content, "staged user override\n");
+  assert.equal(writes.find(({ path: writePath }) => writePath === "docs/typechange.md")?.content, "staged type change\n");
+  assert.equal(writes.find(({ path: writePath }) => writePath === "story/delete-staged.md")?.content, null);
   assert.equal(writes.find(({ path: writePath }) => writePath === "notes/research.md")?.content, "historical note: the secret token is a story clue\n");
   const grantWrite = writes.find(({ path: writePath }) => writePath.endsWith("share-grants.jsonl"))!;
   assert.ok(grantWrite.content?.includes("tokenHash"));
@@ -586,6 +601,7 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   const disabledFiles: TargetFiles = new Map([
     ["story/scene.md", { content: "remote scene\n", revision: digest("remote scene\n") }],
     ["story/delete-me.md", { content: "remote file to delete locally\n", revision: digest("remote file to delete locally\n") }],
+    ["story/delete-staged.md", { content: "remote file to stage for removal\n", revision: digest("remote file to stage for removal\n") }],
   ]);
   const disabled = await inspectLegacyProject({
     sourceRoot,

@@ -56,7 +56,6 @@ const pnpmVersion = execFileSync('pnpm', ['--version'], { cwd: root, encoding: '
 const artifacts = [];
 for (const artifactRoot of artifactRoots) {
   const absoluteRoot = join(root, artifactRoot);
-  await access(absoluteRoot);
   const rootFiles = (await filesUnder(absoluteRoot)).sort();
   if (!rootFiles.length) throw new Error(`Core build artifact root is empty: ${artifactRoot}`);
   for (const file of rootFiles) {
