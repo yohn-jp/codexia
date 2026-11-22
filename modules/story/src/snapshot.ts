@@ -19,6 +19,7 @@ const ENTITY_TYPES = new Set<StoryEntity["type"]>([
   "character", "location", "item", "faction", "event", "thread", "scene", "chapter",
   "volume", "arc", "lore", "manuscript", "dialogue_sketch",
 ]);
+const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 
 const LINK_FIELDS: Readonly<Record<string, string>> = {
   appears: "appears",
@@ -182,7 +183,7 @@ async function readFiles(
     (filePath.startsWith("documents/") ? NATIVE_DOCUMENT_PATH.test(filePath) :
       filePath.endsWith(".yaml") || filePath.endsWith(".yml") || manuscriptId(filePath) !== null)));
   for (const path of nativeByPath.keys()) pathSet.add(path);
-  const paths = [...pathSet].sort();
+  const paths = [...pathSet].filter((path) => !PRESERVATION_ARCHIVE_PATH.test(path)).sort();
   for (const filePath of paths) assertProjectPath(filePath);
 
   const files = new Map<string, StoryFile>();
