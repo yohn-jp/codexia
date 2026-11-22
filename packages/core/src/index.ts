@@ -228,7 +228,14 @@ function stableId(projectId: string, key: string): DocumentId {
 function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly NativeStoryDocument[]): SnapshotReader {
   const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   const documentOrder = new Map(manifest.documents.map((document, index) => [String(document.id), index]));
-  return { snapshot: structuredClone(manifest.snapshot), get nativeStoryDocuments() {
+  const { project } = manifest;
+  const settings = project.settings ?? {};
+  const configuredTitle = Object.hasOwn(settings, "title") ? settings.title : project.title;
+  const title = [configuredTitle, settings.name]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? "Project";
+  const subtitle = typeof settings.subtitle === "string" ? settings.subtitle.trim() : "";
+  return { snapshot: structuredClone(manifest.snapshot), projectPresentation: { title, ...(subtitle ? { subtitle } : {}) },
+    get nativeStoryDocuments() {
       const documents = nativeStoryDocuments?.() ?? [];
       return documents.length ? structuredClone(documents) : undefined;
     },

@@ -134,6 +134,24 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
   }
 });
 
+test("project presentation reads the selected project's public title and subtitle", async () => {
+  const project = await core.createProject({ title: "Author title", settings: {
+    title: "  Published title  ", name: "Fallback title", subtitle: "  Volume One ", internalOnly: "Not projected",
+  } });
+  const selected = await core.reader(project.id);
+  assert.deepEqual(selected.projectPresentation, { title: "Published title", subtitle: "Volume One" });
+
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: project.id, expectedVersion: project.version,
+    settings: { title: null, name: "  New display title ", subtitle: "  " },
+  }));
+  const current = await core.reader(project.id);
+  assert.deepEqual(current.projectPresentation, { title: "New display title" });
+  assert.deepEqual((await core.reader(project.id, selected.snapshot)).projectPresentation,
+    { title: "Published title", subtitle: "Volume One" });
+  assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
+});
+
 test("hierarchy create and delete each read the resolved manifest only once", async () => {
   const project = await createProject();
   const volume = await persistence.transaction(tx => tx.createDocument({
