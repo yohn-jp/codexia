@@ -278,8 +278,9 @@ export class CoreStore implements MutationCoordinator {
       return cached.documents;
     }
     const documents = sources.map(({document,documentOrder,path:metadataPath,file}) => {
+      const metadataContent = Buffer.from(file.content, file.encoding).toString("utf8");
       let value: unknown;
-      try { value = YAML.parse(Buffer.from(file.content, file.encoding).toString("utf8")); }
+      try { value = YAML.parse(metadataContent); }
       catch { fail(409, "snapshot_unavailable", "Native Story metadata is invalid"); }
       if (!value || typeof value !== "object" || Array.isArray(value) ||
           typeof (value as Record<string, unknown>).id !== "string" ||
@@ -288,7 +289,7 @@ export class CoreStore implements MutationCoordinator {
         fail(409, "snapshot_unavailable", "Native Story metadata does not match its canonical document identity");
       }
       return { id: (value as Record<string, unknown>).id as string, kind: document.kind, title: document.title,
-        orderKey: document.orderKey, metadataPath, metadataRevision: file.revision, documentOrder,
+        orderKey: document.orderKey, metadataPath, metadataRevision: file.revision, metadataContent, documentOrder,
         metadata: value as Record<string, unknown> };
     });
     const bytes = Buffer.byteLength(JSON.stringify(documents), "utf8");

@@ -80,7 +80,9 @@ test("native document snapshots expose authoritative chapter and scene parent id
   const chapterPath = `plot/volumes/${volume.id}/chapters/${chapter.id}/chapter.yaml`;
   const scenePath = `plot/volumes/${volume.id}/chapters/${chapter.id}/scenes/${scene.id}.yaml`;
   const chapterMeta = YAML.parse((await reader.read(chapterPath))!.content);
-  const sceneMeta = YAML.parse((await reader.read(scenePath))!.content);
+  const sceneFile = await reader.read(scenePath);
+  assert.ok(sceneFile);
+  const sceneMeta = YAML.parse(sceneFile.content);
   assert.equal(chapterMeta.volume, volume.id);
   assert.equal(sceneMeta.volume, volume.id);
   assert.equal(sceneMeta.chapter, chapter.id);
@@ -89,7 +91,8 @@ test("native document snapshots expose authoritative chapter and scene parent id
   assert.deepEqual({ id: nativeScene?.id, kind: nativeScene?.kind, title: nativeScene?.title, orderKey: nativeScene?.orderKey, metadataPath: nativeScene?.metadataPath }, {
     id: scene.id, kind: "scene", title: "Scene", orderKey: scene.orderKey, metadataPath: scenePath,
   });
-  assert.equal(nativeScene?.metadataRevision, (await reader.read(scenePath))?.revision);
+  assert.equal(nativeScene?.metadataContent, sceneFile.content);
+  assert.equal(nativeScene?.metadataRevision, createHash("sha256").update(sceneFile.content).digest("hex"));
   assert.equal(reader.nativeStoryDocuments?.length, 3);
   const historical = await core.reader(p.id, reader.snapshot);
   assert.deepEqual(historical.nativeStoryDocuments, reader.nativeStoryDocuments, "pinned typed projections retain the exact historical Story identity");
