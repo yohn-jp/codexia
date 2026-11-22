@@ -602,8 +602,76 @@ test("legacy reorders without sibling preconditions require a new proposal and p
     });
   }
 });
-test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
-test("Core restore preserves confirmed evidence for identical text and reviews changed quotes", async () => {
+test("native manuscript restore requires approval, appends an attributed revision, and replays exactly", async () => {
+  const p = await project();
+  const originalText = "元の本文 😀\n";
+  const currentText = "保存済みの改稿\n";
+  const createScene = (title: string) => persistence.transaction(tx => tx.createDocument({
+    projectId: p.id, kind: "scene", title, orderKey: "1", markdown: originalText,
+    authorId: "author", idempotencyKey: randomUUID(),
+  }));
+  const original = await createScene("Original manuscript");
+  const other = await createScene("A different manuscript");
+  const documentId = original.document.id;
+  const save = (baseRevisionId: typeof original.revision.id, prior: string, markdown: string) =>
+    persistence.transaction(tx => tx.saveDocument({
+      projectId: p.id, documentId, baseRevisionId, authorId: "author", clientId: "testing", idempotencyKey: randomUUID(),
+      changes: [{ fromUtf16: 0, toUtf16: prior.length, insert: markdown }],
+      resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+    }));
+  const current = await save(original.revision.id, originalText, currentText);
+  const input = { documentId, baseRevisionId: current.revision.id, sourceRevisionId: original.revision.id };
+  const options = { actorId: "external-proposer", idempotencyKey: randomUUID(), origin: "external-agent" } as const;
+  await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, sourceRevisionId: other.revision.id }, options), { code: "revision_not_found" });
+  await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, baseRevisionId: original.revision.id }, options), { code: "revision_conflict" });
+  assert.deepEqual(await persistence.read(reader => reader.listChangeSets(p.id)), []);
+
+  const propose = () => core.proposeManuscriptRestore(p.id, input, options);
+  const { changeSet, replayed } = await propose();
+  assert.equal(replayed, false);
+  assert.equal(changeSet.authorId, "external-proposer");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  assert.deepEqual(changeSet.operations.map(operation => operation.type), ["document.restore"]);
+  const approve = (proposal: ChangeSet) => persistence.transaction(tx => tx.approveChangeSet({
+    projectId: p.id, changeSetId: proposal.id, expectedVersion: proposal.version, approvedBy: "reviewing-author",
+  }));
+  const apply = (proposal: ChangeSet) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: p.id, changeSetId: proposal.id, expectedVersion: proposal.version,
+  }));
+  await assert.rejects(() => apply(changeSet), { code: "invalid_change_set_state" });
+  const approved = await approve(changeSet);
+  const applied = await apply(approved);
+  const restored = applied.results[0];
+  assert.ok(restored && "revision" in restored);
+  assert.notEqual(restored.revision.id, original.revision.id);
+  assert.equal(restored.revision.parentRevisionId, current.revision.id);
+  assert.equal(restored.revision.markdown, originalText);
+  assert.equal(restored.revision.authorId, "reviewing-author");
+  const history = (await persistence.read(reader => reader.listRevisions(p.id, documentId, 10))).revisions;
+  assert.deepEqual(history.map(revision => revision.id), [restored.revision.id, current.revision.id, original.revision.id]);
+  assert.deepEqual(await apply(approved), { ...applied, replayed: true });
+  assert.deepEqual(await propose(), { changeSet: applied.changeSet, replayed: true });
+  await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, sourceRevisionId: current.revision.id }, options), { code: "idempotency_conflict" });
+
+  const { changeSet: stale } = await core.proposeManuscriptRestore(p.id, {
+    ...input, baseRevisionId: restored.revision.id, sourceRevisionId: current.revision.id,
+  }, { ...options, idempotencyKey: randomUUID() });
+  const approvedStale = await approve(stale);
+  const intervening = await save(restored.revision.id, originalText, "Intervening editor save");
+  await assert.rejects(() => apply(approvedStale), (error: unknown) => error instanceof PersistenceError && error.code === "conflict" &&
+    error.details?.resource === "document_revision");
+  assert.equal((await persistence.read(reader => reader.getDocument(p.id, documentId)))?.headRevisionId, intervening.revision.id);
+  assert.equal(await persistence.read(reader => reader.getChangeSetReceipt(p.id, stale.id)), undefined);
+  assert.equal((await persistence.read(reader => reader.getChangeSet(p.id, stale.id)))?.status, "approved");
+});
+test("native restore preserves confirmed evidence for identical text and reviews changed quotes", async () => {
+  const restore = async (projectId: ProjectId, input: Parameters<CoreStore["proposeManuscriptRestore"]>[1]) => {
+    const { changeSet } = await core.proposeManuscriptRestore(projectId, input, { actorId: "author", idempotencyKey: randomUUID() });
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+    }));
+    await persistence.transaction(tx => tx.applyChangeSet({ projectId, changeSetId: approved.id, expectedVersion: approved.version }));
+  };
   const makeAnchoredProject = async (markdown: string) => {
     const p = await project();
     const volume = (await persistence.transaction(tx => tx.createDocument({ projectId:p.id, kind:"volume", title:"Volume", orderKey:"0001", markdown:"", authorId:"author", idempotencyKey:randomUUID() }))).document;
@@ -626,9 +694,7 @@ test("Core restore preserves confirmed evidence for identical text and reviews c
   const sameHead = same.scene.headRevisionId!;
   const sameEvidence = await attachConfirmedEvidence(same.p, same.scene, sameHead, 1, 3, "BC");
   const duplicate = await persistence.transaction(tx => tx.saveDocument({ projectId:same.p.id as import("@codexia/persistence-contracts").ProjectId, documentId:same.scene.id, baseRevisionId:sameHead, changes:[], resultingSha256:createHash("sha256").update("ABCDEF").digest("hex"), authorId:"author", clientId:"test", idempotencyKey:randomUUID() }));
-  const originalSame = await core.buildRestoreOperation(same.p.id, { sceneId:same.scene.id, snapshotId:sameHead });
-  assert.equal(originalSame.operation.writes[0]?.textChanges, undefined);
-  await accept(same.p.id, originalSame.operation, originalSame.snapshot);
+  await restore(same.p.id, { documentId: same.scene.id, baseRevisionId: duplicate.revision.id, sourceRevisionId: sameHead });
   const sameState = await persistence.read(async reader => {
     const head = await reader.getDocument(same.p.id as import("@codexia/persistence-contracts").ProjectId, same.scene.id);
     const revision = head?.headRevisionId ? await reader.getRevision(same.p.id as import("@codexia/persistence-contracts").ProjectId, same.scene.id, head.headRevisionId) : null;
@@ -648,8 +714,7 @@ test("Core restore preserves confirmed evidence for identical text and reviews c
   const sourceRevisionId = changed.scene.headRevisionId!;
   const changedSave = await persistence.transaction(tx => tx.saveDocument({ projectId:changed.p.id as import("@codexia/persistence-contracts").ProjectId, documentId:changed.scene.id, baseRevisionId:sourceRevisionId, changes:[{fromUtf16:2,toUtf16:3,insert:"C"}], resultingSha256:createHash("sha256").update("ABCDEF").digest("hex"), authorId:"author", clientId:"test", idempotencyKey:randomUUID() }));
   const changedEvidence = await attachConfirmedEvidence(changed.p, changed.scene, changedSave.revision.id, 1, 3, "BC");
-  const changedRestore = await core.buildRestoreOperation(changed.p.id, { sceneId:changed.scene.id, snapshotId:sourceRevisionId });
-  await accept(changed.p.id, changedRestore.operation, changedRestore.snapshot);
+  await restore(changed.p.id, { documentId: changed.scene.id, baseRevisionId: changedSave.revision.id, sourceRevisionId });
   const changedState = await persistence.read(async reader => ({ anchor:await reader.getEvidenceAnchor(changed.p.id as import("@codexia/persistence-contracts").ProjectId, changedEvidence), links:await reader.listMentionLinks(changed.p.id as import("@codexia/persistence-contracts").ProjectId, changedEvidence) }));
   assert.equal(changedState.anchor?.status, "needs_review");
   assert.equal(changedState.links[0]?.status, "proposed");

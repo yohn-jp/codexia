@@ -1831,7 +1831,10 @@ class PostgresTransaction implements PersistenceTransaction {
       case "module.record.save": return this.saveModuleRecord(operation.command);
       case "document.create": return this.createDocument(operation.command);
       case "document.save": return this.saveDocument(operation.command);
-      case "document.restore": return this.restoreDocumentRevision(operation.command);
+      case "document.restore": {
+        if (!approvedBy) throw validationError("Approved restore lacks its author approval identity");
+        return this.restoreDocumentRevision({ ...operation.command, authorId: approvedBy });
+      }
       case "knowledge.node.save": return this.saveKnowledgeNode(operation.command);
       case "knowledge.alias.save": return this.saveKnowledgeAlias(operation.command);
       case "knowledge.relation.save": return this.saveKnowledgeRelation(operation.command);
