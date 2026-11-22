@@ -91,6 +91,8 @@ export interface ChangeOperation {
   reads: FileRevision[];
   readScopes?: ScopeRevision[];
   readDocumentSets?: DocumentSetRevision[];
+  /** Exact Knowledge projection observed by this operation. */
+  readKnowledgeRevision?: string;
   writes: FileChange[];
   message: string;
   evidenceIds?: string[];
@@ -112,8 +114,42 @@ export interface SnapshotProjectPresentation {
   readonly title: string;
   readonly subtitle?: string;
 }
+export interface KnowledgeProjectionRef {
+  readonly kind: "knowledge-projection";
+  readonly snapshot: Readonly<SnapshotId>;
+  readonly revision: string;
+}
+export interface KnowledgeProjectionEvidence {
+  readonly anchor: Readonly<{ id: string; documentId: string; revisionId: string; status: string }>;
+  readonly mention: Readonly<{ status: string }>;
+  readonly current: boolean;
+  readonly storySceneId: string | null;
+  /** Verified quote at the anchor's immutable revision, if it fits the projection budget. */
+  readonly quote: string | null;
+  readonly quoteOmission?: "projection-budget";
+  readonly assertions: readonly Readonly<{ assertion: Readonly<{ status: string }>; role: string }>[];
+  readonly assertionLimitReached: boolean;
+}
+export interface KnowledgeProjectionEntry {
+  readonly node: Readonly<{ id: string; name: string; type: string; status: string; attributes: Readonly<Record<string, unknown>>; deletedAt: string | null }>;
+  readonly aliases: readonly Readonly<{ nodeId: string; surface: string; status: string; scope: string | null }>[];
+  readonly relations: readonly Readonly<{ sourceId: string; targetId: string; status: string }>[];
+  readonly evidence: readonly KnowledgeProjectionEvidence[];
+  readonly evidenceLimitReached: boolean;
+  readonly aliasLimitReached: boolean;
+  readonly relationLimitReached: boolean;
+}
+export interface KnowledgeProjectionData {
+  readonly documentMappings: readonly Readonly<{ documentId: string; storySceneId: string; mapping: "explicit" | "ambiguous" }>[];
+  readonly entries: readonly KnowledgeProjectionEntry[];
+  readonly nodeLimitReached: boolean;
+}
+export interface SnapshotKnowledgeProjection extends KnowledgeProjectionData {
+  readonly source: KnowledgeProjectionRef;
+}
 export interface SnapshotReader {
   snapshot: SnapshotId;
+  readonly knowledge?: SnapshotKnowledgeProjection;
   projectPresentation?: SnapshotProjectPresentation;
   /** Typed projection of canonical PostgreSQL Story documents for native readers. */
   nativeStoryDocuments?: readonly NativeStoryDocument[];
@@ -481,6 +517,9 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
       }
       prefixes.add(scope.prefix);
     }
+  }
+  if (v.readKnowledgeRevision !== undefined && (typeof v.readKnowledgeRevision !== "string" || !/^[a-f0-9]{64}$/u.test(v.readKnowledgeRevision))) {
+    throw new ContractError("Invalid Knowledge projection revision");
   }
   if (v.readDocumentSets !== undefined) {
     if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError("Invalid document-set preconditions");
