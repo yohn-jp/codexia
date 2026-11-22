@@ -33,7 +33,6 @@ export async function createModule(_context: ModuleContext): Promise<ModuleDefin
   };
 }
 
-export { createPublishingMigrationProducer } from "./migration.js";
 export * from "./project.js";
 export * from "./plaintext.js";
 export * from "./epub.js";

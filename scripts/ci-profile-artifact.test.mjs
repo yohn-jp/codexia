@@ -37,8 +37,7 @@ test('exact profile output round trips, with no optional modules in core',async 
     await restoreProfile(consumer,bundle,identity);
     assert.equal(await readFile(path.join(consumer,'app/dist/mobile/index.html'),'utf8'),'fixture app/dist/mobile/index.html');
     const migration=path.join(consumer,'packages/migration/dist/index.js');
-    if(profile==='core') await assert.rejects(readFile(migration),{code:'ENOENT'});
-    else assert.equal(await readFile(migration,'utf8'),'fixture packages/migration/dist/index.js');
+    await assert.rejects(readFile(migration),{code:'ENOENT'});
     await assert.rejects(restoreProfile(consumer,bundle,identity),/already exists/);
   }
 });

@@ -326,9 +326,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -371,9 +368,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
@@ -407,9 +401,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
@@ -434,9 +425,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       jszip:
         specifier: ^3.10.2
         version: 3.10.2
@@ -464,9 +452,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
@@ -494,9 +479,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -524,9 +506,6 @@ importers:
       '@codexia/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -607,12 +586,6 @@ importers:
       '@codexia/persistence-postgres':
         specifier: workspace:*
         version: link:../persistence-postgres
-
-  packages/migration:
-    dependencies:
-      '@codexia/contracts':
-        specifier: workspace:*
-        version: link:../contracts
 
   packages/module-runtime:
     dependencies:

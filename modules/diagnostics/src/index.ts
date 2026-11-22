@@ -23,7 +23,6 @@ import { checkDeclaredVoiceConsistency, type DeclaredVoiceAttribution } from "./
 import { composeSceneDiagnostics } from "./fullDiagnostics.js";
 
 export * from "./analysis.js";
-export { createDiagnosticsMigrationProducer } from "./migration.js";
 export * from "./textAnalysis.js";
 export * from "./config.js";
 export * from "./linter/types.js";

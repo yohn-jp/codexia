@@ -7,7 +7,6 @@
     "modules/**",
     "packages/core/**",
     "packages/contracts/**",
-    "packages/migration/**",
     "packages/module-runtime/**",
     "packages/persistence-contracts/**",
     "packages/persistence-postgres/**",
