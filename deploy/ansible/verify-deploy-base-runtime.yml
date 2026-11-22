@@ -1,0 +1,69 @@
+---
+# Read-only admission shared with the canonical base-runtime container validators.
+# The disposable lifecycle fixture has its own isolated base admission and omits Tunnel.
+- name: Inspect every canonical base Quadlet without following links
+  ansible.builtin.stat:
+    path: "{{ quadlet_dir }}/{{ item }}"
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
+  loop:
+    - codexia.network
+    - codexia-data.network
+    - codexia-postgres.volume
+    - codexia-data.volume
+    - codexia-history.volume
+    - codexia-db.container
+    - codexia-tunnel.container
+  register: codexia_deploy_base_quadlets
+  changed_when: false
+
+- name: Require every base Quadlet to match the reviewed repository source
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.checksum | default('') == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + item.item, rstrip=false) | hash('sha256'))
+    fail_msg: The deployed base Quadlet is missing or differs from its reviewed repository source.
+  loop: "{{ codexia_deploy_base_quadlets.results }}"
+
+- name: Read generated service origins for PostgreSQL and Tunnel
+  ansible.builtin.command:
+    argv: [systemctl, --user, show, --property=SourcePath, --value, "{{ item }}.service"]
+  loop: [codexia-db, codexia-tunnel]
+  register: codexia_deploy_base_sources
+  changed_when: false
+
+- name: Require base services to originate from canonical rootless Quadlets
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout == quadlet_dir + '/' + item.item + '.container'
+    fail_msg: A base systemd service is not generated from its canonical rootless Quadlet.
+  loop: "{{ codexia_deploy_base_sources.results }}"
+
+- name: Reuse the canonical PostgreSQL container image, secret, network and volume checks
+  ansible.builtin.include_tasks: verify-base-db-container.yml
+
+- name: Verify the canonical private network isolation before deployment
+  ansible.builtin.command:
+    argv: [podman, network, inspect, --format, "{% raw %}{{.Name}}|{{.Driver}}|{{.Internal}}{% endraw %}", "{{ item.name }}"]
+  loop:
+    - {name: codexia, expected: 'codexia|bridge|false'}
+    - {name: codexia-data, expected: 'codexia-data|bridge|true'}
+  register: codexia_deploy_base_networks
+  changed_when: false
+  failed_when: codexia_deploy_base_networks.rc != 0 or codexia_deploy_base_networks.stdout != item.expected
+
+- name: Observe whether the existing Tunnel container requires runtime validation
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-tunnel]
+  register: codexia_deploy_base_tunnel_container
+  changed_when: false
+  failed_when: codexia_deploy_base_tunnel_container.rc not in [0, 1]
+
+- name: Reuse canonical Tunnel runtime validation when a container already exists
+  ansible.builtin.include_tasks: verify-base-tunnel-container.yml
+  when: codexia_deploy_base_tunnel_container.rc == 0
