@@ -1,8 +1,10 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
+import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { genericOAuth, jwt } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 import {
   oauthProvider,
   oauthProviderAuthServerMetadata,
@@ -23,9 +25,9 @@ export const OIDC_PROVIDER_ID = "workspace-oidc";
 export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
   readonly publicOrigin: string;
-  readonly oidcIssuer: string;
-  readonly oidcClientId: string;
-  readonly oidcClientSecret: string;
+  readonly oidcIssuer?: string;
+  readonly oidcClientId?: string;
+  readonly oidcClientSecret?: string;
   readonly authSecret: string;
   readonly oauthIntrospectionClientId: string;
   readonly oauthIntrospectionClientSecret: string;
@@ -33,6 +35,12 @@ export interface BetterAuthRuntimeConfig {
   readonly apiAudience?: string;
   readonly ownerClientIds: readonly string[];
   readonly mcpClientIds?: readonly string[];
+  /** Present only in the isolated, operator-authorized first-owner bootstrap runtime. */
+  readonly passkeyBootstrap?: {
+    readonly ownerId: string;
+    readonly ownerEmail: string;
+    readonly ownerName: string;
+  };
   readonly allowInsecureLoopbackForTests?: boolean;
 }
 
@@ -46,6 +54,15 @@ export interface OAuthConsentContext {
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
 const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
+const PASSKEY_BOOTSTRAP_VERIFICATION_ID = "codexia:first-owner-passkey:v1";
+const PASSKEY_BOOTSTRAP_CONTEXT = "codexia-first-owner-v1";
+const PASSKEY_BOOTSTRAP_GRANT_TTL_MS = 10 * 60 * 1000;
+
+function constantTimeEqual(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
 
 export interface BetterAuthClientRegistry {
   getOwner(ownerSubject: string): Promise<unknown | null | undefined>;
@@ -189,7 +206,7 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
 }
 
 interface BetterAuthBootstrapRegistration {
-  readonly ownerOidcSubject: string;
+  readonly ownerOidcSubject?: string;
   readonly nextClientId: () => string;
 }
 
@@ -203,15 +220,27 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
   const publicOrigin = assertHttpsUrl(config.publicOrigin, "CODEXIA_PUBLIC_ORIGIN", config.allowInsecureLoopbackForTests);
   if (publicOrigin.pathname !== "/") throw new Error("CODEXIA_PUBLIC_ORIGIN must be an origin without a path");
   const issuer = new URL("/api/auth", publicOrigin).toString();
-  const oidcIssuer = assertHttpsUrl(config.oidcIssuer, "CODEXIA_OIDC_ISSUER", config.allowInsecureLoopbackForTests).toString().replace(/\/$/u, "");
+  const oidcValues = [config.oidcIssuer, config.oidcClientId, config.oidcClientSecret];
+  if (oidcValues.some(Boolean) && oidcValues.some((value) => !value)) {
+    throw new Error("CODEXIA_OIDC_ISSUER, CODEXIA_OIDC_CLIENT_ID, and CODEXIA_OIDC_CLIENT_SECRET must be configured together");
+  }
+  const oidcIssuer = config.oidcIssuer
+    ? assertHttpsUrl(config.oidcIssuer, "CODEXIA_OIDC_ISSUER", config.allowInsecureLoopbackForTests).toString().replace(/\/$/u, "")
+    : undefined;
   const audience = config.apiAudience ?? new URL("/api", publicOrigin).toString();
   assertHttpsUrl(audience, "CODEXIA_API_AUDIENCE", config.allowInsecureLoopbackForTests);
   if (new URL(audience).pathname !== "/api") throw new Error("CODEXIA_API_AUDIENCE must identify the public API resource");
-  if (!config.databaseUrl.trim() || !config.oidcClientId.trim() || config.oidcClientSecret.length < 16 ||
+  if (!config.databaseUrl.trim() ||
+      (config.oidcClientId !== undefined && !config.oidcClientId.trim()) ||
+      (config.oidcClientSecret !== undefined && config.oidcClientSecret.length < 16) ||
       config.authSecret.length < 32 || config.oauthIntrospectionClientId.trim() === "" ||
       config.oauthIntrospectionClientSecret.length < 16 || config.ownerClientIds.length === 0 ||
       config.ownerClientIds.some((id) => !id.trim())) {
-    throw new Error("Better Auth requires PostgreSQL, OIDC client credentials, a 32-character auth secret, a confidential introspection client, and owner client IDs");
+    throw new Error("Better Auth requires PostgreSQL, complete optional OIDC credentials, a 32-character auth secret, a confidential introspection client, and owner client IDs");
+  }
+  if (config.passkeyBootstrap && (!config.passkeyBootstrap.ownerId.trim() || !config.passkeyBootstrap.ownerEmail.trim() ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(config.passkeyBootstrap.ownerEmail) || !config.passkeyBootstrap.ownerName.trim())) {
+    throw new Error("Passkey owner bootstrap requires a long operator grant, stable owner ID, email, and display name");
   }
   const mcpClientIds = [...new Set((config.mcpClientIds ?? []).map((id) => id.trim()).filter(Boolean))];
   if (mcpClientIds.some((id) => config.ownerClientIds.includes(id))) {
@@ -222,24 +251,106 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     connectionString: config.databaseUrl,
     options: `-c search_path=${CODEXIA_AUTH_SCHEMA}`,
   });
+  const approvedBootstrapOidcSubject = bootstrap?.ownerOidcSubject;
   const auth = betterAuth({
     database: pool,
     baseURL: issuer,
     secret: config.authSecret,
     account: { accountLinking: { enabled: false } },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        const path = ctx.path;
+        if (path !== "/passkey/update-passkey" && path !== "/passkey/delete-passkey") return;
+        if (config.passkeyBootstrap) return new Response("Passkey management is unavailable during first-owner enrollment", { status: 403 });
+        const session = await getSessionFromCtx(ctx);
+        if (!session || !config.ownerSubject || session.user.id !== config.ownerSubject) {
+          return new Response("Passkey management is restricted to the configured owner", { status: 403 });
+        }
+        if (Date.now() - new Date(session.session.createdAt).getTime() >= 5 * 60 * 1000) {
+          return new Response("Recent reauthentication is required for Passkey management", { status: 403 });
+        }
+        if (path === "/passkey/delete-passkey") {
+          const passkeys = await ctx.context.adapter.findMany({ model: "passkey", where: [{ field: "userId", value: session.user.id }] });
+          const accounts = await ctx.context.internalAdapter.findAccountByUserId(session.user.id);
+          if (passkeys.length <= 1 && accounts.length === 0) {
+            return new Response("The last usable authentication method cannot be removed", { status: 403 });
+          }
+        }
+      }),
+    },
     plugins: [
-      genericOAuth({ config: [{
+      passkey({
+        rpID: publicOrigin.hostname,
+        rpName: "Codexia",
+        origin: publicOrigin.origin,
+        authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
+        ...(config.passkeyBootstrap ? {
+          registration: {
+            requireSession: false,
+            async resolveUser({ ctx, context }) {
+              const suppliedToken = ctx.request?.headers.get("x-codexia-owner-enrollment") ?? "";
+              if (context !== PASSKEY_BOOTSTRAP_CONTEXT || !suppliedToken) {
+                throw new Error("An operator-granted owner enrollment is required");
+              }
+              const grant = await ctx.context.internalAdapter.findVerificationValue(PASSKEY_BOOTSTRAP_VERIFICATION_ID);
+              if (!grant || grant.expiresAt.getTime() <= Date.now() ||
+                  !constantTimeEqual(grant.value, createHash("sha256").update(suppliedToken).digest("hex"))) {
+                throw new Error("The owner enrollment grant is unavailable or expired");
+              }
+              return {
+                id: config.passkeyBootstrap!.ownerId,
+                name: config.passkeyBootstrap!.ownerName,
+                displayName: config.passkeyBootstrap!.ownerName,
+              };
+            },
+            async afterVerification({ ctx, user, context }) {
+              if (!config.passkeyBootstrap) {
+                const session = ctx.context.session;
+                if (!session || !config.ownerSubject || user.id !== config.ownerSubject || session.user.id !== config.ownerSubject) {
+                  throw new Error("Passkey registration is restricted to the configured owner");
+                }
+                return;
+              }
+              if (context !== PASSKEY_BOOTSTRAP_CONTEXT) return;
+              // The plugin accepts createSession=false, which skips its PostgreSQL transaction.
+              // Refuse that request before claiming the one-time grant or creating the owner.
+              if (ctx.body.createSession !== true || user.id !== config.passkeyBootstrap!.ownerId) {
+                throw new Error("Owner enrollment requires an atomic session-creating registration");
+              }
+              const suppliedToken = ctx.request?.headers.get("x-codexia-owner-enrollment") ?? "";
+              const grant = await ctx.context.internalAdapter.consumeVerificationValue(PASSKEY_BOOTSTRAP_VERIFICATION_ID);
+              if (!grant || grant.expiresAt.getTime() <= Date.now() || !suppliedToken ||
+                  !constantTimeEqual(grant.value, createHash("sha256").update(suppliedToken).digest("hex"))) {
+                throw new Error("The owner enrollment grant was already used or expired");
+              }
+              const existingOwner = await ctx.context.internalAdapter.findUserById(user.id);
+              const anyUser = await ctx.context.adapter.findMany({ model: "user", limit: 1 });
+              if (existingOwner || anyUser.length > 0) throw new Error("Owner enrollment is only available for an empty authentication database");
+              const createdOwner = await ctx.context.internalAdapter.createUser({
+                id: user.id,
+                name: config.passkeyBootstrap!.ownerName,
+                email: config.passkeyBootstrap!.ownerEmail,
+                emailVerified: false,
+              }, { method: "passkey" });
+              if (createdOwner.id !== config.passkeyBootstrap!.ownerId) {
+                throw new Error("The owner ID could not be preserved during Passkey enrollment");
+              }
+            },
+          },
+        } : {}),
+      }),
+      ...(oidcIssuer ? [genericOAuth({ config: [{
         providerId: OIDC_PROVIDER_ID,
         name: "Workspace identity provider",
-        clientId: config.oidcClientId,
-        clientSecret: config.oidcClientSecret,
+        clientId: config.oidcClientId!,
+        clientSecret: config.oidcClientSecret!,
         discoveryUrl: `${oidcIssuer}/.well-known/openid-configuration`,
         requireIdTokenVerification: true,
-        ...(bootstrap ? {
+        ...(approvedBootstrapOidcSubject ? {
           accountSubject({ tokens }) {
             // Better Auth verifies the signature, audience, expiry, and nonce before calling this resolver.
             const claims = tokens.idToken && decodeJwt(tokens.idToken);
-            if (!claims || claims.iss !== config.oidcIssuer || claims.sub !== bootstrap.ownerOidcSubject) {
+            if (!claims || claims.iss !== config.oidcIssuer || claims.sub !== approvedBootstrapOidcSubject) {
               throw new Error("OIDC identity is outside the approved bootstrap account");
             }
             return claims.sub;
@@ -247,7 +358,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         } : {}),
         pkce: true,
         scopes: ["openid", "email", "profile"],
-      }] }),
+      }] })] : []),
       jwt({ disableSettingJwtHeader: true, jwks: { keyPairConfig: { alg: "ES256" } } }),
       oauthProvider({
         loginPage: "/oauth/login",
@@ -305,6 +416,29 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
   return {
     auth,
     pool,
+    async createPasskeyBootstrapGrant(): Promise<string> {
+      if (!config.passkeyBootstrap) throw new Error("Passkey first-owner enrollment is not configured");
+      const context = await auth.$context;
+      const users = await context.adapter.findMany({ model: "user", limit: 1 });
+      if (users.length > 0) {
+        throw new Error("Passkey first-owner enrollment requires an empty authentication database");
+      }
+      const existing = await context.internalAdapter.findVerificationValue(PASSKEY_BOOTSTRAP_VERIFICATION_ID);
+      if (existing && existing.expiresAt.getTime() > Date.now()) {
+        throw new Error("A first-owner Passkey enrollment grant is already active; wait for expiry before replacing it");
+      }
+      if (existing) {
+        await context.internalAdapter.consumeVerificationValue(PASSKEY_BOOTSTRAP_VERIFICATION_ID);
+      }
+      const token = randomBytes(32).toString("base64url");
+      const reserved = await context.internalAdapter.reserveVerificationValue({
+        identifier: PASSKEY_BOOTSTRAP_VERIFICATION_ID,
+        value: createHash("sha256").update(token).digest("hex"),
+        expiresAt: new Date(Date.now() + PASSKEY_BOOTSTRAP_GRANT_TTL_MS),
+      });
+      if (!reserved) throw new Error("Unable to reserve a single-use first-owner Passkey grant");
+      return token;
+    },
     async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ""): Promise<void> {
       const context = await auth.$context;
       await assertBetterAuthClientRegistrations({

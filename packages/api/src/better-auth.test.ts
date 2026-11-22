@@ -26,3 +26,34 @@ test("Better Auth runtime rejects non-PostgreSQL or URL-overridden auth database
 test("Better Auth runtime rejects owner and limited MCP client overlap before opening PostgreSQL", () => {
   assert.throws(() => createBetterAuthRuntime({ ...baseConfig, mcpClientIds: ["codexia-web"] }), /must be disjoint/u);
 });
+
+test("Better Auth supports Passkey-first bootstrap without upstream OIDC", async () => {
+  const runtime = createBetterAuthRuntime({
+    ...baseConfig,
+    oidcIssuer: undefined,
+    oidcClientId: undefined,
+    oidcClientSecret: undefined,
+    passkeyBootstrap: {
+      ownerId: "operator-approved-owner",
+      ownerEmail: "owner@example.test",
+      ownerName: "Codexia Owner",
+    },
+  });
+  await runtime.pool.end();
+});
+
+test("Better Auth refuses partial upstream OIDC settings", () => {
+  assert.throws(() => createBetterAuthRuntime({ ...baseConfig, oidcClientSecret: undefined }), /configured together/u);
+  assert.throws(() => createBetterAuthRuntime({ ...baseConfig, oidcIssuer: undefined }), /configured together/u);
+});
+
+test("Better Auth validates Passkey owner bootstrap identity before opening PostgreSQL", () => {
+  assert.throws(() => createBetterAuthRuntime({
+    ...baseConfig,
+    passkeyBootstrap: { ownerId: " ", ownerEmail: "owner@example.test", ownerName: "Codexia Owner" },
+  }), /stable owner ID/u);
+  assert.throws(() => createBetterAuthRuntime({
+    ...baseConfig,
+    passkeyBootstrap: { ownerId: "owner", ownerEmail: "not-an-email", ownerName: "Codexia Owner" },
+  }), /email/u);
+});

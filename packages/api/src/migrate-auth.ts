@@ -18,19 +18,39 @@ function csvSetting(suffix: string): string[] {
 }
 
 export function readBetterAuthMigrationConfig(requireOwner = true): BetterAuthRuntimeConfig {
+  const oidcIssuer = readCodexiaEnvironment("OIDC_ISSUER")?.trim();
+  const oidcClientId = readCodexiaEnvironment("OIDC_CLIENT_ID")?.trim();
+  const oidcClientSecret = readCodexiaEnvironment("OIDC_CLIENT_SECRET");
+  const oidcFields = [oidcIssuer, oidcClientId, oidcClientSecret];
+  if (oidcFields.some(Boolean) && oidcFields.some((value) => !value)) {
+    throw new Error("CODEXIA_OIDC_ISSUER, CODEXIA_OIDC_CLIENT_ID, and CODEXIA_OIDC_CLIENT_SECRET must be configured together");
+  }
+  const passkeyBootstrapOwnerId = readCodexiaEnvironment("AUTH_PASSKEY_BOOTSTRAP_OWNER_ID")?.trim();
+  const passkeyBootstrapOwnerEmail = readCodexiaEnvironment("AUTH_PASSKEY_BOOTSTRAP_OWNER_EMAIL")?.trim();
+  const passkeyBootstrapOwnerName = readCodexiaEnvironment("AUTH_PASSKEY_BOOTSTRAP_OWNER_NAME")?.trim();
+  const bootstrapFields = [passkeyBootstrapOwnerId, passkeyBootstrapOwnerEmail, passkeyBootstrapOwnerName];
+  if (bootstrapFields.some(Boolean) && bootstrapFields.some((value) => !value)) {
+    throw new Error("Passkey bootstrap requires AUTH_PASSKEY_BOOTSTRAP_OWNER_ID, AUTH_PASSKEY_BOOTSTRAP_OWNER_EMAIL, and AUTH_PASSKEY_BOOTSTRAP_OWNER_NAME together");
+  }
+  const passkeyBootstrap = passkeyBootstrapOwnerId && passkeyBootstrapOwnerEmail && passkeyBootstrapOwnerName ? {
+    ownerId: passkeyBootstrapOwnerId,
+    ownerEmail: passkeyBootstrapOwnerEmail,
+    ownerName: passkeyBootstrapOwnerName,
+  } : undefined;
+  const configuredOwner = readCodexiaEnvironment("OAUTH_OWNER_SUBJECT")?.trim();
+  if (requireOwner && !passkeyBootstrap && !configuredOwner) requiredSetting("OAUTH_OWNER_SUBJECT");
   return {
     databaseUrl: requiredSetting("AUTH_DATABASE_URL"),
     publicOrigin: requiredSetting("PUBLIC_ORIGIN"),
-    oidcIssuer: requiredSetting("OIDC_ISSUER"),
-    oidcClientId: requiredSetting("OIDC_CLIENT_ID"),
-    oidcClientSecret: requiredSetting("OIDC_CLIENT_SECRET"),
+    ...(oidcIssuer && oidcClientId && oidcClientSecret ? { oidcIssuer, oidcClientId, oidcClientSecret } : {}),
     authSecret: requiredSetting("AUTH_SECRET"),
     oauthIntrospectionClientId: requiredSetting("OAUTH_INTROSPECTION_CLIENT_ID"),
     oauthIntrospectionClientSecret: requiredSetting("OAUTH_INTROSPECTION_CLIENT_SECRET"),
-    ...(requireOwner ? { ownerSubject: requiredSetting("OAUTH_OWNER_SUBJECT") } : {}),
+    ...(configuredOwner ? { ownerSubject: configuredOwner } : {}),
     ownerClientIds: csvSetting("OAUTH_OWNER_CLIENT_IDS"),
     mcpClientIds: (readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
     ...(readCodexiaEnvironment("API_AUDIENCE") ? { apiAudience: readCodexiaEnvironment("API_AUDIENCE")! } : {}),
+    ...(passkeyBootstrap ? { passkeyBootstrap } : {}),
   };
 }
 
