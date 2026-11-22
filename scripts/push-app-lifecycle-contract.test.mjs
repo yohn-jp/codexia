@@ -55,6 +55,7 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /CAPABILITY_UNAVAILABLE/u);
   assert.match(fixture, /rootless_podman --version/u);
   assert.doesNotMatch(fixture, /\.Host\.Version/u);
+  assert.ok(/for _ in \$\(seq 1 12\); do\n  postgres_health=\$\(rootless_podman inspect --format '\{\{\.State\.Health\.Status\}\}' codexia-db\)\n  \[\[ "\$postgres_health" == healthy \]\] && break\n  sleep 5\ndone/u.test(fixture), 'the live PostgreSQL healthcheck must be polled before declaring fixture setup failed');
   assert.match(fixture, /trap 'record_failure .* ERR/u);
   assert.match(fixture, /Last Ansible log .* redacted tail/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);

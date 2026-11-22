@@ -399,9 +399,18 @@ podman_version=$(rootless_podman --version | awk '{print $3}')
 podman_rootless=$(rootless_podman info --format '{{.Host.Security.Rootless}}')
 systemd_version=$(rootless_systemctl --version | head -n 1)
 postgres_version=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -U codexia_admin -d codexia -c "SHOW server_version"')
-postgres_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-db)
+postgres_health=''
+for _ in $(seq 1 12); do
+  postgres_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-db)
+  [[ "$postgres_health" == healthy ]] && break
+  sleep 5
+done
+if [[ "$postgres_health" != healthy ]]; then
+  printf 'PostgreSQL healthcheck did not become healthy (status: %s); health history follows:\n' "$postgres_health" >&2
+  rootless_podman inspect --format '{{json .State.Health}}' codexia-db >&2
+  exit 1
+fi
 test "$podman_rootless" = true
-test "$postgres_health" = healthy
 node - "$report" "$podman_version" "$podman_rootless" "$systemd_version" "$postgres_version" "$postgres_health" <<'CAPABILITIES'
 const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 CAPABILITIES
