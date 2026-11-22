@@ -1,5 +1,5 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
-import { assertProjectPath, type ModuleActionContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
+import { assertProjectPath, type ModuleActionContext, type NativeStoryDocument, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
 export type PublishingScope = "all" | "volume" | "chapter";
@@ -59,10 +59,6 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function nodeId(data: Record<string, unknown>, fallback: string): string {
-  return typeof data.id === "string" && data.id.trim() ? data.id : fallback;
-}
-
 function nodeTitle(data: Record<string, unknown>, fallback: string): string {
   for (const candidate of [data.title, data.name]) {
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
@@ -88,7 +84,8 @@ function compareOrdered(left: { id: string; title: string; order?: PublishingOrd
   return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
 }
 
-async function readYaml(reader: SnapshotReader, path: string): Promise<Record<string, unknown> | null> {
+async function readProjectMetadata(reader: SnapshotReader): Promise<Record<string, unknown> | null> {
+  const path = "meta/project.yaml";
   const file = await reader.read(path);
   if (!file) return null;
   let parsed: unknown;
@@ -99,25 +96,40 @@ async function readYaml(reader: SnapshotReader, path: string): Promise<Record<st
   }
   const result = record(parsed);
   if (!result) throw new Error("Expected a YAML mapping in " + path);
-  return file.documentKind ? { ...result, kind: file.documentKind } : result;
+  return result;
 }
 
-function manuscriptPath(sceneFile: string, data: Record<string, unknown>, sceneId: string): string {
-  const match = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/[^/]+\.yaml$/.exec(sceneFile);
-  const path = typeof data.manuscript === "string"
-    ? data.manuscript
-    : match ? "manuscript/" + match[1] + "/" + match[2] + "/" + sceneId + ".md" : "";
+function publishingNode(document: NativeStoryDocument) {
+  const order = nodeOrder(document.metadata);
+  return { id: document.id, title: nodeTitle(document.metadata, document.id), ...(order === undefined ? {} : { order }) };
+}
+
+function readPublishingHierarchy(reader: SnapshotReader) {
+  const volumes: NativeStoryDocument[] = [];
+  const chapters: NativeStoryDocument[] = [];
+  const scenes = new Map<string, NativeStoryDocument>();
+  for (const document of reader.nativeStoryDocuments ?? []) {
+    if (document.kind === "volume") volumes.push(document);
+    if (document.kind === "chapter") chapters.push(document);
+    if (document.kind === "scene") {
+      if (scenes.has(document.id)) throw new Error("Duplicate scene identity in publishing snapshot: " + document.id);
+      scenes.set(document.id, document);
+    }
+  }
+  return { volumes, chapters, scenes };
+}
+
+function isRootScene(document: NativeStoryDocument): boolean {
+  return !Object.hasOwn(document.metadata, "volume") && !Object.hasOwn(document.metadata, "chapter");
+}
+
+async function readPublishingScene(reader: SnapshotReader, document: NativeStoryDocument, includeManuscript = true) {
+  const source = document.metadata.manuscript;
+  const path = typeof source === "string" ? source : "";
   assertProjectPath(path);
   if (!path.toLowerCase().endsWith(".md")) throw new Error("Scene manuscript must be a Markdown file");
-  return path;
-}
-
-function folderIds(files: string[], prefix: string): string[] {
-  return [...new Set(files.flatMap((path) => {
-    if (!path.startsWith(prefix)) return [];
-    const id = path.slice(prefix.length).split("/")[0];
-    return id ? [id] : [];
-  }))];
+  const manuscript = includeManuscript ? await reader.read(path) : null;
+  return { ...publishingNode(document), path, body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "" };
 }
 
 function coreTree(value: unknown): CoreTree {
@@ -164,168 +176,75 @@ export async function readPublishingProjectFromCore(
     throw new Error("Core hierarchy belongs to another snapshot");
   }
   const hierarchy = coreTree(coreData.tree);
-  const projectMetadata = await readYaml(reader, "meta/project.yaml");
+  const projectMetadata = await readProjectMetadata(reader);
   const subtitle = typeof projectMetadata?.subtitle === "string" && projectMetadata.subtitle.trim()
     ? projectMetadata.subtitle.trim()
     : undefined;
-  const files = await reader.list("plot/volumes");
-  const volumeOrders = new Map<string, PublishingOrder>();
-  const chapterOrders = new Map<string, PublishingOrder>();
-  for (const volumeId of folderIds(files, "plot/volumes/")) {
-    const volumePath = "plot/volumes/" + volumeId + "/volume.yaml";
-    const volumeData = await readYaml(reader, volumePath) ?? { id: volumeId };
-    const volumeOrder = nodeOrder(volumeData);
-    if (volumeOrder !== undefined) volumeOrders.set(nodeId(volumeData, volumeId), volumeOrder);
-    const chapterPrefix = "plot/volumes/" + volumeId + "/chapters/";
-    for (const chapterId of folderIds(files, chapterPrefix)) {
-      const chapterBase = chapterPrefix + chapterId;
-      const chapterData = await readYaml(reader, chapterBase + "/chapter.yaml") ?? { id: chapterId };
-      const chapterOrder = nodeOrder(chapterData);
-      if (chapterOrder !== undefined) chapterOrders.set(nodeId(chapterData, chapterId), chapterOrder);
-    }
-  }
-
-  const sceneMetadata = new Map<string, { title: string; body: string; path: string; rootScene: boolean; order?: PublishingOrder }>();
-  for (const sceneFile of files.filter((path) => /\/scenes\/[^/]+\.yaml$/u.test(path))) {
-    const sceneData = await readYaml(reader, sceneFile);
-    if (!sceneData) continue;
-    const basename = sceneFile.split("/").at(-1)!.slice(0, -".yaml".length);
-    const id = nodeId(sceneData, basename);
-    if (sceneMetadata.has(id)) throw new Error("Duplicate scene identity in publishing snapshot: " + id);
-    const bodyPath = manuscriptPath(sceneFile, sceneData, id);
-    const manuscript = includeManuscripts ? await reader.read(bodyPath) : null;
-    const order = nodeOrder(sceneData);
-    sceneMetadata.set(id, {
-      title: nodeTitle(sceneData, id),
-      body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
-      path: bodyPath,
-      rootScene: sceneData.kind === "scene" && !Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter"),
-      ...(order === undefined ? {} : { order }),
-    });
+  const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
+  const volumeMetadata = new Map(volumeDocuments.map((document) => [document.id, publishingNode(document)]));
+  const chapterMetadata = new Map(chapterDocuments.map((document) => [document.id, publishingNode(document)]));
+  const sceneMetadata = new Map<string, Awaited<ReturnType<typeof readPublishingScene>>>();
+  for (const document of sceneDocuments.values()) {
+    sceneMetadata.set(document.id, await readPublishingScene(reader, document, includeManuscripts));
   }
 
   const seenSceneIds = new Set<string>();
   const volumes: PublishingVolume[] = hierarchy.volumes.map((volume) => ({
+    ...volumeMetadata.get(volume.id),
     id: volume.id,
     title: volume.title,
-    ...(volumeOrders.has(volume.id) ? { order: volumeOrders.get(volume.id)! } : {}),
     chapters: volume.chapters.map((chapter) => ({
+      ...chapterMetadata.get(chapter.id),
       id: chapter.id,
       title: chapter.title,
-      ...(chapterOrders.has(chapter.id) ? { order: chapterOrders.get(chapter.id)! } : {}),
       scenes: chapter.scenes.map((scene) => {
         if (seenSceneIds.has(scene.id)) throw new Error("Duplicate scene identity in Core hierarchy: " + scene.id);
         seenSceneIds.add(scene.id);
         const metadata = sceneMetadata.get(scene.id);
         if (!metadata) throw new Error("Scene metadata is missing from the publishing snapshot: " + scene.id);
-        return {
-          id: scene.id,
-          title: scene.title,
-          body: metadata.body,
-          path: metadata.path,
-          volumeId: volume.id,
-          chapterId: chapter.id,
-          ...(metadata.order === undefined ? {} : { order: metadata.order }),
-        };
+        return { ...metadata, title: scene.title, volumeId: volume.id, chapterId: chapter.id };
       }),
     })),
   }));
-  const rootScenes = [...sceneMetadata.entries()]
-    .filter(([id, scene]) => !seenSceneIds.has(id) && scene.rootScene)
-    .map(([id, scene]) => ({ id, title: scene.title, body: scene.body, path: scene.path, volumeId: "", chapterId: "", ...(scene.order === undefined ? {} : { order: scene.order }) }))
-    .sort(compareOrdered);
-  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes, rootScenes };
+  const rootScenes: PublishingScene[] = [];
+  for (const document of sceneDocuments.values()) {
+    if (seenSceneIds.has(document.id) || !isRootScene(document)) continue;
+    rootScenes.push({ ...sceneMetadata.get(document.id)!, volumeId: "", chapterId: "" });
+  }
+  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes, rootScenes: rootScenes.sort(compareOrdered) };
 }
 
 /** Read a public snapshot projection without composing actions or crossing its authorization boundary. */
 export async function readPublishingProject(reader: SnapshotReader): Promise<PublishingProject> {
-  const projectMetadata = await readYaml(reader, "meta/project.yaml");
+  const projectMetadata = await readProjectMetadata(reader);
   const title = projectMetadata ? nodeTitle(projectMetadata, "Project") : "Project";
   const subtitle = typeof projectMetadata?.subtitle === "string" && projectMetadata.subtitle.trim()
     ? projectMetadata.subtitle.trim()
     : undefined;
-  const files = await reader.list("plot/volumes");
-  const volumes: PublishingVolume[] = [];
-  const rootScenes: PublishingScene[] = [];
-  const seenSceneIds = new Set<string>();
-  const volumesById = new Map<string, PublishingVolume>();
-  const chaptersById = new Map<string, PublishingChapter>();
-  const chapterVolumeIds = new Map<PublishingChapter, string>();
-  for (const volumeFile of files.filter((path) => /^plot\/volumes\/[^/]+\/volume\.yaml$/u.test(path))) {
-    const volumePathId = volumeFile.split("/")[2]!;
-    const volumeData = await readYaml(reader, volumeFile);
-    if (!volumeData || volumeData.kind !== "volume") continue;
-    const volumeId = nodeId(volumeData, volumePathId);
-    const volumeOrder = nodeOrder(volumeData);
-    const volume: PublishingVolume = {
-      id: volumeId,
-      title: nodeTitle(volumeData, volumeId),
-      ...(volumeOrder === undefined ? {} : { order: volumeOrder }),
-      chapters: [],
-    };
-    volumes.push(volume);
-    volumesById.set(volumeId, volume);
-  }
-  // A moved chapter retains its storage path and names its current parent in the snapshot.
-  for (const chapterFile of files.filter((path) => /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/u.test(path))) {
-    const chapterPathId = chapterFile.split("/")[4]!;
-    const chapterData = await readYaml(reader, chapterFile);
-    if (!chapterData || chapterData.kind !== "chapter") continue;
-    const chapterId = nodeId(chapterData, chapterPathId);
-    const chapterOrder = nodeOrder(chapterData);
-    const parentVolume = typeof chapterData.volume === "string" ? volumesById.get(chapterData.volume) : undefined;
-    if (!parentVolume) continue;
-    const chapter: PublishingChapter = {
-      id: chapterId,
-      title: nodeTitle(chapterData, chapterId),
-      ...(chapterOrder === undefined ? {} : { order: chapterOrder }),
-      scenes: [],
-    };
-    parentVolume.chapters.push(chapter);
-    chaptersById.set(chapterId, chapter);
-    chapterVolumeIds.set(chapter, parentVolume.id);
+  const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
+  const volumes: PublishingVolume[] = volumeDocuments.map((document) => ({ ...publishingNode(document), chapters: [] }));
+  const volumesById = new Map(volumes.map((volume) => [volume.id, volume]));
+  const chaptersById = new Map<string, { chapter: PublishingChapter; volumeId: string }>();
+  for (const document of chapterDocuments) {
+    const volumeId = document.metadata.volume;
+    const parent = typeof volumeId === "string" ? volumesById.get(volumeId) : undefined;
+    if (!parent) continue;
+    const chapter: PublishingChapter = { ...publishingNode(document), scenes: [] };
+    parent.chapters.push(chapter);
+    chaptersById.set(chapter.id, { chapter, volumeId: parent.id });
   }
 
-  for (const sceneFile of files.filter((path) => /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/u.test(path))) {
-    const sceneData = await readYaml(reader, sceneFile);
-    if (!sceneData || sceneData.kind !== "scene") continue;
-    const match = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+)\.yaml$/u.exec(sceneFile);
-    if (!match) continue;
-    const basename = match[3]!;
-    const id = nodeId(sceneData, basename);
-    if (seenSceneIds.has(id)) throw new Error("Duplicate scene identity in public publishing snapshot: " + id);
-    seenSceneIds.add(id);
-    if (!Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter")) {
-      const bodyPath = manuscriptPath(sceneFile, sceneData, id);
-      const manuscript = await reader.read(bodyPath);
-      const order = nodeOrder(sceneData);
-      rootScenes.push({
-        id,
-        title: nodeTitle(sceneData, id),
-        body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
-        path: bodyPath,
-        volumeId: "",
-        chapterId: "",
-        ...(order === undefined ? {} : { order }),
-      });
+  const rootScenes: PublishingScene[] = [];
+  for (const document of sceneDocuments.values()) {
+    if (isRootScene(document)) {
+      rootScenes.push({ ...await readPublishingScene(reader, document), volumeId: "", chapterId: "" });
       continue;
     }
-    const chapter = typeof sceneData.chapter === "string" ? chaptersById.get(sceneData.chapter) : undefined;
-    if (!chapter) continue;
-    const bodyPath = manuscriptPath(sceneFile, sceneData, id);
-    const manuscript = await reader.read(bodyPath);
-    const order = nodeOrder(sceneData);
-    chapter.scenes.push({
-      id,
-      title: nodeTitle(sceneData, id),
-      body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
-      path: bodyPath,
-      volumeId: chapterVolumeIds.get(chapter) ?? "",
-      chapterId: chapter.id,
-      ...(order === undefined ? {} : { order }),
-    });
+    const chapterId = document.metadata.chapter;
+    const parent = typeof chapterId === "string" ? chaptersById.get(chapterId) : undefined;
+    if (!parent) continue;
+    parent.chapter.scenes.push({ ...await readPublishingScene(reader, document), volumeId: parent.volumeId, chapterId: parent.chapter.id });
   }
-
   for (const volume of volumes) {
     volume.chapters.sort(compareOrdered);
     for (const chapter of volume.chapters) chapter.scenes.sort(compareOrdered);

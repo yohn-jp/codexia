@@ -35,6 +35,26 @@ const files = new Map([
 
 class Reader {
   snapshot = snapshot;
+  nativeStoryDocuments = [
+    ["volume", "plot/volumes/vol-1/volume.yaml"],
+    ["chapter", "plot/volumes/vol-1/chapters/ch-1/chapter.yaml"],
+    ["scene", "plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml"],
+    ["scene", "plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml"],
+  ].map(([kind, metadataPath], documentOrder) => {
+    const metadataContent = files.get(metadataPath);
+    const metadata = YAML.parse(metadataContent);
+    return {
+      id: metadata.id,
+      kind,
+      title: metadata.title,
+      orderKey: String(metadata.order),
+      metadataPath,
+      metadataRevision: createHash("sha256").update(metadataContent).digest("hex"),
+      metadataContent,
+      documentOrder,
+      metadata,
+    };
+  });
   async read(path) {
     const content = files.get(path);
     return content === undefined ? null : {

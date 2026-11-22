@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import JSZip from "jszip";
 import YAML from "yaml";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, NativeStoryDocument, SnapshotId, SnapshotReader } from "@codexia/contracts";
 import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@codexia/migration";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
@@ -29,6 +29,20 @@ class MemoryReader implements SnapshotReader {
   readonly files: Map<string, Buffer>;
   constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>()) {
     this.files = new Map([...files].map(([path, content]) => [path, Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8")]));
+  }
+  get nativeStoryDocuments(): NativeStoryDocument[] {
+    return [...this.files].flatMap(([metadataPath, bytes], documentOrder) => {
+      if (!metadataPath.startsWith("plot/")) return [];
+      const metadataContent = bytes.toString("utf8");
+      const metadata = YAML.parse(metadataContent);
+      const kind = this.documentKinds.get(metadataPath) ?? metadata.kind;
+      if (!["volume", "chapter", "scene"].includes(kind)) return [];
+      return [{
+        id: metadata.id, kind, title: metadata.title,
+        orderKey: String(metadata.order ?? ""), documentOrder,
+        metadataPath, metadataRevision: fixtureTokenDigest(metadataContent), metadataContent, metadata,
+      }];
+    });
   }
   async read(path: string, encoding: "utf8" | "base64" = "utf8") {
     const bytes = this.files.get(path);
@@ -157,11 +171,16 @@ test("publishing follows Core hierarchy after a scene moves while retaining its 
     ["meta/project.yaml", "title: 移動する作品\n"],
     ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: 章Aの巻\norder: 0000000001\n"],
     ["plot/volumes/vol-a/chapters/ch-a/chapter.yaml", "kind: chapter\nid: ch-a\ntitle: 章A\nvolume: vol-a\norder: 0000000001\n"],
-    ["plot/volumes/vol-a/chapters/ch-a/scenes/sc-moving.yaml", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
+    ["plot/imported/sc-moving.metadata", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
     ["plot/volumes/vol-b/volume.yaml", "kind: volume\nid: vol-b\ntitle: 章Bの巻\norder: 0000000002\n"],
     ["plot/volumes/vol-b/chapters/ch-b/chapter.yaml", "kind: chapter\nid: ch-b\ntitle: 章B\nvolume: vol-b\norder: 0000000001\n"],
     ["manuscript/vol-a/ch-a/sc-moving.md", "元のパスに残る本文。\n"],
   ]));
+  const read = reader.read.bind(reader);
+  reader.read = async (path, encoding) => {
+    assert.ok(!path.startsWith("plot/"), `hierarchy metadata already came from the pinned projection: ${path}`);
+    return read(path, encoding);
+  };
   const tree = {
     title: "移動する作品",
     volumes: [
@@ -342,14 +361,14 @@ test("public scene and volume shares follow a chapter moved to a later volume", 
 test("publishing keeps Core's string order-key sequence in volume, chapter, text, and EPUB output", async () => {
   const reader = new MemoryReader(new Map([
     ["meta/project.yaml", "title: 順序の作品\n"],
-    ["plot/volumes/vol-a/volume.yaml", "id: vol-a\ntitle: Alpha volume\norder: 2\n"],
-    ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "id: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
-    ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "id: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
-    ["plot/volumes/vol-z/volume.yaml", 'id: vol-z\ntitle: Zulu volume\norder: "0000000002"\n'],
-    ["plot/volumes/vol-z/chapters/ch-alpha-z/chapter.yaml", 'id: ch-alpha-z\ntitle: Alpha chapter\nvolume: vol-z\norder: "0000000010"\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/chapter.yaml", 'id: ch-z\ntitle: Zulu chapter\nvolume: vol-z\norder: "0000000002"\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-alpha.yaml", 'id: sc-alpha\ntitle: Alpha scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000010"\nmanuscript: manuscript/vol-z/ch-z/sc-alpha.md\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-zulu.yaml", 'id: sc-zulu\ntitle: Zulu scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000002"\nmanuscript: manuscript/vol-z/ch-z/sc-zulu.md\n'],
+    ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: Alpha volume\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "kind: chapter\nid: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "kind: scene\nid: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
+    ["plot/volumes/vol-z/volume.yaml", 'kind: volume\nid: vol-z\ntitle: Zulu volume\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-alpha-z/chapter.yaml", 'kind: chapter\nid: ch-alpha-z\ntitle: Alpha chapter\nvolume: vol-z\norder: "0000000010"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/chapter.yaml", 'kind: chapter\nid: ch-z\ntitle: Zulu chapter\nvolume: vol-z\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-alpha.yaml", 'kind: scene\nid: sc-alpha\ntitle: Alpha scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000010"\nmanuscript: manuscript/vol-z/ch-z/sc-alpha.md\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-zulu.yaml", 'kind: scene\nid: sc-zulu\ntitle: Zulu scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000002"\nmanuscript: manuscript/vol-z/ch-z/sc-zulu.md\n'],
     ["manuscript/vol-a/ch-alpha/sc-a.md", "本文 Alpha。\n"],
     ["manuscript/vol-z/ch-z/sc-alpha.md", "本文 Alpha scene。\n"],
     ["manuscript/vol-z/ch-z/sc-zulu.md", "本文 Zulu。\n"],
@@ -582,6 +601,15 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(remote))).status, 200);
   assert.equal((await publicScene.handle(new Request(url + "/scenes/out-of-scope"), publicContext(remote))).status, 404);
 
+  const updatedFiles = new Map<string, Buffer | string>(remote.files);
+  updatedFiles.set("manuscript/vol-1/ch-1/sc-1.md", "次の保存版の本文。\n");
+  remote = new MemoryReader(updatedFiles, makeSnapshot(3), remote.documentKinds);
+  const updatedScene = await publicScene.handle(new Request(sceneUrl), publicContext(remote));
+  assert.equal(updatedScene.status, 200);
+  assert.deepEqual(await updatedScene.json(), {
+    snapshot: makeSnapshot(3), id: "sc-1", title: "夜の駅", body: "次の保存版の本文。\n",
+  });
+
   const listed = await invokeAction(definition, "publishing.shares.list", {}, actionContext(remote, []));
   const safeList = listed.shares as Array<Record<string, unknown>>;
   assert.ok(!JSON.stringify(safeList).includes(token));
@@ -591,7 +619,7 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   const revokeOperation = proposals.at(-1)!.operations[0]!;
   assert.ok(revoked.proposalId);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "a proposed revocation does not alter the selected snapshot");
-  remote = applyOperation(remote, revokeOperation, 3);
+  remote = applyOperation(remote, revokeOperation, 4);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "an applied revocation blocks the next read");
 
   const expiredToken = "share_" + "x".repeat(43);
