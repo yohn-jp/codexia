@@ -1867,7 +1867,8 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
-    let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
+    // Admission returns public identity and policy fields after signature and liveness checks.
+    let admittedMcpClient: OAuthMcpPrincipal | undefined;
     const isLegacyBearer = !options.betterAuth && Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
     if (standaloneMcpRoute) {
       if (!oauthMcpMetadataUrl) throw httpFailure(503, "MCP_OAUTH_UNAVAILABLE", "Standalone MCP OAuth is not configured");
@@ -1881,7 +1882,7 @@ export function createServer(options: ApiServerOptions): Server {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
         if (authenticateOAuthMcp && error instanceof OAuthAuthenticationError && error.code === "OAUTH_SCOPE_REQUIRED") {
-          try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+          try { admittedMcpClient = await authenticateOAuthMcp(bearer); }
           catch (mcpError) {
             const failure = mcpError instanceof OAuthAuthenticationError
               ? mcpError
@@ -1905,7 +1906,7 @@ export function createServer(options: ApiServerOptions): Server {
       }
     }
     if (bearer && authenticateOAuthMcp && (standaloneMcpRoute || !authenticateOAuthOwner) && !isLegacyBearer) {
-      try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+      try { admittedMcpClient = await authenticateOAuthMcp(bearer); }
       catch (error) {
         const failure = error instanceof OAuthAuthenticationError
           ? error
@@ -1917,12 +1918,12 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
     }
-    if (standaloneMcpRoute && oauthMcpPrincipal) {
+    if (standaloneMcpRoute && admittedMcpClient) {
       const requested = query.getAll("projectId");
       if (requested.length > 1 || requested[0] === "") {
         throw httpFailure(400, "INVALID_PROJECT", "Specify at most one projectId");
       }
-      const assigned = oauthMcpPrincipal.projectIds;
+      const assigned = admittedMcpClient.projectIds;
       const projectId = requested[0] ?? (assigned.length === 1 ? assigned[0] : undefined);
       if (!projectId) throw httpFailure(400, "MCP_PROJECT_REQUIRED", "Specify projectId when the OAuth client has several project assignments");
       assertAssignedProject(projectId, assigned);
@@ -1958,21 +1959,21 @@ export function createServer(options: ApiServerOptions): Server {
       ? false : cloudflareAccess ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isOAuthAuthor = Boolean(oauthPrincipal);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(oauthMcpPrincipal));
+    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(admittedMcpClient));
     const isAuthor = isCookie || isOAuthAuthor;
     const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
-    const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = oauthMcpPrincipal
+    const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = admittedMcpClient
       ? (["read", "compute", "propose"] as const).filter((effect) =>
-        oauthMcpPrincipal!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
+        admittedMcpClient!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
       : undefined;
     const requireMcpEffect = (effect: ActionDescriptor["effect"]): void => {
-      if (!oauthMcpPrincipal) return;
+      if (!admittedMcpClient) return;
       const requiredScope = OAUTH_MCP_SCOPE_BY_EFFECT[effect];
-      if (oauthMcpPrincipal.scopes.includes(requiredScope)) return;
+      if (admittedMcpClient.scopes.includes(requiredScope)) return;
       if (oauthMcpMetadataUrl) response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl, requiredScope));
       throw httpFailure(403, "OAUTH_MCP_SCOPE_REQUIRED", `Access token does not grant ${requiredScope}`);
     };
-    if (oauthMcpPrincipal && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
+    if (admittedMcpClient && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
       requireMcpEffect("read");
     }
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
@@ -2027,14 +2028,14 @@ export function createServer(options: ApiServerOptions): Server {
       requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
-    const resolveReorderActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(oauthMcpPrincipal))
+    const resolveReorderActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(admittedMcpClient))
       ? async (): Promise<string> => {
         if (hosted) {
           const principal = await requireWritePermission();
           if (principal?.userId) return principal.userId;
         } else {
           requireMcpEffect("propose");
-          if (oauthMcpPrincipal) return oauthMcpPrincipal.userId;
+          if (admittedMcpClient) return admittedMcpClient.userId;
           if (isAuthor) return "owner";
         }
         throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose a hierarchy reorder");
@@ -2056,7 +2057,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     const signal = abortSignalFor(request, response);
-    if (oauthMcpPrincipal && routePath.startsWith("/api/v1/persistence/")) {
+    if (admittedMcpClient && routePath.startsWith("/api/v1/persistence/")) {
       fail(response, 403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
       return;
     }
@@ -2110,7 +2111,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/projects/events" && method === "GET") {
-      if (oauthMcpPrincipal) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
+      if (admittedMcpClient) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
       projectEventStreams.open(response, "no-store", undefined, accessExpiresAt);
       return;
@@ -2173,7 +2174,7 @@ export function createServer(options: ApiServerOptions): Server {
       try { cursor = decodeProjectPageCursor(query.get("cursor")); }
       catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
 
-      const assignedIds = oauthMcpPrincipal?.projectIds;
+      const assignedIds = admittedMcpClient?.projectIds;
       const assigned = hosted
         ? await listProjects(assignedIds)
         : assignedIds && await options.persistence.read(async (reader) => {
@@ -2207,8 +2208,8 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/review-queue" && method === "GET") {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const projectIds = oauthMcpPrincipal
-        ? [...oauthMcpPrincipal.projectIds]
+      const projectIds = admittedMcpClient
+        ? [...admittedMcpClient.projectIds]
         : hosted ? (await listProjects()).map(project => project.id) : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
@@ -2217,8 +2218,8 @@ export function createServer(options: ApiServerOptions): Server {
     const projectRoot = routePath.match(/^\/api\/projects\/([^/]+)(?:\/(.*))?$/u);
     if (projectRoot) {
       const projectId = projectPathId(projectRoot[1]!);
-      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
-      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) {
+      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
+      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) {
         throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       }
       const suffix = projectRoot[2] ?? "";
@@ -2249,7 +2250,7 @@ export function createServer(options: ApiServerOptions): Server {
         }
       }
       if (suffix === "" && method === "GET") {
-        const project = await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds);
+        const project = await findAuthorizedProject(projectId, admittedMcpClient?.projectIds);
         if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
         const observation = await options.store.observe(projectId);
         sendJson(response, 200, { project, observation });
@@ -2363,7 +2364,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor) }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2373,10 +2374,10 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
         let descriptor = descriptors.find((item) => item.id === actionId);
-        if (!descriptor && oauthMcpPrincipal) {
-          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, oauthMcpPrincipal.projectIds, resolveReorderActor);
+        if (!descriptor && admittedMcpClient) {
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, admittedMcpClient.projectIds, resolveReorderActor);
           const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
           if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
         }
@@ -2417,7 +2418,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2506,7 +2507,7 @@ export function createServer(options: ApiServerOptions): Server {
       const moduleRoute = suffix.match(/^modules\/([^/]+)(?:\/(.*))?$/u);
       if (moduleRoute) {
         const moduleId = parseProjectId(moduleRoute[1]!);
-        if (oauthMcpPrincipal && moduleId !== "mcp") {
+        if (admittedMcpClient && moduleId !== "mcp") {
           throw httpFailure(403, "OAUTH_MCP_MODULE_DENIED", "Standalone MCP clients may only use the MCP transport route");
         }
         if (moduleId === "assistant" && isBearer) {
@@ -2515,7 +2516,7 @@ export function createServer(options: ApiServerOptions): Server {
         const contribution = await contributionFor(moduleId, moduleRoute[2] ?? "", method);
         if (!contribution || contribution.access !== "owner") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
         if (isBearer && !["read", "compute", "propose"].includes(contribution.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only use read, compute, and propose module routes");
-        if (oauthMcpPrincipal && moduleId === "mcp" && !mcpStreamableRoute) requireMcpEffect(contribution.effect);
+        if (admittedMcpClient && moduleId === "mcp" && !mcpStreamableRoute) requireMcpEffect(contribution.effect);
         // The MCP transport advertises "propose" because some tools create
         // proposals, but initialization and read-only tools require read only.
         // Actual proposal writes are gated by actionHost.authorizeProposal.
@@ -2525,10 +2526,10 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
-        if (mcpStreamableRoute && oauthMcpPrincipal) {
-          const { issuer, clientId, userId } = oauthMcpPrincipal;
-          host.mcpSessionIdentity = sha256Digest(JSON.stringify([issuer, clientId, userId]));
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
+        if (mcpStreamableRoute && admittedMcpClient) {
+          const { issuer, clientId, userId } = admittedMcpClient;
+          host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
         }
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
@@ -2566,8 +2567,8 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/search" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
-      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
+      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const term = query.get("q") ?? "";
       if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
       const limit = boundedInt(query.get("limit"), 20, 1, 100);
@@ -2577,16 +2578,16 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/writing-stats" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
-      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
+      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       sendJson(response, 200, await writingStatsSnapshot(projectId, optionalSnapshot(query, projectId)));
       return;
     }
     if (routePath === "/api/scratch" && method === "POST") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
-      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
+      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const author = await requireAuthorSession();
       await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
       return;
@@ -2595,9 +2596,9 @@ export function createServer(options: ApiServerOptions): Server {
       const publicMatch = routePath.match(/^\/api\/public\/projects\/([^/]+)\/modules\/([^/]+)(?:\/(.*))?$/u);
       if (!publicMatch) throw httpFailure(404, "NOT_FOUND", "Public module route not found");
       const projectId = parseProjectId(publicMatch[1]!);
-      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
       const moduleId = parseProjectId(publicMatch[2]!);
-      if (!(await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
+      if (!(await findAuthorizedProject(projectId, admittedMcpClient?.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
       const contribution = await contributionFor(moduleId, publicMatch[3] ?? "", method);
       if (!contribution || contribution.access !== "public" || contribution.effect !== "read") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Public module route is unavailable");
       if (!isRead) throw httpFailure(405, "PUBLIC_MODULE_READ_ONLY", "Public module routes are read-only");
