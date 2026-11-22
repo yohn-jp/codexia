@@ -402,8 +402,8 @@ jobs:
         shell: bash
         run: bash scripts/ci-playwright-engine-benchmark.sh podman dual-local acceptance
 
-  compare-certified:
-    name: Current jobs.container versus Podman GHCR dual / ${{ matrix.profile }} / ${{ matrix.variant }}
+  compare-current:
+    name: Current jobs.container / ${{ matrix.profile }}
     needs: publish-dual
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -412,11 +412,11 @@ jobs:
       packages: read
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
         profile: [core, full]
-        variant: [current, podman-dual]
-    container: ${{ matrix.variant == 'current' && fromJSON('{"image":"mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579","options":"--init --ipc=host"}') || null }}
+    container:
+      image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:17
@@ -424,8 +424,6 @@ jobs:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
           POSTGRES_PASSWORD: codexia
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U codexia -d codexia_test"
           --health-interval 5s
@@ -434,7 +432,7 @@ jobs:
     env:
       CI: 'true'
       CODEXIA_PROFILE: ${{ matrix.profile }}
-      CODEXIA_E2E_DATABASE_URL: ${{ matrix.variant == 'current' && 'postgres://codexia:codexia@postgres:5432/codexia_test' || 'postgres://codexia:codexia@postgres:5432/codexia_test' }}
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -457,17 +455,72 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODEXIA_BENCH_DUAL_DIGEST: ${{ needs.publish-dual.outputs.digest }}
-        run: |
-          set -euo pipefail
-          if [[ "${{ matrix.variant }}" == current ]]; then
-            bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
-          else
-            bash scripts/ci-playwright-engine-benchmark.sh podman dual-ghcr acceptance
-          fi
+        run: bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
       - uses: actions/upload-artifact@v7.0.2
         if: failure()
         with:
-          name: dual-benchmark-trace-${{ matrix.variant }}-${{ matrix.profile }}
+          name: dual-benchmark-trace-current-${{ matrix.profile }}
+          path: tests/e2e/test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 3
+
+  compare-podman:
+    name: Podman GHCR dual / ${{ matrix.profile }}
+    needs: publish-dual
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_PROFILE: ${{ matrix.profile }}
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build exact profile
+        run: pnpm build
+      - name: Execute four real WebKit-lane shards
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEXIA_BENCH_DUAL_DIGEST: ${{ needs.publish-dual.outputs.digest }}
+        run: bash scripts/ci-playwright-engine-benchmark.sh podman dual-ghcr acceptance
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: dual-benchmark-trace-podman-${{ matrix.profile }}
           path: tests/e2e/test-results/**/trace.zip
           if-no-files-found: ignore
           retention-days: 3
