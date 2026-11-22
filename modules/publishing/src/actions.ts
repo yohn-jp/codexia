@@ -123,8 +123,7 @@ function parseShareRevokeInput(value: unknown): { id: string } {
   return { id };
 }
 
-async function makeMetadataOperation(context: ModuleActionContext, path: string, content: string, message: string): Promise<ChangeOperation> {
-  const current = await context.reader.read(path);
+function makeMetadataOperation(context: ModuleActionContext, path: string, revision: string | null, content: string, message: string): ChangeOperation {
   const snapshot = context.reader.snapshot;
   return {
     id: randomUUID().replaceAll("-", ""),
@@ -132,8 +131,8 @@ async function makeMetadataOperation(context: ModuleActionContext, path: string,
     projectId: snapshot.projectId,
     baseProjectVersion: snapshot.projectVersion,
     effect: "metadata",
-    reads: [{ path, revision: current?.revision ?? null }],
-    writes: [{ path, revision: current?.revision ?? null, content }],
+    reads: [{ path, revision }],
+    writes: [{ path, revision, content }],
     message,
   };
 }
@@ -191,7 +190,7 @@ export function createPublishingActions(): ModuleAction[] {
   actions.push(defineAction(valueSchema(parseEpisodeInput), "publishing.episodes.propose", "propose", async (input, context) => {
     const existing = await readEpisodeMap(context.reader);
     const merged = mergeEpisodeMap(existing, input.episodes);
-    const operation = await makeMetadataOperation(context, EPISODES_PATH, merged.content, "Update publication episode mapping");
+    const operation = makeMetadataOperation(context, EPISODES_PATH, existing.revision, merged.content, "Update publication episode mapping");
     const proposal = await context.propose([operation]);
     return { episodes: merged.episodes, proposalId: proposal.id, activation: "requires author approval and PostgreSQL apply" };
   }));
@@ -205,10 +204,10 @@ export function createPublishingActions(): ModuleAction[] {
   actions.push(defineAction(valueSchema(parseShareCreateInput), "publishing.shares.create", "propose", async (input, context) => {
     const project = await readPublishingProjectFromCore(context);
     resolveShareScope(project, input.scope);
-    const { grants, content } = await readShareGrants(context.reader);
+    const { grants, content, revision } = await readShareGrants(context.reader);
     const { grant, rawToken } = createShareGrant(input);
     const next = [...grants, grant];
-    const operation = await makeMetadataOperation(context, SHARE_GRANTS_PATH, sortedGrantContent(next), content ? "Create read-only publication share" : "Create read-only publication share index");
+    const operation = makeMetadataOperation(context, SHARE_GRANTS_PATH, revision, sortedGrantContent(next), content ? "Create read-only publication share" : "Create read-only publication share index");
     const proposal = await context.propose([operation]);
     return {
       share: safeShareGrant(grant),
@@ -231,7 +230,7 @@ export function createPublishingActions(): ModuleAction[] {
         revokedAt: new Date().toISOString(),
       };
     }
-    const operation = await makeMetadataOperation(context, SHARE_GRANTS_PATH, sortedGrantContent(existing.grants), "Revoke read-only publication share");
+    const operation = makeMetadataOperation(context, SHARE_GRANTS_PATH, existing.revision, sortedGrantContent(existing.grants), "Revoke read-only publication share");
     const proposal = await context.propose([operation]);
     return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: proposal.id, activation: "Revocation reaches public readers after the change is approved and applied." };
   }));

@@ -561,7 +561,11 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
   assert.equal(proposals.length, 1);
   const operation = proposals[0]!.operations[0]!;
   assert.equal(operation.effect, "metadata");
-  assert.deepEqual(operation.writes.map((write) => write.path), [EPISODES_PATH]);
+  const originalRevision = (await reader.read(EPISODES_PATH))!.revision;
+  assert.deepEqual(operation.reads, [{ path: EPISODES_PATH, revision: originalRevision }]);
+  assert.equal(operation.writes.length, 1);
+  assert.equal(operation.writes[0]!.path, EPISODES_PATH);
+  assert.equal(operation.writes[0]!.revision, originalRevision);
   const written = YAML.parse(operation.writes[0]!.content!);
   assert.deepEqual(written.futureMapField, { provider: "legacy", revision: 3 });
   assert.deepEqual(written.episodes[0].futureEpisodeField, { retain: "yes" });
@@ -600,6 +604,8 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   }, context);
   const token = String(created.token);
   const createOperation = proposals[0]!.operations[0]!;
+  assert.deepEqual(createOperation.reads, [{ path: SHARE_GRANTS_PATH, revision: null }]);
+  assert.equal(createOperation.writes[0]!.revision, null);
   const createJson = createOperation.writes[0]!.content!;
   assert.ok(!createJson.includes(token), "raw bearer is never committed");
   assert.equal(JSON.parse(createJson).tokenHash, fixtureTokenDigest(token));
@@ -646,6 +652,9 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
 
   const revoked = await invokeAction(definition, "publishing.shares.revoke", { id: String((created.share as Record<string, unknown>).id) }, actionContext(remote, proposals));
   const revokeOperation = proposals.at(-1)!.operations[0]!;
+  const activeRevision = (await remote.read(SHARE_GRANTS_PATH))!.revision;
+  assert.deepEqual(revokeOperation.reads, [{ path: SHARE_GRANTS_PATH, revision: activeRevision }]);
+  assert.equal(revokeOperation.writes[0]!.revision, activeRevision);
   assert.ok(revoked.proposalId);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "a proposed revocation does not alter the selected snapshot");
   remote = applyOperation(remote, revokeOperation, 4);
