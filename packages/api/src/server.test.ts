@@ -519,6 +519,26 @@ function hostedTestPolicy(): HostedAuthorizationPolicy {
   };
 }
 
+it("starts standalone API only with Better Auth and exposes no static login route", async (t) => {
+  const store = makeStore();
+  const persistence = admissionPersistence(store);
+  assert.throws(() => createServer({ store, persistence }), /Standalone authentication requires Better Auth/u);
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-canonical-auth-only-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings("project-1", client.publicJwks, client.isActive);
+  const instance = await startCustomApi(store, staticDir, settings);
+  const headers = client.ownerHeaders();
+  t.after(instance.close);
+  const oldLogin = await fetch(instance.base + "/api/login", { method: "POST", headers, body: "{}" });
+  assert.equal(oldLogin.status, 404);
+  assert.equal(oldLogin.headers.get("set-cookie"), null);
+  const owner = await fetch(instance.base + "/api/session", { headers });
+  assert.deepEqual(await owner.json(), { authenticated: true, authorScope: "owner" });
+  const retiredLogout = await fetch(instance.base + "/api/logout", { method: "POST", headers, body: "{}" });
+  assert.equal(retiredLogout.status, 410);
+});
+
 class InterleavingLifecycleRuntime extends ModuleRuntime {
   private lifecycleListener: WorkerJobLifecycleListener | undefined;
 
@@ -559,7 +579,7 @@ async function startHostedApi(
   return { server, base, close };
 }
 
-function rawHostedRequest(urlValue: string, headers: Record<string, string>, body?: string): Promise<{ status: number; body: string }> {
+function rawHostedRequest(urlValue: string, headers: Record<string, string>, body?: string): Promise<{ status: number; body: string; cookies: string[] }> {
   const url = new URL(urlValue);
   return new Promise((resolveResponse, reject) => {
     const request = httpRequest({
@@ -571,12 +591,33 @@ function rawHostedRequest(urlValue: string, headers: Record<string, string>, bod
     }, (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.once("end", () => resolveResponse({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+      response.once("end", () => resolveResponse({
+        status: response.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString("utf8"),
+        cookies: response.headers["set-cookie"] ?? [],
+      }));
     });
     request.once("error", reject);
     request.end(body);
   });
 }
+
+it("keeps Hosted logout at the Instance Access boundary", async (t) => {
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-logout-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const api = await startHostedApi(makeSnapshotStore().store, staticDir, hostedTestPolicy());
+  t.after(api.close);
+  const url = api.base + "/api/logout";
+  const headers = {
+    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
+    Cookie: "__Host-praetorium_access=read-grant; __Host-praetorium_csrf=fixture-csrf",
+    "Content-Type": "application/json",
+  };
+  const result = await rawHostedRequest(url, { ...headers, "X-CSRF-Token": "fixture-csrf" }, "{}");
+  assert.equal(result.status, 410, result.body);
+  assert.equal((JSON.parse(result.body) as { code: string }).code, "HOSTED_LOGOUT_RETIRED");
+  assert.deepEqual(result.cookies, []);
+});
 
 async function rawHostedRequestStatus(urlValue: string, headers: Record<string, string>, body?: string): Promise<number> {
   return (await rawHostedRequest(urlValue, headers, body)).status;
