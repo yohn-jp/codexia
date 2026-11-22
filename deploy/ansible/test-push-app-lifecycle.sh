@@ -13,6 +13,10 @@ fixture_gid=22001
 fixture_home=/home/codexia
 manager_dropin_dir="/run/systemd/system/user@${fixture_uid}.service.d"
 manager_dropin="$manager_dropin_dir/10-codexia-lifecycle-ci.conf"
+environment_generator_dir=/run/systemd/user-environment-generators
+environment_generator="$environment_generator_dir/99-codexia-lifecycle-xdg-$fixture_uid"
+environment_generator_dir_created=false
+environment_generator_installed=false
 fixture_ip=''
 backup_mounted=false
 manager_configured=false
@@ -120,7 +124,7 @@ const fs=require('node:fs');
 const [path,key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
 const report=JSON.parse(fs.readFileSync(path,'utf8'));
 const evidence=JSON.parse(fs.readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,'utf8'));
-const role=['first-activation','same-digest-reapply','interrupted-recovery'].includes(key)?'head':'compatible';
+const role=['first-activation','same-digest-reapply'].includes(key)?'head':'compatible';
 const expectedImageId=evidence.candidates[role].imageId;
 if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API writer image ID differs from the run-bound ${role} candidate`);
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
@@ -182,6 +186,13 @@ cleanup() {
     rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_status=1
     [[ ! -e "$fixture_home/.config/containers/registries.conf" ]] || cleanup_status=1
   fi
+  if [[ "$environment_generator_installed" == true ]]; then
+    sudo rm -f -- "$environment_generator" || cleanup_status=1
+    [[ ! -e "$environment_generator" && ! -L "$environment_generator" ]] || cleanup_status=1
+  fi
+  if [[ "$environment_generator_dir_created" == true ]]; then
+    sudo rmdir -- "$environment_generator_dir" 2>/dev/null || cleanup_status=1
+  fi
   if [[ "$manager_configured" == true ]]; then
     if [[ -e "$manager_dropin" || -L "$manager_dropin" ]]; then sudo rm -f "$manager_dropin" || cleanup_status=1; fi
     if [[ -d "$manager_dropin_dir" ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_status=1; fi
@@ -239,7 +250,7 @@ done
 sudo -n true || { mark_fixture_unavailable 'non-interactive sudo is unavailable for disposable host provisioning'; exit 78; }
 if getent passwd "$fixture_user" >/dev/null 2>&1 || getent passwd "$fixture_uid" >/dev/null 2>&1 || \
    getent group "$fixture_user" >/dev/null 2>&1 || getent group "$fixture_gid" >/dev/null 2>&1 || \
-   grep -q '^codexia:' /etc/subuid /etc/subgid || [[ -e "$fixture_home" || -e "$manager_dropin" || -d "$manager_dropin_dir" ]]; then
+   grep -q '^codexia:' /etc/subuid /etc/subgid || [[ -e "$fixture_home" || -e "$manager_dropin" || -d "$manager_dropin_dir" || -e "$environment_generator" || -L "$environment_generator" ]]; then
   set_state fixture_cleanup NOT_CHECKED 'refused to adopt a pre-existing fixture identity, subordinate ID mapping, home or systemd drop-in'
   exit 1
 fi
@@ -294,6 +305,27 @@ if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
   exit 78
 fi
 rootless_systemctl import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
+# Quadlet's user generator reads the manager's generated environment, not
+# just this shell's imported values. Reuse the Base Runtime CI fixture contract.
+if [[ ! -d "$environment_generator_dir" ]]; then
+  sudo install -d -m 0755 "$environment_generator_dir"
+  environment_generator_dir_created=true
+fi
+sudo install -m 0755 /dev/null "$environment_generator"
+environment_generator_installed=true
+cat <<ENV_GENERATOR | sudo tee "$environment_generator" >/dev/null
+#!/bin/sh
+if [ "\$(id -u)" = "$fixture_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$fixture_home/.config' 'XDG_RUNTIME_DIR=/run/user/$fixture_uid'
+fi
+ENV_GENERATOR
+rootless_systemctl daemon-reload
+for expected in "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
+  if ! rootless_systemctl show-environment | grep -Fxq "$expected"; then
+    echo "Disposable systemd user manager did not retain $expected after environment generation" >&2
+    exit 1
+  fi
+done
 if ! rootless_podman info --format '{{.Host.Security.Rootless}}' | grep -Fxq true; then
   mark_fixture_unavailable 'rootless Podman is unavailable for the configured service identity'
   exit 78
