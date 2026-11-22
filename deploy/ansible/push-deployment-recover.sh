@@ -43,12 +43,23 @@ if (value.phase === 'pending' && value.hadUnit) {
   const unit = fs.readFileSync(process.argv[4], 'utf8');
   const unitMatch = unit.match(/^Image=(\S+)$/m);
   const unitImage = unitMatch?.[1] ?? '';
+  const modes = [...unit.matchAll(/^Environment=CODEXIA_AUTH_MODE=(token|better-auth)$/gm)].map(match => match[1]);
+  const unitAuthMode = modes.length === 1 ? modes[0] : modes.length === 0 && unit.includes('Environment=CODEXIA_AUTH_TOKEN_FILE=') &&
+    !unit.includes('codexia-auth-database-url') && !unit.includes('codexia-auth/runtime.env') ? 'token' : '';
+  const settingsDigests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([a-f0-9]{64}|none)$/gm)].map(match => match[1]);
   if (!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(unitImage)) process.exit(2);
+  if (modes.length > 1 || !unitAuthMode || settingsDigests.length > 1) process.exit(2);
   if (value.releasePresent) {
     const info = fs.lstatSync(process.argv[3]);
     if (!info.isFile() || info.isSymbolicLink()) process.exit(2);
     const release = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     previousImage = release.image;
+    if (release.authMode !== undefined && release.authMode !== unitAuthMode) process.exit(2);
+    if (release.authSettingsSha256 !== undefined) {
+      if (!/^([a-f0-9]{64}|none)$/.test(release.authSettingsSha256)) process.exit(2);
+      const unitDigest = settingsDigests[0] ?? (unitAuthMode === 'token' ? 'none' : '');
+      if (release.authSettingsSha256 !== unitDigest) process.exit(2);
+    }
   } else {
     previousImage = unitImage;
   }

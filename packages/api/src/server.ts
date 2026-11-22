@@ -2,6 +2,7 @@ import { EventStreams } from "./event-streams.js";
 import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
+import { resolveStandaloneAuthMode } from "./auth-mode.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
@@ -2677,21 +2678,25 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
-    betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
+    betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
   ].some((value) => value !== undefined);
+  const authMode = resolveStandaloneAuthMode(readCodexiaEnvironment("AUTH_MODE"), betterAuthConfigured);
   const requiredBetterAuthValues = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
     betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds,
   ];
-  if (betterAuthConfigured && requiredBetterAuthValues.some((value) => !value)) {
+  if (authMode === "better-auth" && requiredBetterAuthValues.some((value) => !value)) {
     throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
+  }
+  if (authMode === "better-auth" && [oauthValues.issuer, oauthValues.audience, oauthValues.jwksUrl].some((value) => value !== undefined)) {
+    throw new Error("Better Auth mode cannot be combined with legacy standalone OAuth settings");
   }
   const mcpClientIds = (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean);
   const mcpProjectAssignments = parseOAuthMcpProjectAssignments(betterAuthValues.mcpProjectAssignments, mcpClientIds);
   let betterAuth: ReturnType<typeof createBetterAuthRuntime> | undefined;
-  if (betterAuthConfigured) {
+  if (authMode === "better-auth") {
     const { createBetterAuthRuntime } = await import("./better-auth.js");
     betterAuth = createBetterAuthRuntime({
       databaseUrl: betterAuthValues.databaseUrl!,
@@ -2702,10 +2707,17 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       authSecret: betterAuthValues.authSecret!,
       oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
       oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
+      ownerSubject: betterAuthValues.ownerSubject!,
       ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
       ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
       mcpClientIds,
     });
+    try {
+      await betterAuth.assertRegisteredClients();
+    } catch (error) {
+      await betterAuth.pool.end().catch(() => undefined);
+      throw error;
+    }
   }
   if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
     throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");

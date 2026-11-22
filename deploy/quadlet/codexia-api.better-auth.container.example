@@ -1,6 +1,6 @@
-# Inert reference only. This filename is intentionally not a Quadlet .container
-# unit; do not rename or install it until migrations and target-specific recovery
-# have been accepted on a disposable VM.
+# Inert Ansible source template. This filename is intentionally not a Quadlet
+# .container unit. Push deployment renders it only after the Better Auth mode,
+# approval, runtime secrets, migrations, and registered clients are validated.
 [Unit]
 Description=Codexia API backend with opt-in Better Auth
 Requires=codexia-db.service
@@ -21,6 +21,8 @@ Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET
 Secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET
 EnvironmentFile=/home/codexia/.config/codexia-auth/runtime.env
 Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token
+Environment=CODEXIA_AUTH_MODE=better-auth
+Environment=CODEXIA_AUTH_SETTINGS_SHA256=CODEXIA_AUTH_SETTINGS_SHA256
 Environment=CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password
 Environment=CODEXIA_DATABASE_USER=codexia
 Environment=CODEXIA_DATABASE_NAME=codexia

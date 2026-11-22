@@ -37,6 +37,8 @@ export interface BetterAuthFixture {
     session_id: string | null;
     expires_at: Date;
   } | null>;
+  readSigningKeyIds(): Promise<string[]>;
+  restartApi(): Promise<void>;
   seedExpiredRevocationRecord(jti: string): Promise<void>;
   pruneExpiredRevocations(): Promise<number>;
   close(): Promise<void>;
@@ -228,6 +230,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       authSecret: "codexia-fixture-auth-secret-at-least-32-bytes-long",
       oauthIntrospectionClientId: "fixture-introspector-pending-registration",
       oauthIntrospectionClientSecret: "fixture-introspector-secret-placeholder-long",
+      ownerSubject: "",
       ownerClientIds,
       mcpClientIds: [],
       allowInsecureLoopbackForTests: true,
@@ -284,6 +287,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     const session = await runtime.auth.api.getSession({ headers: new Headers({ cookie: cookie.header() }) });
     if (!session) throw new Error("Synthetic OIDC bootstrap did not establish a Better Auth session");
     ownerSubject = session.user.id;
+    runtimeConfig.ownerSubject = ownerSubject;
 
     const webClient = await runtime.auth.api.adminCreateOAuthClient({
       headers: new Headers({ cookie: cookie.header() }),
@@ -334,6 +338,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     ownerClientIds.splice(0, ownerClientIds.length, webClient.client_id);
     runtimeConfig.oauthIntrospectionClientId = introspectionClient.client_id;
     runtimeConfig.oauthIntrospectionClientSecret = introspectionClient.client_secret;
+    await runtime.assertRegisteredClients();
 
     await close(bootstrapServer);
     bootstrapServer = undefined;
@@ -350,6 +355,20 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       ownerSubject,
       introspectionClientId: introspectionClient.client_id,
       introspectionClientSecret: introspectionClient.client_secret,
+      async readSigningKeyIds() {
+        const context = await runtime!.auth.$context;
+        const rows = await context.adapter.findMany({ model: "jwks" });
+        return rows.flatMap((row) => typeof row === "object" && row !== null && "id" in row && typeof row.id === "string" ? [row.id] : []);
+      },
+      async restartApi() {
+        if (apiServer) await close(apiServer);
+        apiServer = undefined;
+        await runtime!.pool.end();
+        runtime = createBetterAuthRuntime(runtimeConfig);
+        await runtime.assertRegisteredClients();
+        apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
+        await listen(apiServer, apiPort);
+      },
       async readRevocationRecord(jti) {
         const result = await runtime!.pool.query<{
           issuer: string;

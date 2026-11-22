@@ -29,6 +29,7 @@ export interface BetterAuthRuntimeConfig {
   readonly authSecret: string;
   readonly oauthIntrospectionClientId: string;
   readonly oauthIntrospectionClientSecret: string;
+  readonly ownerSubject?: string;
   readonly apiAudience?: string;
   readonly ownerClientIds: readonly string[];
   readonly mcpClientIds?: readonly string[];
@@ -43,7 +44,99 @@ export interface OAuthConsentContext {
 }
 
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
+const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
+
+export interface BetterAuthClientRegistry {
+  getOwner(ownerSubject: string): Promise<unknown | null | undefined>;
+  getClient(clientId: string): Promise<unknown | null | undefined>;
+  getClientResources(clientId: string): Promise<readonly unknown[]>;
+}
+
+export interface BetterAuthClientRegistrationConfig {
+  readonly audience: string;
+  readonly ownerSubject: string;
+  readonly ownerClientIds: readonly string[];
+  readonly mcpClientIds?: readonly string[];
+  readonly introspectionClientId: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** Verify the configured owner, MCP, and introspection clients against Better Auth's persisted registry. */
+export async function assertBetterAuthClientRegistrations(
+  config: BetterAuthClientRegistrationConfig,
+  registry: BetterAuthClientRegistry,
+): Promise<void> {
+  if (!config.ownerSubject.trim() || config.ownerSubject !== config.ownerSubject.trim() || !await registry.getOwner(config.ownerSubject)) {
+    throw new Error("Configured Better Auth owner subject is not registered");
+  }
+  const ownerClientIds = [...new Set(config.ownerClientIds)];
+  const mcpClientIds = [...new Set(config.mcpClientIds ?? [])];
+  if (ownerClientIds.length === 0 || ownerClientIds.length !== config.ownerClientIds.length ||
+      ownerClientIds.some((id) => !id.trim() || id !== id.trim())) {
+    throw new Error("Better Auth owner client registration is required");
+  }
+  if (mcpClientIds.length !== (config.mcpClientIds ?? []).length || mcpClientIds.some((id) => !id.trim() || id !== id.trim()) ||
+      !config.introspectionClientId.trim() || config.introspectionClientId !== config.introspectionClientId.trim() ||
+      ownerClientIds.some((id) => mcpClientIds.includes(id)) ||
+      [...ownerClientIds, ...mcpClientIds].includes(config.introspectionClientId)) {
+    throw new Error("Better Auth owner, MCP, and introspection client registrations must be disjoint");
+  }
+
+  const assertLinkedToAudience = async (clientId: string): Promise<void> => {
+    const resources = await registry.getClientResources(clientId);
+    if (!resources.some((resource) => asRecord(resource)?.resourceId === config.audience)) {
+      throw new Error(`Registered Better Auth client ${clientId} is not linked to the configured API audience`);
+    }
+  };
+  const assertPublicClient = async (clientId: string, requiredScopes: readonly string[], kind: "owner" | "MCP"): Promise<void> => {
+    const client = asRecord(await registry.getClient(clientId));
+    if (!client) throw new Error(`Registered Better Auth ${kind} client is missing: ${clientId}`);
+    if (client.disabled !== false || client.tokenEndpointAuthMethod !== "none" ||
+        !stringList(client.grantTypes).includes("authorization_code") ||
+        !stringList(client.grantTypes).includes("refresh_token") ||
+        !stringList(client.responseTypes).includes("code") || client.requirePKCE !== true) {
+      throw new Error(`Registered Better Auth ${kind} client is disabled or does not require Authorization Code with PKCE: ${clientId}`);
+    }
+    const scopes = stringList(client.scopes);
+    if (!requiredScopes.every((scope) => scopes.includes(scope))) {
+      throw new Error(`Registered Better Auth ${kind} client is missing required scopes: ${clientId}`);
+    }
+    const allowedScopes = kind === "owner" ? OWNER_PUBLIC_SCOPES : ["openid", ...CODEXIA_MCP_SCOPES];
+    if (scopes.some((scope) => !(allowedScopes as readonly string[]).includes(scope))) {
+      throw new Error(`Registered Better Auth ${kind} client has an unsupported scope: ${clientId}`);
+    }
+    await assertLinkedToAudience(clientId);
+  };
+
+  for (const clientId of ownerClientIds) {
+    await assertPublicClient(clientId, ["openid", CODEXIA_OWNER_SCOPE], "owner");
+  }
+  for (const clientId of mcpClientIds) {
+    await assertPublicClient(clientId, ["openid"], "MCP");
+    const client = asRecord(await registry.getClient(clientId));
+    const scopes = stringList(client?.scopes);
+    if (!scopes.some((scope) => (CODEXIA_MCP_SCOPES as readonly string[]).includes(scope))) {
+      throw new Error(`Registered Better Auth MCP client is missing a limited MCP scope: ${clientId}`);
+    }
+  }
+
+  const introspectionClient = asRecord(await registry.getClient(config.introspectionClientId));
+  if (!introspectionClient) throw new Error(`Registered Better Auth confidential introspection client is missing: ${config.introspectionClientId}`);
+  if (introspectionClient.disabled !== false ||
+      !(CONFIDENTIAL_TOKEN_AUTH_METHODS as readonly string[]).includes(String(introspectionClient.tokenEndpointAuthMethod)) ||
+      typeof introspectionClient.clientSecret !== "string" || introspectionClient.clientSecret.length === 0) {
+    throw new Error(`Better Auth introspection ID must identify an enabled confidential registered client: ${config.introspectionClientId}`);
+  }
+  await assertLinkedToAudience(config.introspectionClientId);
+}
 
 /**
  * Better Auth 1.7.x only advertises public clients when dynamic registration or
@@ -193,6 +286,26 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
   return {
     auth,
     pool,
+    async assertRegisteredClients(): Promise<void> {
+      const context = await auth.$context;
+      await assertBetterAuthClientRegistrations({
+        audience,
+        ownerSubject: config.ownerSubject ?? "",
+        ownerClientIds: config.ownerClientIds,
+        mcpClientIds,
+        introspectionClientId: config.oauthIntrospectionClientId,
+      }, {
+        async getOwner(ownerSubject) {
+          return context.adapter.findOne({ model: "user", where: [{ field: "id", value: ownerSubject }] });
+        },
+        async getClient(clientId) {
+          return context.adapter.findOne({ model: "oauthClient", where: [{ field: "clientId", value: clientId }] });
+        },
+        async getClientResources(clientId) {
+          return context.adapter.findMany({ model: "oauthClientResource", where: [{ field: "clientId", value: clientId }] });
+        },
+      });
+    },
     issuer,
     audience,
     toHeaders: fromNodeHeaders,

@@ -70,6 +70,10 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
+  assert.equal(ansible.env.CODEXIA_AUTH_MODE, "${{ vars.CODEXIA_AUTH_MODE || 'token' }}");
+  assert.equal(ansible.env.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED, "${{ vars.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED || 'false' }}");
+  assert.match(ansible.run, /codexia_auth_mode:process\.env\.CODEXIA_AUTH_MODE/u);
+  assert.match(ansible.run, /codexia_better_auth_activation_approved:process\.env\.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_initial_install_approved:process\.env\.CODEXIA_INITIAL_INSTALL_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_database_initialization_approved:process\.env\.CODEXIA_DATABASE_INITIALIZATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_stage: deploy/u);
@@ -227,6 +231,54 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   assert.ok(restore !== -1 && restoreStartApi > restore && restoreHealth > restoreStartApi && restoreStartTunnel > restoreHealth,
     'rollback must restore and health-check the previous API before restoring Tunnel ingress');
   assert.match(shell, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
+});
+
+test('Better Auth activation is explicit, validates staged state, and retains mode through update and rollback', () => {
+  const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  const selectMode = deployment.find(task => task.name === 'Require an explicit standalone authentication deployment mode');
+  assert.ok(selectMode, 'the push stage must receive an explicit token or Better Auth mode');
+  const transition = deployment.find(task => task.name === 'Reject auth mode drift, implicit Better Auth enablement and downgrade');
+  assert.ok(transition, 'Better Auth activation and downgrade must be gated against the installed Quadlet');
+  assert.ok(transition['ansible.builtin.assert'].that.some(item => item.includes('codexia_better_auth_activation_approved')));
+  assert.ok(transition['ansible.builtin.assert'].that.some(item => item.includes("codexia_current_auth_mode == 'better-auth' and codexia_auth_mode == 'token'")));
+  assert.ok(deployment.some(task => task.name === 'Require private staged Better Auth settings before activation'));
+  assert.ok(deployment.some(task => task.name === 'Require complete public Better Auth settings without secret material in the environment file'));
+  assert.ok(deployment.some(task => task.name === 'Verify every staged Better Auth Podman secret exists before activation'));
+  assert.ok(deployment.some(task => task.name === 'Verify registered Better Auth clients before a compatible Better Auth reapply or update'));
+  const candidate = deployment.find(task => task.name === 'Render a digest-specific candidate Quadlet outside the active unit path');
+  assert.match(candidate['ansible.builtin.copy'].content, /codexia-api\.better-auth\.container\.example/u);
+  assert.match(candidate['ansible.builtin.copy'].content, /CODEXIA_AUTH_SETTINGS_SHA256/u);
+  assert.match(candidate['ansible.builtin.copy'].dest, /codexia_candidate_unit_filename/u);
+
+  const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'];
+  const backup = shell.indexOf('backup-locked');
+  const authMigration = shell.indexOf('/app/packages/api/dist/migrate-auth.js --apply');
+  const verifyClients = shell.indexOf('/app/packages/api/dist/verify-auth-clients.js');
+  const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
+  assert.ok(backup >= 0 && authMigration > backup && verifyClients > authMigration && installCandidate > verifyClients,
+    'Better Auth migration and client checks must follow encrypted backup and precede the API mode switch');
+  assert.match(shell, /auth_transition.*true/u);
+  assert.match(shell, /authSettingsSha256/u);
+  assert.match(shell, /restore_previous/u);
+
+  const recovery = readFileSync(new URL('../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
+  assert.match(recovery, /authMode !== unitAuthMode/u);
+  assert.match(recovery, /authSettingsSha256 !== unitDigest/u);
+  const tokenUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
+  const betterAuthUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.better-auth.container.example', import.meta.url), 'utf8');
+  assert.match(tokenUnit, /^Environment=CODEXIA_AUTH_MODE=token$/mu);
+  assert.match(betterAuthUnit, /^Environment=CODEXIA_AUTH_MODE=better-auth$/mu);
+  assert.match(betterAuthUnit, /^Environment=CODEXIA_AUTH_SETTINGS_SHA256=CODEXIA_AUTH_SETTINGS_SHA256$/mu);
+
+  const apiSource = readFileSync(new URL('../packages/api/src/server.ts', import.meta.url), 'utf8');
+  const authRuntime = readFileSync(new URL('../packages/api/src/better-auth.ts', import.meta.url), 'utf8');
+  const runbook = readFileSync(new URL('../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8');
+  assert.match(apiSource, /await betterAuth\.assertRegisteredClients\(\)/u, 'API startup must refuse incomplete persisted owner/client records');
+  assert.match(authRuntime, /Configured Better Auth owner subject is not registered/u);
+  assert.match(authRuntime, /has an unsupported scope/u, 'client registration checks must reject authority beyond the configured scope class');
+  assert.match(runbook, /Initial Better Auth client provisioning remains blocked/u);
+  assert.match(runbook, /authenticated Better Auth user session and generates its client IDs/u);
 });
 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {

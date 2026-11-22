@@ -13,6 +13,7 @@ Volume=codexia-history.volume:/history
 Secret=codexia-auth-token,type=mount,target=/run/secrets/codexia-auth-token
 Secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password
 Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token
+Environment=CODEXIA_AUTH_MODE=token
 Environment=CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password
 Environment=CODEXIA_DATABASE_USER=codexia
 Environment=CODEXIA_DATABASE_NAME=codexia

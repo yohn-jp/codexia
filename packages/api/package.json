@@ -24,6 +24,7 @@
     "test": "pnpm run build && node --test dist/*.test.js && node --import tsx --test test/better-auth.integration.test.ts",
     "start": "node dist/server.js",
     "migrate:auth": "node dist/migrate-auth.js",
+    "verify:auth-clients": "node dist/verify-auth-clients.js",
     "prune:auth-revocations": "node dist/prune-auth-revocations.js"
   },
   "dependencies": {
