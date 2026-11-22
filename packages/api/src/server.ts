@@ -2761,40 +2761,40 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
     const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
     persistenceOptions = await postgresPersistenceOptions();
-      if (Object.keys(mcpProjectAssignments).length > 0) {
-        const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
-          const missing: string[] = [];
-          for (const projectIds of Object.values(mcpProjectAssignments)) {
-            for (const projectId of projectIds) {
-              const project = await reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId);
-              if (project?.id !== projectId) missing.push(projectId);
-            }
+    if (Object.keys(mcpProjectAssignments).length > 0) {
+      const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
+        const missing: string[] = [];
+        for (const projectIds of Object.values(mcpProjectAssignments)) {
+          for (const projectId of projectIds) {
+            const project = await reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId);
+            if (project?.id !== projectId) missing.push(projectId);
           }
-          return missing;
-        });
-        if (missingMcpProjects.length) throw new Error("CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS contains a project that does not exist");
-      }
-      const store = new CoreStore({ persistence: persistenceOptions.persistence! });
-      await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
-      return await startServer({
-        store,
-        ...persistenceOptions,
-        authToken,
-        ...(browserAuth === "cloudflare-access" ? { cloudflareAccess: {
-          issuer: readCodexiaEnvironment("ACCESS_ISSUER") ?? "",
-          audience: readCodexiaEnvironment("ACCESS_AUDIENCE") ?? "",
-          origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",
-          ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
-        } } : {}),
-        ...(oauthOwner ? { oauthOwner } : {}),
-        ...(oauthMcp ? { oauthMcp } : {}),
-        ...(betterAuth ? { betterAuth, closeBetterAuthOnShutdown: true } : {}),
-        ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
-        trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
-        runtimeOptions,
-        usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
-        profile,
+        }
+        return missing;
       });
+      if (missingMcpProjects.length) throw new Error("CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS contains a project that does not exist");
+    }
+    const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+    await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
+    return await startServer({
+      store,
+      ...persistenceOptions,
+      authToken,
+      ...(browserAuth === "cloudflare-access" ? { cloudflareAccess: {
+        issuer: readCodexiaEnvironment("ACCESS_ISSUER") ?? "",
+        audience: readCodexiaEnvironment("ACCESS_AUDIENCE") ?? "",
+        origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",
+        ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
+      } } : {}),
+      ...(oauthOwner ? { oauthOwner } : {}),
+      ...(oauthMcp ? { oauthMcp } : {}),
+      ...(betterAuth ? { betterAuth, closeBetterAuthOnShutdown: true } : {}),
+      ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
+      trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
+      runtimeOptions,
+      usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+      profile,
+    });
 
   } catch (error) {
     await persistenceOptions?.persistence?.close().catch(() => undefined);
