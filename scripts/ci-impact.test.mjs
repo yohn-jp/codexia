@@ -23,6 +23,29 @@ test('full verification uses twenty jobs including planning and certification', 
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
 });
 
+test('browser cache has a single trusted main-push writer without changing test coverage', async () => {
+  const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+  const browser = workflow.jobs.browser;
+  const steps = browser.steps;
+  const restore = steps.find(step => step.id === 'dependencies');
+  const saves = steps.filter(step => step.uses?.startsWith('actions/cache/save@'));
+  assert.equal(restore.uses, 'actions/cache/restore@v6.1.0');
+  assert.equal(saves.length, 1, 'Only one browser cache writer is permitted');
+  const save = saves[0];
+  assert.equal(save.if, "success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'core-reference' && steps.dependencies.outputs.cache-hit != 'true'");
+  assert.equal(save['continue-on-error'], true, 'Cache availability must not change verification results');
+  assert.equal(save.with.path, restore.with.path);
+  assert.equal(save.with.key, '${{ steps.dependencies.outputs.cache-primary-key }}');
+  assert.ok(steps.indexOf(save) > steps.findIndex(step => step.run?.startsWith('node scripts/ci-group.mjs "browser-')),
+    'A failed validation must not produce a new cache');
+  assert.ok(steps.indexOf(save) < steps.findIndex(step => step.with?.name?.startsWith('ci-evidence-browser-')));
+  assert.equal(browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
+  const { createVerificationPlan } = await import('./ci-impact.mjs');
+  const main = createVerificationPlan({ files: ['docs/authoring.md'], event: 'push',
+    sha: 'a'.repeat(40), base: 'b'.repeat(40) });
+  assert.ok(main.groups.includes('browser-core-reference'), 'Full main verification always has the cache writer');
+});
+
 test('PR paths and completed-Verify release impact retain component build inputs', () => {
   const releases = ['frontend', 'backend'].map(component => parse(
     readFileSync(new URL(`../.github/workflows/${component}-release.yml`, import.meta.url), 'utf8')
