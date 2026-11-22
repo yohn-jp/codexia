@@ -18,6 +18,10 @@ export interface BetterAuthFixtureOptions {
   readonly staticDirectory?: string;
   readonly apiPort?: number;
   readonly usePostgresPersistence?: boolean;
+  /** A caller-owned store and pool that the fixture does not replace or close. */
+  readonly domain?: Pick<ApiServerOptions, "store" | "persistence">;
+  readonly createApiServer?: typeof createServer;
+  readonly observeApiServer?: (server: Server) => void;
   readonly appProfile?: Pick<ApiServerOptions, "profile" | "runtimeOptions">;
   readonly registerInBrowser?: (bootstrapOrigin: string) => Promise<BootstrapRegistration>;
 }
@@ -65,7 +69,8 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
   const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
     new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) &&
-    new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName);
+    (new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName) ||
+      /^codexia_perf_[a-z0-9_-]+$/u.test(databaseName));
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
       (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
     throw new Error("Better Auth fixture requires an explicitly opted-in disposable loopback auth database or uniquely named disposable CI database");
@@ -142,6 +147,9 @@ function persistenceForAuthFixture(): ApiServerOptions["persistence"] {
 
 export async function startBetterAuthFixture(options: BetterAuthFixtureOptions): Promise<BetterAuthFixture> {
   assertDisposableAuthFixtureDatabaseUrl(options.databaseUrl);
+  if (options.domain && options.usePostgresPersistence) {
+    throw new Error("Select either caller-owned domain persistence or fixture-owned PostgreSQL persistence");
+  }
   const previousNodeEnv = process.env.NODE_ENV;
   const restoreNodeEnv = () => {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -264,25 +272,29 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       domainStore = new CoreStore({ persistence: domainPersistence });
     }
 
-    const makeApi = (withOwner: boolean, withPostgresPersistence = false): Server => createServer({
-      profile: "core",
-      ...(withOwner ? options.appProfile : {}),
-      store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
-      persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
-      staticDir: options.staticDirectory ?? process.cwd(),
-      usageDirectory: usageDirectory!,
-      betterAuth: runtime!,
-      ...(withOwner ? { oauthOwner: {
-        issuer,
-        audience,
-        jwksUrl: `${issuer}/jwks`,
-        ownerSubject,
-        requiredScopes: [CODEXIA_OWNER_SCOPE],
-        allowedClientIds: ownerClientIds,
-        verifyActiveToken: runtime!.verifyActiveAccessToken,
-        allowInsecureLoopbackForTests: true,
-      } } : {}),
-    });
+    const makeApi = (): Server => {
+      const server = (options.createApiServer ?? createServer)({
+        profile: "core",
+        ...options.appProfile,
+        store: options.domain?.store ?? domainStore ?? coreStoreForAuthFixture(),
+        persistence: options.domain?.persistence ?? domainPersistence ?? persistenceForAuthFixture(),
+        staticDir: options.staticDirectory ?? process.cwd(),
+        usageDirectory: usageDirectory!,
+        betterAuth: runtime!,
+        oauthOwner: {
+          issuer,
+          audience,
+          jwksUrl: `${issuer}/jwks`,
+          ownerSubject,
+          requiredScopes: [CODEXIA_OWNER_SCOPE],
+          allowedClientIds: ownerClientIds,
+          verifyActiveToken: runtime!.verifyActiveAccessToken,
+          allowInsecureLoopbackForTests: true,
+        },
+      });
+      options.observeApiServer?.(server);
+      return server;
+    };
 
     const bootstrapOrigin = "http://127.0.0.1:" + await (async () => {
       const probe = createHttpServer();
@@ -377,7 +389,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     bootstrapServer = undefined;
     await bootstrap.close();
     bootstrap = undefined;
-    apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
+    apiServer = makeApi();
     await listen(apiServer, apiPort);
 
     async function issueAccessToken(clientId: string, path: string): Promise<string> {
@@ -450,7 +462,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         await runtime!.pool.end();
         runtime = createBetterAuthRuntime(runtimeConfig);
         await runtime.assertRegisteredClients();
-        apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
+        apiServer = makeApi();
         await listen(apiServer, apiPort);
       },
       async readRevocationRecord(jti) {

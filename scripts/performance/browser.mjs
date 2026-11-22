@@ -4,12 +4,12 @@ import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { chromium, expect as playwrightExpect } from '@playwright/test';
+import { chromium } from '@playwright/test';
+import { tsImport } from 'tsx/esm/api';
 import { buildIdentity, distribution, save, sourceIdentity } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
 import { manuscriptEditor, expectServerSaved, selectManuscriptProject, openManuscriptScene } from '../../tests/e2e/postgres-fixture.ts';
 
-const expect = playwrightExpect.configure({ timeout: 60000 });
 const [datasetPathArg, output, repeatsArg = '20'] = process.argv.slice(2);
 const datasetPath = resolve(datasetPathArg);
 const repeats = Number(repeatsArg);
@@ -18,14 +18,16 @@ if (!Number.isInteger(repeats) || repeats < 1 || !Number.isInteger(saveRepeats) 
   throw new Error('Navigation and save repeat counts must be positive integers');
 }
 const dataset = JSON.parse(await readFile(join(datasetPath, 'dataset.json'), 'utf8'));
-const token = 'synthetic-benchmark-local-token-000000';
 const report = { schemaVersion: 2, harness: { source: sourceIdentity(), build: await buildIdentity(),
     scriptSha256: createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex') },
   profile: 'core', dataset, node: process.version, repeats, saveRepeats, runtimeAuthority: 'PostgreSQL-backed Core/API',
   gitRole: 'synthetic-fixture-transport-only', samples: [], phases: [], requests: [], status: 'running',
   failures: [], notMeasured: ['Native OS IME and physical-device input', 'Input-to-pixel latency beyond the recorded animation-frame opportunity',
     'React production render durations', 'Offline recovery, process crash, and long-idle acceptance'] };
-const server = fork(new URL('./server.mjs', import.meta.url), [datasetPath], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+const server = fork(new URL('./server.mjs', import.meta.url), [datasetPath], {
+  execArgv: [...process.execArgv, '--import', 'tsx'],
+  stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+});
 let page, browser, cdp, browserCDP, lastServerSnapshot;
 
 function numericDelta(after, before) {
@@ -86,6 +88,9 @@ async function waitForServer() {
 try {
   const ready = await waitForServer();
   report.serverStartupMs = ready.startupMs;
+  report.authFixtureSetupMs = ready.authFixtureSetupMs;
+  report.browserAssetBuildMs = ready.browserAssetBuildMs;
+  report.harness.browserAssets = ready.browserAssets;
   report.fixtureSetupMs = ready.fixtureSetupMs;
   report.fixture = ready.fixture;
   report.browser = undefined;
@@ -127,7 +132,8 @@ try {
       pendingCategories=${JSON.stringify(outstanding)}, quietForMs=${Math.round(performance.now() - lastFiniteEvent)},
       recentCategories=${JSON.stringify(recent)})`);
   }
-  const base = `http://127.0.0.1:${ready.port}`;
+  const base = ready.origin;
+  const { signInAuthorBrowser } = await tsImport('../../tests/e2e/author-oauth-server.ts', import.meta.url);
   cdp = await context.newCDPSession(page);
   await cdp.send('Network.enable');
   report.network = { encodedTransferBytes: 0, completed: 0, failed: 0, cancelled: 0 };
@@ -143,12 +149,10 @@ try {
   await cdp.send('Profiler.start');
   await phase('browser.startup.login-ready', async () => {
     await page.goto(`${base}/desktop/`);
-    await page.getByLabel('アクセス・トークン').waitFor();
+    await page.getByRole('button', { name: 'OAuthでサインイン', exact: true }).waitFor();
   });
   await phase('browser.author.login', async () => {
-    await page.getByLabel('アクセス・トークン').fill(token);
-    await page.getByRole('button', { name: 'PostgreSQL作品を開く', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Database workspace' })).toBeVisible();
+    await signInAuthorBrowser(page, base, 'desktop', { continueCurrentPage: true });
   });
   const project = ready.fixture.project;
   const scenes = ready.fixture.scenes;
