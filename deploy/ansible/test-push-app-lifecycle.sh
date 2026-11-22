@@ -19,6 +19,8 @@ environment_generator_dir_created=false
 environment_generator_installed=false
 fixture_ip=''
 backup_mounted=false
+build_context=''
+docker_fixture_image_created=false
 manager_configured=false
 registry_configured=false
 user_created=false
@@ -206,6 +208,18 @@ cleanup() {
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_status=1
     done
+    rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
+    if (( rc == 0 )); then rootless_podman rmi codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_status=1; fi
+    rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
+    (( rc == 1 )) || cleanup_status=1
+    if [[ -n "$build_context" ]] && rootless test -d "$build_context"; then
+      rootless rm -r "$build_context" || cleanup_status=1
+      rootless test ! -e "$build_context" || cleanup_status=1
+    fi
+  fi
+  if [[ "$docker_fixture_image_created" == true ]]; then
+    docker image rm codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_status=1
+    docker image inspect codexia-sshfs-fixture >/dev/null 2>&1 && cleanup_status=1
   fi
   if [[ -n "$fixture_ip" ]]; then
     sudo sed -i "\\|^$fixture_ip codexia-backup-fixture$|d" /etc/hosts || cleanup_status=1
@@ -420,10 +434,11 @@ CAPABILITIES
 rootless_podman network create codexia-lifecycle-backup >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$tmp/backup_key"
 build_context="$fixture_home/.local/state/codexia-lifecycle-build"
+docker_build_context="$tmp/sshfs-build-context"
 docker pull docker.io/library/debian:stable-slim >/dev/null
 debian_image_digest=$(docker image inspect --format '{{json .RepoDigests}}' docker.io/library/debian:stable-slim | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^(docker\.io\/library\/)?debian@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v.startsWith("docker.io/")?v:"docker.io/library/"+v)})')
-rootless mkdir -p "$build_context/sshfs"
-sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/sshfs/authorized_keys"
+rootless mkdir -p "$build_context"
+mkdir -p "$docker_build_context"
 cat > "$tmp/sshfs.Dockerfile" <<'DOCKERFILE'
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
@@ -443,18 +458,20 @@ ssh-keygen -A
 chown -R codexia-backup:codexia-backup /backups
 exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o AllowUsers=codexia-backup
 ENTRYPOINT
-sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs.Dockerfile" "$build_context/sshfs/Dockerfile"
-sudo install -o codexia -g codexia -m 0755 "$tmp/sshfs.entrypoint.sh" "$build_context/sshfs/entrypoint.sh"
+install -m 0644 "$tmp/sshfs.Dockerfile" "$docker_build_context/Dockerfile"
+install -m 0644 "$tmp/backup_key.pub" "$docker_build_context/authorized_keys"
+install -m 0755 "$tmp/sshfs.entrypoint.sh" "$docker_build_context/entrypoint.sh"
 # The helper server is built outside rootless Podman's fuse-overlayfs because
 # system package postinst ACLs are not supported there. The app lifecycle below
 # still runs only in the service user's rootless Podman store.
-if docker build --build-arg "BASE_IMAGE=$debian_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >"$tmp/sshfs-build.log" 2>&1; then
+if docker build --build-arg "BASE_IMAGE=$debian_image_digest" -t codexia-sshfs-fixture -f "$docker_build_context/Dockerfile" "$docker_build_context" >"$tmp/sshfs-build.log" 2>&1; then
   :
 else
   build_status=$?
   record_failure "$build_status" "$LINENO" 'SSHFS fixture image build'
   exit "$build_status"
 fi
+docker_fixture_image_created=true
 if docker save --output "$tmp/sshfs-fixture.tar" codexia-sshfs-fixture >"$tmp/sshfs-save.log" 2>&1; then
   :
 else
@@ -462,7 +479,8 @@ else
   record_failure "$save_status" "$LINENO" 'SSHFS fixture image archive'
   exit "$save_status"
 fi
-if rootless_podman load --input "$tmp/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1; then
+sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs-fixture.tar" "$build_context/sshfs-fixture.tar"
+if rootless_podman load --input "$build_context/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1; then
   :
 else
   load_status=$?
@@ -539,7 +557,7 @@ database_image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-db)
 database_repo_digests=$(rootless_podman image inspect --format '{{json .RepoDigests}}' "$database_image_name")
 sshfs_image_id=$(rootless_podman image inspect --format '{{.Id}}' codexia-sshfs-fixture)
 registry_image_id=$(rootless_podman image inspect --format '{{.Id}}' "$registry_image_digest")
-sshfs_context_sha=$(rootless cat "$build_context/sshfs/Dockerfile" "$build_context/sshfs/entrypoint.sh" "$build_context/sshfs/authorized_keys" | sha256sum | cut -d' ' -f1)
+sshfs_context_sha=$(cat "$docker_build_context/Dockerfile" "$docker_build_context/entrypoint.sh" "$docker_build_context/authorized_keys" | sha256sum | cut -d' ' -f1)
 node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$debian_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
 const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',builder:'host Docker; archive loaded into rootless Podman',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY

@@ -64,11 +64,16 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
     'the SSHFS fixture image must be built without interactive package setup');
   assert.ok(/docker pull docker\.io\/library\/debian:stable-slim/u.test(fixture));
-  assert.ok(/if docker build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1; then/u.test(fixture),
+  assert.ok(/docker_build_context="\$tmp\/sshfs-build-context"/u.test(fixture),
+    'the Docker CLI context must be readable by the runner user');
+  assert.ok(/if docker build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$docker_build_context\/Dockerfile" "\$docker_build_context" >"\$tmp\/sshfs-build\.log" 2>&1; then/u.test(fixture),
     'the SSHFS helper image must build outside rootless Podman overlayfs');
-  assert.match(fixture, /rootless_podman load --input "\$tmp\/sshfs-fixture\.tar"/u,
+  assert.match(fixture, /sudo install -o codexia -g codexia -m 0644 "\$tmp\/sshfs-fixture\.tar" "\$build_context\/sshfs-fixture\.tar"/u);
+  assert.match(fixture, /rootless_podman load --input "\$build_context\/sshfs-fixture\.tar"/u,
     'the SSHFS helper image must run from the disposable rootless Podman store');
   assert.match(fixture, /docker save --output "\$tmp\/sshfs-fixture\.tar" codexia-sshfs-fixture/u);
+  assert.match(fixture, /docker image rm codexia-sshfs-fixture/u);
+  assert.match(fixture, /rootless_podman rmi codexia-sshfs-fixture/u);
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });
