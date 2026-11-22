@@ -31,14 +31,18 @@ test("only author review reads include private Publishing ChangeSets and receipt
     persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer",
     idempotencyKey: "ordinary", operations: [nodeOperation(p.id, "Visible character")],
   });
-  const share = { label: "Private proofreading", tokenHash: createHash("sha256").update("test share descriptor").digest("hex") };
+  const share = {
+    version: 1, grantVersion: 1, revocationVersion: 0, id: "private-review-grant",
+    label: "Private proofreading", tokenHash: createHash("sha256").update("test share descriptor").digest("hex"),
+    scope: { kind: "chapter", id: "proofreading-chapter" }, createdAt: "2026-04-01T10:00:00.000Z", expiresAt: "2026-04-02T10:00:00.000Z",
+  };
   const identity = JSON.stringify(["publishing", "share-grants"]);
   const privateReview = await persistence.transaction(tx => tx.createChangeSet({
     projectId: p.id, authorId: "reviewer", idempotencyKey: "publishing-share",
-    operations: [{ type: "module.record.save", command: { projectId: p.id, moduleId: "publishing", key: "share-grants", value: { grants: [share] }, expectedVersion: null } }],
+    operations: [{ type: "module.record.save", command: { projectId: p.id, moduleId: "publishing", key: "share-grants", value: { version: 1, grants: [share] }, expectedVersion: null } }],
     readSet: [{ resource: "module_record", id: identity, expectedVersion: null }],
     writeSet: [{ resource: "module_record", id: identity }],
-    provenance: { source: "publishing.native", actorId: "reviewer", details: {} },
+    provenance: { source: "publishing.native", actorId: "reviewer", details: { projectVersion: p.version } },
   }));
   const approved = await approveNativeChangeSet(persistence, p.id, privateReview.changeSet.id, 1, "reviewer");
   await applyNativeChangeSet(persistence, p.id, approved.id, approved.version);
