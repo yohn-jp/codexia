@@ -4,6 +4,8 @@ on:
     paths:
       - 'scripts/audit/**'
       - 'scripts/ci-dashboard/**'
+      - 'scripts/graphify-pages/**'
+      - 'docs/verification/GRAPHIFY-PAGES.md'
       - 'scripts/ci-timing.mjs'
       - 'scripts/ci-contract.mjs'
       - '.github/workflows/repository-audit.yml'
@@ -35,6 +37,9 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
+      - uses: actions/setup-python@v6.1.0
+        with:
+          python-version: '3.12'
       - name: Install the isolated audit tool
         run: |
           npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
@@ -45,7 +50,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/audit-ocr" --ignore-scripts --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
           echo "CODEXIA_AUDIT_OCR_BIN=$RUNNER_TEMP/audit-ocr/node_modules/.bin/ocr" >> "$GITHUB_ENV"
       - name: Test audit exporter, delegation and browser downloads
-        run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs scripts/audit/packet-format.test.mjs
+        run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs scripts/audit/packet-format.test.mjs scripts/graphify-pages/pack.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6.1.0
@@ -67,6 +72,23 @@ jobs:
           else
             node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
           fi
+      - name: Generate main source graph for Pages
+        timeout-minutes: 12
+        env:
+          GRAPHIFY_BACKEND: none
+        run: |
+          python -m pip install --disable-pip-version-check --no-cache-dir graphifyy==0.9.115
+          timeout 600s graphify extract . --code-only --backend none \
+            --out "$RUNNER_TEMP/graphify-out" \
+            --max-workers 2 \
+            --exclude 'tests/**' \
+            --exclude 'evidence/**' \
+            --exclude '.agents/**' \
+            --exclude 'docs/**' \
+            --exclude '**/*.test.*' \
+            --exclude '**/*.spec.*'
+          node scripts/graphify-pages/pack.mjs \
+            "$RUNNER_TEMP/graphify-out" "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)"
       - name: Require current PR's review materials
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
