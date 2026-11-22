@@ -38,22 +38,16 @@ async function main() {
     await publishPlan(plan, planPath);
     return;
   }
-  const currentResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`, {
-    headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(15_000), redirect: 'error',
-  });
-  if (!currentResponse.ok) {
-    if (plan.mode === 'affected') plan = validateVerificationPlan(createVerificationPlan({ ...plan, forceFull: true }));
-    console.log(`Exact-main task proof unavailable (current workflow identity: HTTP ${currentResponse.status}); full verification selected.`);
-    await publishPlan(plan, planPath);
-    return;
-  }
-  const current = await currentResponse.json();
-  let resolved;
   try {
+    const currentResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`, {
+      headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15_000), redirect: 'error',
+    });
+    if (!currentResponse.ok) throw new Error(`Current workflow identity lookup returned HTTP ${currentResponse.status}`);
+    const current = await currentResponse.json();
     if (plan.mode === 'affected') {
       const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
-      resolved = await resolveExactMainTaskProofs({ plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN, tasks: omitted });
+      const resolved = await resolveExactMainTaskProofs({ plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN, tasks: omitted });
       const runtime = coverageRuntime();
       const baseline = omitted.map(task => ({ ...resolved[task], format: 'codexia-ci-task-input-proof/v2',
         mode: 'task-execution', status: 'passed', sourceSha: resolved[task].proofSourceSha }));
