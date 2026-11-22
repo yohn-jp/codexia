@@ -90,17 +90,16 @@ test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQ
 
   const archive = await exportWorkArchive(persistence, source.id);
   const imported = await importWorkArchive(persistence, archive, "owner");
-  const deletion = await core.buildDeleteHierarchyOperation(imported.project.id, {
+  const { snapshot: deletionSnapshot } = await core.observe(imported.project.id);
+  const { changeSet: deletion } = await core.proposeHierarchyDelete(imported.project.id, {
     kind: "scene", id: "reserve-scene", volumeId: "reserve-volume", chapterId: "reserve-chapter",
-  });
-  const deletionProposal: ChangeProposal = {
-    id: randomUUID(), snapshot: deletion.snapshot, operations: [deletion.operation], source: "author",
-  };
-  await core.propose(imported.project.id, deletionProposal);
-  await core.approve(imported.project.id, {
-    proposalId: deletionProposal.id, operationIds: [deletion.operation.id], authorScope: "owner",
-  });
-  await core.apply(imported.project.id, deletion.operation);
+  }, { projectVersion: deletionSnapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID() });
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: imported.project.id, changeSetId: deletion.id, expectedVersion: deletion.version, approvedBy: "owner",
+  }));
+  await persistence.transaction(tx => tx.applyChangeSet({
+    projectId: imported.project.id, changeSetId: deletion.id, expectedVersion: approved.version,
+  }));
 
   await assert.rejects(
     core.buildCreateHierarchyOperation(imported.project.id, {

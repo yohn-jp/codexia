@@ -30,9 +30,21 @@ const applyReorder = (changeSet: ChangeSet) => persistence.transaction(tx => tx.
   projectId: changeSet.projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version,
 }));
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
-function isHierarchyConflict(error: unknown): boolean {
-  return error instanceof CoreError && ["hierarchy_parent_changed", "revision_conflict", "scope_conflict"].includes(error.code);
-}
+const proposeDelete = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyDelete"]>[1]) => {
+  const { snapshot } = await core.observe(projectId);
+  return core.proposeHierarchyDelete(projectId, input, {
+    projectVersion: snapshot.projectVersion, actorId: "author", idempotencyKey: randomUUID(),
+  });
+};
+const approveDelete = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyDelete"]>[1]) => {
+  const { changeSet } = await proposeDelete(projectId, input);
+  return persistence.transaction(tx => tx.approveChangeSet({
+    projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+  }));
+};
+const applyDelete = (changeSet: ChangeSet) => persistence.transaction(tx => tx.applyChangeSet({
+  projectId: changeSet.projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version,
+}));
 
 test("native hierarchy reorder keeps manuscript revisions and applies once after approval", async () => {
   const p = await hierarchy();
@@ -318,8 +330,7 @@ test("recursive deletion after native reorder preserves manuscript revision hist
   assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s2", "s1"]);
   const documents = await persistence.read(reader => reader.listDocuments(p.id));
   const scene = documents.find(document => document.title === "Scene")!;
-  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "v1" });
-  await accept(p.id, removal.operation);
+  await applyDelete(await approveDelete(p.id, { kind: "volume", id: "v1" }));
   assert.equal((await core.tree(p.id)).volumes.length, 0);
   assert.equal((await persistence.read(reader => reader.getRevision(p.id, scene.id, scene.headRevisionId!)))?.markdown, "Text 😀\n");
 });
@@ -451,14 +462,13 @@ test("hierarchy delete validates the requested parent at proposal and apply time
   await persistence.transaction(tx => tx.updateDocument({
     projectId: p.id, documentId: chapter.id, parentId: volumeB.id, expectedVersion: chapter.version,
   }));
-  await assert.rejects(core.buildDeleteHierarchyOperation(p.id, { kind: "chapter", id: "c1", volumeId: "v1" }),
+  await assert.rejects(proposeDelete(p.id, { kind: "chapter", id: "c1", volumeId: "v1" }),
     (error: unknown) => error instanceof CoreError && error.code === "hierarchy_parent_changed");
-  const chapterDelete = await core.buildDeleteHierarchyOperation(p.id, { kind: "chapter", id: "c1", volumeId: "v2" });
-  await approve(p.id, chapterDelete);
+  const chapterDelete = await approveDelete(p.id, { kind: "chapter", id: "c1", volumeId: "v2" });
   await persistence.transaction(tx => tx.updateDocument({
     projectId: p.id, documentId: chapter.id, parentId: volumeA.id, expectedVersion: chapter.version + 1,
   }));
-  await assert.rejects(core.apply(p.id, chapterDelete.operation), isHierarchyConflict);
+  await assert.rejects(applyDelete(chapterDelete), { code: "conflict" });
 
   documents = await persistence.read(reader => reader.listDocuments(p.id));
   const chapterA = documents.find(document => document.kind === "chapter")!;
@@ -470,27 +480,24 @@ test("hierarchy delete validates the requested parent at proposal and apply time
   await persistence.transaction(tx => tx.updateDocument({
     projectId: p.id, documentId: scene.id, parentId: chapterB.id, expectedVersion: scene.version,
   }));
-  await assert.rejects(core.buildDeleteHierarchyOperation(p.id, {
+  await assert.rejects(proposeDelete(p.id, {
     kind: "scene", id: "s1", volumeId: "v2", chapterId: "c1",
   }), (error: unknown) => error instanceof CoreError && error.code === "hierarchy_parent_changed");
-  const sceneDelete = await core.buildDeleteHierarchyOperation(p.id, {
+  const sceneDelete = await approveDelete(p.id, {
     kind: "scene", id: "s1", volumeId: "v2", chapterId: "c2",
   });
-  await approve(p.id, sceneDelete);
   await persistence.transaction(tx => tx.updateDocument({
     projectId: p.id, documentId: scene.id, parentId: chapterA.id, expectedVersion: scene.version + 1,
   }));
-  await assert.rejects(core.apply(p.id, sceneDelete.operation), isHierarchyConflict);
+  await assert.rejects(applyDelete(sceneDelete), { code: "conflict" });
 
-  const currentSceneDelete = await core.buildDeleteHierarchyOperation(p.id, {
+  await applyDelete(await approveDelete(p.id, {
     kind: "scene", id: "s1", volumeId: "v1", chapterId: "c1",
-  });
-  await accept(p.id, currentSceneDelete.operation);
+  }));
   assert.equal((await persistence.read(reader => reader.listDocuments(p.id))).some(document => document.id === scene.id), false);
-  const currentChapterDelete = await core.buildDeleteHierarchyOperation(p.id, {
+  await applyDelete(await approveDelete(p.id, {
     kind: "chapter", id: "c1", volumeId: "v1",
-  });
-  await accept(p.id, currentChapterDelete.operation);
+  }));
   assert.equal((await persistence.read(reader => reader.listDocuments(p.id))).some(document => document.id === chapter.id), false);
 });
 
@@ -1192,8 +1199,7 @@ test("a path deleted after proposal approval is rejected before recreating its r
   const competing = await core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "raced-volume", title: "Competing" });
   await accept(p.id, competing.operation);
   const existing = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "volume")!;
-  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "raced-volume" });
-  await accept(p.id, removal.operation);
+  await applyDelete(await approveDelete(p.id, { kind: "volume", id: "raced-volume" }));
 
   await assert.rejects(core.apply(p.id, pending.operation), (error: unknown) =>
     error instanceof CoreError && error.code === "hierarchy_path_reserved");

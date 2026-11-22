@@ -1128,44 +1128,6 @@ export class CoreStore implements MutationCoordinator {
     writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
     return this.buildOperation(manifest.snapshot,writes,"structure",`Create ${input.kind} ${input.id}`);
   }
-  async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),target=this.findDocument(manifest,input.id,index);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
-    if(input.kind==="chapter"){
-      const volume=this.findDocument(manifest,input.volumeId,index);
-      if(volume.kind!=="volume"||target.parentId!==volume.id)fail(409,"hierarchy_parent_changed","The chapter no longer belongs to the requested volume");
-    }
-    if(input.kind==="scene"){
-      const volume=this.findDocument(manifest,input.volumeId,index),chapter=this.findDocument(manifest,input.chapterId,index);
-      if(volume.kind!=="volume"||chapter.kind!=="chapter"||chapter.parentId!==volume.id||target.parentId!==chapter.id)
-        fail(409,"hierarchy_parent_changed","The scene no longer belongs to the requested chapter and volume");
-    }
-    const selected=new Set<string>([target.id]),pending=[target.id];for(let cursor=0;cursor<pending.length;cursor++)for(const document of index.documentsByParentId.get(pending[cursor]!)??[])if(!selected.has(document.id)){selected.add(document.id);pending.push(document.id);}
-    const entries=Object.entries(manifest.files).filter(([,file])=>file.documentId&&selected.has(file.documentId));
-    if (!pinned) {
-      // JSONB object key order differs from the original current projection.
-      // Retain its document order and metadata-before-body write ordering.
-      const order = new Map(manifest.documents.map((document, position) => [document.id, position]));
-      entries.sort(([,left],[,right]) => order.get(left.documentId as DocumentId)! - order.get(right.documentId as DocumentId)! ||
-        Number(Boolean(right.metadata)) - Number(Boolean(left.metadata)));
-    }
-    const writes=entries.map(([path,file])=>({path,revision:file.revision,content:null}));
-    const built=this.buildOperation(manifest.snapshot,writes,"structure",`Delete ${input.kind} ${input.id}`);
-    const readDocumentSets=new Map<string,{kind:HierarchyKind;parentId:string|null;documentIds:string[]}>();
-    const addSet=(parentId:string|null,kind:HierarchyKind)=>{
-      const key = `${parentId ?? "root"}\0${kind}`;
-      if (readDocumentSets.has(key)) return;
-      const documentIds = (index.documentsByParentId.get(parentId) ?? [])
-        .filter(document => document.kind === kind).map(document => document.id).sort();
-      readDocumentSets.set(key, { kind, parentId, documentIds });
-    };
-    for(const document of index.documentsById.values())if(selected.has(document.id)){
-      if(document.kind==="volume"||document.kind==="chapter"||document.kind==="scene")addSet(document.parentId,document.kind);
-      if(document.kind==="volume")addSet(document.id,"chapter");
-      if(document.kind==="chapter")addSet(document.id,"scene");
-    }
-    built.operation.readDocumentSets=[...readDocumentSets.values()];
-    return built;
-  }
   async proposeHierarchyDelete(project: string, input: HierarchyTarget, options: ProposeHierarchyOptions): Promise<ChangeSetResult> {
     const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;
     if (!Number.isSafeInteger(projectVersion) || projectVersion < 1 || !actorId.trim() || !idempotencyKey.trim()) {

@@ -152,12 +152,8 @@ test("project presentation reads the selected project's public title and subtitl
   assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
 });
 
-test("hierarchy create and delete each read the resolved manifest only once", async () => {
+test("file-based hierarchy creation reads the resolved manifest only once", async () => {
   const project = await createProject();
-  const volume = await persistence.transaction(tx => tx.createDocument({
-    projectId: project.id, kind: "volume", parentId: null, title: "Volume", orderKey: "1",
-    markdown: "", authorId: "author", idempotencyKey: randomUUID(),
-  }));
   const pinned = (await core.reader(project.id)).snapshot;
   await persistence.transaction(tx => tx.updateProject({
     projectId: project.id, expectedVersion: pinned.projectVersion, title: "Later version",
@@ -168,17 +164,12 @@ test("hierarchy create and delete each read the resolved manifest only once", as
 
   for (const snapshot of [undefined, pinned]) {
     const expected = snapshot ?? current;
-    for (const build of [
-      () => store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot),
-      () => store.buildDeleteHierarchyOperation(project.id, { kind: "volume", id: volume.document.id }, snapshot),
-    ]) {
-      const before = tracked.counts.manifestReads!;
-      const built = await build();
-      assert.deepEqual(built.snapshot, expected);
-      assert.equal(built.operation.projectId, expected.projectId);
-      assert.equal(built.operation.baseProjectVersion, expected.projectVersion);
-      assert.equal(tracked.counts.manifestReads! - before, 1);
-    }
+    const before = tracked.counts.manifestReads!;
+    const built = await store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot);
+    assert.deepEqual(built.snapshot, expected);
+    assert.equal(built.operation.projectId, expected.projectId);
+    assert.equal(built.operation.baseProjectVersion, expected.projectVersion);
+    assert.equal(tracked.counts.manifestReads! - before, 1);
   }
 });
 
@@ -477,7 +468,7 @@ test("writing statistics preserve a non-scene first-match logical identity colli
   assert.equal(stats.totalCharCount,3);
 });
 
-test("durable current reuse preserves hierarchy deletion write order", async () => {
+test("native hierarchy deletion retains its ordered operations after restart", async () => {
   const project = await createProject();
   const {volume,chapter,scene} = await persistence.transaction(async tx => {
     const create = (kind: string,parentId: DocumentId | null) => tx.createDocument({
@@ -489,13 +480,18 @@ test("durable current reuse preserves hierarchy deletion write order", async () 
     const scene = await create("scene",chapter.document.id);
     return {volume,chapter,scene};
   });
-  const target = {kind:"scene" as const,id:scene.document.id,volumeId:volume.document.id,chapterId:chapter.document.id};
-  const first = await core.buildDeleteHierarchyOperation(project.id,target);
-  const current = await core.readSceneSnapshot(project.id,scene.document.id);
-  const expected = [current.metadata.path,current.document.path];
-  assert.deepEqual(first.operation.writes.map(write=>write.path),expected);
-  const warm = await core.buildDeleteHierarchyOperation(project.id,target);
-  assert.deepEqual(warm.operation.writes,first.operation.writes);
-  const restarted = new CoreStore({persistence});
-  assert.deepEqual((await restarted.buildDeleteHierarchyOperation(project.id,target)).operation.writes,first.operation.writes);
+  const target = { kind: "volume", id: volume.document.id } as const;
+  const { snapshot } = await core.observe(project.id);
+  const options = { projectVersion: snapshot.projectVersion, actorId: "author", idempotencyKey: randomUUID() };
+  const first = await core.proposeHierarchyDelete(project.id, target, options);
+  assert.deepEqual(first.changeSet.operations.map(operation => operation.type === "document.delete" && operation.command.documentId),
+    [scene.document.id, chapter.document.id, volume.document.id]);
+  const restartedPersistence = createPostgresPersistence(connectionString);
+  try {
+    const restarted = new CoreStore({ persistence: restartedPersistence });
+    assert.deepEqual(await restarted.proposeHierarchyDelete(project.id, target, options),
+      { changeSet: first.changeSet, replayed: true });
+  } finally {
+    await restartedPersistence.close();
+  }
 });
