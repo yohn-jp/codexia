@@ -4,7 +4,7 @@ import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
-import { collectGitHubPages } from './release-policy.mjs';
+import { collectGitHubArrayPages, collectGitHubPages } from './release-policy.mjs';
 import { listProducerArtifacts } from './ci-producer-artifact.mjs';
 
 const sourceSha = 'a'.repeat(40);
@@ -78,6 +78,18 @@ test('selection sees latest artifacts on later complete REST pages', async () =>
   }), 'artifacts');
   const selected = selectLatestEvidenceArtifacts(plan, paginated, successfulJobs, identity);
   assert.equal(selected.find(item => item.name === 'ci-evidence-oci-core').id, 12_572_824_349);
+});
+
+test('array-style GitHub REST pages are collected through the final short page', async () => {
+  const releases = Array.from({ length: 201 }, (_, index) => ({ id: index + 1 }));
+  const requested = [];
+  const actual = await collectGitHubArrayPages(async (page, perPage) => {
+    requested.push({ page, perPage });
+    return releases.slice((page - 1) * perPage, page * perPage);
+  });
+  assert.deepEqual(actual, releases);
+  assert.deepEqual(requested, [{ page: 1, perPage: 100 }, { page: 2, perPage: 100 }, { page: 3, perPage: 100 }]);
+  await assert.rejects(collectGitHubArrayPages(async () => ({ releases: [] })), /Invalid GitHub array pagination response/u);
 });
 
 test('producer restore inventories only the exact artifact name and still rejects incomplete pages', async () => {

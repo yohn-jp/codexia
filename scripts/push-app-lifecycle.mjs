@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
 import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
-import { collectGitHubPages } from './release-policy.mjs';
+import { collectGitHubArrayPages, collectGitHubPages } from './release-policy.mjs';
 import { expectedBackendMigrationFingerprint, assertBackendImageIdentity } from './backend-image-inspection.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
 import { selectPushDeploymentCertificateArtifact, validatePushDeploymentCertificatePair } from './verify-backend-push-handoff.mjs';
@@ -56,6 +56,9 @@ async function api(resource, fetchImpl = fetch) {
 }
 async function apiPages(resource, key) {
   return collectGitHubPages((page, perPage) => api(`${resource}${resource.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`), key);
+}
+async function apiArrayPages(resource) {
+  return collectGitHubArrayPages((page, perPage) => api(`${resource}${resource.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`));
 }
 function imageIdentity(image, { expectedImage = false, disposableRegistry = false } = {}) {
   const observed = JSON.parse(rootlessPodman(['image', 'inspect', image]))[0];
@@ -147,7 +150,7 @@ async function loadExactSourceFullCandidate() {
   } finally { await rm(folder, { recursive: true, force: true }); }
 }
 async function certifiedCompatibleCandidate(head) {
-  const releases = await apiPages('releases', 'releases');
+  const releases = await apiArrayPages('releases');
   const candidates = releases.filter(release => release?.tag_name?.startsWith('backend-v') && !release.draft && !release.prerelease)
     .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
   const failures = [];

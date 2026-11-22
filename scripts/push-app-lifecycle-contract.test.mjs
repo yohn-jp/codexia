@@ -48,6 +48,8 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   const source = readFileSync(new URL('./push-app-lifecycle.mjs', import.meta.url), 'utf8');
   const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   assert.match(source, /selectBackendArtifacts/u);
+  assert.match(source, /apiArrayPages\('releases'\)/u,
+    'the GitHub releases endpoint must use its array response pagination contract');
   assert.match(source, /downloadArtifact/u);
   assert.match(source, /validatePushDeploymentCertificatePair/u);
   assert.match(source, /migrationFingerprint/u);
