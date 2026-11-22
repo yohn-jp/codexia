@@ -63,7 +63,7 @@ redact_log() {
     -e 's/(Bearer )[A-Za-z0-9._~-]+/\1[REDACTED]/g' \
     -e 's/(fixture-(auth|tunnel)-token-)[A-Za-z0-9]+/\1[REDACTED]/g' \
     -e 's/((password|token)(_file)?[=: ]+)[^[:space:]]+/\1[REDACTED]/Ig' \
-    "$source" | tail -n 160 > "$target"
+    "$source" | tail -n 400 > "$target"
 }
 record_failure() {
   local status=$1 line=$2 command=$3 latest_log='' log

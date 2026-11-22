@@ -78,6 +78,7 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(source, /persistenceFormat/u);
   assert.match(source, /localhost:5000\/yohn-jp\/codexia-backend:lifecycle-/u);
   assert.match(fixture, /CAPABILITY_UNAVAILABLE/u);
+  assert.match(fixture, /tail -n 400/u, 'bounded failure logs retain the transaction error after long shell task output');
   assert.match(fixture, /rootless_podman --version/u);
   assert.doesNotMatch(fixture, /\.Host\.Version/u);
   assert.match(fixture, /prefix = "localhost:5000"\nlocation = "localhost:5000"\ninsecure = true/u,
