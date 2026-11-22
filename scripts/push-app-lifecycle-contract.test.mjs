@@ -97,7 +97,17 @@ test('rollback proof requires a candidate startup or readiness failure and a res
   const rollback = script.slice(script.indexOf('before_failure='), script.indexOf('set_state failed_candidate_rollback PASS'));
   assert.match(rollback, /grep -Eq .*Deployment transaction failed during candidate API \(?startup\|readiness/u);
   assert.match(rollback, /rootless test ! -e .*deploy-transaction\.json/u);
-  assert.match(script, /key==='failed-candidate-rollback'&&apiContainer===previous\.apiContainer/u);
+  assert.match(script, /key==='failed-candidate-rollback'\|\|key==='better-auth-rollback'\)&&apiContainer===previous\.apiContainer/u);
+});
+
+test('Better Auth checkpoints identify their exact installed image, including the restored writer', () => {
+  const script = readFileSync(new URL('../deploy/ansible/test-push-auth-lifecycle.sh', import.meta.url), 'utf8');
+  assert.deepEqual([...script.matchAll(/^ {2}observe_runtime (\S+) (\S+)$/gmu)].map(match => match.slice(1)), [
+    ['better-auth-activation', 'auth-primary'],
+    ['better-auth-same-digest', 'auth-primary'],
+    ['better-auth-compatible-update', 'auth-update'],
+    ['better-auth-rollback', 'auth-update'],
+  ]);
 });
 
 test('image selection binds the PR Full artifact and fails closed without a compatible verified release', () => {

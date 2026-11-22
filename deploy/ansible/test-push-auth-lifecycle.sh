@@ -157,26 +157,27 @@ NODE
     echo 'Better Auth activation bypassed its explicit approval' >&2
     return 1
   fi
+  grep -Fq 'Better Auth requires an approved token-to-Better-Auth transition' "$tmp/auth-transition-unapproved.log"
   rootless_podman exec codexia-api node -e 'if (process.env.CODEXIA_AUTH_MODE !== "token") process.exit(1)'
   run_deploy auth-primary false '' auth-transition better-auth true
   auth_fixture authorize "$web" "$owner" >"$tmp/auth-session.json"
   token=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).accessToken' "$tmp/auth-session.json")
   proof=$(observe_auth "$primary_image")
   grep -Eq '^[0-9]+:codexia_auth_runtime$' <<<"$proof"
-  observe_runtime better-auth-activation
+  observe_runtime better-auth-activation auth-primary
   record_auth better-auth-activation "$primary_image" "$proof"
   set_state better_auth_activation PASS 'isolated HTTPS registration, discovery and protected owner session verified'
 
   prior=$(release_checksums)
   run_deploy auth-primary false '' auth-same-digest better-auth
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
-  observe_runtime better-auth-same-digest
+  observe_runtime better-auth-same-digest auth-primary
   record_auth better-auth-same-digest "$primary_image" "$proof"
   set_state better_auth_same_digest PASS 'same release, settings, signing keys, auth schema and owner session'
 
   run_deploy auth-update false '' auth-compatible-update better-auth
   [[ "$(observe_auth "$update_image")" == "$proof" ]]
-  observe_runtime better-auth-compatible-update
+  observe_runtime better-auth-compatible-update auth-update
   record_auth better-auth-compatible-update "$update_image" "$proof"
   set_state better_auth_compatible_update PASS 'alternate OCI digest with original signing keys, schema and owner session'
 
@@ -188,7 +189,7 @@ NODE
   grep -Eq 'Deployment transaction failed during candidate API (startup|readiness)' "$tmp/auth-failed-candidate.log"
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$update_image")" == "$proof" ]]
   rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-  observe_runtime better-auth-rollback
+  observe_runtime better-auth-rollback auth-update
   record_auth better-auth-rollback "$update_image" "$proof"
   set_state better_auth_rollback PASS 'failed candidate restored exact Better Auth Quadlet, release, keys, schema and owner session'
 }
