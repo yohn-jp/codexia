@@ -89,7 +89,20 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   });
 
   const reader = await core!.reader(project.id);
-  const canonicalEntities = await readCanonicalSnapshotEntities(reader, new AbortController().signal);
+  const nativeStoryDocuments = reader.nativeStoryDocuments;
+  assert.ok(nativeStoryDocuments);
+  assert.equal(nativeStoryDocuments.length, 4, "only the volume, chapter and two scenes have typed hierarchy rows");
+  const hierarchyPaths = new Set(nativeStoryDocuments.map((document) => document.metadataPath));
+  const canonicalEntities = await readCanonicalSnapshotEntities({
+    snapshot: reader.snapshot,
+    nativeStoryDocuments,
+    list: (prefix) => reader.list(prefix),
+    async read(path, encoding) {
+      assert.ok(!hierarchyPaths.has(path), `hierarchy metadata already came from the pinned projection: ${path}`);
+      return reader.read(path, encoding);
+    },
+  }, new AbortController().signal);
+  assert.equal(canonicalEntities.find((entity) => entity.id === nativeDocumentId)?.type, "scene");
   assert.equal(canonicalEntities.some((entity) => entity.raw.id === noteDocumentId), false,
     "a note projected under a scene-shaped path must not enter the canonical scene/entity set");
   const legacyEntityId = "ms-legacy-volume-legacy-chapter-legacy-scene";

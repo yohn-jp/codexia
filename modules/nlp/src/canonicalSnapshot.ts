@@ -44,21 +44,41 @@ function frontMatter(content: string): { raw: Record<string, unknown>; body: str
   return { raw: parsed as Record<string, unknown>, body: content.slice(match[0].length).trim() };
 }
 
-/**
- * Reconstruct the source Core entity inputs from one immutable snapshot. This
- * mirrors loader.ts without activating the optional Story module, and is shared
- * by NLP candidate discovery and diagnostics scene metadata lookup.
- */
+function nativeSceneBodyPath(path: unknown): string | undefined {
+  return typeof path === "string" && path.startsWith("documents/") && /\.md$/i.test(path) ? path : undefined;
+}
+
+function canonicalEntity(
+  id: string, type: string, filePath: string, raw: Record<string, unknown>, body?: string,
+): CanonicalSnapshotEntity {
+  const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined;
+  return {
+    id,
+    type,
+    filePath,
+    ...(typeof raw.name === "string" ? { name: raw.name } : typeof raw.title === "string" && body !== undefined ? { name: raw.title } : {}),
+    ...(aliases ? { aliases } : {}),
+    raw,
+    ...(body !== undefined ? { body } : {}),
+  };
+}
+
+/** Read the pinned hierarchy and file-backed entity inputs without activating Story. */
 export async function readCanonicalSnapshotEntities(
   reader: SnapshotReader,
   signal: AbortSignal,
 ): Promise<CanonicalSnapshotEntity[]> {
-  const paths = [...new Set((await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat())]
-    .filter((path) => /\.(?:ya?ml|md)$/i.test(path))
-    .sort();
+  const hierarchy = new Map((reader.nativeStoryDocuments ?? []).map((document) => [document.metadataPath, document]));
+  const listedPaths = (await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat();
+  const paths = [...new Set([...listedPaths.filter((path) => /\.(?:ya?ml|md)$/i.test(path)), ...hierarchy.keys()])].sort();
   if (paths.length > MAX_ENTITY_FILES) throw new TypeError(`Project analysis exceeds ${MAX_ENTITY_FILES} canonical entity files`);
 
   const nativeSceneBodyPaths = new Set<string>();
+  for (const document of hierarchy.values()) {
+    if (document.kind !== "scene") continue;
+    const path = nativeSceneBodyPath(document.metadata.manuscript);
+    if (path) nativeSceneBodyPaths.add(path);
+  }
   const orderedPaths = [
     ...paths.filter((path) => !path.startsWith("documents/")),
     ...paths.filter((path) => path.startsWith("documents/")),
@@ -66,6 +86,13 @@ export async function readCanonicalSnapshotEntities(
   const entities: CanonicalSnapshotEntity[] = [];
   for (const path of orderedPaths) {
     if (signal.aborted) throw Object.assign(new Error("Snapshot entity read was cancelled"), { code: "job_cancelled" });
+    const document = hierarchy.get(path);
+    if (document) {
+      const raw = document.metadata;
+      const type = typeof raw.type === "string" ? raw.type : document.kind;
+      entities.push(canonicalEntity(document.id, type, path, raw));
+      continue;
+    }
     const file = await reader.read(path);
     if (!file) continue;
     if (file.documentKind === "note") continue;
@@ -89,9 +116,9 @@ export async function readCanonicalSnapshotEntities(
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       raw = parsed as Record<string, unknown>;
       if (typeof raw.id !== "string") continue;
-      if (file.documentKind === "scene" && typeof raw.manuscript === "string" &&
-          raw.manuscript.startsWith("documents/") && /\.md$/i.test(raw.manuscript)) {
-        nativeSceneBodyPaths.add(raw.manuscript);
+      if (file.documentKind === "scene") {
+        const manuscriptPath = nativeSceneBodyPath(raw.manuscript);
+        if (manuscriptPath) nativeSceneBodyPaths.add(manuscriptPath);
       }
     }
     const id = isNativeSceneBody
@@ -99,16 +126,8 @@ export async function readCanonicalSnapshotEntities(
       : isMarkdown
         ? `ms-${path.slice("manuscript/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
         : raw.id as string;
-    const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined;
-    entities.push({
-      id,
-      type: isNativeSceneBody ? "scene" : inferredType(path, raw),
-      filePath: path,
-      ...(typeof raw.name === "string" ? { name: raw.name } : typeof raw.title === "string" && isMarkdown ? { name: raw.title } : {}),
-      ...(aliases ? { aliases } : {}),
-      raw,
-      ...(body !== undefined ? { body } : {}),
-    });
+    const type = isNativeSceneBody ? "scene" : inferredType(path, raw);
+    entities.push(canonicalEntity(id, type, path, raw, body));
   }
   return entities.sort((left, right) => left.filePath < right.filePath ? -1 : left.filePath > right.filePath ? 1 : 0);
 }
