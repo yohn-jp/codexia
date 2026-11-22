@@ -2,28 +2,44 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
+import { appendManuscript, createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 test("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page }) => {
-  const fixture = await createWritingFixture(page, "desktop", `Draft re-protection ${crypto.randomUUID()}`, "Before.");
+  const original = "Before.";
+  const appendedText = " After local quota failure.";
+  const draft = original + appendedText;
+  const fixture = await createWritingFixture(page, "desktop", `Draft re-protection ${crypto.randomUUID()}`, original);
+  const editor = manuscriptEditor(page);
+  await expect(editor).toHaveText(original);
+  await expect(page.getByRole("status").filter({ hasText: "根拠を確認中" })).toHaveCount(0);
+  await page.clock.install();
   let remoteWrites = 0;
   const documentPath = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
+  async function readSavedManuscript() {
+    const response = await page.request.get(documentPath);
+    expect(response.ok()).toBe(true);
+    return (await response.json()).revision.markdown;
+  }
   page.on("request", (request) => {
     if (request.method() === "PATCH" && new URL(request.url()).pathname === documentPath) remoteWrites += 1;
   });
   await setPersistenceDraftWritesFailing(page, true);
-  const draft = "Before. After local quota failure.";
-  await manuscriptEditor(page).fill(draft);
+  await editor.press("Control+End");
+  await page.keyboard.insertText(appendedText);
+  await expect(editor).toHaveText(draft);
   await expect(page.locator(".pg-save-state summary")).toHaveText("この入力はまだ保護されていません");
   await expect(page.locator(".pg-editor").getByRole("alert")).toContainText("復旧用の記録を作れていません");
   await expect(page.getByRole("button", { name: "下書きを再保護" })).toBeEnabled();
+  await page.clock.runFor(1_500);
+  expect(await readSavedManuscript()).toBe(original);
   expect(remoteWrites).toBe(0);
-  expect((await readPersistenceDrafts(page)).some((item) => item.documentId === fixture.scene.id && item.markdown === draft)).toBe(false);
+  expect((await readPersistenceDrafts(page)).find((item) => item.documentId === fixture.scene.id)).toBeUndefined();
 
   await setPersistenceDraftWritesFailing(page, false);
   await page.getByRole("button", { name: "下書きを再保護" }).click();
   await expectServerSaved(page);
   expect(remoteWrites).toBeGreaterThan(0);
+  expect(await readSavedManuscript()).toBe(draft);
   expect(await readManuscriptMarkdown(page)).toBe(draft);
 });
 
@@ -61,8 +77,14 @@ test("mixed line endings preserve source offsets for edits and selected evidence
 test("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
-    const fixture = await createWritingFixture(page, mode, `Missing route ${mode} ${crypto.randomUUID()}`, `Untouched ${mode} manuscript.`);
-    await fillDraft(page, `Unrelated ${mode} draft.`);
+    const original = `Untouched ${mode} manuscript.`;
+    const addition = ` Unrelated ${mode} draft.`;
+    const fixture = await createWritingFixture(page, mode, `Missing route ${mode} ${crypto.randomUUID()}`, original);
+    const editor = manuscriptEditor(page);
+    await expect(editor).toHaveText(original);
+    await appendManuscript(page, addition);
+    await expect(editor).toHaveText(original + addition);
+    await expectDeviceDraft(page);
     const missingSceneId = crypto.randomUUID();
     const route = (projectId: string, sceneId?: string) => {
       const suffix = sceneId ? `/scenes/${sceneId}` : "";
@@ -74,7 +96,7 @@ test("an unavailable explicit scene route stays non-editable until the author se
     await expect(manuscriptEditor(page)).toHaveCount(0);
     expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${missingSceneId}`);
     const storedDraft = (await readPersistenceDrafts(page)).find(draft => draft.projectId === fixture.project.id && draft.documentId === fixture.scene.id);
-    expect(storedDraft?.markdown).toBe(`Unrelated ${mode} draft.`);
+    expect(storedDraft?.markdown).toBe(original + addition);
 
     if (mode === "mobile") {
       await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
@@ -133,7 +155,9 @@ test("an anchor read failure leaves the confirmed manuscript readable and can be
 test("the manuscript opens and remains editable while its anchor read is pending", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
-    const fixture = await createWritingFixture(page, mode, `Pending anchor read ${mode} ${crypto.randomUUID()}`, "Readable while anchors are pending.");
+    const original = "Readable while anchors are pending.";
+    const addition = " Typed while anchors are pending.";
+    const fixture = await createWritingFixture(page, mode, `Pending anchor read ${mode} ${crypto.randomUUID()}`, original);
     let releaseAnchors!: () => void;
     let reportAnchorRequest!: () => void;
     const anchorsReleased = new Promise<void>((resolve) => { releaseAnchors = resolve; });
@@ -150,16 +174,18 @@ test("the manuscript opens and remains editable while its anchor read is pending
       const query = mode === "mobile" ? "?view=writing" : "";
       await page.goto(new URL(`/${mode}/projects/${fixture.project.id}/scenes/${fixture.scene.id}${query}`, page.url()).toString());
       await anchorRequestStarted;
-      await expect(manuscriptEditor(page)).toBeVisible();
-      await expect(manuscriptEditor(page)).toContainText("Readable while anchors are pending.");
+      const editor = manuscriptEditor(page);
+      await expect(editor).toHaveText(original);
       await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toBeVisible();
       const commands = page.locator(".pg-editor-command-menu");
       if (!await commands.evaluate((element) => (element as HTMLDetailsElement).open)) await commands.locator("summary").click();
       await expect(commands.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeDisabled();
-      await fillDraft(page, "Typed while anchors are pending.");
+      await appendManuscript(page, addition);
+      await expect(editor).toHaveText(original + addition);
+      await expectDeviceDraft(page);
       releaseAnchors();
       await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toHaveCount(0);
-      await expect(manuscriptEditor(page)).toHaveText("Typed while anchors are pending.");
+      await expect(editor).toHaveText(original + addition);
     } finally {
       releaseAnchors();
     }

@@ -84,10 +84,33 @@ export async function openFixtureScene(page: Page, index = 0): Promise<{ project
   return { project, scene: scene! };
 }
 
-export async function fillDraft(page: Page, text: string): Promise<void> {
+export async function replaceManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
-  await editor.fill(text);
-  await expect(editor).toHaveText(text);
+  // Let CodeMirror handle the selection as an editor command before typing.
+  await editor.click();
+  await editor.press("ControlOrMeta+a");
+  if (text) await page.keyboard.insertText(text);
+  else await editor.press("Backspace");
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(text);
+}
+
+export async function appendManuscript(page: Page, text: string): Promise<void> {
+  await manuscriptEditor(page).evaluate((element) => {
+    const lastLine = [...element.querySelectorAll(".cm-line")].at(-1);
+    const selection = element.ownerDocument.getSelection();
+    if (!lastLine || !selection) throw new Error("The visible manuscript must have a selectable final line");
+    (element as HTMLElement).focus();
+    const range = element.ownerDocument.createRange();
+    range.selectNodeContents(lastLine);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.keyboard.insertText(text);
+}
+
+export async function fillDraft(page: Page, text: string): Promise<void> {
+  await replaceManuscript(page, text);
   await expectDeviceDraft(page);
 }
 
