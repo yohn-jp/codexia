@@ -84,3 +84,53 @@ test('task invocations describe only canonical executable work with secret value
       'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR'],
   });
 });
+
+
+test('task-scoped proofs reuse unrelated inputs but invalidate global and unknown paths', async t => {
+  const root = await fixture(t);
+  for (const file of ['modules/search/src/browser.ts', 'modules/search/src/browser.test.ts',
+    'deploy/ansible/deploy-transaction.yml']) {
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file + '\n');
+  }
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'add reviewed independent inputs');
+  const base = await git(root, 'rev-parse', 'HEAD');
+  const tasks = ['unit-core', 'unit-search', 'unit-root'];
+  const capture = async sha => Object.fromEntries(await Promise.all(tasks.map(async task =>
+    [task, await captureTaskInputClosure({ root, sha, task, runtime })])));
+  const baseline = await capture(base);
+  const changed = async (file, value) => {
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, value);
+    await git(root, 'add', '.');
+    await git(root, 'commit', '-qm', 'change ' + file);
+    const result = await capture(await git(root, 'rev-parse', 'HEAD'));
+    await git(root, 'reset', '--hard', base);
+    return result;
+  };
+
+  const search = await changed('modules/search/src/browser.ts', 'search browser changed\n');
+  assert.equal(search['unit-core'].source, baseline['unit-core'].source, 'unrelated core task can reuse source proof');
+  assert.notEqual(search['unit-search'].source, baseline['unit-search'].source, 'search owner must invalidate');
+  const searchTest = await changed('modules/search/src/browser.test.ts', 'search test changed\n');
+  assert.equal(searchTest['unit-core'].tests, baseline['unit-core'].tests, 'unrelated tests must not invalidate');
+  assert.notEqual(searchTest['unit-search'].tests, baseline['unit-search'].tests, 'own tests must invalidate');
+
+  const deploy = await changed('deploy/ansible/deploy-transaction.yml', 'deployment changed\n');
+  assert.equal(deploy['unit-core'].source, baseline['unit-core'].source, 'dedicated deployment proof is independent');
+  assert.notEqual(deploy['unit-root'].source, baseline['unit-root'].source, 'root verification owns deployment inputs');
+
+  const global = await changed('packages/core/src/index.ts', 'shared core changed\n');
+  assert.notEqual(global['unit-core'].source, baseline['unit-core'].source);
+  assert.notEqual(global['unit-search'].source, baseline['unit-search'].source, 'shared contracts invalidate other tasks');
+  const unknown = await changed('scripts/unmapped-ci-tool.mjs', 'unknown executable\n');
+  assert.notEqual(unknown['unit-core'].source, baseline['unit-core'].source, 'unknown paths fail closed');
+  assert.notEqual(unknown['unit-search'].source, baseline['unit-search'].source, 'unknown paths invalidate all tasks');
+
+  const lockfile = await changed('pnpm-lock.yaml', 'changed lockfile\n');
+  assert.notEqual(lockfile['unit-core'].dependencies, baseline['unit-core'].dependencies);
+  assert.notEqual(lockfile['unit-search'].dependencies, baseline['unit-search'].dependencies);
+});
