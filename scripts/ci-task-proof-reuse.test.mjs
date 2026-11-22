@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
-import { resolveExactMainCoverageProof } from './ci-task-proof-reuse.mjs';
+import { resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
+import { taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const candidateSha = 'b'.repeat(40);
@@ -36,23 +37,27 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
       inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
     } : null;
     const results = tasks.map(task => ({ task, status: 'passed', seconds: 1,
-      invocations: [{ executable: '/opt/node/bin/node', arguments: ['scripts/task.mjs', task], environmentKeys: [] }],
-      ...(task === 'coverage' ? { inputProof } : {}),
+      invocations: task === 'coverage' ? [{ executable: '/opt/node/bin/node', arguments: ['scripts/task.mjs', task], environmentKeys: [] }]
+        : (Array.isArray(taskInvocation(task, runtime.execPath)) ? taskInvocation(task, runtime.execPath) : [taskInvocation(task, runtime.execPath)]),
+      ...(task === 'coverage' ? { inputProof } : { inputProof: {
+        format: 'codexia-ci-task-input-proof/v2', task, mode: 'task-execution', status: 'passed', sourceSha,
+        planDigest: digest, workflowRunId: run.id, workflowAttempt: run.run_attempt,
+        workflowJob: taskWorkflowJob(task), runtime,
+        inputClosure: Object.fromEntries(dimensions.map(name => [name, createHashDigit(task + name)])),
+      } }),
     }));
     const report = { group, sha: sourceSha, planDigest: digest, workflowRunId: run.id,
-      workflowAttempt: run.run_attempt, workflowJob: group === 'types-tests' ? 'types' : group, workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main',
+      workflowAttempt: run.run_attempt, workflowJob: taskWorkflowJob(tasks[0]), workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main',
       workflowSha: sourceSha, results };
-    if (group === 'types-tests') {
-      report.producerInventory = {
-        format: 'codexia-ci-task-producer-inventory/v1', group, sourceSha, planDigest: digest,
-        workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowJob: report.workflowJob,
-        workflowRef: report.workflowRef, workflowSha: sourceSha,
-        runner: { os: 'Linux', arch: 'X64', imageOS: 'ubuntu24', imageVersion: '20261115.1', nodeVersion: 'v24.22.3' },
-        selectedTasks: tasks, groupInvocations: [],
-        taskInvocations: results.map(({ task, status, invocations }) => ({ task, status, invocations,
-          ...(task === 'coverage' ? { inputProof } : {}) })),
-      };
-    }
+    report.producerInventory = {
+      format: 'codexia-ci-task-producer-inventory/v1', group, sourceSha, planDigest: digest,
+      workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowJob: report.workflowJob,
+      workflowRef: report.workflowRef, workflowSha: sourceSha,
+      runner: { os: 'Linux', arch: 'X64', imageOS: 'ubuntu24', imageVersion: '20261115.1', nodeVersion: 'v24.22.3' },
+      selectedTasks: tasks, groupInvocations: [],
+      taskInvocations: results.map(({ task, status, invocations, inputProof: resultProof }) => ({ task, status, invocations,
+        ...(resultProof ? { inputProof: resultProof } : {}) })),
+    };
     reports.set(`ci-evidence-${group}`, report);
     artifacts.push({ id: 900 + jobId, name: `ci-evidence-${group}`, digest: `sha256:${String(jobId).padStart(64, '0')}`,
       size_in_bytes: 100, expired: false, created_at: '2026-11-21T00:00:30Z',
@@ -66,6 +71,12 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
   return { plan, run, jobs, artifacts, reports };
 }
 
+function createHashDigit(value) {
+  let hash = 0;
+  for (const char of value) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash.toString(16).padStart(64, '0').slice(-64);
+}
+
 function mockRequest({ run, jobs, artifacts, latestRuns = [run] }) {
   return async (url, options) => {
     assert.equal(options.headers.Authorization, 'Bearer test-token');
@@ -75,7 +86,7 @@ function mockRequest({ run, jobs, artifacts, latestRuns = [run] }) {
     let data;
     if (endpoint === 'actions/workflows/verify.yml') data = { id: 7, path: '.github/workflows/verify.yml' };
     else if (endpoint === 'actions/workflows/7/runs') data = { total_count: latestRuns.length, workflow_runs: latestRuns };
-    else if (endpoint === `actions/runs/${run.id}/jobs`) data = { total_count: jobs.length, jobs };
+    else if (endpoint === `actions/runs/${run.id}/jobs` || endpoint.startsWith(`actions/runs/${run.id}/attempts/`)) data = { total_count: jobs.length, jobs };
     else if (endpoint === `actions/runs/${run.id}/artifacts`) data = { total_count: artifacts.length, artifacts };
     else throw new Error(`Unexpected request ${endpoint}`);
     return { ok: true, json: async () => data };
@@ -109,4 +120,19 @@ test('does not fall back to an older successful main run when the latest exact-b
   request: mockRequest({ ...evidence, latestRuns: [older, latest] }),
   readArtifact: async (artifact, filename) => filename === 'ci-plan.json' ? evidence.plan : evidence.reports.get(artifact.name),
   }), /Latest exact-base main run failed/);
+});
+
+test('resolves an omitted task only when its exact-base main report has a trusted execution closure', async () => {
+  const evidence = mainEvidence();
+  const current = { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
+    head_sha: candidateSha, repository: { id: 9 } };
+  const receipts = await resolveExactMainTaskProofs({ plan: createVerificationPlan({ files: ['docs/README.md'],
+    event: 'pull_request', sha: candidateSha, base: sourceSha }), current, repository: 'yohn-jp/codexia', token: 'test-token',
+  tasks: ['unit-contracts', 'typecheck-foundations'], request: mockRequest(evidence),
+  readArtifact: async (artifact, filename) => filename === 'ci-plan.json' ? evidence.plan : evidence.reports.get(artifact.name) });
+  assert.equal(receipts.coverage.task, 'coverage');
+  assert.equal(receipts['unit-contracts'].task, 'unit-contracts');
+  assert.equal(receipts['unit-contracts'].workflowJob, 'unit');
+  assert.equal(receipts['unit-contracts'].artifactName, 'ci-evidence-unit-core');
+  assert.equal(receipts['typecheck-foundations'].artifactName, 'ci-evidence-types-sources');
 });

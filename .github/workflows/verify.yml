@@ -23,14 +23,14 @@ jobs:
       pull-requests: read
     outputs:
       reuse: ${{ steps.reuse.outputs.eligible }}
-      plan: ${{ steps.select.outputs.plan }}
-      unit: ${{ steps.select.outputs.unit }}
-      types: ${{ steps.select.outputs.types }}
-      build: ${{ steps.select.outputs.build }}
-      oci: ${{ steps.select.outputs.oci }}
-      browser: ${{ steps.select.outputs.browser }}
-      hosted_catalog: ${{ steps.select.outputs.hosted_catalog }}
-      hosted: ${{ steps.select.outputs.hosted }}
+      plan: ${{ steps.taskproof.outputs.plan || steps.select.outputs.plan }}
+      unit: ${{ steps.taskproof.outputs.unit || steps.select.outputs.unit }}
+      types: ${{ steps.taskproof.outputs.types || steps.select.outputs.types }}
+      build: ${{ steps.taskproof.outputs.build || steps.select.outputs.build }}
+      oci: ${{ steps.taskproof.outputs.oci || steps.select.outputs.oci }}
+      browser: ${{ steps.taskproof.outputs.browser || steps.select.outputs.browser }}
+      hosted_catalog: ${{ steps.taskproof.outputs.hosted_catalog || steps.select.outputs.hosted_catalog }}
+      hosted: ${{ steps.taskproof.outputs.hosted || steps.select.outputs.hosted }}
       full_model_oci: ${{ steps.select.outputs.full_model_oci }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -48,6 +48,7 @@ jobs:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-impact.mjs
       - name: Resolve exact-base task input proof
+        id: taskproof
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,7 +91,7 @@ jobs:
       CODEXIA_AUTH_TEST_DISPOSABLE: "1"
     services:
       postgres:
-        image: postgres:17
+        image: docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
         env:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
@@ -331,7 +332,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:17
+        image: docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
         env:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
