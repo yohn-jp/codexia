@@ -6,6 +6,9 @@ OCI_AUTH_WEB_CLIENT='codexia-oci-web'
 setup_oci_better_auth() {
   local engine=$1 image=$2 verification_network=$3 database_container=$4
   local secret_directory=$5 bootstrap_container=$6 oidc_container=$7
+  local database_name=${8:-codexia_verify} user_namespace=${9:-}
+  local user_args=()
+  if [[ -n "$user_namespace" ]]; then user_args=("$user_namespace"); fi
   local api_origin='https://codexia-lifecycle-proxy:4443'
   local bootstrap_origin='https://codexia-auth-registration:8443'
   local ios_client='codexia-oci-ios' introspection_client='codexia-oci-introspection'
@@ -28,7 +31,7 @@ setup_oci_better_auth() {
   chmod 0444 "$secret_directory/oidc/"*
   cat > "$secret_directory/auth.env" <<ENV
 CODEXIA_AUTH_MODE=better-auth
-CODEXIA_AUTH_DATABASE_URL=postgres://codexia_auth_runtime:$auth_database_password@$database_container:5432/codexia_verify
+CODEXIA_AUTH_DATABASE_URL=postgres://codexia_auth_runtime:$auth_database_password@$database_container:5432/$database_name
 CODEXIA_PUBLIC_ORIGIN=$api_origin
 CODEXIA_TRUST_PROXY=1
 CODEXIA_AUTH_SECRET=$auth_secret
@@ -47,14 +50,14 @@ CREATE ROLE codexia_auth_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINH
 CREATE SCHEMA codexia_auth AUTHORIZATION codexia_auth_runtime;
 REVOKE ALL ON SCHEMA codexia_auth FROM PUBLIC;
 SQL
-  } | "$engine" exec -i "$database_container" psql -X -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify >/dev/null
+  } | "$engine" exec -i "$database_container" psql -X -q -v ON_ERROR_STOP=1 -U codexia -d "$database_name" >/dev/null
 
   "$engine" run --detach --name "$oidc_container" --network "$verification_network" --network-alias codexia-lifecycle-proxy \
-    --no-healthcheck --read-only --cap-drop ALL --security-opt no-new-privileges \
+    "${user_args[@]}" --no-healthcheck --read-only --cap-drop ALL --security-opt no-new-privileges \
     --volume "$secret_directory/oidc:/fixture:ro" --entrypoint node \
     "$image" /fixture/fixture.mjs serve >/dev/null
   "$engine" run --detach --name "$bootstrap_container" --network "$verification_network" --network-alias codexia-auth-registration \
-    --no-healthcheck --read-only --cap-drop ALL --security-opt no-new-privileges \
+    "${user_args[@]}" --no-healthcheck --read-only --cap-drop ALL --security-opt no-new-privileges \
     --volume "$secret_directory/oidc/tls.crt:/run/codexia-bootstrap/tls.crt:ro" \
     --volume "$secret_directory/oidc/tls.key:/run/codexia-bootstrap/tls.key:ro" \
     --env-file "$secret_directory/auth.env" --env NODE_EXTRA_CA_CERTS=/run/codexia-bootstrap/tls.crt \

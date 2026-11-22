@@ -34,6 +34,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/profile-package.mjs',
   'scripts/verify-oci.sh',
   'scripts/verify-oci-http.mjs',
+  'scripts/oci-better-auth-fixture.sh',
+  'scripts/push-auth-lifecycle-oidc.mjs',
   'tests/integration/model-oci-lifecycle.acceptance.mjs',
   'tests/integration/model-oci-lifecycle-arguments.mjs',
   'tests/integration/model-oci-lifecycle-arguments.test.mjs',

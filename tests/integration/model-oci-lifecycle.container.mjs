@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -6,12 +7,16 @@ import { findPackageJSON } from "node:module";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { seedModelFixture } from "./model-postgres-fixture.mjs";
 
 const OUTPUT_DIRECTORY = "/p13-output";
-const API_ORIGIN = "http://127.0.0.1:3000";
+const LOCAL_API_ORIGIN = "http://127.0.0.1:3000";
+const API_ORIGIN = new URL(process.env.CODEXIA_PUBLIC_ORIGIN).origin;
 const PROJECT_ID = process.env.P13_PROJECT_ID;
-const AUTH_TOKEN = process.env.CODEXIA_AUTH_TOKEN;
+const OWNER_SUBJECT = process.env.CODEXIA_OAUTH_OWNER_SUBJECT;
+const WEB_CLIENT_ID = process.env.P13_OAUTH_WEB_CLIENT;
+const execFile = promisify(execFileCallback);
 const MODEL_IDS = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
@@ -24,7 +29,7 @@ const SETTINGS_PATHS = [
 ];
 
 assert.ok(PROJECT_ID && /^[0-9a-f-]{36}$/iu.test(PROJECT_ID), "project fixture ID is required");
-assert.ok(AUTH_TOKEN && AUTH_TOKEN.length >= 32, "API auth token is required");
+assert.ok(OWNER_SUBJECT && WEB_CLIENT_ID, "registered OAuth owner and web client are required");
 
 function waitGate() {
   let resolve;
@@ -163,7 +168,7 @@ function createSampler(runtime, workerEntries) {
     healthInFlight = true;
     const started = performance.now();
     try {
-      const response = await fetch(API_ORIGIN + "/health/live", { signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(LOCAL_API_ORIGIN + "/health/live", { signal: AbortSignal.timeout(2_000) });
       if (!response.ok) healthFailures += 1;
       await response.arrayBuffer();
       healthLatencies.push(Number((performance.now() - started).toFixed(2)));
@@ -224,18 +229,37 @@ function createSampler(runtime, workerEntries) {
   };
 }
 
-let authorCookie;
-async function api(path, options = {}) {
-  if (!authorCookie) {
-    const login = await fetch(API_ORIGIN + "/api/login", {method:"POST",headers:{"content-type":"application/json",origin:API_ORIGIN},body:JSON.stringify({token:AUTH_TOKEN})});
-    assert.ok(login.ok, "author login failed");
-    const cookie = login.headers.get("set-cookie");
-    assert.ok(cookie, "author login did not establish session");
-    authorCookie = cookie.split(";",1)[0];
-    await login.arrayBuffer();
+let authorCredential;
+let pendingAuthorization;
+async function authorizeOwner() {
+  let accessToken;
+  try {
+    const { stdout } = await execFile(process.execPath, ["/fixture/fixture.mjs", "authorize", WEB_CLIENT_ID, OWNER_SUBJECT], {
+      encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024,
+    });
+    ({ accessToken } = JSON.parse(stdout));
+  } catch {
+    throw new Error("the verified OIDC and OAuth owner flow failed");
   }
-  const headers = { cookie: authorCookie, origin: API_ORIGIN };
-  const init = { method: options.method ?? "GET", headers };
+  assert.equal(typeof accessToken, "string", "the OAuth token endpoint must issue a bearer token");
+  const [, payload] = accessToken.split(".");
+  assert.ok(payload, "the owner access token must carry issuer claims");
+  // The fixture has already proved the token at /api/session. Read exp only to schedule another authorization.
+  const { exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  assert.ok(Number.isSafeInteger(exp) && exp * 1000 > Date.now(), "the issued owner token must have a future expiry");
+  authorCredential = { accessToken, expiresAt: exp * 1000 };
+  return accessToken;
+}
+
+function ownerAccessToken() {
+  if (authorCredential && authorCredential.expiresAt > Date.now() + 30_000) return authorCredential.accessToken;
+  pendingAuthorization ??= authorizeOwner().finally(() => { pendingAuthorization = undefined; });
+  return pendingAuthorization;
+}
+
+async function api(path, options = {}) {
+  const headers = { authorization: "Bearer " + await ownerAccessToken(), origin: API_ORIGIN };
+  const init = { method: options.method ?? "GET", headers, redirect: "error" };
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
@@ -247,6 +271,13 @@ async function api(path, options = {}) {
   catch { throw new Error("API returned a non-JSON response at " + path); }
   assert.equal(response.status, options.status ?? 200, "unexpected HTTP status for " + path + ": " + response.status);
   return value;
+}
+
+async function assertOwnerAuthorization() {
+  const anonymous = await fetch(API_ORIGIN + "/api/session", { redirect: "error" });
+  assert.equal(anonymous.status, 401, "the protected API must deny anonymous requests");
+  await anonymous.arrayBuffer();
+  assert.deepEqual(await api("/api/session"), { authenticated: true, authorScope: "owner" });
 }
 
 const projectPath = "/api/projects/" + encodeURIComponent(PROJECT_ID);
@@ -433,12 +464,26 @@ async function runLifecycle() {
   await migratePostgresDatabase(databaseUrl);
   const persistence = createPostgresPersistence(databaseUrl);
   const store = new CoreStore({ persistence });
-  let server;
+  let server, betterAuth;
   try {
     await persistence.transaction(tx=>tx.createProject({id:PROJECT_ID,title:"Synthetic OCI model lifecycle work"}));
     await seedModelFixture(store,PROJECT_ID,JSON.parse(await readFile(OUTPUT_DIRECTORY+"/fixture.json","utf8")));
-    server = await start({ store, persistence, authToken: AUTH_TOKEN, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist" });
+    const { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } = await import(new URL("./better-auth.js", apiUrl).href);
+    const { readBetterAuthMigrationConfig } = await import(new URL("./migrate-auth.js", apiUrl).href);
+    const authConfig = readBetterAuthMigrationConfig();
+    betterAuth = createBetterAuthRuntime(authConfig);
+    await betterAuth.assertRegisteredClients();
+    await betterAuth.verifyIntrospectionCredentials();
+    server = await start({ store, persistence, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist",
+      betterAuth, closeBetterAuthOnShutdown: true, trustProxy: true,
+      oauthOwner: {
+        issuer: betterAuth.issuer, audience: betterAuth.audience, jwksUrl: betterAuth.issuer + "/jwks",
+        ownerSubject: authConfig.ownerSubject, requiredScopes: [CODEXIA_OWNER_SCOPE], allowedClientIds: authConfig.ownerClientIds,
+        verifyActiveToken: betterAuth.verifyActiveAccessToken,
+      },
+    });
   } catch (error) {
+    await betterAuth?.pool.end().catch(() => {});
     await runtime.shutdown();
     await persistence.close();
     throw error;
@@ -457,6 +502,7 @@ async function runLifecycle() {
   };
 
   try {
+    await assertOwnerAuthorization();
     const version = await api("/api/version");
     assert.equal(version.profile, "full");
     const initialStatuses = await api(projectPath + "/modules");
@@ -842,6 +888,7 @@ async function replacementProbe() {
     assertions: {},
   };
   try {
+    await assertOwnerAuthorization();
     const version = await api("/api/version");
     assert.equal(version.profile, "full");
     const statuses = await api(projectPathname + "/modules");
