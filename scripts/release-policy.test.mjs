@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
 import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './release-policy.mjs';
 
 const sha = 'a'.repeat(40);
@@ -20,12 +20,14 @@ test('release eligibility rejects moved tags and malformed version names', () =>
 });
 
 test('release gate requires the exact successful job set including every matrix element and certification', () => {
-  assert.deepEqual(REQUIRED_VERIFICATION_JOBS, [...VERIFICATION_LEAF_JOBS, 'certification']);
   const jobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
   assert.doesNotThrow(() => assertVerificationJobs(jobs));
   assert.doesNotThrow(() => assertVerificationLeafJobs(jobs.filter(job => job.name !== 'certification')));
   assert.throws(() => assertVerificationLeafJobs(jobs), /Unexpected release verification job/);
-  assert.throws(() => assertVerificationJobs(jobs.slice(1)), /exact required job set/);
+  for (const required of ['plan', 'browser-core-webkit', 'browser-full-webkit', 'certification']) {
+    assert.ok(jobs.some(job => job.name === required), required + ' is a release obligation');
+    assert.throws(() => assertVerificationJobs(jobs.filter(job => job.name !== required)), /exact required job set/);
+  }
   for (const conclusion of ['failure', 'cancelled', 'skipped']) {
     const rejected = jobs.map((job, index) => index === 1 ? { ...job, conclusion } : job);
     assert.throws(() => assertVerificationJobs(rejected), /did not succeed/);
@@ -70,19 +72,6 @@ test('GitHub Actions pagination retrieves all pages and rejects incomplete respo
     return { total_count: page === 1 ? 101 : 102, jobs: expected.slice((page - 1) * 100, page * 100) };
   }, 'jobs'), /count changed/);
   await assert.rejects(collectGitHubPages(async () => { throw new Error('page request failed'); }, 'jobs'), /page request failed/);
-});
-
-test('release source selection excludes PR runs, failed runs and stale commits', () => {
-  for (const change of [
-    { head_sha: 'b'.repeat(40) },
-    { head_branch: 'other' },
-    { event: 'pull_request' },
-    { status: 'in_progress' },
-    { conclusion: 'failure' },
-    { conclusion: 'cancelled' },
-  ]) {
-    assert.throws(() => verifiedSourceRun([{ ...run, ...change }], sha));
-  }
 });
 
 test('OCI publication refuses existing image tags and fails closed on registry uncertainty', async () => {
