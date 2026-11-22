@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, Response } from "@playwright/test";
 import type { ChangeOperation } from "@codexia/contracts";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import { expect, test, type AuthorApiFetch, type AuthorizeAuthor } from "./author-oauth-fixture";
@@ -704,15 +704,21 @@ test("saving a scratch note replays the same request after its committed respons
   await image(page).setInputFiles(png);
   await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain(png.name);
 
+  type NoteReceipt = { document: { id: string }; revision: { id: string }; replayed: boolean };
+  const collectionPath = documentPath(f).slice(0, documentPath(f).lastIndexOf("/"));
+  const isNoteResponse = (response: Response) => response.request().method() === "POST" &&
+    new URL(response.url()).pathname === collectionPath;
+  let firstCommit: NoteReceipt | undefined;
   let attempts = 0;
   const requests: Array<{ key: string | undefined; body: unknown }> = [];
-  await page.route(`**${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}`, async (route) => {
+  await page.route(`**${collectionPath}`, async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     attempts += 1;
     requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
     if (attempts === 1) {
       const response = await route.fetch();
       expect(response.status()).toBe(201);
+      firstCommit = await response.json() as NoteReceipt;
       await route.abort("failed");
       return;
     }
@@ -725,25 +731,38 @@ test("saving a scratch note replays the same request after its committed respons
   await expect(memo(page)).toHaveValue("Scratch text survives an ambiguous note save.");
   await expect(page.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
   await memo(page).fill("A newer scratch draft stays separate from the pending note.");
-  await page.locator(".scratch-panel").getByRole("button", { name: "前のノート保存を照合", exact: true }).click();
+  const reconcile = page.locator(".scratch-panel").getByRole("button", { name: "前のノート保存を照合", exact: true });
+  const [replayResponse] = await Promise.all([page.waitForResponse(isNoteResponse), reconcile.click()]);
+  expect(replayResponse.status()).toBe(201);
+  if (!firstCommit) throw new Error("The intercepted note was never committed");
+  expect(firstCommit.replayed).toBe(false);
+  expect(await replayResponse.json()).toMatchObject({
+    document: { id: firstCommit.document.id }, revision: { id: firstCommit.revision.id }, replayed: true,
+  });
   await expect(page.locator(".scratch-panel").getByRole("alert")).toHaveCount(0);
   expect(attempts).toBe(2);
   expect(requests[1]).toEqual(requests[0]);
   await expect(memo(page)).toHaveValue("A newer scratch draft stays separate from the pending note.");
 
-  await save.click();
-  await expect.poll(() => attempts).toBe(3);
+  const [newResponse] = await Promise.all([page.waitForResponse(isNoteResponse), save.click()]);
+  expect(newResponse.status()).toBe(201);
+  const newCommit = await newResponse.json() as NoteReceipt;
+  expect(newCommit.replayed).toBe(false);
+  expect(newCommit.document.id).not.toBe(firstCommit.document.id);
+  await expect(memo(page)).toBeEnabled();
+  expect(attempts).toBe(3);
   await expect(page.locator(".scratch-panel").getByRole("alert")).toHaveCount(0);
   expect(requests[2]?.key).not.toBe(requests[0]?.key);
   expect((requests[2]?.body as { markdown: string }).markdown).toContain("A newer scratch draft stays separate from the pending note.");
 
-  const documents = await f.fetch(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}?limit=1000&parentId=${f.one.document.id}`);
+  const documents = await f.fetch(`${collectionPath}?limit=1000&parentId=${f.one.document.id}`);
   expect(documents.ok()).toBe(true);
   const children = await documents.json() as { documents: Array<{ id: string; kind: string; title: string }> };
   const notes = children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ");
   expect(notes).toHaveLength(2);
+  expect(notes.map(note => note.id).sort()).toEqual([firstCommit.document.id, newCommit.document.id].sort());
   const noteBodies = await Promise.all(notes.map(async (item) => {
-    const note = await f.fetch(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}/${item.id}`);
+    const note = await f.fetch(`${collectionPath}/${item.id}`);
     expect(note.ok()).toBe(true);
     const noteRead = await note.json() as { revision: { markdown: string } };
     return noteRead.revision.markdown;
