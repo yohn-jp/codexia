@@ -237,12 +237,20 @@ async function shippedModuleData() {
 }
 
 test('composition persistence declares base and selected module readers/writers only', () => {
+  const core = persistenceForModules([], MODULE_PERSISTENCE_FORMATS);
+  assert.deepEqual(core.readable, [{ formatId: 'scriptorium.browser-recovery-indexeddb', versions: [3] }]);
+  assert.deepEqual(core.writable, [{ formatId: 'scriptorium.browser-recovery-indexeddb', version: 3 }]);
+
+  const fullModuleIds = [...new Set(MODULE_PERSISTENCE_FORMATS.map(({ moduleId }) => moduleId))];
+  const full = persistenceForModules(fullModuleIds, MODULE_PERSISTENCE_FORMATS);
+  for (const { formatId } of [...full.readable, ...full.writable]) {
+    assert.doesNotMatch(formatId, /^scriptorium\.git-/u);
+  }
+
   const persistence = persistenceForModules(['publishing', 'story'], MODULE_PERSISTENCE_FORMATS);
   const readable = new Map(persistence.readable.map(({ formatId, versions }) => [formatId, versions]));
   const writable = new Set(persistence.writable.map(({ formatId, version }) => `${formatId}@${version}`));
 
-  assert.deepEqual(readable.get('scriptorium.git-operations'), [1]);
-  assert.deepEqual(readable.get('scriptorium.git-proposal-legacy'), [1]);
   assert.deepEqual(readable.get('scriptorium.browser-recovery-indexeddb'), [3]);
   assert.deepEqual(readable.get('scriptorium.module-story.series'), [1]);
   assert.deepEqual(readable.get('scriptorium.module-publishing.cover'), [1]);

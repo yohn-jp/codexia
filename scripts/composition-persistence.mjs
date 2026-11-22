@@ -1,26 +1,12 @@
 /** Shared pure declaration builder; consumed by the Build Kit and its trusted consumer bundle. */
-const baseReadablePersistence = [
-  { formatId: 'scriptorium.browser-recovery-indexeddb', version: 3 },
-  { formatId: 'scriptorium.git-operations', version: 1 },
-  { formatId: 'scriptorium.git-proposal-binding', version: 2 },
-  { formatId: 'scriptorium.git-proposal-complete', version: 2 },
-  { formatId: 'scriptorium.git-proposal-legacy', version: 1 },
-  { formatId: 'scriptorium.git-publications', version: 1 },
-];
-
-const baseWritablePersistence = [
-  { formatId: 'scriptorium.browser-recovery-indexeddb', version: 3 },
-  { formatId: 'scriptorium.git-operations', version: 1 },
-  { formatId: 'scriptorium.git-proposal-binding', version: 2 },
-  { formatId: 'scriptorium.git-proposal-complete', version: 2 },
-  { formatId: 'scriptorium.git-publications', version: 1 },
-];
+const browserRecoveryFormat = 'scriptorium.browser-recovery-indexeddb';
+const browserRecoveryVersion = 3;
 
 export function persistenceForModules(selectedModuleIds, moduleFormats) {
   const selected = new Set(selectedModuleIds);
   if (selected.size !== selectedModuleIds.length) throw new Error('Selected module IDs must be unique for persistence declarations');
-  const readable = new Map(baseReadablePersistence.map(({ formatId, version }) => [formatId, new Set([version])]));
-  const writable = new Map(baseWritablePersistence.map(({ formatId, version }) => [formatId, new Set([version])]));
+  const readable = new Map([[browserRecoveryFormat, new Set([browserRecoveryVersion])]]);
+  const writable = new Map([[browserRecoveryFormat, new Set([browserRecoveryVersion])]]);
   for (const descriptor of moduleFormats) {
     if (!selected.has(descriptor.moduleId)) continue;
     if (!Number.isSafeInteger(descriptor.version) || descriptor.version < 1 ||
