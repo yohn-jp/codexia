@@ -38,6 +38,7 @@ import type {
   SaveKnowledgeNodeCommand,
   SaveKnowledgeRelationCommand,
   SaveMentionLinkCommand,
+  ChangeSet,
 } from "@codexia/persistence-contracts";
 
 /** Portable current-state work, separate from operational PostgreSQL backups. */
@@ -57,6 +58,32 @@ export interface PortableWorkImportResult {
   unresolvedAnchors: number;
   omittedRecords: number;
 }
+
+/** Author review feed summary retaining each stored lifecycle's native receipt shape. */
+export type AuthorReviewFeedItem =
+  | {
+      kind: "core-proposal";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ProposalStatus["state"];
+      approvalModel: "per-operation";
+      applicationModel: "per-operation";
+      status: ProposalStatus;
+      receipts: ApplyReceipt[];
+      stale: boolean;
+    }
+  | {
+      kind: "native-change-set";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ChangeSet["status"];
+      approvalModel: "whole-change-set";
+      applicationModel: "transaction";
+      changeSet: Pick<ChangeSet, "id" | "projectId" | "status" | "version" | "createdAt">;
+      receipt: Record<string, unknown> | null;
+    };
 
 export class DocumentDepartureError extends DOMException {
   constructor() {
@@ -622,6 +649,8 @@ export const api = {
   persistenceProject: (projectId: string, signal?: AbortSignal) => request(dto.persistenceProject, persistencePath(projectId), { ...(signal ? { signal } : {}) }),
   nativeChangeSets: (projectId: string, limit = 50, signal?: AbortSignal) => request(dto.nativeChangeSets,
     persistencePath(projectId, `changesets?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
+  authorReviewFeed: (projectId: string, limit = 50, signal?: AbortSignal) => request(dto.authorReviewFeed,
+    persistencePath(projectId, `review-feed?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
   nativeChangeSet: (projectId: string, changeSetId: string, signal?: AbortSignal) => request(dto.nativeChangeSet,
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}`), { ...(signal ? { signal } : {}) }),
   approveNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetEnvelope,
