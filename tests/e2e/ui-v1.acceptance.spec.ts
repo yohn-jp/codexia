@@ -905,9 +905,7 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
   await expect.poll(async () => {
     const drafts = await readPersistenceDrafts(page);
     if (drafts.some(draft => draft.documentId === scene.id && draft.markdown === expectedMarkdown)) return true;
-    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
-    expect(response.ok()).toBe(true);
-    return (await response.json()).revision.markdown === expectedMarkdown;
+    return await persistedMarkdown(page, project.id, scene.id) === expectedMarkdown;
   }).toBe(true);
   await expect(editor(page)).toContainText(text);
 });

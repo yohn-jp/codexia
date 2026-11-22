@@ -297,3 +297,34 @@ test('pre-profile workspace build preserves the complete 15-package build graph'
     assert.deepEqual(commands[0].slice(-2), ['run', 'build']);
   } finally { await rm(fixture.projectRoot, { recursive: true, force: true }); }
 });
+
+test('root typecheck shares completed compiler builds and runs distinct checks', async t => {
+  const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
+  t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+  for (const [workspace, change] of [
+    ['packages/contracts', { build: 'tsc -p tsconfig.json', typecheck: 'tsc -p tsconfig.json --noEmit' }],
+    ['modules/search', { typecheck: 'tsc -p tsconfig.strict.json --noEmit' }],
+    ['packages/migration', { posttypecheck: 'node check-migrations.mjs' }],
+  ]) {
+    const manifestPath = path.join(fixture.projectRoot, workspace, 'package.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    Object.assign(manifest.scripts, change);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+  }
+
+  const result = runProject(fixture.projectRoot, ['typecheck'], fixture.env);
+  assert.equal(result.status, 0, result.stderr);
+  const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(commands.map(command => command.at(-1)), ['build', 'typecheck']);
+  const [build, typecheck] = commands.map(command =>
+    new Set(command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : [])));
+  for (const { path: workspacePath } of WORKSPACES) {
+    const { name } = JSON.parse(await readFile(path.join(fixture.projectRoot, workspacePath, 'package.json'), 'utf8'));
+    assert.ok(build.has(name) || typecheck.has(name), `Missing production check for ${name}`);
+  }
+  assert.ok(build.has('@codexia/contracts') && !typecheck.has('@codexia/contracts'));
+  for (const name of ['@codexia/module-search', '@codexia/migration']) {
+    assert.ok(typecheck.has(name), `A distinct compiler command or lifecycle hook must run for ${name}`);
+  }
+  for (const name of ['@codexia/api', '@codexia/app']) assert.ok(!build.has(name) && typecheck.has(name));
+});

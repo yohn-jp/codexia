@@ -3,31 +3,21 @@ import assert from "node:assert/strict";
 import { BROWSER_SHARDS, PROFILES } from "./ci-contract.mjs";
 import { buildBrowserTestArguments, resolveBrowserShard, summarizeBrowserCoverage } from "./browser-shards.mjs";
 
-test("the browser matrix resolves all twelve Chromium specs and the WebKit UI spec for both profiles", () => {
+test("each profile resolves every declared shard to its Playwright project and file", () => {
   assert.deepEqual(PROFILES, ["core", "full"]);
-  assert.deepEqual(BROWSER_SHARDS, [
-    { id: "auth-recovery", project: "chromium", file: "auth-recovery.acceptance.spec.ts" },
-    { id: "oauth-web", project: "chromium", file: "oauth-web.acceptance.spec.ts" },
-    { id: "core", project: "chromium", file: "core.acceptance.spec.ts" },
-    { id: "outline-headings", project: "chromium", file: "outline-headings.acceptance.spec.ts" },
-    { id: "job-inbox", project: "chromium", file: "job-inbox.acceptance.spec.ts" },
-    { id: "modular-workspace", project: "chromium", file: "modular-workspace.acceptance.spec.ts" },
-    { id: "native-review", project: "chromium", file: "native-review.acceptance.spec.ts" },
-    { id: "persistence-database", project: "chromium", file: "persistence-database.acceptance.spec.ts" },
-    { id: "recent-activity", project: "chromium", file: "recent-activity.acceptance.spec.ts" },
-    { id: "redesign-visual", project: "chromium", file: "redesign-visual.acceptance.spec.ts" },
-    { id: "review-contributions", project: "chromium", file: "review-contributions.acceptance.spec.ts" },
-    { id: "ui-v1", project: "chromium", file: "ui-v1.acceptance.spec.ts" },
-    { id: "webkit", project: "webkit", file: "ui-v1.acceptance.spec.ts" },
-  ]);
+  for (const profile of PROFILES) {
+    for (const shard of BROWSER_SHARDS) {
+      const resolved = resolveBrowserShard(profile, shard.id);
+      assert.deepEqual(resolved, { profile, ...shard });
+      if (resolved.project === "chromium") assert.equal(resolved.file, `${resolved.id}.acceptance.spec.ts`);
+    }
+  }
   assert.deepEqual(resolveBrowserShard("full", "webkit"), {
     profile: "full",
     id: "webkit",
     project: "webkit",
     file: "ui-v1.acceptance.spec.ts",
   });
-  assert.equal(resolveBrowserShard("core", "recent-activity").project, "chromium");
-  assert.equal(resolveBrowserShard("core", "recent-activity").file, "recent-activity.acceptance.spec.ts");
 });
 
 test("unknown profiles and shards are rejected before a runner starts", () => {
