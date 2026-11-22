@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
 import type { UiMode, WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import {
   activateWorkspacePanel,
@@ -202,14 +202,27 @@ interface TreeViewProps {
   onFloat(panelId: string): void;
   onMaximize(panelId: string): void;
   maximizedPanelId: string | null;
+  presetRevision: number;
 }
 
 function describeNode(node: WorkspaceNode, catalog: ReadonlyMap<string, WorkspacePanel>): string {
   return visiblePanelIds(node).map((panelId) => catalog.get(panelId)?.title ?? panelId).join("、");
 }
 
-function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount, onActivate, onHide, onDrop, onResize, onFloat, onMaximize, maximizedPanelId }: TreeViewProps): ReactNode {
+function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount, onActivate, onHide, onDrop, onResize, onFloat, onMaximize, maximizedPanelId, presetRevision }: TreeViewProps): ReactNode {
   const resizeGestureRef = useRef(false);
+  const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const presetLayoutRef = useRef<Record<string, number>>({});
+  if (node.type === "split") {
+    presetLayoutRef.current = Object.fromEntries(node.children.map((_, index) => [
+      `st-workspace-panel-${node.id}-${index}`,
+      node.sizes[index]!,
+    ]));
+  }
+  useLayoutEffect(() => {
+    if (presetRevision > 0) groupRef.current?.setLayout(presetLayoutRef.current);
+  }, [presetRevision]);
+
   if (node.type === "leaf") {
     return <PanelFrame panelId={node.panelId} panel={catalog.get(node.panelId)} mode={mode} layoutEditing={layoutEditing} canHide={visibleCount > 1} onHide={onHide} onDrop={onDrop} onFloat={onFloat} onMaximize={onMaximize} maximized={maximizedPanelId === node.panelId} />;
   }
@@ -292,6 +305,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
 
   return (
     <Group
+      groupRef={groupRef}
       className={`st-workspace-split st-workspace-split-${node.direction}`}
       id={`st-workspace-${node.id}`}
       orientation={node.direction}
@@ -322,6 +336,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
               onDrop={onDrop}
               onResize={onResize}
               onFloat={onFloat} onMaximize={onMaximize} maximizedPanelId={maximizedPanelId}
+              presetRevision={presetRevision}
             />
           </Panel>,
           ...(index < node.children.length - 1 ? [
@@ -400,6 +415,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [moveTarget, setMoveTarget] = useState<string>(() => panelIds.find((id) => id !== "editor") ?? "");
   const [placement, setPlacement] = useState<Placement>("tab");
   const [layoutEditing, setLayoutEditing] = useState(false);
+  const [presetRevision, setPresetRevision] = useState(0);
   const [message, setMessage] = useState("");
   const [changing, setChanging] = useState(false);
   const [committingPanelRequest, setCommittingPanelRequest] = useState<number>();
@@ -550,7 +566,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
 
   const changePreset = (preset: Exclude<WorkspacePreset, "custom">): void => {
     void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)}の作業面を開きました。次回も使うには配置を保存してください。`)
-      .then((allowed) => { if (allowed) { setFloating([]); setMaximizedPanelId(null); onActivePanelChange?.("editor"); } });
+      .then((allowed) => { if (allowed) { setFloating([]); setMaximizedPanelId(null); setPresetRevision((revision) => revision + 1); onActivePanelChange?.("editor"); } });
   };
 
   const save = (): void => {
@@ -883,6 +899,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
             onDrop={handleDrop}
             onResize={resize}
             onFloat={floatPanel} onMaximize={toggleMaximize} maximizedPanelId={maximizedPanelId}
+            presetRevision={presetRevision}
           />
         </div>
       )}

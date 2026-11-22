@@ -7,6 +7,7 @@ import {
   syncDataLoaderFeature,
 } from "@headless-tree/core";
 import { useTree } from "@headless-tree/react";
+import "./DocumentOutlineTree.css";
 
 const ROOT_ID = "codexia:outline-root";
 
@@ -187,7 +188,7 @@ export function DocumentOutlineTree({
     </li>;
   });
 
-  return <ul {...tree.getContainerProps("作品の構成")} className="pg-document-list">
+  return <ul {...tree.getContainerProps("作品の構成")} className="pg-document-list pg-document-outline-tree">
     {renderBranch(index.roots)}
   </ul>;
 }

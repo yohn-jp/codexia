@@ -230,6 +230,13 @@ test("mobile route navigation commits the URL, panel and focus as one guarded tr
     await expect(editor).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
       .toBe("outline");
+    const focusedPanel = page.locator('[data-workspace-panel="outline"]');
+    await expect(focusedPanel).toBeFocused();
+    const focusRing = await focusedPanel.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineOffset: style.outlineOffset };
+    });
+    expect(focusRing).toEqual({ outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
     expect(metrics).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 1 });
   } finally {
     await fixture.server.stop();
@@ -773,6 +780,157 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await expect(page.locator(".st-workspace")).toBeVisible();
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
   await expect.poll(async () => (await workspaceStorage(page, "desktop")).raw).toBe(persisted.raw);
+});
+
+test("desktop preset sizing updates the live split without replacing the editor or overwriting a saved layout", async ({ page }) => {
+  expect(authToken.length).toBeGreaterThanOrEqual(32);
+  await signIn(page, "desktop");
+  await openFixtureScene(page, "desktop");
+
+  const workspace = page.locator(".st-workspace");
+  const toolbar = workspaceToolbar(page);
+  const editorPanel = workspace.locator('[data-workspace-panel="editor"]');
+  const editorShare = async (): Promise<number> => editorPanel.evaluate((element) => {
+    const group = element.closest<HTMLElement>("[data-group]");
+    if (!group) throw new Error("Editor panel is missing its resizable group");
+    return element.getBoundingClientRect().width / group.getBoundingClientRect().width;
+  });
+  await expect(editorPanel).toBeVisible();
+  await page.evaluate(() => {
+    (window as Window & { __presetEditorNode?: Element }).__presetEditorNode = document.querySelector(".cm-editor") ?? undefined;
+  });
+
+  // Save a user-sized Writing layout first. Choosing a preset is an in-memory
+  // arrangement until the author explicitly saves it again.
+  const resizeHandle = page.getByRole("separator", { name: "Resize horizontal workspace panels" });
+  await expect(resizeHandle).toBeVisible();
+  await resizeHandle.focus();
+  await resizeHandle.press("ArrowRight");
+  const savedLayout = await saveWorkspace(page);
+  expect(savedLayout.preset).toBe("custom");
+  const persistedBeforePreset = await workspaceStorage(page, "desktop");
+  expect(persistedBeforePreset.raw).not.toBeNull();
+  const savedEditorShare = await editorShare();
+
+  const layoutMenu = workspace.locator(".st-workspace-move-menu");
+  const layoutSummary = layoutMenu.locator("summary");
+  const closedEditorPanelTop = await editorPanel.evaluate((element) => element.getBoundingClientRect().top);
+  await layoutSummary.click();
+  await expect(layoutMenu.locator(".st-workspace-move-controls")).toBeVisible();
+  const openGeometry = await page.evaluate(() => {
+    const controls = document.querySelector<HTMLElement>(".st-workspace-move-controls");
+    const editor = document.querySelector<HTMLElement>('[data-workspace-panel="editor"]');
+    if (!controls || !editor) throw new Error("Workspace controls or editor panel are missing");
+    return { controlsBottom: controls.getBoundingClientRect().bottom, editorTop: editor.getBoundingClientRect().top };
+  });
+  expect(openGeometry.editorTop).toBeGreaterThan(closedEditorPanelTop);
+  expect(openGeometry.controlsBottom).toBeLessThanOrEqual(openGeometry.editorTop);
+
+  const saveStatus = editorPanel.locator(".pg-save-state");
+  await expect(saveStatus).toHaveAttribute("open", "");
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus).not.toHaveAttribute("open", "");
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus.locator(".pg-save-state-detail")).toBeVisible();
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus.locator(".pg-save-state-detail")).not.toBeVisible();
+  await layoutSummary.click();
+  await expect.poll(() => editorPanel.evaluate((element) => element.getBoundingClientRect().top)).toBe(closedEditorPanelTop);
+
+  const writingPreset = toolbar.getByRole("button", { name: "執筆", exact: true });
+  const researchPreset = toolbar.getByRole("button", { name: "調査", exact: true });
+  await writingPreset.focus();
+  await page.keyboard.press("Tab");
+  await expect(researchPreset).toBeFocused();
+  const focusGeometry = await researchPreset.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const workspaceBounds = element.closest<HTMLElement>(".st-workspace")?.getBoundingClientRect();
+    if (!workspaceBounds) throw new Error("Workspace clipping bounds are missing");
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    return {
+      visible: element.matches(":focus-visible"),
+      outlineStyle: style.outlineStyle,
+      outlineWidth,
+      outlineOffset,
+      outlineTop: bounds.top - outlineWidth - outlineOffset,
+      workspaceTop: workspaceBounds.top,
+    };
+  });
+  expect(focusGeometry.visible).toBe(true);
+  expect(focusGeometry.outlineStyle).toBe("solid");
+  expect(focusGeometry.outlineWidth).toBe(3);
+  expect(focusGeometry.outlineOffset).toBe(2);
+  expect(focusGeometry.outlineTop).toBeGreaterThanOrEqual(focusGeometry.workspaceTop);
+
+  await researchPreset.click();
+  await expect(workspace).toHaveAttribute("data-preset", "research");
+  await expect(workspace.locator('[data-workspace-panel="inspector"]')).toBeVisible();
+  await expect.poll(editorShare).toBeGreaterThan(0.6);
+  await expect.poll(editorShare).toBeLessThan(0.74);
+  expect(await page.evaluate(() =>
+    (window as Window & { __presetEditorNode?: Element }).__presetEditorNode === document.querySelector(".cm-editor"),
+  )).toBe(true);
+  expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
+
+  await page.reload();
+  await expect(page.locator(".st-workspace")).toHaveAttribute("data-preset", "custom");
+  await expect.poll(async () => Math.abs(await editorShare() - savedEditorShare)).toBeLessThan(0.02);
+  expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
+});
+
+test("narrow Desktop keeps the manuscript internally scrollable while shell and workspace controls stay reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  await signIn(page, "desktop");
+  await openFixtureScene(page, "desktop");
+
+  const workspace = page.locator(".st-workspace");
+  const toolbar = workspaceToolbar(page);
+  const editor = manuscriptEditor(page);
+  const manuscript = Array.from({ length: 48 }, (_, index) =>
+    `第${index + 1}段落。　灯台の下に古い書庫があり、海図の端にはまだ知られていない港の名前が小さく記されていた。`,
+  ).join("\n\n");
+  await editor.fill(manuscript);
+  await expect(editor).toContainText("第48段落");
+
+  const scrollState = await editor.evaluate((content) => {
+    let ancestor = content.parentElement;
+    let scrollArea: HTMLElement | null = null;
+    while (ancestor && ancestor !== document.body) {
+      const overflowY = getComputedStyle(ancestor).overflowY;
+      if (ancestor.scrollHeight > ancestor.clientHeight + 1 && (overflowY === "auto" || overflowY === "scroll")) {
+        scrollArea = ancestor;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (!scrollArea) throw new Error("The manuscript has no internal vertical scroll area");
+    scrollArea.scrollTop = 0;
+    const before = scrollArea.scrollTop;
+    const documentScrollBefore = window.scrollY;
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+    const line = content.querySelectorAll<HTMLElement>(".cm-line").item(content.querySelectorAll(".cm-line").length - 1);
+    if (!line) throw new Error("The final manuscript line is missing");
+    const areaBounds = scrollArea.getBoundingClientRect();
+    const lineBounds = line.getBoundingClientRect();
+    return {
+      before,
+      after: scrollArea.scrollTop,
+      documentScrollBefore,
+      documentScrollAfter: window.scrollY,
+      lastLineVisible: lineBounds.top >= areaBounds.top && lineBounds.bottom <= areaBounds.bottom,
+    };
+  });
+  expect(scrollState.after).toBeGreaterThan(scrollState.before);
+  expect(scrollState.documentScrollAfter).toBe(scrollState.documentScrollBefore);
+  expect(scrollState.lastLineVisible).toBe(true);
+
+  await expect(toolbar.getByRole("button", { name: "執筆", exact: true })).toBeInViewport();
+  const shellSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
+  await expect(shellSwitch).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  await expect(page).toHaveURL(/\/desktop\//u);
 });
 
 test("malformed workspace settings are retained until the owner explicitly saves a replacement", async ({ page }) => {

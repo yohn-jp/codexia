@@ -67,6 +67,7 @@ async function resolveCompactMainTaskProofs({ plan, run, jobs, current, reposito
     signal: AbortSignal.timeout(15_000), redirect: 'error',
   });
   const mainProof = await verifyReusableMainProof({ sourceSha: plan.base, before, repository, currentRun: run,
+    checkoutSha: plan.sha,
     git: args => execFileSync('git', args, { encoding: 'utf8' }),
     request: async endpoint => {
       const response = await githubRequest(endpoint);

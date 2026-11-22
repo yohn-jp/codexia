@@ -21,10 +21,11 @@ const positive = n => Number.isSafeInteger(n) && n > 0;
 const sameRepo = (record, id) => record?.id === id;
 const success = job => job?.status === 'completed' && job.conclusion === 'success';
 
-export function mergeCandidate(sourceSha, before, git) {
+export function mergeCandidate(sourceSha, before, git, checkoutSha = sourceSha) {
   assert.match(sourceSha, shaPattern);
   assert.match(before, shaPattern);
-  assert.equal(git(['rev-parse', 'HEAD']).trim(), sourceSha, 'Checkout is not exact main source');
+  assert.match(checkoutSha, shaPattern);
+  assert.equal(git(['rev-parse', 'HEAD']).trim(), checkoutSha, 'Checkout is not the expected exact source');
   const parents = git(['rev-list', '--parents', '-n', '1', sourceSha]).trim().split(/\s+/u);
   assert.equal(parents.length, 3, 'Not a single two-parent merge commit');
   const [source, base, head] = parents;
@@ -186,9 +187,9 @@ function assertSuccessfulStep(job, name) {
 }
 
 /** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
-export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact }) {
+export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact, checkoutSha = sourceSha }) {
   const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
-  const candidate = mergeCandidate(sourceSha, before, git);
+  const candidate = mergeCandidate(sourceSha, before, git, checkoutSha);
   const { run, jobs, prNumber, mergedAt, headRef } = await mergedPrRun({ context, candidate, request });
   const cert = assertCertificationJob(jobs, run);
   assertSuccessfulStep(cert, FULL_CERT_STEP);

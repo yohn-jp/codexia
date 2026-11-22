@@ -75,6 +75,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/check_postgres_volume.py',
   'deploy/ansible/ci-mitogen-playbook.sh',
   'deploy/ansible/deploy.yml',
+  'deploy/ansible/deploy-transaction.yml',
   'deploy/ansible/host-contract.py',
   'deploy/ansible/host-validate.yml',
   'deploy/ansible/host.yml',
