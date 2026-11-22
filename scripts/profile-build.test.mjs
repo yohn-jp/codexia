@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,11 +22,14 @@ test('Core profile generation and deployed-closure verification exclude optional
     assert.equal(result.status, 0, result.stderr);
     const metadata = JSON.parse(await readFile(path.join(output, 'module-manifests.json'), 'utf8'));
     assert.deepEqual(metadata.modules, []);
-    const server = await readFile(path.join(output, 'server.mjs'), 'utf8');
-    const browser = await readFile(path.join(output, 'browser.mjs'), 'utf8');
-    assert.match(server, /moduleLoaders = Object\.freeze\(\{\s*\}\)/);
-    assert.match(browser, /moduleBrowserLoaders = Object\.freeze\(\{\s*\}\)/);
-    assert.doesNotMatch(`${server}\n${browser}`, /@codexia\/module-(?:story|diagnostics|nlp|semantic|speaker|assistant|publishing|mcp)/);
+    const server = await import(pathToFileURL(path.join(output, 'server.mjs')).href);
+    const browser = await import(pathToFileURL(path.join(output, 'browser.mjs')).href);
+    assert.equal(server.profile, 'core');
+    assert.equal(browser.profile, 'core');
+    assert.deepEqual(Object.keys(server.moduleLoaders), []);
+    assert.deepEqual(Object.keys(browser.moduleBrowserLoaders), []);
+    assert.ok(Object.isFrozen(server.moduleLoaders));
+    assert.ok(Object.isFrozen(browser.moduleBrowserLoaders));
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

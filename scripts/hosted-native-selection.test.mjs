@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { createHostedNativeReport, hostedNativeComposeCases, hostedModuleIds, hostedNativeSelections, parseHostedNativeSelection } from './hosted-native-selection.mjs';
+import { createHostedNativeReport, hostedNativeComposeCases, parseHostedNativeSelection } from './hosted-native-selection.mjs';
+
+const fullProfile = JSON.parse(await readFile(new URL('../profiles/full.json', import.meta.url), 'utf8'));
 
 test('Hosted Native selection defaults to all catalog and composition checks', () => {
   assert.equal(parseHostedNativeSelection([]), 'all');
@@ -8,11 +11,15 @@ test('Hosted Native selection defaults to all catalog and composition checks', (
 });
 
 test('Hosted Native matrix selections isolate catalog and each composition', () => {
-  assert.deepEqual(hostedNativeSelections, ['catalog', 'core', 'selected', 'full']);
+  for (const selection of ['catalog', 'core', 'selected', 'full']) {
+    assert.equal(parseHostedNativeSelection(['--selection', selection]), selection);
+  }
   assert.deepEqual(hostedNativeComposeCases('catalog'), []);
   assert.deepEqual(hostedNativeComposeCases('core'), [{ name: 'core', requestedModules: [] }]);
   assert.deepEqual(hostedNativeComposeCases('selected'), [{ name: 'selected', requestedModules: ['story', 'mcp', 'search'] }]);
-  assert.deepEqual(hostedNativeComposeCases('full'), [{ name: 'full', requestedModules: [...hostedModuleIds] }]);
+  const [full] = hostedNativeComposeCases('full');
+  assert.equal(full.name, 'full');
+  assert.deepEqual(full.requestedModules.toSorted(), fullProfile.modules.toSorted());
 });
 
 test('Hosted Native selection rejects malformed or unknown CLI arguments', () => {
@@ -34,7 +41,7 @@ test('Hosted Native report binds source, recipe and OCI identities while retaini
       sourceDigest: `sha256:${'e'.repeat(64)}`,
       recipeDigest: `sha256:${'f'.repeat(64)}`,
       lockDigest: `sha256:${'1'.repeat(64)}`,
-      moduleCount: hostedModuleIds.length,
+      moduleCount: fullProfile.modules.length,
     },
     compositions: [{ selection: 'core', requestedModules: [], resolvedModules: [], buildKey: `sha256:${'2'.repeat(64)}`, composeMode: 'OFFLINE' }],
   });
