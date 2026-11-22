@@ -39,8 +39,10 @@ test("PostgreSQL projection labels a note with misleading scene ancestry by its 
   const projectedNote = await reader.read(misleadingPath);
   assert.equal(YAML.parse(projectedNote!.content).kind, undefined, "the immutable projection bytes remain unchanged");
   assert.equal(projectedNote!.documentKind, "note");
+  assert.equal((await reader.read(`documents/${note.document.id}.md`))?.documentKind, "note", "native body reads expose their canonical PostgreSQL document kind");
   const pinnedReader = await core.reader(p.id, reader.snapshot);
   assert.equal((await pinnedReader.read(misleadingPath))?.documentKind, "note", "pinned stored snapshots expose their canonical document kind");
+  assert.equal((await pinnedReader.read(`documents/${note.document.id}.md`))?.documentKind, "note", "pinned native body reads expose their canonical PostgreSQL document kind");
   const tree = await core.tree(p.id);
   assert.deepEqual(tree.volumes.map((volume) => volume.id), ["v1"]);
   assert.deepEqual(tree.volumes[0]?.chapters.map((chapter) => chapter.id), ["c1"]);
@@ -66,6 +68,7 @@ test("native document snapshots expose authoritative chapter and scene parent id
   assert.equal(sceneMeta.chapter, chapter.id);
   assert.equal(sceneMeta.manuscript, `documents/${scene.id}.md`);
   assert.equal((await reader.read(sceneMeta.manuscript))?.content, "本文😀");
+  assert.equal((await reader.read(sceneMeta.manuscript))?.documentKind, "scene", "native scene body reads expose their canonical PostgreSQL document kind");
   assert.equal((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes[0]?.id, scene.id);
 });
 
