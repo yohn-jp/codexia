@@ -70,6 +70,13 @@ test("legacy search retains semantic action ID and Story Context preserves produ
     descriptor("search.query", "search"), descriptor("semantic.search", "semantic"),
     descriptor("story.context.package", "story", "read"),
   ], (id) => ({ ok: true, snapshot, data: id === "story.context.package" ? payload : { results: [] } }));
+  const legacySchema = z.object(tools.get("search")!.schema);
+  assert.equal(legacySchema.safeParse({ query: "river", limit: 3 }).success, true);
+  assert.equal(legacySchema.safeParse({ query: "x".repeat(8192), limit: 100 }).success, true);
+  for (const input of [{ query: "x".repeat(8193) }, { query: "river", limit: 0 },
+    { query: "river", limit: 101 }, { query: "river", limit: 1.5 }]) {
+    assert.equal(legacySchema.safeParse(input).success, false, "MCP search rejects arguments the source action cannot accept");
+  }
   await tools.get("search")!.handler({ query: "river", limit: 3 }, { signal: new AbortController().signal });
   const contextSchema = z.object(tools.get("story.context.package")!.schema);
   assert.equal(contextSchema.safeParse({ scene_id: "scene-1", scope: "reader", budget: 127 }).success, false);
