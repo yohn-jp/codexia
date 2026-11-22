@@ -511,10 +511,24 @@ function persistencePath(projectId: string, suffix = ""): string {
   return suffix ? `${root}/${suffix}` : root;
 }
 
+async function requestRuntimeVersion(): Promise<RuntimeVersion> {
+  if (nativeApiSession) return request(dto.version, "/api/version");
+  try {
+    return await request(dto.version, "/api/browser/version");
+  } catch (error) {
+    // Independent deployments may leave the browser ahead of the origin.
+    if (error instanceof ApiError && ((error.status === 404 && error.code === "NOT_FOUND") ||
+        (error.status === 401 && error.code === "UNAUTHORIZED"))) {
+      return request(dto.version, "/api/version");
+    }
+    throw error;
+  }
+}
+
 /** The browser talks only to the public HTTP adapter and the shared contracts. */
 export const api = {
   version: async () => {
-    const version = await request(dto.version, "/api/version");
+    const version = await requestRuntimeVersion();
     hostedMode = version.hosted;
     return version;
   },

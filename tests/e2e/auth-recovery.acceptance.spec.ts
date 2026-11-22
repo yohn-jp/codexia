@@ -4,7 +4,7 @@ import { ownerLogin, fixtureProject, createWritingFixture, manuscriptEditor, rea
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 
 async function mockAuthenticatedWorkspace(page: Page, hosted: boolean, session?: () => { status: number; body: unknown }): Promise<void> {
-  await page.route("**/api/version", (route) => route.fulfill({ json: { name: "codexia", version: "test", hosted, profile: hosted ? "hosted" : "core" } }));
+  await page.route("**/api/browser/version", (route) => route.fulfill({ json: { name: "codexia", version: "test", hosted, profile: hosted ? "hosted" : "core" } }));
   await page.route("**/api/session", (route) => {
     const response = session?.() ?? { status: 200, body: { authenticated: true, authorScope: hosted ? "hosted:synthetic-author" : "owner", ...(hosted ? { permissions: ["read", "write"] } : {}) } };
     return route.fulfill({ status: response.status, json: response.body });
@@ -23,7 +23,8 @@ for (const shell of ["desktop", "mobile"] as const) {
     let signedIn = false;
     let tokenLogins = 0;
     let tokenLogouts = 0;
-    await page.route("**/api/version", route => route.fulfill({
+    await page.route("**/api/version", route => route.abort("failed"));
+    await page.route("**/api/browser/version", route => route.fulfill({
       json: { name: "codexia", version: "test", hosted: false, profile: "full", browserAuth: "cloudflare-access" },
     }));
     await page.route("**/api/session", route => signedIn
@@ -53,7 +54,7 @@ for (const shell of ["desktop", "mobile"] as const) {
 }
 
 test("an unavailable initial version cannot incorrectly offer the standalone token form", async ({ page }) => {
-  await page.route("**/api/version", route => route.fulfill({
+  await page.route(/\/api\/(?:browser\/)?version$/u, route => route.fulfill({
     status: 401, json: { error: "Edge authentication required", code: "UNAUTHORIZED" },
   }));
   await page.goto("/desktop/");
@@ -68,7 +69,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
   let reauthRequests = 0;
   let grantFresh = false;
 
-  await page.route("**/api/version", (route) => route.fulfill({
+  await page.route("**/api/browser/version", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
@@ -352,7 +353,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   let releaseInitialRequests!: () => void;
   const bothInitialRequests = new Promise<void>((resolve) => { releaseInitialRequests = resolve; });
 
-  await context.route("**/api/version", (route) => route.fulfill({
+  await context.route("**/api/browser/version", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),

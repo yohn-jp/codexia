@@ -2,6 +2,34 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { api, clearNativeApiSession, configureNativeApiSession, setOAuthAccessToken } from "./api.js";
 
+test("browser version stays under the author application and only retries a legacy origin response", async (t) => {
+  const requests: string[] = [];
+  let legacyOrigin = false;
+  let accessRedirect = false;
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    requests.push(path);
+    assert.equal(init?.credentials, "same-origin");
+    if (accessRedirect) throw new TypeError("Failed to fetch");
+    if (path === "/api/browser/version" && legacyOrigin) {
+      return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
+    }
+    return Response.json({ name: "codexia", version: "0.1.0", hosted: false, profile: "full" });
+  });
+
+  await api.version();
+  assert.deepEqual(requests, ["/api/browser/version"]);
+  legacyOrigin = true;
+  requests.length = 0;
+  await api.version();
+  assert.deepEqual(requests, ["/api/browser/version", "/api/version"]);
+
+  accessRedirect = true;
+  requests.length = 0;
+  await assert.rejects(api.version(), /Failed to fetch/u);
+  assert.deepEqual(requests, ["/api/browser/version"]);
+});
+
 test("OAuth API requests send a bearer token without ambient cookies", async () => {
   const originalFetch = globalThis.fetch;
   const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -107,7 +135,7 @@ test("concurrent expired Hosted requests share the rotating refresh exchange", a
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: undefined } });
   globalThis.fetch = async (input) => {
     const path = String(input);
-    if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
     if (path === "/_platform/refresh") {
       refreshRequests += 1;
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -151,7 +179,7 @@ test("concurrent Hosted tabs serialize refresh-cookie rotation", async () => {
   });
   globalThis.fetch = async (input) => {
     const path = String(input);
-    if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
     if (path === "/_platform/refresh") {
       refreshRequests += 1;
       grantFresh = true;
@@ -188,7 +216,7 @@ test("Hosted dependency authorization failures do not trigger browser grant refr
   });
   globalThis.fetch = async (input) => {
     const path = String(input);
-    if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
     if (path === "/api/v1/persistence/projects/project-1") {
       return Response.json({ error: "Remote repository authorization failed", code: "REMOTE_AUTHORIZATION_FAILED" }, { status: 401 });
     }
@@ -221,7 +249,7 @@ test("transient Hosted refresh failures preserve their error without reauthentic
   });
   globalThis.fetch = async (input) => {
     const path = String(input);
-    if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
     if (path === "/api/v1/persistence/projects?limit=100") return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
     if (path === "/_platform/refresh") return Response.json({ error: "Gateway unavailable", code: "GATEWAY_UNAVAILABLE" }, { status: 503 });
     throw new Error(`Unexpected request: ${path}`);
@@ -246,7 +274,7 @@ test("Hosted mutation retries only after an explicit admission denial, never aft
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: undefined } });
   globalThis.fetch = async (input) => {
     const path = String(input);
-    if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
     if (path === "/api/v1/persistence/projects") {
       registrationRequests += 1;
       return registrationRequests === 1
