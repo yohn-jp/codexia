@@ -237,6 +237,7 @@ test('operational proof remains owned by one exact-head root task and matching i
   const readWorkflow = name => parse(readFileSync(new URL('../.github/workflows/'+name, import.meta.url), 'utf8'));
   const infra = readWorkflow('deployment-config.yml');
   for (const event of ['pull_request','push']) {
+    assert.deepEqual(infra.on[event].branches, ['main'], event);
     for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
       assert.ok(infra.on[event].paths.includes(path), path);
     }
@@ -266,6 +267,7 @@ test('Mitogen launcher changes select the rootless contract on PR and main', asy
   const fixture = workflow.jobs['rootless-secrets'].steps.find(step => step.env?.ANSIBLE_PLAYBOOK);
   assert.equal(fixture.env.ANSIBLE_PLAYBOOK, '${{ github.workspace }}/' + launcher);
   for (const event of ['pull_request', 'push']) {
+    assert.deepEqual(workflow.on[event].branches, ['main'], event);
     assert.ok(workflow.on[event].paths.includes(launcher), event);
   }
   assert.deepEqual((await plan([launcher])).tasks, ['unit-root', 'coverage']);
