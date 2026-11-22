@@ -654,6 +654,9 @@ test("native manuscript restore requires approval, appends an attributed revisio
   assert.deepEqual(history.map(revision => revision.id), [restored.revision.id, current.revision.id, original.revision.id]);
   assert.deepEqual(await apply(approved), { ...applied, replayed: true });
   assert.deepEqual(await propose(), { changeSet: applied.changeSet, replayed: true });
+  const freshSnapshot = (await core.observe(p.id)).snapshot;
+  assert.deepEqual(await core.proposeManuscriptRestore(p.id, input, { ...options, snapshot: freshSnapshot }),
+    { changeSet: applied.changeSet, replayed: true });
   await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, sourceRevisionId: current.revision.id }, options), { code: "idempotency_conflict" });
 
   const { changeSet: stale } = await core.proposeManuscriptRestore(p.id, {

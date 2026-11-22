@@ -1237,12 +1237,12 @@ export class CoreStore implements MutationCoordinator {
         } }],
         readSet: [], // The restore command binds the exact head revision at application.
         writeSet: [{ resource: "document", id: documentId }],
-        provenance: { source: "native-manuscript-restore", actorId, details: {
-          origin, ...(snapshot && { projectVersion: snapshot.projectVersion }),
-        } },
+        provenance: { source: "native-manuscript-restore", actorId, details: { origin } },
       });
       // createChangeSet holds the project lock. Validate only fresh proposals,
       // and roll back their registration if the observed ancestry has changed.
+      // Re-dispatch can resolve a newer project snapshot; the revision command
+      // itself is the stable request identity.
       if (proposal.replayed) return proposal;
       if (snapshot && (await tx.getProject(projectId))?.version !== snapshot.projectVersion) {
         const saved = await tx.getModuleRecord(projectId, SNAPSHOTS, `snapshot:${snapshot.projectVersion}`);
