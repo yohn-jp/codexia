@@ -4,9 +4,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { createWritingFixture, expectServerSaved, manuscriptEditor, ownerLogin } from "./postgres-fixture";
-const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
+import { chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type AuthorSession, type AuthorizeAuthor } from "./author-oauth-fixture";
+import { createOAuthWritingFixture, expectServerSaved, manuscriptEditor, replaceManuscript, writingFixturePath } from "./postgres-fixture";
+
+
 async function unusedTcpPort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolveListen, reject) => {
@@ -127,31 +129,29 @@ function requireNativeVisibilityCoverage(): void {
 }
 
 
-async function activity(page: Page, projectId: string) {
-  const response = await page.request.get(new URL(`/api/projects/${projectId}/recent-activity`, page.url()).toString());
+async function activity(author: AuthorSession, projectId: string) {
+  const response = await author.fetch(`/api/projects/${projectId}/recent-activity`);
   expect(response.ok()).toBe(true);
   return response.json() as Promise<{ items: Array<{ sceneId: string; sentenceOffset: number | null; pageIndex?: number | null; deviceType: string; updatedAt: string }> }>;
 }
-async function remotePosition(page: Page, projectId: string, sceneId: string, sentenceOffset = 2) {
-  const response = await page.request.put(new URL(`/api/projects/${projectId}/recent-activity`, page.url()).toString(), { headers: { Origin: new URL(page.url()).origin }, data: { sceneId, sentenceOffset, pageIndex: 2, deviceType: "mobile" } });
+async function remotePosition(author: AuthorSession, projectId: string, sceneId: string, sentenceOffset = 2) {
+  const response = await author.fetch(`/api/projects/${projectId}/recent-activity`, {
+    method: "PUT", headers: { Origin: author.origin },
+    data: { sceneId, sentenceOffset, pageIndex: 2, deviceType: "mobile" },
+  });
   expect(response.ok()).toBe(true);
 }
-async function longFixture(page: Page) {
-  const f = await createWritingFixture(page);
-  const editor = manuscriptEditor(page);
-  await editor.fill("読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
+const originalMarkdown = "最初の本文。\n次の文章です。";
+
+async function longFixture(authorizeAuthor: AuthorizeAuthor, page: Page) {
+  const f = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, originalMarkdown);
+  await replaceManuscript(page, "読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
   await expectServerSaved(page);
   return f;
 }
 async function nativeFixture() {
   requireNativeVisibilityCoverage();
-  const native = await createNativeHeadfulContext(1280);
-  // Native CDP contexts need an absolute app entry for ownerLogin's relative URL.
-  await native.page.goto(`${configuredBaseURL}/desktop/`);
-  const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-  await native.page.getByLabel("アクセス・トークン").fill(authToken);
-  await native.page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  return native;
+  return createNativeHeadfulContext(1280);
 }
 
 async function openContinuePanel(page: Page) {
@@ -163,17 +163,18 @@ async function openContinuePanel(page: Page) {
 }
 
 for (const kind of ["writing", "reading", "superseded reading"] as const) {
-  test(`a delayed scene handles the chosen remote ${kind} position`, async ({ page }) => {
+  test(`a delayed scene handles the chosen remote ${kind} position`, async ({ page, authorizeAuthor }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const { project, scene, second } = await createWritingFixture(page, "mobile");
+    const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, originalMarkdown);
     const path = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
-    const read = await page.request.get(path);
+    const read = await author.fetch(path);
     expect(read.ok()).toBe(true);
     const { revision } = await read.json() as { revision: { id: string; markdown: string } };
     const prefix = "第一文です。第二文です。";
     const body = prefix + "第三文の始めです。\n\n" + "続きの原稿を読書ページへ表示します。\n\n".repeat(120);
-    const patched = await page.request.patch(path, {
-      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "handoff-fixture" },
+    const patched = await author.fetch(path, {
+      method: "PATCH",
+      headers: { Origin: author.origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "handoff-fixture" },
       data: {
         baseRevisionId: revision.id,
         changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: body }],
@@ -181,8 +182,9 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
       },
     });
     expect(patched.ok()).toBe(true);
-    await remotePosition(page, project.id, second.id, 3);
+    await remotePosition(author, project.id, second.id, 3);
     await page.reload();
+    await authorizeAuthor("mobile", page, { continueCurrentPage: true });
     await expect(manuscriptEditor(page)).toBeVisible();
 
     let releaseLoad!: () => void;
@@ -232,45 +234,49 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
   });
 }
 
-test("recent activity hands off only numeric positions across devices, projects, and API restart", async ({ browser, page }) => {
-  const f = await longFixture(page);
+test("recent activity hands off only numeric positions across devices, projects, and API restart", async ({ browser, page, authorizeAuthor, authorServer }) => {
+  const f = await longFixture(authorizeAuthor, page);
+  const { author } = f;
   const writes: Record<string, unknown>[] = [];
   page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/recent-activity")) writes.push(request.postDataJSON()); });
   await manuscriptEditor(page).press("Control+End");
-  await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && typeof item.sentenceOffset === "number")).toBe(true);
+  await expect.poll(async () => (await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id && typeof item.sentenceOffset === "number")).toBe(true);
   for (const write of writes) expect(Object.keys(write).every((key) => ["sceneId", "sentenceOffset", "pageIndex", "deviceType"].includes(key))).toBe(true);
-  await remotePosition(page, f.project.id, f.scene.id);
+  await remotePosition(author, f.project.id, f.scene.id);
   const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
   const secondPage = await mobile.newPage();
   try {
-    await ownerLogin(secondPage, `/mobile/projects/${f.project.id}/scenes/${f.scene.id}?view=writing`);
+    await authorizeAuthor("mobile", secondPage, { path: writingFixturePath("mobile", f.project, f.scene) });
     await expect(manuscriptEditor(secondPage)).toContainText("読書位置");
-    const before = await activity(page, f.project.id);
+    const before = await activity(author, f.project.id);
     expect(before.items.some((item) => item.deviceType === "mobile" && item.pageIndex === 2)).toBe(true);
-    const another = await page.request.post("/api/v1/persistence/projects", { headers: { Origin: new URL(page.url()).origin }, data: { title: `Isolated cursor ${crypto.randomUUID()}` } });
+    const another = await author.fetch("/api/v1/persistence/projects", { method: "POST", headers: { Origin: author.origin }, data: { title: `Isolated cursor ${crypto.randomUUID()}` } });
     expect(another.status()).toBe(201);
-    const { project } = await another.json(); expect((await activity(page, project.id)).items).toEqual([]);
-    const control = new URL(page.url()); control.port = String(Number(control.port) + 1); control.pathname = "/__e2e/restart-api";
-    expect((await fetch(control, { method: "POST" })).status).toBe(204);
-    await ownerLogin(page);
-    expect((await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "mobile")).toBe(true);
-    const anonymous = await browser.newContext(); try { const denial = await anonymous.request.get(`${new URL(page.url()).origin}/api/projects/${f.project.id}/recent-activity`); expect(denial.status()).toBe(401); } finally { await anonymous.close(); }
+    const { project } = await another.json(); expect((await activity(author, project.id)).items).toEqual([]);
+    await authorServer.restartApi();
+    await page.reload();
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    expect((await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "mobile")).toBe(true);
+    const anonymous = await browser.newContext(); try { const denial = await anonymous.request.get(`${author.origin}/api/projects/${f.project.id}/recent-activity`); expect(denial.status()).toBe(401); } finally { await anonymous.close(); }
   } finally { await mobile.close(); }
 });
 
-test("recent activity polling pauses while naturally hidden and resumes when visible", async () => {
+test("recent activity polling pauses while naturally hidden and resumes when visible", async ({ authorizeAuthor }) => {
   const native = await nativeFixture(); const { page, context } = native;
   let background: Page | undefined;
   try {
-    const f = await longFixture(page); let requests = 0;
+    const f = await longFixture(authorizeAuthor, page);
+    const { author } = f; let requests = 0;
     page.on("request", (request) => { if (request.method() === "GET" && request.url().endsWith("/recent-activity")) requests += 1; });
-    await page.reload(); await expect.poll(() => requests).toBeGreaterThan(0);
+    await page.reload();
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    await expect.poll(() => requests).toBeGreaterThan(0);
     const panel = await openContinuePanel(page);
     background = await context.newPage(); await background.goto("about:blank"); await background.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
     const hidden = requests;
     await page.waitForTimeout(15_500); expect(requests).toBe(hidden);
-    await remotePosition(page, f.project.id, f.scene.id);
+    await remotePosition(author, f.project.id, f.scene.id);
     await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     await expect.poll(() => requests).toBeGreaterThan(hidden);
     await expect(panel.getByText(/スマホでたった今まで編集していました/u)).toBeVisible();
@@ -279,14 +285,15 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
   } finally { await background?.close(); await native.close(); }
 });
 
-test("recent activity ignores a refresh response invalidated by natural hide", async () => {
+test("recent activity ignores a refresh response invalidated by natural hide", async ({ authorizeAuthor }) => {
   const native = await nativeFixture(); const { page, context } = native;
   let background: Page | undefined;
   let release!: () => void;
   try {
-    const f = await longFixture(page);
+    const f = await longFixture(authorizeAuthor, page);
+    const { author } = f;
     const path = `/api/projects/${f.project.id}/recent-activity`;
-    await remotePosition(page, f.project.id, f.scene.id);
+    await remotePosition(author, f.project.id, f.scene.id);
     let started!: () => void;
     const pending = new Promise<void>((resolve) => { started = resolve; });
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -300,6 +307,7 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
       });
     });
     await page.reload();
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await pending;
     await expect(manuscriptEditor(page)).toBeVisible();
     const panel = await openContinuePanel(page);
@@ -332,10 +340,11 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
   } finally { release?.(); await background?.close(); await native.close(); }
 });
 
-test("recent activity coalesces repeated positions and records 50 input reports", async ({ page }) => {
+test("recent activity coalesces repeated positions and records 50 input reports", async ({ page, authorizeAuthor }) => {
+  const f = await longFixture(authorizeAuthor, page);
+  const { author } = f;
   const initialTime = Date.now();
   await page.clock.install({ time: initialTime });
-  const f = await longFixture(page);
   await page.clock.pauseAt(initialTime + 60_000);
   const writes: Record<string, unknown>[] = [];
   page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/recent-activity")) writes.push(request.postDataJSON()); });
@@ -350,15 +359,16 @@ test("recent activity coalesces repeated positions and records 50 input reports"
   const inputCount = writes.length; await editor.press("End"); await page.keyboard.type("x".repeat(50), { delay: 0 });
   await page.clock.runFor(5_000);
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBe(inputCount + 1);
-  expect((await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id)).toBe(true);
+  expect((await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id)).toBe(true);
 });
 
 for (const departure of [false, true]) {
-  test(`recent activity rejects reversed PUT delivery${departure ? " during pagehide keepalive" : ""}`, async ({ browser, page }) => {
-    const f = await longFixture(page);
+  test(`recent activity rejects reversed PUT delivery${departure ? " during pagehide keepalive" : ""}`, async ({ browser, page, authorizeAuthor }) => {
+    const f = await longFixture(authorizeAuthor, page);
+    const { author } = f;
     const editor = manuscriptEditor(page);
     await editor.press("Control+End");
-    await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
+    await expect.poll(async () => (await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const sent: Array<{ sceneId: string; sentenceOffset: number | null; deviceType: string }> = [];
@@ -398,18 +408,18 @@ for (const departure of [false, true]) {
       // The initial cursor may equal the newer report. Its GET alone cannot
       // establish reversed delivery; require the newer PUT's own completion.
       expect((await newerResponse).ok()).toBe(true);
-      await expect.poll(async () => (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
-      const newer = (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop");
+      await expect.poll(async () => (await activity(author, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+      const newer = (await activity(author, f.project.id)).items.find((item) => item.deviceType === "desktop");
       const olderResponse = page.waitForResponse((response) => response.url().endsWith("/recent-activity") &&
         response.request().method() === "PUT" && response.request().postDataJSON().sentenceOffset === 1);
       release();
       expect((await olderResponse).ok()).toBe(true);
-      expect((await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")).toEqual(newer);
+      expect((await activity(author, f.project.id)).items.find((item) => item.deviceType === "desktop")).toEqual(newer);
       const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
       try {
         const other = await mobile.newPage();
-        await ownerLogin(other, `/mobile/projects/${f.project.id}/scenes/${f.scene.id}?view=writing`);
-        expect((await activity(other, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+        const otherAuthor = await authorizeAuthor("mobile", other, { path: writingFixturePath("mobile", f.project, f.scene) });
+        expect((await activity(otherAuthor, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
       } finally { await mobile.close(); }
     } finally {
       release();

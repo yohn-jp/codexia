@@ -1,14 +1,17 @@
-import { expect, test, type Page } from "@playwright/test";
-import { createWritingFixture, expectDeviceDraft, manuscriptEditor } from "./postgres-fixture";
+import type { Page } from "@playwright/test";
+import { expect, test, type AuthorSession } from "./author-oauth-fixture";
+import { createOAuthWritingFixture, expectDeviceDraft, manuscriptEditor } from "./postgres-fixture";
 
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+const originalMarkdown = "最初の本文。\n次の文章です。";
 
-async function proposeNode(page: Page, projectId: string, label: string, id = crypto.randomUUID()) {
-  const projectResponse = await page.request.get(`/api/v1/persistence/projects/${projectId}`);
+async function proposeNode(author: AuthorSession, projectId: string, label: string, id = crypto.randomUUID()) {
+  const projectResponse = await author.fetch(`/api/v1/persistence/projects/${projectId}`);
   expect(projectResponse.ok(), await projectResponse.text()).toBe(true);
   const { project } = await projectResponse.json() as { project: { version: number } };
-  const response = await page.request.post(`/api/v1/persistence/projects/${projectId}/changesets`, {
-    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+  const response = await author.fetch(`/api/v1/persistence/projects/${projectId}/changesets`, {
+    method: "POST",
+    headers: { Origin: author.origin, "Idempotency-Key": crypto.randomUUID() },
     data: {
       projectVersion: project.version,
       operations: [{ type: "knowledge.node.save", command: {
@@ -21,8 +24,8 @@ async function proposeNode(page: Page, projectId: string, label: string, id = cr
   return { id, changeSetId: result.changeSet.id };
 }
 
-async function proposeCoreMetadata(page: Page, projectId: string, message: string) {
-  const snapshotResponse = await page.request.get(`/api/projects/${projectId}/snapshot`);
+async function proposeCoreMetadata(author: AuthorSession, projectId: string, message: string) {
+  const snapshotResponse = await author.fetch(`/api/projects/${projectId}/snapshot`);
   expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
   const { snapshot } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
   const id = crypto.randomUUID();
@@ -30,33 +33,37 @@ async function proposeCoreMetadata(page: Page, projectId: string, message: strin
     id: crypto.randomUUID(), generation: 0, projectId, baseProjectVersion: snapshot.projectVersion,
     effect: "metadata", reads: [], writes: [{ path: `meta/review-feed/${id}.yaml`, revision: null, content: "status: proposed\n" }], message,
   };
-  const response = await page.request.post(`/api/projects/${projectId}/proposals`, {
-    headers: { Origin: new URL(page.url()).origin }, data: { id, snapshot, operations: [operation] },
+  const response = await author.fetch(`/api/projects/${projectId}/proposals`, {
+    method: "POST",
+    headers: { Origin: author.origin }, data: { id, snapshot, operations: [operation] },
   });
   expect(response.status(), await response.text()).toBe(201);
   return id;
 }
 
-async function proposeMerge(page: Page, projectId: string) {
+async function proposeMerge(author: AuthorSession, projectId: string) {
   const sourceId = crypto.randomUUID();
   const targetId = crypto.randomUUID();
-  const origin = new URL(page.url()).origin;
+  const origin = author.origin;
   for (const [id, name] of [[sourceId, "統合元人物"], [targetId, "統合先人物"]]) {
-    const saved = await page.request.put(`/api/v1/persistence/projects/${projectId}/nodes/${id}`, {
+    const saved = await author.fetch(`/api/v1/persistence/projects/${projectId}/nodes/${id}`, {
+      method: "PUT",
       headers: { Origin: origin },
       data: { type: "person", name, attributes: { createdFor: "native-merge-review" }, status: "confirmed", expectedVersion: null },
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }
-  const projectResponse = await page.request.get(`/api/v1/persistence/projects/${projectId}`);
+  const projectResponse = await author.fetch(`/api/v1/persistence/projects/${projectId}`);
   expect(projectResponse.ok(), await projectResponse.text()).toBe(true);
   const { project } = await projectResponse.json() as { project: { version: number } };
-  const previewResponse = await page.request.post(`/api/projects/${projectId}/actions/core.knowledge.merge.preview`, {
+  const previewResponse = await author.fetch(`/api/projects/${projectId}/actions/core.knowledge.merge.preview`, {
+    method: "POST",
     headers: { Origin: origin }, data: { input: { sourceId, targetId, projectVersion: project.version } },
   });
   expect(previewResponse.ok(), await previewResponse.text()).toBe(true);
   const preview = await previewResponse.json() as { ok: true; data: { previewDigest: string; projectVersion: number } };
-  const proposalResponse = await page.request.post(`/api/projects/${projectId}/actions/core.knowledge.merge.propose`, {
+  const proposalResponse = await author.fetch(`/api/projects/${projectId}/actions/core.knowledge.merge.propose`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { input: { sourceId, targetId, projectVersion: preview.data.projectVersion, previewDigest: preview.data.previewDigest, idempotencyKey: crypto.randomUUID() } },
   });
@@ -93,11 +100,11 @@ async function openProjectCreator(page: Page) {
 }
 
 for (const mode of ["desktop", "mobile"] as const) {
-  test(`${mode} native author review keeps approval separate from apply and preserves the manuscript`, async ({ page }) => {
+  test(`${mode} native author review keeps approval separate from apply and preserves the manuscript`, async ({ page, authorizeAuthor }) => {
     expect(databaseUrl, "native review browser checks require the disposable PostgreSQL fixture").toBeTruthy();
     await page.setViewportSize(mode === "desktop" ? { width: 1440, height: 900 } : { width: 390, height: 844 });
-    const { project, scene } = await createWritingFixture(page, mode, `Native review ${mode}`);
-    const proposal = await proposeNode(page, project.id, `レビュー対象 ${mode}`);
+    const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, mode, `Native review ${mode}`, originalMarkdown);
+    const proposal = await proposeNode(author, project.id, `レビュー対象 ${mode}`);
 
     // Keep the manuscript dirty and recoverable while the native review refreshes projections.
     await page.route(`**/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, async (route) => {
@@ -115,12 +122,12 @@ for (const mode of ["desktop", "mobile"] as const) {
     await expect(page.locator(".native-changeset-card")).toContainText('"expectedVersion": null');
     await page.getByRole("button", { name: "承認する" }).click();
     await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
-    const approved = await page.request.get(`/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}`);
+    const approved = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}`);
     expect(approved.ok()).toBe(true);
     const { changeSet: approvedChangeSet } = await approved.json() as { changeSet: { status: string; version: number } };
     expect(approvedChangeSet.status).toBe("approved");
     expect(Number.isInteger(approvedChangeSet.version)).toBe(true);
-    const beforeApply = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
+    const beforeApply = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
     expect((await beforeApply.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === proposal.id)).toBe(false);
 
     const applyPath = `**/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}/apply`;
@@ -136,32 +143,33 @@ for (const mode of ["desktop", "mobile"] as const) {
     await page.getByRole("button", { name: "承認済み提案を適用" }).click();
     await expect(page.getByRole("region", { name: "適用receipt" })).toBeVisible();
     expect(applyVersions).toEqual([approvedChangeSet.version, approvedChangeSet.version]);
-    const afterApply = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
+    const afterApply = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
     expect((await afterApply.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === proposal.id)).toBe(true);
     await returnToEditor(page, mode);
     await expect(editor).toBeVisible();
     await expect(editor).toContainText(draft);
-    const document = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+    const document = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
     expect((await document.json() as { revision: { markdown: string } }).revision.markdown).not.toContain(draft);
   });
 }
 
-test("native rejection leaves canonical Knowledge unchanged and stale application remains recoverable", async ({ page }) => {
+test("native rejection leaves canonical Knowledge unchanged and stale application remains recoverable", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Native review decisions");
-  const rejected = await proposeNode(page, project.id, "却下される候補");
-  const stale = await proposeNode(page, project.id, "競合する候補");
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Native review decisions", originalMarkdown);
+  const rejected = await proposeNode(author, project.id, "却下される候補");
+  const stale = await proposeNode(author, project.id, "競合する候補");
   await openReview(page, "desktop");
   await page.locator(".native-changeset-select").filter({ hasText: rejected.changeSetId }).click();
   await page.getByRole("button", { name: "却下する" }).click();
   await expect(page.locator(".native-changeset-card")).toContainText("却下");
-  const unchanged = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
+  const unchanged = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
   expect((await unchanged.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === rejected.id)).toBe(false);
 
   await page.locator(".native-changeset-select").filter({ hasText: stale.changeSetId }).click();
-  const conflictingWrite = await page.request.put(`/api/v1/persistence/projects/${project.id}/nodes/${stale.id}`, {
-    headers: { Origin: new URL(page.url()).origin },
+  const conflictingWrite = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${stale.id}`, {
+    method: "PUT",
+    headers: { Origin: author.origin },
     data: { type: "person", name: "別操作で先に確定", attributes: {}, status: "confirmed", expectedVersion: null },
   });
   expect(conflictingWrite.ok(), await conflictingWrite.text()).toBe(true);
@@ -169,20 +177,21 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
   await page.getByRole("button", { name: "承認済み提案を適用" }).click();
   await expect(page.getByRole("alert")).toContainText("前提条件が更新されています");
-  const authoritative = await page.request.get(`/api/v1/persistence/projects/${project.id}/changesets/${stale.changeSetId}`);
+  const authoritative = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${stale.changeSetId}`);
   const latest = await authoritative.json() as { changeSet: { status: string }; receipt?: unknown };
   expect(latest.changeSet.status).toBe("approved");
   expect(latest.receipt).toBeUndefined();
   await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeEnabled();
 });
 
-test("author review reads native ChangeSets from the unified feed and keeps one actionable Core card", async ({ page }) => {
+test("author review reads native ChangeSets from the unified feed and keeps one actionable Core card", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Unified author review feed");
-  const coreProposalId = await proposeCoreMetadata(page, project.id, "Core feed proposal");
-  const native = await proposeNode(page, project.id, "Native feed proposal");
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Unified author review feed", originalMarkdown);
+  const coreProposalId = await proposeCoreMetadata(author, project.id, "Core feed proposal");
+  const native = await proposeNode(author, project.id, "Native feed proposal");
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(manuscriptEditor(page)).toBeVisible();
   let feedReads = 0;
   let nativeListReads = 0;
@@ -205,13 +214,14 @@ test("author review reads native ChangeSets from the unified feed and keeps one 
   expect(nativeListReads).toBe(0);
 });
 
-test("author review shows durable Core status once when IndexedDB journal is unavailable", async ({ page }) => {
+test("author review shows durable Core status once when IndexedDB journal is unavailable", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Unavailable review journal");
-  const coreProposalId = await proposeCoreMetadata(page, project.id, "Server-only Core review");
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Unavailable review journal", originalMarkdown);
+  const coreProposalId = await proposeCoreMetadata(author, project.id, "Server-only Core review");
   await page.addInitScript(() => Object.defineProperty(window, "indexedDB", { configurable: true, get() { throw new Error("IndexedDB unavailable in acceptance test"); } }));
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await openReview(page, "desktop");
   const feed = page.getByRole("region", { name: "Core提案の承認と適用状況" });
   await expect(feed).toContainText("Server-only Core review");
@@ -219,11 +229,11 @@ test("author review shows durable Core status once when IndexedDB journal is una
   expect(await page.locator(".proposal-card").filter({ hasText: coreProposalId }).count()).toBe(1);
 });
 
-test("author review surfaces a missing feed without requesting the native ChangeSet list", async ({ page }) => {
+test("author review surfaces a missing feed without requesting the native ChangeSet list", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Unavailable author review feed");
-  await proposeNode(page, project.id, "Proposal behind unavailable feed");
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Unavailable author review feed", originalMarkdown);
+  await proposeNode(author, project.id, "Proposal behind unavailable feed");
   let listReads = 0;
   await page.route(`**/api/v1/persistence/projects/${project.id}/review-feed**`, route => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found", code: "NOT_FOUND" }) }));
   page.on("request", request => { if (/\/changesets$/u.test(new URL(request.url()).pathname)) listReads += 1; });
@@ -235,12 +245,12 @@ test("author review surfaces a missing feed without requesting the native Change
 });
 
 for (const mode of ["desktop", "mobile"] as const) {
-  test(`${mode} author review presents exact native merge effects and refreshes canonical state after approved apply`, async ({ page }) => {
+  test(`${mode} author review presents exact native merge effects and refreshes canonical state after approved apply`, async ({ page, authorizeAuthor }) => {
     expect(databaseUrl, "native merge review browser checks require the disposable PostgreSQL fixture").toBeTruthy();
     await page.setViewportSize(mode === "desktop" ? { width: 1440, height: 900 } : { width: 390, height: 844 });
-    const { project } = await createWritingFixture(page, mode, `Native merge review ${mode}`);
-    const merge = await proposeMerge(page, project.id);
-    const before = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`);
+    const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, mode, `Native merge review ${mode}`, originalMarkdown);
+    const merge = await proposeMerge(author, project.id);
+    const before = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`);
     expect(before.ok(), await before.text()).toBe(true);
     expect((await before.json() as { node: { status: string } }).node.status).toBe("confirmed");
     await openReview(page, mode);
@@ -257,34 +267,34 @@ for (const mode of ["desktop", "mobile"] as const) {
     await expect(mergeRegion.getByText("統合計画と対象リソースを確認")).toBeVisible();
     await page.getByRole("button", { name: "承認する" }).click();
     await expect(card).toContainText("承認済み・未適用");
-    const unchanged = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`);
+    const unchanged = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`);
     expect(unchanged.ok(), await unchanged.text()).toBe(true);
     expect((await unchanged.json() as { node: { status: string } }).node.status).toBe("confirmed");
     await page.getByRole("button", { name: "承認済み提案を適用" }).click();
     const receipt = page.getByRole("region", { name: "適用receipt" });
     await expect(receipt).toBeVisible();
     const [appliedSource, appliedTarget] = await Promise.all([
-      page.request.get(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`),
-      page.request.get(`/api/v1/persistence/projects/${project.id}/nodes/${merge.targetId}`),
+      author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${merge.sourceId}`),
+      author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${merge.targetId}`),
     ]);
     expect(appliedSource.ok(), await appliedSource.text()).toBe(true);
     expect(appliedTarget.ok(), await appliedTarget.text()).toBe(true);
     expect((await appliedSource.json() as { node: { status: string } }).node.status).toBe("retired");
     expect((await appliedTarget.json() as { node: { attributes: Record<string, unknown> } }).node.attributes.createdFor).toBe("native-merge-review");
     await expect(receipt).toContainText(merge.changeSet.id);
-    const detail = await page.request.get(`/api/v1/persistence/projects/${project.id}/changesets/${merge.changeSet.id}`);
+    const detail = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${merge.changeSet.id}`);
     const final = await detail.json() as { receipt: { results: Array<{ auditId: string }> } };
     expect(final.receipt.results[0]?.auditId).toBeTruthy();
     await expect(receipt).toContainText(final.receipt.results[0]!.auditId);
   });
 }
 
-test("project switch fences a late unified-feed response and read-only sessions expose no author controls", async ({ page, browser }) => {
+test("project switch fences a late unified-feed response and read-only sessions expose no author controls", async ({ page, browser, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Native review response fence");
-  const proposal = await proposeNode(page, project.id, "旧作品だけの候補");
-  const oldFeedResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}/review-feed?limit=100`);
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Native review response fence", originalMarkdown);
+  const proposal = await proposeNode(author, project.id, "旧作品だけの候補");
+  const oldFeedResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}/review-feed?limit=100`);
   const oldFeed = await oldFeedResponse.json();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -315,24 +325,26 @@ test("project switch fences a late unified-feed response and read-only sessions 
     const body = await response.json() as Record<string, unknown>;
     await route.fulfill({ response, body: JSON.stringify({ ...body, permissions: ["read"] }) });
   });
-  await readOnlyPage.goto("/desktop/");
-  await readOnlyPage.getByLabel("アクセス・トークン").fill(process.env.CODEXIA_E2E_AUTH_TOKEN ?? "");
-  await readOnlyPage.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  await expect(readOnlyPage.getByRole("alert")).toContainText("原稿編集権限がありません");
-  await expect(readOnlyPage.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
-  await expect(readOnlyPage.getByRole("button", { name: "承認する" })).toHaveCount(0);
+  try {
+    const missingAuthorControls = readOnlyPage.getByRole("alert").filter({ hasText: "原稿編集権限がありません" });
+    await authorizeAuthor("desktop", readOnlyPage, { expectedView: missingAuthorControls });
+    await expect(missingAuthorControls).toBeVisible();
+    await expect(readOnlyPage.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
+    await expect(readOnlyPage.getByRole("button", { name: "承認する" })).toHaveCount(0);
+  } finally { await readOnlyPage.close(); }
 });
 
 
-test("native assertion review exposes modality in the primary change fields", async ({ page }) => {
+test("native assertion review exposes modality in the primary change fields", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page);
-  const projectResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}`);
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, originalMarkdown);
+  const projectResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}`);
   expect(projectResponse.ok()).toBe(true);
   const { project: current } = await projectResponse.json() as { project: { version: number } };
-  const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/changesets`, {
-    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+  const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets`, {
+    method: "POST",
+    headers: { Origin: author.origin, "Idempotency-Key": crypto.randomUUID() },
     data: { projectVersion: current.version, operations: [{ type: "evidence.assertion.save", command: {
       projectId: project.id, id: crypto.randomUUID(), proposition: { statement: "未確認の推測" },
       modality: "hypothesis", perspective: "author", narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null,
