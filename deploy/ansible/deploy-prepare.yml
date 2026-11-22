@@ -1,0 +1,28 @@
+---
+- name: Create push deployment state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
+    - {path: "{{ home }}/.local/bin", mode: '0700'}
+    - {path: "{{ quadlet_dir }}", mode: '0750'}
+
+- name: Install the encrypted backup helper for the rootless deployment identity
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/backup/backup.sh"
+    dest: "{{ home }}/.local/bin/codexia-backup"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0700'
+
+- name: Install the interrupted deployment recovery helper
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/push-deployment-recover.sh"
+    dest: "{{ home }}/.local/bin/codexia-deploy-recover"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0700'

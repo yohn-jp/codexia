@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildComponentReleaseRecord } from './component-release-record.mjs';
-import { assertExistingBackendReleaseBinding, successfulPublicationJobs } from './verify-existing-backend-release.mjs';
+import { assertExistingBackendReleaseBinding, backendReleaseSourceTree, successfulPublicationJobs } from './verify-existing-backend-release.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
 
 const sha=char=>char.repeat(40),image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
 const compatibility={apiEpoch:1,persistenceFormat:1};
+
+test('resolves historical release tree from its certified source SHA instead of the current checkout',()=>{
+  const sourceSha=sha('a'),tree=sha('b'),calls=[];
+  assert.equal(backendReleaseSourceTree(sourceSha,(...args)=>{calls.push(args);return tree+'\n';}),tree);
+  assert.deepEqual(calls,[["git",['rev-parse',sourceSha+'^{tree}'],{encoding:'utf8'}]]);
+  assert.throws(()=>backendReleaseSourceTree('HEAD'),/source SHA is invalid/u);
+});
+
 function promotedFixture(){
   const mainSha=sha('a'),sourceSha=sha('b'),tree=sha('c'),version=readComponentVersion('backend','450');
   const identity=profile=>({format:'codexia-backend-identity/v1',version,sourceSha,profile,platform:'linux/amd64',

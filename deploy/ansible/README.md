@@ -8,7 +8,7 @@ Use a private inventory with pinned SSH host keys, externally supplied protected
 ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=inspect
 ```
 
-Supported stages are `inspect`, `host`, `secrets`, `base`, `auth-runtime`, `deploy` and `restore-drill`.
+Supported stages are `inspect`, `host`, `secrets`, `base`, `auth-runtime`, `deploy`, `deploy-lifecycle-fixture` and `restore-drill`. The lifecycle fixture stage runs only from the run-bound disposable GitHub Actions workflow; it is not a production operation.
 
 The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs four protected Podman secrets without implicit rotation. The `base` stage converges networks, volumes, PostgreSQL 17 and Tunnel Quadlets, verifying exact persistent storage and identities. These stages do not publish new API images.
 

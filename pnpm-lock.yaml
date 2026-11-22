@@ -627,12 +627,18 @@ importers:
       '@codexia/api':
         specifier: workspace:*
         version: link:../../packages/api
+      '@codexia/persistence-postgres':
+        specifier: workspace:*
+        version: link:../../packages/persistence-postgres
 
   profiles/full:
     dependencies:
       '@codexia/api':
         specifier: workspace:*
         version: link:../../packages/api
+      '@codexia/persistence-postgres':
+        specifier: workspace:*
+        version: link:../../packages/persistence-postgres
       '@codexia/module-assistant':
         specifier: workspace:*
         version: link:../../modules/assistant

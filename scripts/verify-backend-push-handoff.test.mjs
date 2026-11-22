@@ -68,6 +68,20 @@ test('selects the single unexpired digest-bound certificate artifact for the exa
   assert.throws(() => selectPushDeploymentCertificateArtifact([artifact(), artifact()], buildRun()), /one/);
 });
 
+test('binds promotion artifact name to its source SHA and workflow association to publication head SHA', () => {
+  const publicationRun = { ...buildRun(), head_sha: mainSha };
+  const promotedSourceSha = sourceSha;
+  const promotedArtifact = {
+    ...artifact(publicationRun),
+    name: `codexia-backend-deployment-certificate-${promotedSourceSha}-run-${publicationRun.id}-attempt-${publicationRun.run_attempt}`,
+  };
+  assert.equal(selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun, { sourceSha: promotedSourceSha }).id, 303);
+  assert.throws(() => selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun), /one/u);
+  assert.throws(() => selectPushDeploymentCertificateArtifact([
+    { ...promotedArtifact, workflow_run: { ...promotedArtifact.workflow_run, head_sha: promotedSourceSha } },
+  ], publicationRun, { sourceSha: promotedSourceSha }), /workflow head/u);
+});
+
 test('requires both independently certified profiles from the same verified producer and compatible release', () => {
   const [core, full] = validatePushDeploymentCertificatePair([cert('core'), cert('full')], mainSha);
   assert.equal(core.identity.profile, 'core');

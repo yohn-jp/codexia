@@ -1,0 +1,166 @@
+name: Push deployment app lifecycle
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile.backend
+      - .dockerignore
+      - Dockerfile.backend.dockerignore
+      - deploy/backend/**
+      - packages/**
+      - modules/**
+      - '!modules/story/src/browser.tsx'
+      - profiles/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+      - deploy/postgres/**
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - scripts/runtime-package-closure.mjs
+      - scripts/verify-backend-image.sh
+      - scripts/backend-update-identity*.mjs
+      - scripts/component-release-version*.mjs
+      - scripts/verify-backend-image-identity.mjs
+      - .github/workflows/push-app-lifecycle.yml
+      - .github/workflows/backend-release.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/base-*.yml
+      - deploy/ansible/deploy*.yml
+      - deploy/ansible/push-deployment-recover.sh
+      - deploy/ansible/requirements.txt
+      - deploy/backup/**
+      - deploy/quadlet/**
+      - deploy/update-compatibility.json
+      - scripts/push-app-lifecycle*.mjs
+      - scripts/push-deployment-contract.test.mjs
+      - scripts/push-deployment-documentation.test.mjs
+      - scripts/verify-backend-artifacts.mjs
+      - scripts/ci-artifact-selection.mjs
+      - scripts/download-ci-artifacts*.mjs
+      - scripts/release-policy.mjs
+      - scripts/ci-contract.mjs
+      - scripts/backend-image-inspection.mjs
+      - scripts/push-deployment-admission.mjs
+      - scripts/push-deployment-certificate.mjs
+      - scripts/verify-backend-push-handoff.mjs
+      - scripts/verify-backend-push-handoff.test.mjs
+      - scripts/verify-existing-backend-release.mjs
+      - scripts/verify-existing-backend-release.test.mjs
+      - scripts/component-release-record.mjs
+      - docs/deployment/PUSH-DEPLOYMENT.md
+      - docs/deployment/IAC.md
+permissions:
+  contents: read
+concurrency:
+  group: push-app-lifecycle-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  lifecycle:
+    name: Verify app deployment state transitions on a disposable rootless host
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Initialize run-bound lifecycle outcome artifact
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPORT_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
+        run: |
+          mkdir -p "$(dirname "$REPORT_FILE")"
+          python3 - <<'PY'
+          import json, os
+          keys = ['first_activation', 'same_digest_reapply', 'compatible_update', 'failed_candidate_rollback',
+                  'durable_interruption_recovery', 'database_volume_writer_quadlet_release_continuity',
+                  'backup_remote_filesystem', 'fixture_cleanup']
+          value = {'schemaVersion': 1, 'sourceSha': os.environ['SOURCE_SHA'],
+                   'runId': int(os.environ['GITHUB_RUN_ID']), 'runAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                   'status': 'NOT_CHECKED', 'detail': 'workflow bootstrap; lifecycle fixture has not started',
+                   'states': {key: {'status': 'NOT_CHECKED'} for key in keys}, 'images': [],
+                   'observations': {}, 'capabilities': {}, 'logs': []}
+          with open(os.environ['REPORT_FILE'], 'w', encoding='utf8') as target:
+              json.dump(value, target, indent=2)
+              target.write('\n')
+          os.chmod(os.environ['REPORT_FILE'], 0o600)
+          PY
+      - name: Check out exact PR source without persistent credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install disposable host and filesystem capabilities
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPORT_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
+        run: |
+          set -euo pipefail
+          setup_log="$(dirname "$REPORT_FILE")/host-setup.log"
+          record_unavailable() {
+            local reason="$1"
+            sed -E -e 's/(Bearer )[A-Za-z0-9._~-]+/\1[REDACTED]/g' -e 's/((password|token)([=: ]+))[^[:space:]]+/\1[REDACTED]/Ig' "$setup_log" | tail -n 160 > "$(dirname "$REPORT_FILE")/host-setup-bounded.log"
+            rm -f "$setup_log"
+            python3 - "$REPORT_FILE" "$reason" <<'PY'
+          import json, os, sys
+          path, reason = sys.argv[1:]
+          with open(path, encoding='utf8') as source:
+              value = json.load(source)
+          for key in value['states']:
+              value['states'][key] = {'status': 'CAPABILITY_UNAVAILABLE', 'detail': reason}
+          value['states']['fixture_cleanup'] = {'status': 'PASS', 'detail': 'fixture resources were not created'}
+          value.update({'status': 'NOT_CHECKED', 'detail': reason, 'failure': reason,
+                        'cleanup': {'status': 'PASS', 'exitCode': 0},
+                        'logs': [{'file': 'host-setup-bounded.log', 'redacted': True}]})
+          with open(path, 'w', encoding='utf8') as target:
+              json.dump(value, target, indent=2)
+              target.write('\n')
+          os.chmod(path, 0o600)
+          PY
+          }
+          if ! sudo apt-get update -qq >"$setup_log" 2>&1; then
+            record_unavailable 'runner could not provision required disposable host packages'
+            exit 78
+          fi
+          if ! sudo apt-get install -y --no-install-recommends podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session age sshfs fuse3 python3-venv jq acl ca-certificates lsb-release iproute2 openssh-client curl >>"$setup_log" 2>&1; then
+            record_unavailable 'runner could not install required disposable host and SSHFS capabilities'
+            exit 78
+          fi
+          if ! python3 -m venv "$RUNNER_TEMP/codexia-ansible" >>"$setup_log" 2>&1 || ! "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt mitogen==0.3.55 >>"$setup_log" 2>&1; then
+            record_unavailable 'runner could not provision the Ansible deployment capability'
+            exit 78
+          fi
+          if ! docker info --format '{{.ServerVersion}}' >>"$setup_log" 2>&1; then
+            record_unavailable 'runner rootful Docker builder is unavailable for preparing the isolated SSHFS fixture image'
+            exit 78
+          fi
+          rm -f "$setup_log"
+          echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" >> "$GITHUB_ENV"
+          bash -n deploy/ansible/test-push-app-lifecycle.sh
+      - name: Run exact-source image selection and real app lifecycle fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_LIFECYCLE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_LIFECYCLE_REPORT_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
+          CODEXIA_LIFECYCLE_EVIDENCE_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/evidence.json
+        run: bash deploy/ansible/test-push-app-lifecycle.sh
+      - name: Upload run-bound lifecycle outcome and bounded logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: push-app-lifecycle-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
+            ${{ runner.temp }}/codexia-push-app-lifecycle/evidence.json
+            ${{ runner.temp }}/codexia-push-app-lifecycle/*-bounded.log
+          if-no-files-found: warn
+          retention-days: 14

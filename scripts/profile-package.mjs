@@ -35,6 +35,9 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
   if (dependencies['@codexia/api'] === undefined) {
     throw new Error(`Profile ${profileName} package must depend on @codexia/api`);
   }
+  if (dependencies['@codexia/persistence-postgres'] === undefined) {
+    throw new Error(`Profile ${profileName} package must depend on @codexia/persistence-postgres`);
+  }
   const directModuleDependencies = Object.keys(dependencies)
     .filter((name) => knownModules.includes(name.startsWith(modulePackagePrefix) ? name.slice(modulePackagePrefix.length) : ''))
     .sort();

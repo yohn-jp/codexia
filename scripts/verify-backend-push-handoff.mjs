@@ -43,16 +43,17 @@ export function backendReleaseValidationEnvironment(env, run) {
   return { ...env, GITHUB_RUN_ID: String(run.id), GITHUB_RUN_NUMBER: String(run.run_number) };
 }
 
-export function selectPushDeploymentCertificateArtifact(artifacts, run) {
+export function selectPushDeploymentCertificateArtifact(artifacts, run, { sourceSha = run?.head_sha } = {}) {
   assert.ok(Array.isArray(artifacts), 'Backend publication artifact inventory is invalid');
   assert.ok(positive(run?.id) && positive(run?.run_attempt) && sha.test(run?.head_sha ?? ''), 'Backend publication identity is invalid');
-  const name = `codexia-backend-deployment-certificate-${run.head_sha}-run-${run.id}-attempt-${run.run_attempt}`;
+  assert.match(sourceSha ?? '', sha, 'Backend publication artifact source SHA is invalid');
+  const name = `codexia-backend-deployment-certificate-${sourceSha}-run-${run.id}-attempt-${run.run_attempt}`;
   const matches = artifacts.filter(artifact => artifact?.name === name);
   assert.equal(matches.length, 1, 'Expected one deployment certificate artifact for this publication run and attempt');
   const artifact = matches[0];
   assert.equal(artifact.expired, false, 'Deployment certificate artifact is expired');
   assert.equal(String(artifact.workflow_run?.id), String(run.id), 'Deployment certificate artifact run mismatch');
-  assert.equal(artifact.workflow_run?.head_sha, run.head_sha, 'Deployment certificate artifact source mismatch');
+  assert.equal(artifact.workflow_run?.head_sha, run.head_sha, 'Deployment certificate artifact workflow head mismatch');
   assert.match(artifact.digest ?? '', /^sha256:[a-f0-9]{64}$/u, 'Deployment certificate artifact digest is invalid');
   assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 &&
     artifact.size_in_bytes <= ARTIFACT_MAX_BYTES, 'Deployment certificate artifact size is invalid');

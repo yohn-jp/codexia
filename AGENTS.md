@@ -14,7 +14,7 @@ Read only the contracts relevant to the task:
 - UI/UX: [Design and UX contract](docs/design/UX-CONTRACT.md). Preserve distinct Desktop/Mobile shells and shared authoring, durability, and authorization boundaries. Mockups are not specifications.
 - Web frontend design, implementation, or review: project-local [Modern Web Guidance](.agents/skills/modern-web-guidance/SKILL.md).
 - CI/release: [CI/CD architecture](docs/verification/CI-CD.md) and [Test architecture](docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.md).
-- VM configuration: [Infrastructure as code](docs/deployment/IAC.md), the Ansible desired-state and lifecycle contract. Keep Cloudflare Terraform, protected release publication, and the exclusive updater as distinct authorities.
+- VM configuration: [Infrastructure as code](docs/deployment/IAC.md), the Ansible desired-state and lifecycle contract. The sole backend delivery path is GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet. Keep Cloudflare Terraform and protected release publication as distinct authorities.
 
 [Plugin Platform](docs/architecture/PLUGIN-PLATFORM.md) is a proposal, not the trusted module runtime contract. Use the [documentation index](docs/README.md) to locate the owning contract. Design targets are not implementation evidence.
 
