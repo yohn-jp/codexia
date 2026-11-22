@@ -96,8 +96,15 @@ export interface ProjectObservation {
   observedAt: string;
   state: "fresh" | "failed" | "unknown";
 }
+/** Presentation fields from the project record at the enclosing snapshot. */
+export interface SnapshotProjectPresentation {
+  /** Reader-facing title after applying the project's display settings. */
+  readonly title: string;
+  readonly subtitle?: string;
+}
 export interface SnapshotReader {
   snapshot: SnapshotId;
+  projectPresentation?: SnapshotProjectPresentation;
   /** Typed projection of canonical PostgreSQL Story documents for native readers. */
   nativeStoryDocuments?: readonly NativeStoryDocument[];
   /** Canonical PostgreSQL kind for projected metadata and body files, even when the bytes omit it. */
