@@ -19,7 +19,7 @@ Quiet Page を Writing の基本とする。Folio Atlas の考え方は、構成
 
 ## プラットフォームとシェル
 
-Web/PWA と Capacitor iOS Mobile shell を一つのデザインシステムで扱う。意味トークン、テーマ、余白、状態表現は共有し、各シェルの情報量と操作方法は画面特性に合わせる。ここでいう adaptive は Android 対応を定めない。
+Web/PWA と、同じ Mobile Web UI を表示する Capacitor iOS wrapper を一つのデザインシステムで扱う。Impeccable の Platform は `web` とする。wrapper 内でWeb UIを表示する構成はWebであり、この記録はnative iOS UIやAndroid対応を意味しない。意味トークン、テーマ、余白、状態表現は共有し、各シェルの情報量と操作方法は画面特性に合わせる。
 
 Desktop と Mobile は異なる presentation として保つ。共通の原稿・保護・認可境界を見た目の都合で分けたり、書き換えたりしない。狭い画面では原稿の読みやすさを守り、必要な補助面をタブ、ドロワー、シートなどで呼び出せるようにする。幅だけを理由に作業中の shell を勝手に切り替えない。
 

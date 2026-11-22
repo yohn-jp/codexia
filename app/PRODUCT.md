@@ -4,7 +4,7 @@
 
 ## Platform
 
-adaptive
+web
 
 ## Users
 
@@ -21,7 +21,7 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 ## Operating Context
 
 - The product covers Desktop and Mobile Web/PWA, plus a Capacitor iOS client that reuses the Mobile shell.
-- The owner wants one design system to cover Web/PWA and Capacitor iOS. The platform is recorded as `adaptive`; this does not establish Android support.
+- The owner wants one design system to cover Desktop/Mobile Web/PWA and a Capacitor iOS wrapper that displays the Mobile Web UI. Impeccable platform is `web`; a website or web UI in a native wrapper remains web, and this does not claim native iOS UI or Android support.
 - Writing, reading, reference, and review are ways to work with the same manuscript context, not separate manuscript authorities.
 
 ## Capabilities and Constraints
