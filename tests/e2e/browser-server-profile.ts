@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ModuleId, ModuleManifest } from "@codexia/contracts";
 import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
 
@@ -8,7 +8,7 @@ export async function browserServerProfile(profile: string, cacheDirectory: stri
   runtimeOptions?: ModuleRuntimeOptions;
 }> {
   if (profile === "core") return { profile };
-  const generatedPath = resolve("profiles", profile, "generated", "server.mjs");
+  const generatedPath = resolve(fileURLToPath(new URL("../../", import.meta.url)), "profiles", profile, "generated", "server.mjs");
   const composition = await import(pathToFileURL(generatedPath).href) as {
     profile: string;
     moduleManifests: ModuleManifest[];
