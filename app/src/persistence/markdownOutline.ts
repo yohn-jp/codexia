@@ -13,15 +13,19 @@ interface SourceLine {
 export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
   const lines = sourceLines(markdown);
   const headings: MarkdownHeading[] = [];
-  let frontmatter = lines[0]?.content === "---";
+  // A leading Markdown horizontal rule is not sufficient to identify YAML
+  // frontmatter. Only skip a closed, mapping-shaped metadata block.
+  const closingFrontmatterLine = lines[0]?.content === "---"
+    ? lines.findIndex((line, index) => index > 0 && (line.content === "---" || line.content === "..."))
+    : -1;
+  const hasMapping = closingFrontmatterLine > 0 && lines.slice(1, closingFrontmatterLine)
+    .some((line) => /^[^#\\s][^:]*:[ \\t]*(?:.*)$/u.test(line.content));
+  const frontmatterEndLine = hasMapping ? closingFrontmatterLine : -1;
   let fence: { marker: string; length: number } | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
-    if (frontmatter) {
-      if (index > 0 && (line.content === "---" || line.content === "...")) frontmatter = false;
-      continue;
-    }
+    if (index <= frontmatterEndLine) continue;
 
     const openingFence = /^ {0,3}(`{3,}|~{3,})/u.exec(line.content)?.[1];
     if (fence) {
