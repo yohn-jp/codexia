@@ -1,0 +1,82 @@
+name: Compare Docker, Podman and jobs.container startup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-pull:
+    name: ${{ matrix.engine }} pull / trial ${{ matrix.trial }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+        trial: [1, 2, 3]
+    env:
+      IMAGE: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+    steps:
+      - name: Record runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/runner-image-release || true
+          echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          df -h /var/lib/docker /var/lib/containers 2>/dev/null || true
+      - name: Install Podman (setup measured separately)
+        if: matrix.engine == 'podman'
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman
+          echo "Podman setup seconds: $((SECONDS-start))" >> "$GITHUB_STEP_SUMMARY"
+          podman version
+      - name: Measure cold pull and image startup
+        shell: bash
+        env:
+          ENGINE: ${{ matrix.engine }}
+          TRIAL: ${{ matrix.trial }}
+        run: |
+          set -euo pipefail
+          "$ENGINE" --version
+          "$ENGINE" image rm "$IMAGE" >/dev/null 2>&1 || true
+          start=$(date +%s%N)
+          "$ENGINE" pull "$IMAGE"
+          pulled=$(date +%s%N)
+          "$ENGINE" run --rm --entrypoint /bin/sh "$IMAGE" -c 'test -d /ms-playwright'
+          finished=$(date +%s%N)
+          pull_ms=$(( (pulled-start)/1000000 ))
+          startup_ms=$(( (finished-pulled)/1000000 ))
+          {
+            echo "### $ENGINE trial $TRIAL"
+            echo "- Pull: ${pull_ms} ms"
+            echo "- Container start and smoke check: ${startup_ms} ms"
+            echo "- Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf 'BENCHMARK engine=%s trial=%s pull_ms=%s startup_ms=%s runner_image=%s\n' "$ENGINE" "$TRIAL" "$pull_ms" "$startup_ms" "${ImageVersion:-unknown}"
+
+  job-container:
+    name: jobs.container / trial ${{ matrix.trial }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2, 3]
+    container:
+      image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --init --ipc=host
+    steps:
+      - name: Smoke check and runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /ms-playwright
+          echo "jobs.container trial ${{ matrix.trial }} ready" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          printf 'BENCHMARK engine=jobs.container trial=%s runner_image=%s\n' '${{ matrix.trial }}' "${ImageVersion:-unknown}"
