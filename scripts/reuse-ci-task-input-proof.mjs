@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planDigest, validateVerificationPlan, createVerificationPlan, verificationPlanOutputs } from './ci-impact.mjs';
 import { resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
-import { captureTaskInputClosure, taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
+import { captureTaskInputSource, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 import { coverageRuntime } from './ci-coverage-inputs.mjs';
 import { VERIFICATION_TASKS } from './ci-contract.mjs';
@@ -51,10 +51,10 @@ async function main() {
       const runtime = coverageRuntime();
       const baseline = omitted.map(task => ({ ...resolved[task], format: 'codexia-ci-task-input-proof/v2',
         mode: 'task-execution', status: 'passed', sourceSha: resolved[task].proofSourceSha }));
+      const closureFor = captureTaskInputSource({ root: process.cwd(), sha: plan.sha, runtime });
       const candidate = [];
       for (const task of omitted) {
-        const invocations = taskInvocation(task, runtime.execPath);
-        const closure = await captureTaskInputClosure({ root: process.cwd(), sha: plan.sha, task, runtime, invocations });
+        const closure = closureFor(task);
         candidate.push({ task, format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', status: 'passed',
           sourceSha: plan.sha, planDigest: planDigest(plan), workflowRunId: current.id, workflowAttempt: current.run_attempt,
           workflowJob: taskWorkflowJob(task), inputClosure: closure });

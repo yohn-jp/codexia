@@ -10,7 +10,7 @@ import { VERIFICATION_TASKS, requiredBuildProfile } from './ci-contract.mjs';
 import { captureCoverageInputClosure, coverageInvocation } from './ci-coverage-inputs.mjs';
 import { readReusableMainEvidence } from './reuse-pr-verification.mjs';
 import { assertTrustedCertifiedSourceTaskInputProof } from './ci-task-input-proof.mjs';
-import { captureTaskInputClosure, taskGroup, taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
+import { captureTaskInputSource, taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { coverageRuntime } from './ci-coverage-inputs.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
@@ -324,12 +324,12 @@ export async function assertReusedOmittedTaskProofs({ plan: planValue, current, 
     'Plan task proof reference changed after selection');
 
   const runtime = coverageRuntime();
+  const closureFor = captureTaskInputSource({ root: process.cwd(), sha: plan.sha, runtime });
   const baseline = [];
   const candidate = [];
   for (const task of tasks) {
     const receipt = trusted[task];
-    const invocation = taskInvocation(task, runtime.execPath);
-    const closure = await captureTaskInputClosure({ root: process.cwd(), sha: plan.sha, task, runtime, invocations: invocation });
+    const closure = closureFor(task);
     baseline.push({ ...receipt, format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', status: 'passed',
       sourceSha: receipt.proofSourceSha });
     candidate.push({ task, format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', status: 'passed',
