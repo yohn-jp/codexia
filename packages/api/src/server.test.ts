@@ -9,7 +9,7 @@ import { afterEach, describe, it } from "node:test";
 import { fromNodeHeaders } from "better-auth/node";
 import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import type { Persistence, PersistenceReader } from "@codexia/persistence-contracts";
+import type { ChangeSetResult, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
 import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
@@ -2660,7 +2660,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await unassignedProjectRead.json() as { code: string }).code, "PROJECT_NOT_FOUND");
     for (const path of [
       "/api/v1/persistence/projects",
-      "/api/v1/persistence/projects?page=1",
+      "/api/v1/persistence/projects?limit=1",
       "/api/v1/persistence/projects/project-1/archive",
       "/api/v1/persistence/projects/project-2/archive",
     ]) {
@@ -2670,7 +2670,7 @@ describe("Codexia HTTP boundary", () => {
     }
     for (const path of [
       "/api/v1/persistence/projects",
-      "/api/v1/persistence/projects?page=1",
+      "/api/v1/persistence/projects?limit=1",
       "/api/v1/persistence/projects/project-1/archive",
       "/api/v1/persistence/projects/project-2/archive",
     ]) {
@@ -2695,6 +2695,12 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(actions.some((action) => action.effect === "read"));
     assert.equal(actions.some((action) => action.id === "mcp.propose" || action.id === "nlp.analyze"), false,
       "read scope must not disclose compute or proposal action capabilities");
+    assert.equal(actions.some(action => action.id === "core.hierarchy.reorder"), false);
+    const reorderWithoutProposalScope = await send("/api/projects/project-1/actions/core.hierarchy.reorder", readToken, {
+      method: "POST", body: JSON.stringify({ input: { kind: "volume", orderedIds: ["one"], idempotencyKey: "read-only" } }),
+    });
+    assert.equal(reorderWithoutProposalScope.status, 403);
+    assert.equal((await reorderWithoutProposalScope.json() as { code: string }).code, "OAUTH_MCP_SCOPE_REQUIRED");
 
     const computeTokenCannotRead = await send("/api/projects/project-1/snapshot", computeToken);
     assert.equal(computeTokenCannotRead.status, 403);
@@ -4021,6 +4027,91 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.equal(nestedChange.status, "proposed");
 });
 
+it("reorders hierarchy only by approving a version-bound native ChangeSet", async (t) => {
+  const native = await nativeProject(t, "Native hierarchy reorder");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-reorder-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  t.after(instance.close);
+  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
+  t.after(hosted.close);
+  const projectId = native.project.id;
+  const [first, second] = await native.persistence.transaction(async tx => {
+    const seed = (title: string, orderKey: string) => tx.createDocument({
+      projectId, kind: "volume", title, orderKey, markdown: "", authorId: "owner", idempotencyKey: randomUUID(),
+    });
+    return [await seed("First", "1"), await seed("Second", "2")];
+  });
+  const snapshot = (await native.store.observe(projectId)).snapshot;
+  const owner = await login(instance.base);
+  const authorHeaders = { Cookie: owner.cookie, Origin: instance.base, "Content-Type": "application/json" };
+  const bearerHeaders = { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" };
+  const actionPath = `/api/projects/${projectId}/actions/core.hierarchy.reorder`;
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const readOrder = () => native.persistence.read(async reader => (await reader.listDocuments(projectId, null)).map(document => document.id));
+  const input = { kind: "volume", orderedIds: [second.document.id, first.document.id], idempotencyKey: randomUUID() };
+  const post = (path: string, body: unknown, headers: Record<string, string> = authorHeaders) =>
+    fetch(instance.base + path, { method: "POST", headers, body: JSON.stringify(body) });
+
+  const response = await post(actionPath, { input, snapshot });
+  assert.equal(response.status, 200);
+  const result = await response.json() as ActionResult<ChangeSetResult>;
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.deepEqual(result.snapshot, snapshot);
+  const { changeSet, replayed } = result.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.authorId, "owner");
+  assert.deepEqual(changeSet.operations.map(({ type }) => type), ["document.update", "document.update"]);
+  assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
+
+  const replayResponse = await post(actionPath, { input, snapshot });
+  const replay = await replayResponse.json() as ActionResult<ChangeSetResult>;
+  assert.ok(replay.ok && replay.data.replayed);
+  assert.equal(replay.data.changeSet.id, changeSet.id);
+
+  const review = await fetch(instance.base + nativePath + "/review-feed", { headers: authorHeaders });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+
+  const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
+  const unauthorized = await post(actionPath, { input: { ...input, idempotencyKey: randomUUID() }, snapshot }, bearerHeaders);
+  assert.equal(unauthorized.status, 404);
+  const postHosted = (path: string, body: unknown, grant: string) => fetch(hosted.base + path, {
+    method: "POST", headers: { Authorization: `Bearer ${grant}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const hostedInput = { ...input, idempotencyKey: randomUUID() };
+  assert.equal((await postHosted(actionPath, { input: hostedInput, snapshot }, "read-grant")).status, 403);
+  const hostedResponse = await postHosted(actionPath, { input: hostedInput, snapshot }, "write-grant");
+  assert.equal(hostedResponse.status, 200);
+  const hostedResult = await hostedResponse.json() as ActionResult<ChangeSetResult>;
+  assert.ok(hostedResult.ok, JSON.stringify(hostedResult));
+  const hostedChangeSet = hostedResult.data.changeSet;
+  assert.equal(hostedChangeSet.authorId, "writer-1");
+  assert.equal(hostedChangeSet.provenance.details.origin, "external-agent");
+  assert.equal(hostedChangeSet.status, "proposed");
+  const hostedChangeSetPath = `${nativePath}/changesets/${hostedChangeSet.id}`;
+  for (const action of ["approve", "apply"]) {
+    const denied = await postHosted(`${hostedChangeSetPath}/${action}`, { expectedVersion: hostedChangeSet.version }, "write-grant");
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  }
+  const unapproved = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version });
+  assert.equal(unapproved.status, 409);
+  assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
+  const approval = await post(changeSetPath + "/approve", { expectedVersion: changeSet.version });
+  assert.equal(approval.status, 200, await approval.text());
+  const applied = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version + 1 });
+  assert.equal(applied.status, 200, await applied.text());
+  assert.deepEqual(await readOrder(), [second.document.id, first.document.id]);
+  const appliedReplay = await post(actionPath, { input, snapshot });
+  const appliedResult = await appliedReplay.json() as ActionResult<ChangeSetResult>;
+  assert.ok(appliedResult.ok && appliedResult.data.replayed);
+  assert.equal(appliedResult.data.changeSet.id, changeSet.id);
+  assert.equal(appliedResult.data.changeSet.status, "applied");
+});
+
 it("replays built-in Core proposal actions with their original operation IDs through authenticated PostgreSQL HTTP", async (t) => {
   const native = await nativeProject(t, "Core proposal action replay");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
@@ -4175,9 +4266,6 @@ it("replays built-in Core proposal actions with their original operation IDs thr
     await approveApplyAndReplay(actionId, input, snapshot, first);
   };
 
-  await assertSharedBuilderReplay("core.hierarchy.reorder", {
-    kind: "volume", orderedIds: ["retry-volume", "v1"], proposalId: randomUUID(),
-  });
   await assertSharedBuilderReplay("core.hierarchy.delete", {
     target: { kind: "volume", id: "retry-volume" }, proposalId: randomUUID(),
   });

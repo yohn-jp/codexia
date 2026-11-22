@@ -828,7 +828,14 @@ export function createServer(options: ApiServerOptions): Server {
     if (!coreStore.writingStatsSnapshot) throw httpFailure(503, "WRITING_STATS_UNAVAILABLE", "Snapshot writing statistics are not available in this Core version");
     return coreStore.writingStatsSnapshot(projectId, selected.pinned);
   };
-  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>, allowedProjectIds?: readonly string[]): Array<{ module: "core"; action: ModuleAction }> => {
+  const buildCoreActions = (
+    projectId: string,
+    source: ChangeProposal["source"],
+    actorId: string,
+    authorizeProposal?: () => Promise<void>,
+    allowedProjectIds?: readonly string[],
+    resolveReorderActor?: () => Promise<string>,
+  ): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
         let encoded: string;
@@ -905,12 +912,15 @@ export function createServer(options: ApiServerOptions): Server {
           !Array.isArray(value.orderedIds) || !value.orderedIds.every((id) => typeof id === "string")) {
         throw new Error("kind and an ordered sibling ID list are required for hierarchy reorder");
       }
-      const proposalId = optionalProposalId(value);
-      if (value.kind === "volume") return { kind: value.kind, orderedIds: value.orderedIds, ...(proposalId ? { proposalId } : {}) };
+      const { idempotencyKey } = value;
+      if (value.proposalId !== undefined || typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200) {
+        throw new Error("A native hierarchy reorder requires an idempotencyKey of 1 to 200 characters");
+      }
+      if (value.kind === "volume") return { kind: value.kind, orderedIds: value.orderedIds, idempotencyKey };
       if (typeof value.volumeId !== "string") throw new Error("volumeId is required for chapter or scene reorder");
-      if (value.kind === "chapter") return { kind: value.kind, volumeId: value.volumeId, orderedIds: value.orderedIds, ...(proposalId ? { proposalId } : {}) };
+      if (value.kind === "chapter") return { kind: value.kind, volumeId: value.volumeId, orderedIds: value.orderedIds, idempotencyKey };
       if (typeof value.chapterId !== "string") throw new Error("chapterId is required for scene reorder");
-      return { kind: value.kind, volumeId: value.volumeId, chapterId: value.chapterId, orderedIds: value.orderedIds, ...(proposalId ? { proposalId } : {}) };
+      return { kind: value.kind, volumeId: value.volumeId, chapterId: value.chapterId, orderedIds: value.orderedIds, idempotencyKey };
     } };
     const restoreInput: ValueSchema = { parse(value: unknown) {
       if (!isRecord(value) || typeof value.sceneId !== "string" || !value.sceneId || !isPostgresRevisionId(value.snapshotId)) throw new Error("sceneId and a canonical PostgreSQL revision ID are required for restore");
@@ -1000,6 +1010,37 @@ export function createServer(options: ApiServerOptions): Server {
         }
       },
     });
+    const hierarchyReorder: ModuleAction[] = resolveReorderActor === undefined ? [] : [{
+      id: "core.hierarchy.reorder",
+      effect: "propose",
+      inputSchema: hierarchyReorderInput,
+      outputSchema: jsonSchema,
+      async invoke(input, context) {
+        const snapshot = context.reader.snapshot;
+        const checkCancelled = (): void => {
+          if (context.signal.aborted) throw httpFailure(499, "action_cancelled", "Action was cancelled");
+        };
+        try {
+          checkCancelled();
+          if (context.projectId !== projectId || snapshot.projectId !== projectId) {
+            throw httpFailure(409, "snapshot_unavailable", "Action project does not match its selected reader");
+          }
+          const authorId = await resolveReorderActor();
+          checkCancelled();
+          const { idempotencyKey, ...reorder } = input as ReorderHierarchyInput & { idempotencyKey: string };
+          const result = await coreStore.proposeHierarchyReorder(projectId, reorder, {
+            projectVersion: snapshot.projectVersion,
+            actorId: authorId,
+            idempotencyKey,
+            origin: source === "mcp" ? "external-agent" : "author",
+          });
+          checkCancelled();
+          return { ok: true, snapshot, data: result };
+        } catch (error) {
+          return actionFailure(snapshot, error, "core_proposal_failed");
+        }
+      },
+    }];
     return [
       { module: "core", action: makeProposal("core.hierarchy.create", hierarchyCreateInput, (context, input, existingProposal) =>
         options.store.buildCreateHierarchyOperation(
@@ -1010,8 +1051,7 @@ export function createServer(options: ApiServerOptions): Server {
         )) },
       { module: "core", action: makeProposal("core.hierarchy.delete", hierarchyDeleteInput, (context, input) =>
         options.store.buildDeleteHierarchyOperation(projectId, (input as { target: HierarchyTarget }).target, context.reader.snapshot)) },
-      { module: "core", action: makeProposal("core.hierarchy.reorder", hierarchyReorderInput, (context, input) =>
-        options.store.buildReorderHierarchyOperation(projectId, input as ReorderHierarchyInput, context.reader.snapshot)) },
+      ...hierarchyReorder.map(action => ({ module: "core" as const, action })),
       { module: "core", action: makeProposal("core.operation.restore", restoreInput, (context, input) =>
         options.store.buildRestoreOperation(projectId, input as { sceneId: string; snapshotId: string }, undefined, context.reader.snapshot)) },
       { module: "core", action: make("core.status", emptyInput, async () => options.store.status(projectId)) },
@@ -1084,9 +1124,16 @@ export function createServer(options: ApiServerOptions): Server {
       if (status.availability === "enabled-idle" || status.availability === "active") await runtime.activate(status.id);
     }
   };
-  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author", allowedEffects?: readonly ActionDescriptor["effect"][], allowedProjectIds?: readonly string[]): Promise<ActionDescriptor[]> => {
+  const listActionDescriptors = async (
+    projectId: string,
+    signal: AbortSignal,
+    source: ChangeProposal["source"],
+    allowedEffects?: readonly ActionDescriptor["effect"][],
+    allowedProjectIds?: readonly string[],
+    resolveReorderActor?: () => Promise<string>,
+  ): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds));
+    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds, resolveReorderActor));
   };
   const proposeAs = async (
     projectId: string,
@@ -1116,6 +1163,7 @@ export function createServer(options: ApiServerOptions): Server {
     actorId = "owner",
     allowedEffects?: readonly ActionDescriptor["effect"][],
     allowedProjectIds?: readonly string[],
+    resolveReorderActor?: () => Promise<string>,
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
@@ -1126,7 +1174,7 @@ export function createServer(options: ApiServerOptions): Server {
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
-      }, allowedProjectIds),
+      }, allowedProjectIds, resolveReorderActor),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
         if (hosted || (source === "mcp" && authorizeProposal)) {
@@ -1932,6 +1980,19 @@ export function createServer(options: ApiServerOptions): Server {
       requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
+    const resolveReorderActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(oauthMcpPrincipal))
+      ? async (): Promise<string> => {
+        if (hosted) {
+          const principal = await requireWritePermission();
+          if (principal?.userId) return principal.userId;
+        } else {
+          requireMcpEffect("propose");
+          if (oauthMcpPrincipal) return oauthMcpPrincipal.userId;
+          if (isAuthor) return "owner";
+        }
+        throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose a hierarchy reorder");
+      }
+      : undefined;
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
       return;
@@ -2254,7 +2315,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds) }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2264,10 +2325,10 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
         let descriptor = descriptors.find((item) => item.id === actionId);
         if (!descriptor && oauthMcpPrincipal) {
-          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, oauthMcpPrincipal.projectIds);
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, oauthMcpPrincipal.projectIds, resolveReorderActor);
           const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
           if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
         }
@@ -2308,7 +2369,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2416,7 +2477,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
