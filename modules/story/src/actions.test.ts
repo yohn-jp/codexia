@@ -70,7 +70,7 @@ function makeReader(files: Map<string, string>, repositoryId = "repo-work", docu
   };
 }
 
-test("scene lists exclude native notes while retaining native and mapped scenes", async () => {
+test("Story keeps native notes as manuscripts and preserves native and mapped scenes", async () => {
   const nativeSceneId = "11111111-1111-4111-8111-111111111111";
   const nativeNoteId = "22222222-2222-4222-8222-222222222222";
   const scenePath = `plot/volumes/vol-main/chapters/ch-main-1/scenes/${nativeSceneId}.yaml`;
@@ -84,14 +84,18 @@ test("scene lists exclude native notes while retaining native and mapped scenes"
   const reader = makeReader(files, "repo-story-note-filter", {
     [scenePath]: "scene",
     [notePath]: "note",
+    [`documents/${nativeNoteId}.md`]: "note",
   });
   const context = makeActionContext(reader);
 
   const scenes = (await invoke<Array<{ id: string }>>("story.entities.list", { type: "scene" }, context)).data;
   assert.deepEqual(new Set(scenes.map((entity) => entity.id)), new Set(["sc-1", "sc-2", nativeSceneId]));
 
-  const allEntities = (await invoke<Array<{ id: string }>>("story.entities.list", {}, context)).data;
-  assert.ok(allEntities.some((entity) => entity.id === nativeNoteId));
+  const allEntities = (await invoke<Array<{ id: string; type: string; body?: string }>>("story.entities.list", {}, context)).data;
+  assert.equal(allEntities.some((entity) => entity.id === nativeNoteId), false);
+  const note = allEntities.find((entity) => entity.id === `doc-ms-${nativeNoteId}`);
+  assert.equal(note?.type, "manuscript");
+  assert.equal(note?.body, "Private note body.");
   assert.ok(allEntities.some((entity) => entity.id === "sc-1"));
 
   const snapshot = await readStorySnapshot(reader);

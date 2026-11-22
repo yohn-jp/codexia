@@ -167,6 +167,8 @@ function parseStoryEntity(file: StoryFile): StoryEntity | null {
       body: body.trim(),
     };
   }
+  // A native note has an author manuscript but its projected metadata is not a Story entity.
+  if (file.documentKind === "note") return null;
   if (!file.path.endsWith(".yaml") && !file.path.endsWith(".yml")) return null;
   const raw = asRecord(YAML.parse(file.content));
   return raw ? entityFromMetadata(file.path, raw, raw.id, inferType(file.path, raw)) : null;

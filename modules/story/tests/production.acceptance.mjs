@@ -97,6 +97,41 @@ async function approveAndApply(store, projectId, proposal, operationIds = propos
   return receipts;
 }
 
+test("a native PostgreSQL note is a Story manuscript and does not create a scene", async (t) => {
+  const { store, persistence, project, close } = await postgresFixture({}, "Notes without a story");
+  const tempRoot = await mkdtemp(join(tmpdir(), "codexia-story-note-kind-pg-"));
+  const runtime = startRuntime(join(tempRoot, "runtime"));
+  t.after(async () => {
+    await runtime.shutdown();
+    await close();
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+  const noteId = randomUUID();
+  const body = "A note for the author.";
+  await persistence.transaction(tx => tx.createDocument({
+    projectId: project.id, documentId: noteId, kind: "note", title: "Author note",
+    orderKey: "0001", markdown: body, authorId: "story-note-author", idempotencyKey: noteId,
+  }));
+  const reader = await store.reader(project.id);
+  const host = makeHost(store, project.id, reader, new Set([project.id]));
+  async function invoke(actionId, input) {
+    const result = await runtime.invokeAction("story", actionId, input, host);
+    assert.deepEqual(result.snapshot, reader.snapshot);
+    return assertAction(result, actionId);
+  }
+  const manuscriptId = `doc-ms-${noteId}`;
+  const list = await invoke("story.entities.list", {});
+  const sceneList = await invoke("story.entities.list", { type: "scene" });
+  const noteAsScene = await invoke("story.entities.get", { id: noteId });
+  const manuscript = await invoke("story.entities.get", { id: manuscriptId });
+  assert.deepEqual({ all: list.map(({ id, type }) => ({ id, type })), sceneList, noteAsScene }, {
+    all: [{ id: manuscriptId, type: "manuscript" }], sceneList: [], noteAsScene: null,
+  });
+  assert.equal(manuscript.type, "manuscript");
+  assert.equal(manuscript.filePath, `documents/${noteId}.md`);
+  assert.equal(manuscript.body, body);
+});
+
 test("Story actions preserve review, linked-project, concurrency, and recovery behavior in PostgreSQL", { timeout: 180_000 }, async (t) => {
   const tempRoot = await mkdtemp(join(tmpdir(), "codexia-story-production-pg-"));
   const fixtures = [];

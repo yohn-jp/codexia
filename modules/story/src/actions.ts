@@ -1138,7 +1138,6 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const story = await readStorySnapshot(context.reader);
       return [...story.entities.values()].filter((entity) =>
         (!input.type || entity.type === input.type) &&
-        (input.type !== "scene" || story.files.get(entity.filePath)?.documentKind !== "note") &&
         (!input.tag || entity.tags?.includes(String(input.tag))))
         .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id, "ja"))
         .map((entity) => entityWithRevision(entity, story));
