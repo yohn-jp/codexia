@@ -198,6 +198,7 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
   const [sceneId, setSceneId] = useState("");
   const [scene, setScene] = useState<SceneContext | null>(null);
   const [metadata, setMetadata] = useState<Record<string, string>>({});
+  const pendingReorder = useRef<{ intent: string; idempotencyKey: string } | null>(null);
   const refresh = async () => {
     const result = await invoke<{ tree: VolumeTree }>("story.volumes.tree", {});
     setTree(result.tree);
@@ -235,10 +236,17 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
     if (nextIndex < 0 || nextIndex >= siblings.length) return;
     const orderedIds = siblings.map((item) => item.id);
     [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex]!, orderedIds[index]!];
+    const input = { ...target, orderedIds };
+    const intent = JSON.stringify(input);
+    if (pendingReorder.current?.intent !== intent) {
+      pendingReorder.current = { intent, idempotencyKey: globalThis.crypto.randomUUID() };
+    }
+    const submission = pendingReorder.current;
     try {
       // The host remounts this panel when the snapshot changes and pins both actions to its snapshot.
-      await invoke("core.hierarchy.reorder", { ...target, orderedIds, proposalId: globalThis.crypto.randomUUID() });
-      setMessage(`Proposed ${target.kind} order change. The outline updates after the proposal is accepted and applied.`);
+      await invoke("core.hierarchy.reorder", { ...input, idempotencyKey: submission.idempotencyKey });
+      if (pendingReorder.current === submission) pendingReorder.current = null;
+      setMessage(`Proposed ${target.kind} order change. Approve and apply it in Proposal Review to update the outline.`);
     } catch { /* The panel displays the machine error. */ }
   };
   return <section style={panelStyle} aria-label="Story navigator">

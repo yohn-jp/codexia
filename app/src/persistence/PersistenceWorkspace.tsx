@@ -12,7 +12,7 @@ import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, 
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
-import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
+import type { ChangeSet, Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
 import { api, type EditorSnapshotRead, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
@@ -344,6 +344,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [projectNextCursor, setProjectNextCursor] = useState<string | null>(null);
   const projectPageSequenceRef = useRef(0);
   const [nativeReviewEpoch, setNativeReviewEpoch] = useState(0);
+  const [nativeOutlineEpoch, setNativeOutlineEpoch] = useState(0);
+  const [nativeReviewRequest, setNativeReviewRequest] = useState<{ projectId: string; changeSetId: string }>();
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
@@ -733,7 +735,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [explicitRouteDocumentId, projectId, publishEditor, resumeEpoch, sessionBlocked]);
+  }, [explicitRouteDocumentId, projectId, publishEditor, resumeEpoch, nativeOutlineEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -930,10 +932,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }
   }, [publishEditor]);
 
-  const refreshAfterNativeApply = useCallback(() => {
+  const refreshAfterNativeApply = useCallback((changeSet: ChangeSet) => {
     const appliedProjectId = projectId;
     if (projectIdRef.current !== appliedProjectId) return;
     setNativeReviewEpoch(current => current + 1);
+    if (changeSet.operations.some(({ type }) => type === "document.update" || type === "document.create" || type === "document.delete")) {
+      setNativeOutlineEpoch(current => current + 1);
+    }
     refreshKnowledgeBrowse();
     void refreshModules();
     const captured = activeRef.current;
@@ -2852,9 +2857,21 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   };
   const modulePanels = availableModulePanels({ items: workspaceContributions(contributions, modules), contributions, modules, projectId, authorScope,
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
+    onNativeChangeSetProposed: (proposedProjectId, changeSetId) => {
+      if (projectIdRef.current === proposedProjectId && !sessionBlockedRef.current) {
+        setNativeReviewRequest({ projectId: proposedProjectId, changeSetId });
+      }
+    },
     navigateDocument: navigateReference,
   });
-  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} showCoreReviews={Boolean(journalError)} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>
+    {moduleError && <p role="alert">{moduleError}</p>}
+    <NativeChangeSetReview key={projectId} projectId={projectId} showCoreReviews={Boolean(journalError)}
+      requestedChangeSetId={nativeReviewRequest?.projectId === projectId ? nativeReviewRequest.changeSetId : undefined}
+      onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />
+    {journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals}
+      onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}
+  </> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />

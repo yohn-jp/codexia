@@ -98,6 +98,7 @@ test("an available panel keeps its workspace identity and explains a missing pro
     journal: null,
     refresh: async () => undefined,
     onProposalStored: () => undefined,
+    onNativeChangeSetProposed: () => undefined,
     readCurrentEditor: () => null,
     navigateDocument: async () => undefined,
   });
