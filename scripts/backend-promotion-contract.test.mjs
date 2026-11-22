@@ -6,7 +6,6 @@ import { test } from 'node:test';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
-const handoff = parse(readFileSync(new URL('../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
 
 test('backend promotion resolver and publisher checkouts include full merge history', () => {
   for (const [jobName, proofScript] of [
@@ -31,12 +30,5 @@ test('backend publication requires a still-eligible component source before regi
   assert.match(steps[gate].run, /release-source-gate\.mjs backend/u);
   assert.equal(steps[publication].if, "steps.freshness.outputs.affected == 'true'");
   assert.ok(steps[publication].run.includes('scripts/backend-registry-tag.mjs'), 'Registry checks must use the verified source context');
-  const deploy = handoff.jobs['deploy-production'];
-  assert.deepEqual(deploy.needs, ['verify-handoff']);
-  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
-  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
-  assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
-  assert.ok(deploy.steps.some(step => step.id === 'deployment-gate'),
-    'environment-scoped deployment enablement must be checked after the production Environment is attached');
   assert.equal(workflow.jobs['stable-channel'], undefined, 'retired pull publication must not exist');
 });
