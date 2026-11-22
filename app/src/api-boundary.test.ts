@@ -39,7 +39,9 @@ test("audit browser API preserves service errors and permits 204 only for no-con
     proposalId: "proposal-1", operationIds: ["operation-1"], authorScope: "owner",
   }), undefined);
   await assert.rejects(api.deletePersistenceDocument("project-1", "document-1", 1), invalid);
-  await assert.rejects(api.persistenceProjects(), invalid);
+  await assert.rejects(api.persistenceProjectPage(100), invalid);
+  globalThis.fetch = async () => Response.json([]);
+  await assert.rejects(api.persistenceProjectPage(100), invalid);
 });
 
 test("audit browser API rejects successful actions missing their required opaque payload", async () => {

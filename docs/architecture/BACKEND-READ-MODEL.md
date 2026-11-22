@@ -11,7 +11,7 @@ Normative architecture for PostgreSQL-backed reads and derived computation. [Cor
 
 ## Project library
 
-- Owner project discovery is a bounded keyset read ordered by `updatedAt` descending and project ID ascending. `GET /api/v1/persistence/projects?page=1&limit=200` returns `{ projects, nextCursor }`; pass the opaque `nextCursor` as `cursor` to continue. The no-page persistence response remains an array for existing app clients.
+- Owner project discovery is a bounded keyset read ordered by `updatedAt` descending and project ID ascending. `GET /api/v1/persistence/projects` returns `{ projects, nextCursor }`. The optional `limit` ranges from 1 to 200 and defaults to 200. Pass the opaque `nextCursor` as `cursor` to continue. A null continuation ends the listing.
 - `GET /api/projects` returns `{ projects, nextCursor }` for every successful request. Use optional `limit` (1–200, default 200) and pass a returned opaque string as `cursor`. A null continuation ends the listing. MCP `list_projects` exposes that continuation as `next_cursor`. OAuth MCP discovery includes only the client’s assigned projects, and Hosted discovery includes only its assigned project. A project deep link reads its requested identity directly and returns an error if the project is missing.
 
 ## Read paths and ownership

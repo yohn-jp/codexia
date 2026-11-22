@@ -643,15 +643,10 @@ export const api = {
     persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),
   importWorkArchive: (archive: unknown, signal?: AbortSignal) => request(dto.portableWorkImport,
     "/api/v1/persistence/import", { method: "POST", body: JSON.stringify(archive), ...(signal ? { signal } : {}) }),
-  persistenceProjects: (limit = 100, signal?: AbortSignal) => request(dto.persistenceProjects,
-    `/api/v1/persistence/projects?${new URLSearchParams({ limit: String(limit) })}`, { ...(signal ? { signal } : {}) }),
-  persistenceProjectPage: async (limit = 200, cursor?: string, signal?: AbortSignal): Promise<PersistenceProjectPage> => {
-    const query = new URLSearchParams({ page: "1", limit: String(limit) });
+  persistenceProjectPage: (limit = 200, cursor?: string, signal?: AbortSignal): Promise<PersistenceProjectPage> => {
+    const query = new URLSearchParams({ limit: String(limit) });
     if (cursor !== undefined) query.set("cursor", cursor);
-    const result = await request((value): value is PersistenceProjectPage | PersistenceProject[] =>
-      dto.persistenceProjectPage(value) || dto.persistenceProjects(value),
-    `/api/v1/persistence/projects?${query}`, { ...(signal ? { signal } : {}) });
-    return Array.isArray(result) ? { projects: result, nextCursor: null } : result;
+    return request(dto.persistenceProjectPage, `/api/v1/persistence/projects?${query}`, { ...(signal ? { signal } : {}) });
   },
   createPersistenceProject: (command: CreateProjectCommand, signal?: AbortSignal) => request(dto.persistenceProject, "/api/v1/persistence/projects", {
     method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),

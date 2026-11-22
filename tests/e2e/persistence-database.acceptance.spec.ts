@@ -495,7 +495,7 @@ test("a delayed import keeps unprotected intervening input available and lists t
     expect(projects.ok()).toBe(true);
     const importedId = heldImport.projectId;
     expect(importedId).toBeTruthy();
-    const listedProjects = await projects.json() as Array<{ id: string }>;
+    const { projects: listedProjects } = await projects.json() as { projects: Array<{ id: string }> };
     expect(listedProjects.some((item) => item.id === importedId)).toBe(true);
     await page.getByLabel("作品", { exact: true }).selectOption(importedId);
     const importedDocuments = await readProjectDocuments(page, importedId);
@@ -872,8 +872,8 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
   }
 
   let pageRequests = 0;
-  await page.route(/\/api\/v1\/persistence\/projects\?page=/u, async (route) => {
-    pageRequests++;
+  await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
+    if (route.request().method() === "GET") pageRequests++;
     await route.continue();
   });
   const target = created[0]!;
@@ -886,7 +886,7 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
   const library = page.getByLabel("作品と文書");
   const firstPageResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/v1/persistence/projects" && url.searchParams.get("page") === "1" && !url.searchParams.has("cursor");
+    return response.request().method() === "GET" && url.pathname === "/api/v1/persistence/projects" && !url.searchParams.has("cursor");
   });
   await library.getByRole("button", { name: "作品一覧を読み込む" }).click();
   const firstPage = await (await firstPageResponse).json() as { projects: Array<{ id: string }>; nextCursor: string | null };
@@ -895,7 +895,7 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
   await expect(library.getByRole("button", { name: "さらに作品を読み込む" })).toBeVisible();
   const secondPageResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/v1/persistence/projects" && url.searchParams.get("page") === "1" && url.searchParams.has("cursor");
+    return response.request().method() === "GET" && url.pathname === "/api/v1/persistence/projects" && url.searchParams.has("cursor");
   });
   await library.getByRole("button", { name: "さらに作品を読み込む" }).click();
   const secondPage = await (await secondPageResponse).json() as { projects: Array<{ id: string }>; nextCursor: string | null };
@@ -1451,9 +1451,9 @@ test("replays ambiguous project and document creates with retained client intent
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
   await expect(page.getByRole("heading", { name: projectTitle, exact: true })).toBeVisible();
 
-  const projectsResponse = await page.request.get("/api/v1/persistence/projects");
+  const projectsResponse = await page.request.get("/api/v1/persistence/projects?limit=100");
   expect(projectsResponse.ok()).toBe(true);
-  const projects = await projectsResponse.json() as Array<{ id: string; title: string }>;
+  const { projects } = await projectsResponse.json() as { projects: Array<{ id: string; title: string }> };
   expect(projects.filter((item) => item.title === projectTitle)).toHaveLength(1);
   expect(projectBodies).toHaveLength(2);
   expect(projectBodies[1]).toEqual(projectBodies[0]);
@@ -1466,9 +1466,10 @@ test("replays ambiguous project and document creates with retained client intent
   const projectId = projectBodies[2]?.id;
   expect(projectId).toBeTruthy();
   await expect(outline.getByLabel("作品", { exact: true })).toHaveValue(projectId!);
-  const projectsAfterSameTitle = await page.request.get("/api/v1/persistence/projects");
-  const sameTitleProjects = (await projectsAfterSameTitle.json() as Array<{ id: string; title: string }>).filter((item) => item.title === projectTitle);
-  expect(sameTitleProjects).toHaveLength(2);
+  const projectsAfterSameTitle = await page.request.get("/api/v1/persistence/projects?limit=100");
+  expect(projectsAfterSameTitle.ok()).toBe(true);
+  const afterSameTitle = await projectsAfterSameTitle.json() as { projects: Array<{ id: string; title: string }> };
+  expect(afterSameTitle.projects.filter((item) => item.title === projectTitle)).toHaveLength(2);
   expect(projectBodies).toHaveLength(3);
   expect(projectId).not.toBe(projectBodies[0]?.id);
 
@@ -1523,7 +1524,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
     let showProject = false;
     await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
-      if (!showProject && route.request().method() === "GET") return route.fulfill({ json: [] });
+      if (!showProject && route.request().method() === "GET") return route.fulfill({ json: { projects: [], nextCursor: null } });
       if (route.request().method() !== "POST") return route.continue();
       const response = await route.fetch();
       showProject = response.ok();

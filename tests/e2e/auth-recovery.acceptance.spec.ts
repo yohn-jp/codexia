@@ -10,7 +10,7 @@ async function mockAuthenticatedWorkspace(page: Page, hosted: boolean, session?:
     return route.fulfill({ status: response.status, json: response.body });
   });
   await page.route("**/api/v1/persistence/status", (route) => route.fulfill({ json: { available: true, provider: "postgres" } }));
-  await page.route("**/api/v1/persistence/projects*", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/persistence/projects*", (route) => route.fulfill({ json: { projects: [], nextCursor: null } }));
   await page.route("**/api/jobs", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/jobs/events", (route) => route.fulfill({ headers: { "content-type": "text/event-stream" }, body: "" }));
   await page.route("**/api/inbox", (route) => route.fulfill({ json: { items: [], unreadCount: 0 } }));
@@ -31,7 +31,7 @@ for (const shell of ["desktop", "mobile"] as const) {
       ? route.fulfill({ json: { authenticated: true, authorScope: "owner" } })
       : route.fulfill({ status: 401, json: { error: "Authentication required", code: "UNAUTHORIZED" } }));
     await page.route("**/api/v1/persistence/status", route => route.fulfill({ json: { available: true, provider: "postgres" } }));
-    await page.route("**/api/v1/persistence/projects*", route => route.fulfill({ json: [] }));
+    await page.route("**/api/v1/persistence/projects*", route => route.fulfill({ json: { projects: [], nextCursor: null } }));
     await page.route("**/api/jobs", route => route.fulfill({ json: [] }));
     await page.route("**/api/jobs/events", route => route.fulfill({ headers: { "content-type": "text/event-stream" }, body: "" }));
     await page.route("**/api/inbox", route => route.fulfill({ json: { items: [], unreadCount: 0 } }));
@@ -91,9 +91,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
     });
   });
   await page.route("**/api/v1/persistence/projects*", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: "[]",
+    json: { projects: [], nextCursor: null },
   }));
   await page.route("**/api/jobs", (route) => route.fulfill({
     status: 200,
@@ -322,9 +320,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
     });
   });
   await context.route("**/api/v1/persistence/projects*", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: "[]",
+    json: { projects: [], nextCursor: null },
   }));
   await context.route("**/api/jobs", (route) => route.fulfill({
     status: 200,

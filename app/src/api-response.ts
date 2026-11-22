@@ -125,7 +125,6 @@ export const responseContracts = {
     Array.isArray(v.moduleRecords) && strings(v.omittedRecords),
   portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
     bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
-  persistenceProjects: array(persistenceProject),
   persistenceProjectPage: (v: unknown): v is { projects: PersistenceProject[]; nextCursor: string | null } =>
     record(v) && array(persistenceProject)(v.projects) && (v.nextCursor === null || (text(v.nextCursor) && v.nextCursor.length <= 512)),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),

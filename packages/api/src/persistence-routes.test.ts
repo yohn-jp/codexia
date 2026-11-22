@@ -15,7 +15,7 @@ test("hosted PostgreSQL routes are scoped to the assigned project", async () => 
           lookedUp.push(projectId);
           return projectId === assignedProjectId ? project : undefined;
         },
-        async listProjects() {
+        async listProjectPage() {
           assert.fail("hosted project listing must not enumerate the database");
         },
       });
@@ -31,10 +31,10 @@ test("hosted PostgreSQL routes are scoped to the assigned project", async () => 
 
   const projects = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects" });
   assert.equal(projects?.status, 200);
-  assert.deepEqual(projects?.body, [project]);
+  assert.deepEqual(projects?.body, { projects: [project], nextCursor: null });
   assert.deepEqual(lookedUp, [assignedProjectId]);
 
-  const page = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=20" });
+  const page = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects?limit=20" });
   assert.equal(page?.status, 200);
   assert.deepEqual(page?.body, { projects: [project], nextCursor: null });
   assert.deepEqual(lookedUp, [assignedProjectId, assignedProjectId]);
@@ -147,7 +147,7 @@ test("persistence project page uses the bounded keyset reader and encodes contin
     },
   } as unknown as Persistence;
   const result = await handlePersistenceRoute({
-    persistence, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=1", body: null, requestHeaders: {},
+    persistence, method: "GET", url: "/api/v1/persistence/projects?limit=1", body: null, requestHeaders: {},
     async requireAuthor() { return "author"; },
   });
   assert.equal(result?.status, 200);
@@ -155,7 +155,7 @@ test("persistence project page uses the bounded keyset reader and encodes contin
   assert.deepEqual(firstPage, [projects[0]]);
   assert.ok(cursor, "lookahead must provide an opaque continuation");
   const next = await handlePersistenceRoute({
-    persistence, method: "GET", url: `/api/v1/persistence/projects?page=1&limit=1&cursor=${encodeURIComponent(cursor)}`, body: null, requestHeaders: {},
+    persistence, method: "GET", url: `/api/v1/persistence/projects?limit=1&cursor=${encodeURIComponent(cursor)}`, body: null, requestHeaders: {},
     async requireAuthor() { return "author"; },
   });
   assert.deepEqual(next?.body, { projects: [projects[1]], nextCursor: null });

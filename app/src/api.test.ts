@@ -145,14 +145,14 @@ test("concurrent expired Hosted requests share the rotating refresh exchange", a
       projectRequests += 1;
       return projectRequests <= 2
         ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json([]);
+        : Response.json({ projects: [], nextCursor: null });
     }
     throw new Error(`Unexpected request: ${path}`);
   };
   try {
     await api.version();
-    const results = await Promise.all([api.persistenceProjects(), api.persistenceProjects()]);
-    assert.deepEqual(results, [[], []]);
+    const results = await Promise.all([api.persistenceProjectPage(100), api.persistenceProjectPage(100)]);
+    assert.deepEqual(results, [{ projects: [], nextCursor: null }, { projects: [], nextCursor: null }]);
     assert.equal(refreshRequests, 1);
     assert.equal(projectRequests, 4);
   } finally {
@@ -189,13 +189,13 @@ test("concurrent Hosted tabs serialize refresh-cookie rotation", async () => {
       projectRequests += 1;
       return !grantFresh
         ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json([]);
+        : Response.json({ projects: [], nextCursor: null });
     }
     throw new Error(`Unexpected request: ${path}`);
   };
   try {
     await api.version();
-    assert.deepEqual(await Promise.all([api.persistenceProjects(), api.persistenceProjects()]), [[], []]);
+    assert.deepEqual(await Promise.all([api.persistenceProjectPage(100), api.persistenceProjectPage(100)]), [{ projects: [], nextCursor: null }, { projects: [], nextCursor: null }]);
     assert.equal(refreshRequests, 1);
     assert.equal(projectRequests, 5);
   } finally {
@@ -256,7 +256,7 @@ test("transient Hosted refresh failures preserve their error without reauthentic
   };
   try {
     await api.version();
-    await assert.rejects(api.persistenceProjects(), (error: unknown) =>
+    await assert.rejects(api.persistenceProjectPage(100), (error: unknown) =>
       error instanceof Error && "status" in error && error.status === 503 && error.message === "Gateway unavailable");
     assert.equal(redirectedToReauth, false);
   } finally {

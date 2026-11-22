@@ -48,9 +48,9 @@ export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> 
 }
 
 export async function fixtureProject(request: APIRequestContext): Promise<{ project: FixtureProject; scenes: FixtureDocument[] }> {
-  const response = await request.get("/api/v1/persistence/projects");
+  const response = await request.get("/api/v1/persistence/projects?limit=100");
   expect(response.ok()).toBe(true);
-  const projects = await response.json() as FixtureProject[];
+  const { projects } = await response.json() as { projects: FixtureProject[] };
   const project = projects.find((item) => item.title === process.env.CODEXIA_E2E_PROJECT_TITLE) ?? projects.find((item) => item.title.startsWith("Acceptance manuscript"));
   expect(project, "disposable browser project must exist").toBeTruthy();
   const documentsResponse = await request.get(`/api/v1/persistence/projects/${project!.id}/documents`);

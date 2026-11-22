@@ -160,9 +160,9 @@ async function captureScreenshots(baseURL, token, title) {
           await page.getByRole('button', { name: 'PostgreSQL作品を開く' }).click();
         }
         await workspace.waitFor({ timeout: 20_000 });
-        const projectsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects`);
+        const projectsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects?limit=100`);
         if (!projectsResponse.ok()) throw new Error(`${mode} projects returned ${projectsResponse.status()}`);
-        const projects = await projectsResponse.json();
+        const { projects } = await projectsResponse.json();
         const project = projects.find(item => item.title === title);
         if (!project) throw new Error(`${mode}: seeded preview project not found`);
         const docsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects/${project.id}/documents`);
