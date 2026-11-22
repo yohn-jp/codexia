@@ -38,7 +38,6 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
     getDocumentHeadRevisions: 0,
     listModuleRecords: 0,
     snapshotMisses: 0,
-    manifestReads: 0,
   };
   const instrumented = new Proxy(base, {
     get(target, property, receiver) {
@@ -50,9 +49,6 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
               if (typeof method !== "function") return method;
               if (readerProperty === "getModuleRecord") {
                 return async (...args: Parameters<PersistenceReader["getModuleRecord"]>) => {
-                  if (args[1] === "core.authority.snapshots" && args[2].startsWith("snapshot:")) {
-                    counts.manifestReads = (counts.manifestReads ?? 0) + 1;
-                  }
                   const record = await readerTarget.getModuleRecord(...args);
                   if (args[1] === "core.authority.snapshots" && !record) {
                     counts.snapshotMisses = (counts.snapshotMisses ?? 0) + 1;
@@ -152,25 +148,19 @@ test("project presentation reads the selected project's public title and subtitl
   assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
 });
 
-test("file-based hierarchy creation reads the resolved manifest only once", async () => {
+test("native hierarchy creation rejects an older project version without materializing a snapshot", async () => {
   const project = await createProject();
-  const pinned = (await core.reader(project.id)).snapshot;
   await persistence.transaction(tx => tx.updateProject({
-    projectId: project.id, expectedVersion: pinned.projectVersion, title: "Later version",
+    projectId: project.id, expectedVersion: project.version, title: "Later version",
   }));
-  const current = (await core.reader(project.id)).snapshot;
-  const tracked = countSnapshotReads(persistence, async () => {});
-  const store = new CoreStore({ persistence: tracked.persistence });
-
-  for (const snapshot of [undefined, pinned]) {
-    const expected = snapshot ?? current;
-    const before = tracked.counts.manifestReads!;
-    const built = await store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot);
-    assert.deepEqual(built.snapshot, expected);
-    assert.equal(built.operation.projectId, expected.projectId);
-    assert.equal(built.operation.baseProjectVersion, expected.projectVersion);
-    assert.equal(tracked.counts.manifestReads! - before, 1);
-  }
+  const { snapshot } = await core.observe(project.id);
+  const input = { kind: "volume", id: "v", title: "新巻" } as const;
+  const options = { actorId: "author", idempotencyKey: randomUUID() };
+  await assert.rejects(core.proposeHierarchyCreate(project.id, input, { ...options, projectVersion: project.version }), { code: "conflict" });
+  const proposed = await core.proposeHierarchyCreate(project.id, input, { ...options, projectVersion: snapshot.projectVersion });
+  assert.equal(proposed.changeSet.status, "proposed");
+  assert.equal(await persistence.read(reader =>
+    reader.getModuleRecord(project.id, "core.authority.snapshots", `snapshot:${snapshot.projectVersion}`)), undefined);
 });
 
 test("every persisted snapshot dependency advances the project version, while authority records do not", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
-import type { ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
+import type { ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
 import type { DocumentId } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { readCanonicalSnapshotEntities } from "@codexia/module-nlp";
@@ -30,21 +30,17 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
 }, async () => {
   const project = await core!.createProject({ title: "Semantic Snapshot " + randomUUID() });
 
-  const createHierarchy = async (input: Parameters<CoreStore["buildCreateHierarchyOperation"]>[1]) => {
-    const built = await core!.buildCreateHierarchyOperation(project.id, input);
-    const proposal: ChangeProposal = {
-      id: randomUUID(),
-      snapshot: built.snapshot,
-      source: "author",
-      operations: [built.operation],
-    };
-    await core!.propose(project.id, proposal);
-    await core!.approve(project.id, {
-      proposalId: proposal.id,
-      operationIds: [built.operation.id],
-      authorScope: "owner",
+  const createHierarchy = async (input: Parameters<CoreStore["proposeHierarchyCreate"]>[1]) => {
+    const { snapshot } = await core!.observe(project.id);
+    const { changeSet } = await core!.proposeHierarchyCreate(project.id, input, {
+      projectVersion: snapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID(),
     });
-    await core!.apply(project.id, built.operation);
+    const approved = await persistence!.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "owner",
+    }));
+    await persistence!.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: approved.version,
+    }));
   };
 
   await createHierarchy({ kind: "volume", id: "legacy-volume", title: "Legacy volume" });

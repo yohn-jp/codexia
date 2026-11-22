@@ -29,19 +29,21 @@ test("Story range approval applies exact PostgreSQL edits and preserves unrelate
   const core = new CoreStore({ persistence });
   try {
     const project = await core.createProject({ title: `Story range evidence ${randomUUID()}` });
-    async function accept(operation, snapshot) {
-      const proposal = { id: randomUUID(), snapshot, operations: [operation], source: "author" };
-      await core.propose(project.id, proposal);
-      await core.approve(project.id, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "story-range-owner" });
-      return core.apply(project.id, operation);
-    }
     for (const input of [
       { kind: "volume", id: "v1", title: "Volume" },
       { kind: "chapter", id: "c1", title: "Chapter", volumeId: "v1" },
       { kind: "scene", id: "s1", title: "Scene", volumeId: "v1", chapterId: "c1", manuscriptBody: "  BEFORE confirmed evidence MID changed target AFTER confirmed evidence  \n" },
     ]) {
-      const built = await core.buildCreateHierarchyOperation(project.id, input);
-      await accept(built.operation, built.snapshot);
+      const { snapshot } = await core.observe(project.id);
+      const { changeSet } = await core.proposeHierarchyCreate(project.id, input, {
+        projectVersion: snapshot.projectVersion, actorId: "story-range-owner", idempotencyKey: randomUUID(),
+      });
+      const approved = await persistence.transaction(tx => tx.approveChangeSet({
+        projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "story-range-owner",
+      }));
+      await persistence.transaction(tx => tx.applyChangeSet({
+        projectId: project.id, changeSetId: changeSet.id, expectedVersion: approved.version,
+      }));
     }
 
     const documents = await persistence.read((reader) => reader.listDocuments(project.id));

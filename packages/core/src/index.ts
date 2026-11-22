@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
 import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
@@ -135,11 +135,6 @@ export interface ProposeManuscriptRestoreOptions {
   idempotencyKey: string;
   origin?: "author" | "external-agent";
   snapshot?: SnapshotId;
-}
-
-export interface BuiltChangeOperation {
-  snapshot: SnapshotId;
-  operation: ChangeOperation;
 }
 
 
@@ -1096,36 +1091,6 @@ export class CoreStore implements MutationCoordinator {
 
       return recordApplication(receipt);
     });
-  }
-  private buildOperation(
-    snapshot: SnapshotId, writes: FileChange[], effect: ChangeOperation["effect"], message: string,
-  ): BuiltChangeOperation {
-    return {
-      snapshot: { ...snapshot },
-      operation: {
-        id: randomUUID(), generation: 0, projectId: snapshot.projectId,
-        baseProjectVersion: snapshot.projectVersion, effect,
-        reads: writes.map(({ path, revision }) => ({ path, revision })), writes, message,
-      },
-    };
-  }
-  async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId,allowReservedPathReplay=false):Promise<BuiltChangeOperation>{
-    if(!input||!["volume","chapter","scene"].includes(input.kind)||typeof input.id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(input.id)||!input.title?.trim())fail(400,"invalid_hierarchy_operation","A path-safe identity and title are required");
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);if(index.logicalDocumentIds.has(input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
-    const reader=makeReader(manifest),writes:FileChange[]=[];let path:string,parentId:DocumentId|null=null;
-    if(input.kind==="volume")path=`plot/volumes/${input.id}/volume.yaml`;
-    else {const volume=this.findDocument(manifest,input.volumeId);if(volume.kind!=="volume")fail(422,"invalid_hierarchy_parent","The parent must be a volume");
-      if(input.kind==="chapter"){parentId=volume.id;path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;}
-      else {const chapter=this.findDocument(manifest,input.chapterId);if(chapter.kind!=="chapter"||chapter.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The chapter must belong to the volume");parentId=chapter.id;path=`plot/volumes/${input.volumeId}/chapters/${input.chapterId}/scenes/${input.id}.yaml`;const manuscript=`manuscript/${input.volumeId}/${input.chapterId}/${input.id}.md`;writes.push({path:manuscript,revision:null,content:input.manuscriptBody??""});}}
-    if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");
-    const archivedPath = await this.persistence.read(async (currentReader) =>
-      (await currentReader.listModuleRecords(pid(projectId), PATHS)).some((record) => record.value.metadataPath === path));
-    if (archivedPath && !allowReservedPathReplay) {
-      fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
-    }
-    const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
-    writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
-    return this.buildOperation(manifest.snapshot,writes,"structure",`Create ${input.kind} ${input.id}`);
   }
   async proposeHierarchyCreate(project: string, input: CreateHierarchyInput, options: ProposeHierarchyOptions): Promise<ChangeSetResult> {
     const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;

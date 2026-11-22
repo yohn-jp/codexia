@@ -4,7 +4,7 @@ import { after, before, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { CoreError, CoreStore } from "@codexia/core";
 import type { ChangeOperation, ChangeProposal } from "@codexia/contracts";
-import type { DocumentId, EvidenceId, KnowledgeNodeId, Persistence, PersistenceTransaction, ProjectId } from "@codexia/persistence-contracts";
+import type { ChangeSet, DocumentId, EvidenceId, KnowledgeNodeId, Persistence, PersistenceTransaction, ProjectId } from "@codexia/persistence-contracts";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import { exportWorkArchive, importWorkArchive } from "./work-archive.js";
 
@@ -76,16 +76,26 @@ test("a portable work round trip reconstitutes manuscript, hierarchy, knowledge,
 
 test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQL", async () => {
   const source = await core.createProject({ title: "Archive reservation " + randomUUID() });
+  const proposeCreation = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyCreate"]>[1]) => {
+    const { snapshot } = await core.observe(projectId);
+    return core.proposeHierarchyCreate(projectId, input, {
+      projectVersion: snapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID(),
+    });
+  };
+  const approveAndApply = async (changeSet: ChangeSet) => {
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId: changeSet.projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "owner",
+    }));
+    await persistence.transaction(tx => tx.applyChangeSet({
+      projectId: changeSet.projectId, changeSetId: changeSet.id, expectedVersion: approved.version,
+    }));
+  };
   for (const input of [
     { kind: "volume", id: "reserve-volume", title: "Volume" },
     { kind: "chapter", id: "reserve-chapter", title: "Chapter", volumeId: "reserve-volume" },
     { kind: "scene", id: "reserve-scene", title: "Scene", volumeId: "reserve-volume", chapterId: "reserve-chapter", manuscriptBody: "Retained text" },
   ] as const) {
-    const built = await core.buildCreateHierarchyOperation(source.id, input);
-    const proposal: ChangeProposal = { id: randomUUID(), snapshot: built.snapshot, operations: [built.operation], source: "author" };
-    await core.propose(source.id, proposal);
-    await core.approve(source.id, { proposalId: proposal.id, operationIds: [built.operation.id], authorScope: "owner" });
-    await core.apply(source.id, built.operation);
+    await approveAndApply((await proposeCreation(source.id, input)).changeSet);
   }
 
   const archive = await exportWorkArchive(persistence, source.id);
@@ -94,30 +104,18 @@ test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQ
   const { changeSet: deletion } = await core.proposeHierarchyDelete(imported.project.id, {
     kind: "scene", id: "reserve-scene", volumeId: "reserve-volume", chapterId: "reserve-chapter",
   }, { projectVersion: deletionSnapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID() });
-  const approved = await persistence.transaction(tx => tx.approveChangeSet({
-    projectId: imported.project.id, changeSetId: deletion.id, expectedVersion: deletion.version, approvedBy: "owner",
-  }));
-  await persistence.transaction(tx => tx.applyChangeSet({
-    projectId: imported.project.id, changeSetId: deletion.id, expectedVersion: approved.version,
-  }));
+  await approveAndApply(deletion);
 
   await assert.rejects(
-    core.buildCreateHierarchyOperation(imported.project.id, {
+    proposeCreation(imported.project.id, {
       kind: "scene", id: "reserve-scene", title: "Reused", volumeId: "reserve-volume", chapterId: "reserve-chapter",
     }),
     (error: unknown) => error instanceof CoreError && error.code === "hierarchy_path_reserved",
   );
-  const newScene = await core.buildCreateHierarchyOperation(imported.project.id, {
+  const newScene = await proposeCreation(imported.project.id, {
     kind: "scene", id: "unused-scene", title: "Unused path", volumeId: "reserve-volume", chapterId: "reserve-chapter",
   });
-  const newProposal: ChangeProposal = {
-    id: randomUUID(), snapshot: newScene.snapshot, operations: [newScene.operation], source: "author",
-  };
-  await core.propose(imported.project.id, newProposal);
-  await core.approve(imported.project.id, {
-    proposalId: newProposal.id, operationIds: [newScene.operation.id], authorScope: "owner",
-  });
-  await core.apply(imported.project.id, newScene.operation);
+  await approveAndApply(newScene.changeSet);
 
   const sourceScene = archive.documents.find(document => document.kind === "scene")!;
   assert.ok(await persistence.read(reader => reader.getRevision(source.id, sourceScene.id as DocumentId, sourceScene.revisionId as import("@codexia/persistence-contracts").RevisionId)));
