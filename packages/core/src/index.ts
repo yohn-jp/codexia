@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
-import { HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
@@ -189,7 +189,6 @@ function projectionProofKey(version: number): string {
   return `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${version}`;
 }
 const ARTIFACTS = "core.artifacts";
-const PATHS = "core.document-paths";
 const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
 const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
@@ -1127,6 +1126,81 @@ export class CoreStore implements MutationCoordinator {
     const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
     writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
     return this.buildOperation(manifest.snapshot,writes,"structure",`Create ${input.kind} ${input.id}`);
+  }
+  async proposeHierarchyCreate(project: string, input: CreateHierarchyInput, options: ProposeHierarchyOptions): Promise<ChangeSetResult> {
+    const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;
+    if (!input || !["volume", "chapter", "scene"].includes(input.kind) ||
+        typeof input.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(input.id) ||
+        typeof input.title !== "string" || !input.title.trim()) {
+      fail(400, "invalid_hierarchy_operation", "A path-safe identity and title are required");
+    }
+    if (!Number.isSafeInteger(projectVersion) || projectVersion < 1 || !actorId.trim() || !idempotencyKey.trim()) {
+      fail(400, "invalid_hierarchy_operation", "A project version, actor and idempotency key are required");
+    }
+    const projectId = pid(project);
+    const requestDigest = hash(canonicalJson({ actorId, origin, input }));
+    try {
+      return await this.persistence.transaction(async tx => {
+        await tx.assertProjectVersion(projectId);
+        const existing = await tx.getChangeSetByIdempotencyKey(projectId, idempotencyKey);
+        if (existing) {
+          if (existing.authorId !== actorId || existing.provenance.source !== HIERARCHY_CREATE_SOURCE ||
+              existing.provenance.details.requestDigest !== requestDigest) {
+            throw new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
+              resource: "idempotency_key", id: idempotencyKey,
+            });
+          }
+          return { changeSet: existing, replayed: true };
+        }
+        await tx.assertProjectVersion(projectId, projectVersion);
+        const documents = await tx.listDocuments(projectId, undefined, 1000);
+        if (documents.length === 1000) fail(413, "snapshot_too_large", "Project snapshot exceeds the supported document bound");
+        const mappings = new Map((await tx.listModuleRecords(projectId, PATHS)).map(record => [record.key, record.value]));
+        const resolveParent = (lookupId: string, kind: "volume" | "chapter", parentId: DocumentId | null) => {
+          const matches = documents.filter(document => document.kind === kind && document.parentId === parentId &&
+            (document.id === lookupId || storyDocumentId(document, storyMetadata(mappings.get(document.id))) === lookupId));
+          if (matches.length !== 1) fail(422, "invalid_hierarchy_parent", "The selected parent is missing or ambiguous");
+          return { documentId: matches[0]!.id, lookupId };
+        };
+        let hierarchy: HierarchyDocumentCreate = { kind: "volume", logicalId: input.id };
+        let parentId: DocumentId | null = null;
+        if (input.kind !== "volume") {
+          const volume = resolveParent(input.volumeId, "volume", null);
+          if (input.kind === "chapter") {
+            hierarchy = { kind: "chapter", logicalId: input.id, volume };
+            parentId = volume.documentId;
+          } else {
+            const chapter = resolveParent(input.chapterId, "chapter", volume.documentId);
+            hierarchy = { kind: "scene", logicalId: input.id, volume, chapter };
+            parentId = chapter.documentId;
+          }
+        }
+        const { metadataPath } = hierarchyDocumentPaths(hierarchy);
+        const documentId = stableId(projectId, metadataPath);
+        const orderKey = nextOrderKey(documents.filter(document => document.kind === input.kind && document.parentId === parentId)
+          .map(document => document.orderKey));
+        return tx.createChangeSet({
+          projectId, authorId: actorId, idempotencyKey,
+          operations: [{ type: "document.create", hierarchy, command: {
+            projectId, documentId, parentId, kind: input.kind, title: input.title, orderKey, appendToEnd: true,
+            markdown: input.kind === "scene" ? input.manuscriptBody ?? "" : "",
+            authorId: actorId, idempotencyKey: `hierarchy-create:${hash(idempotencyKey)}`,
+          } }],
+          readSet: [],
+          writeSet: [{ resource: "document", id: documentId },
+            { resource: "module_record", id: JSON.stringify([PATHS, documentId]) }],
+          provenance: { source: HIERARCHY_CREATE_SOURCE, actorId, details: { projectVersion, origin, requestDigest } },
+        });
+      });
+    } catch (error) {
+      if (error instanceof PersistenceError) {
+        const resource = error.details?.resource;
+        if (resource === "hierarchy_id_exists" || resource === "hierarchy_path_exists" || resource === "hierarchy_path_reserved") {
+          fail(409, resource, error.message);
+        }
+      }
+      throw error;
+    }
   }
   async proposeHierarchyDelete(project: string, input: HierarchyTarget, options: ProposeHierarchyOptions): Promise<ChangeSetResult> {
     const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;

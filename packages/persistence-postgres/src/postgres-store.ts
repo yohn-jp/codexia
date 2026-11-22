@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { nextOrderKey } from "@codexia/contracts";
+import { assertProjectPath, nextOrderKey } from "@codexia/contracts";
 import {
+  CORE_DOCUMENT_PATHS,
+  HIERARCHY_CREATE_SOURCE,
   HIERARCHY_DELETE_SOURCE,
   HIERARCHY_REORDER_SOURCE,
+  hierarchyDocumentPaths,
   PersistenceError,
   type Assertion,
   type AssertionEvidence,
@@ -28,6 +31,7 @@ import {
   type EvidenceAnchor,
   type EvidenceAnchorHistory,
   type EvidenceId,
+  type HierarchyDocumentCreate,
   type IdempotencyKey,
   type JsonObject,
   type KnowledgeAlias,
@@ -411,7 +415,12 @@ function operationWriteTargets(operation: ChangeSetOperation): readonly ChangeSe
   switch (operation.type) {
     case "document.create":
       if (!operation.command.documentId) throw validationError("ChangeSet document creates require a stable documentId");
-      return [{ resource: "document", id: operation.command.documentId }];
+      return [
+        { resource: "document", id: operation.command.documentId },
+        ...(operation.hierarchy ? [{
+          resource: "module_record" as const, id: JSON.stringify([CORE_DOCUMENT_PATHS, operation.command.documentId]),
+        }] : []),
+      ];
     case "document.update":
     case "document.delete":
     case "document.save":
@@ -490,7 +499,15 @@ function validateChangeSetOperations(
   allowKnowledgeMerge = false,
 ): void {
   if (operations.length === 0) throw validationError("A ChangeSet must contain at least one operation");
+  const first = operations[0];
+  if (provenance.source === HIERARCHY_CREATE_SOURCE &&
+      (operations.length !== 1 || first?.type !== "document.create" || !first.hierarchy)) {
+    throw validationError("A hierarchy create must be the only operation in its native ChangeSet");
+  }
   for (const operation of operations) {
+    if (operation.type === "document.create" && operation.hierarchy !== undefined && provenance.source !== HIERARCHY_CREATE_SOURCE) {
+      throw validationError("Hierarchy documents require a native hierarchy ChangeSet");
+    }
     if (operation.type === "knowledge.merge" && !allowKnowledgeMerge) throw validationError("Knowledge merge operations require the native merge proposal entrypoint");
     if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
     if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
@@ -1692,7 +1709,7 @@ class PostgresTransaction implements PersistenceTransaction {
     }
     let readSet = command.readSet;
     if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE ||
-        command.provenance.source === HIERARCHY_DELETE_SOURCE) {
+        command.provenance.source === HIERARCHY_DELETE_SOURCE || command.provenance.source === HIERARCHY_CREATE_SOURCE) {
       const sourceVersion = command.provenance.details.projectVersion;
       if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
@@ -1700,6 +1717,10 @@ class PostgresTransaction implements PersistenceTransaction {
     if (command.provenance.source === "native-knowledge-service") {
       readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
       await this.assertChangeSetReadSet(command.projectId, readSet);
+    }
+    const firstOperation = command.operations[0];
+    if (firstOperation?.type === "document.create" && firstOperation.hierarchy) {
+      await this.checkHierarchyCreate(firstOperation.command, firstOperation.hierarchy);
     }
     const id = command.id ?? randomUUID() as ChangeSetId;
     const result = await this.query(
@@ -1831,7 +1852,11 @@ class PostgresTransaction implements PersistenceTransaction {
       case "document.update": return this.updateDocument(operation.command);
       case "document.delete": return this.deleteDocument(operation.command);
       case "module.record.save": return this.saveModuleRecord(operation.command);
-      case "document.create": return this.createDocument(operation.command);
+      case "document.create": {
+        if (!operation.hierarchy) return this.createDocument(operation.command);
+        if (!approvedBy) throw validationError("Approved hierarchy creation lacks its author approval identity");
+        return this.createHierarchyDocument(operation.command, operation.hierarchy, approvedBy);
+      }
       case "document.save": return this.saveDocument(operation.command);
       case "document.restore": {
         if (!approvedBy) throw validationError("Approved restore lacks its author approval identity");
@@ -1920,6 +1945,84 @@ class PostgresTransaction implements PersistenceTransaction {
       for (const target of operationWriteTargets(operation)) earlier.add(changeSetResourceKey(target.resource, target.id));
     }
     return [...resolved.values()];
+  }
+
+  private async checkHierarchyCreate(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate) {
+    const { projectId, documentId } = command;
+    const { kind, logicalId } = hierarchy;
+    const volume = kind === "volume" ? undefined : hierarchy.volume;
+    const chapter = kind === "scene" ? hierarchy.chapter : undefined;
+    const parentId = chapter?.documentId ?? volume?.documentId ?? null;
+    if (!documentId || kind !== command.kind || !["volume", "chapter", "scene"].includes(kind) ||
+        typeof logicalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(logicalId) ||
+        (kind !== "volume" && !volume) || (kind === "scene" && !chapter) ||
+        command.parentId !== parentId || command.appendToEnd !== true ||
+        (kind !== "scene" && command.markdown !== "")) {
+      throw validationError("A hierarchy creation requires a canonical document and parent scope");
+    }
+    const paths = hierarchyDocumentPaths(hierarchy);
+    try {
+      assertProjectPath(paths.metadataPath);
+      if (paths.manuscriptPath) assertProjectPath(paths.manuscriptPath);
+      for (const reference of [volume, chapter]) {
+        if (reference && (!reference.lookupId || reference.lookupId.includes("/"))) throw new Error("Invalid parent path segment");
+      }
+    } catch {
+      throw validationError("A hierarchy creation requires path-safe identities");
+    }
+    const { metadataPath, manuscriptPath } = paths;
+    const reservedPaths = manuscriptPath ? [metadataPath, manuscriptPath] : [metadataPath];
+    const documents = await this.listDocuments(projectId, undefined, MAX_ACTIVE_DOCUMENTS_PER_PROJECT + 1);
+    const mappingRows = await this.listModuleRecords(projectId, CORE_DOCUMENT_PATHS);
+    const documentById = new Map(documents.map(document => [document.id, document]));
+    const mappingById = new Map(mappingRows.map(record => [record.key, record.value]));
+    function matchesLookup(document: Document, lookupId: string): boolean {
+      const metadata = mappingById.get(document.id)?.metadata;
+      const logicalId = metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.id === "string"
+        ? metadata.id : document.id;
+      return lookupId === document.id || lookupId === logicalId;
+    }
+    const currentVolume = volume && documentById.get(volume.documentId);
+    const currentChapter = chapter && documentById.get(chapter.documentId);
+    if ((volume && (!currentVolume || currentVolume.kind !== "volume" || currentVolume.parentId !== null ||
+                    !matchesLookup(currentVolume, volume.lookupId))) ||
+        (chapter && (!currentChapter || currentChapter.kind !== "chapter" || currentChapter.parentId !== volume?.documentId ||
+                     !matchesLookup(currentChapter, chapter.lookupId)))) {
+      throw new PersistenceError("conflict", "A hierarchy parent changed since the proposal was created", {
+        resource: "hierarchy_parent_changed", id: parentId ?? projectId,
+      });
+    }
+    if (documents.some(document => matchesLookup(document, logicalId))) {
+      throw new PersistenceError("conflict", "The hierarchy identity already exists", { resource: "hierarchy_id_exists", id: logicalId });
+    }
+    for (const mapping of mappingRows) {
+      const path = reservedPaths.find(path => mapping.value.metadataPath === path || mapping.value.manuscriptPath === path);
+      if (path) {
+        const active = documentById.has(mapping.key as DocumentId);
+        throw new PersistenceError("conflict", active ? "The hierarchy path already exists" : "The hierarchy path is reserved by retained document history", {
+          resource: active ? "hierarchy_path_exists" : "hierarchy_path_reserved", id: path,
+        });
+      }
+    }
+    for (const path of reservedPaths) {
+      const artifact = await this.getModuleRecord(projectId, "core.artifacts", path);
+      if (artifact && artifact.value.deleted !== true) {
+        throw new PersistenceError("conflict", "The hierarchy path already exists", { resource: "hierarchy_path_exists", id: path });
+      }
+    }
+    const orderKey = nextOrderKey(documents.filter(document => document.parentId === parentId && document.kind === kind)
+      .map(document => document.orderKey));
+    return { paths, orderKey };
+  }
+
+  private async createHierarchyDocument(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate, authorId: string): Promise<DocumentWriteResult> {
+    const { paths, orderKey } = await this.checkHierarchyCreate(command, hierarchy);
+    const created = await this.createDocument({ ...command, orderKey, appendToEnd: false, authorId });
+    await this.saveModuleRecord({
+      projectId: command.projectId, moduleId: CORE_DOCUMENT_PATHS, key: created.document.id, expectedVersion: null,
+      value: { ...paths, metadata: { id: hierarchy.logicalId, title: created.document.title, order: created.document.orderKey } },
+    });
+    return created;
   }
 
   private async assertHierarchyReorderScope(changeSet: ChangeSet): Promise<void> {

@@ -402,12 +402,36 @@ export interface ChangeSetProvenance {
 
 export const HIERARCHY_REORDER_SOURCE = "native-hierarchy-reorder";
 export const HIERARCHY_DELETE_SOURCE = "native-hierarchy-delete";
+export const HIERARCHY_CREATE_SOURCE = "native-hierarchy-create";
+export const CORE_DOCUMENT_PATHS = "core.document-paths";
+
+interface HierarchyParentReference {
+  readonly documentId: DocumentId;
+  readonly lookupId: string;
+}
+
+/** Fixed parent identities and the author-facing ID for an approved hierarchy create. */
+export type HierarchyDocumentCreate =
+  | { kind: "volume"; logicalId: string }
+  | { kind: "chapter"; logicalId: string; volume: HierarchyParentReference }
+  | { kind: "scene"; logicalId: string; volume: HierarchyParentReference; chapter: HierarchyParentReference };
+
+export function hierarchyDocumentPaths(scope: HierarchyDocumentCreate): { metadataPath: string; manuscriptPath?: string } {
+  if (scope.kind === "volume") return { metadataPath: `plot/volumes/${scope.logicalId}/volume.yaml` };
+  const volumePath = `plot/volumes/${scope.volume.lookupId}`;
+  if (scope.kind === "chapter") return { metadataPath: `${volumePath}/chapters/${scope.logicalId}/chapter.yaml` };
+  const { lookupId: chapter } = scope.chapter;
+  return {
+    metadataPath: `${volumePath}/chapters/${chapter}/scenes/${scope.logicalId}.yaml`,
+    manuscriptPath: `manuscript/${scope.volume.lookupId}/${chapter}/${scope.logicalId}.md`,
+  };
+}
 
 export type ChangeSetOperation =
   | { type: "document.update"; command: UpdateDocumentCommand }
   | { type: "document.delete"; command: DeleteDocumentCommand }
   | { type: "module.record.save"; command: SaveModuleRecordCommand }
-  | { type: "document.create"; command: CreateDocumentCommand }
+  | { type: "document.create"; command: CreateDocumentCommand; hierarchy?: HierarchyDocumentCreate }
   | { type: "document.save"; command: SaveDocumentCommand }
   | { type: "document.restore"; command: RestoreDocumentRevisionCommand }
   | { type: "knowledge.node.save"; command: SaveKnowledgeNodeCommand }
