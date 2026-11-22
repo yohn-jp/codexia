@@ -263,7 +263,6 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       profile: "core",
       store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
       persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
-      authToken: "codexia-test-api-token-with-32-characters",
       staticDir: options.staticDirectory ?? process.cwd(),
       usageDirectory: usageDirectory!,
       betterAuth: runtime!,

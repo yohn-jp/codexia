@@ -626,7 +626,11 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 export function createServer(options: ApiServerOptions): Server {
   if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
   const hosted = options.hosted;
-  if (!hosted && (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
+  if (!hosted && options.betterAuth && (options.authToken !== undefined || options.cloudflareAccess)) {
+    throw new Error("Better Auth cannot coexist with legacy static-token or Access-owner authentication");
+  }
+  if (!hosted && !options.betterAuth &&
+      (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
     throw new Error("CODEXIA_AUTH_TOKEN must contain at least 32 characters");
   }
   if (hosted && (options.authToken !== undefined || !hosted.projectId || hosted.authorization === undefined)) {
@@ -1767,6 +1771,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     if (routePath === "/api/login" && method === "POST") {
+      if (options.betterAuth) { fail(response, 410, "STATIC_TOKEN_LOGIN_RETIRED", "Static-token sign-in is disabled; use Better Auth OAuth"); return; }
       if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGIN_RETIRED", "Browser authentication is handled by Cloudflare Access"); return; }
       if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "Request origin must match this application"); return; }
       const body = await readJson(request, parsedBody);
@@ -1785,7 +1790,7 @@ export function createServer(options: ApiServerOptions): Server {
         ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
         hosted: Boolean(hosted),
         ...(cloudflareAccess ? { browserAuth: "cloudflare-access" } : {}),
-        profile, auth: [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        profile, auth: options.betterAuth ? ["oauth-owner", "oauth-mcp"] : [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
@@ -1804,7 +1809,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
     let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
-    const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
+    const isLegacyBearer = !options.betterAuth && Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
     if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
@@ -1871,8 +1876,8 @@ export function createServer(options: ApiServerOptions): Server {
         catch { /* Missing/invalid identity or unavailable keys fails closed. */ }
       }
     }
-    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : cloudflareAccess
-      ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
+    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : options.betterAuth
+      ? false : cloudflareAccess ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isOAuthAuthor = Boolean(oauthPrincipal);
     const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(oauthMcpPrincipal));
@@ -2006,6 +2011,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/logout" && method === "POST") {
+      if (options.betterAuth) { fail(response, 410, "LEGACY_LOGOUT_RETIRED", "Use the Better Auth session revocation endpoint"); return; }
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Only an owner session can log out"); return; }
       if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGOUT_REQUIRED", "Log out through Cloudflare Access"); return; }
       if (sessionId) sessions.delete(sessionId);
@@ -2681,8 +2687,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       throw error;
     }
   }
-  const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
-  if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  const configuredLegacyToken = readCodexiaEnvironment("AUTH_TOKEN");
   const oauthValues = {
     issuer: readCodexiaEnvironment("OAUTH_ISSUER"),
     audience: readCodexiaEnvironment("OAUTH_AUDIENCE"),
@@ -2717,6 +2722,15 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
   ].some((value) => value !== undefined);
   const authMode = resolveStandaloneAuthMode(readCodexiaEnvironment("AUTH_MODE"), betterAuthConfigured);
+  if (authMode === "better-auth" &&
+      (configuredLegacyToken !== undefined || readCodexiaEnvironment("AUTH_TOKEN_FILE") !== undefined ||
+       readCodexiaEnvironment("BROWSER_AUTH") === "cloudflare-access")) {
+    throw new Error("Better Auth forbids static-token and Access-owner compatibility credentials");
+  }
+  const authToken = authMode === "token" ? configuredLegacyToken?.trim() : undefined;
+  if (authMode === "token" && (!authToken || authToken.length < 32)) {
+    throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  }
   const requiredBetterAuthValues = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
@@ -2806,8 +2820,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     return await startServer({
       store,
       ...persistenceOptions,
-      authToken,
-      ...(browserAuth === "cloudflare-access" ? { cloudflareAccess: {
+      ...(authToken !== undefined ? { authToken } : {}),
+      ...(authMode === "token" && browserAuth === "cloudflare-access" ? { cloudflareAccess: {
         issuer: readCodexiaEnvironment("ACCESS_ISSUER") ?? "",
         audience: readCodexiaEnvironment("ACCESS_AUDIENCE") ?? "",
         origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",

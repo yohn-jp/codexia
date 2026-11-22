@@ -438,7 +438,8 @@ async function startCustomApi(
   staticDir: string,
   options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
 ) {
-  const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
+  const server = createServer({ store, ...(options.betterAuth ? {} : { authToken: ACCESS_TOKEN }),
+    staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
