@@ -17,26 +17,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [docker, podman]
+        engine: [docker, podman, podman-root]
         trial: [1, 2, 3]
     env:
       IMAGE: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
     steps:
-      - name: Record runner identity
+      - name: Record runner identity and baseline host telemetry
         shell: bash
         run: |
           set -euo pipefail
-          cat /etc/runner-image-release || true
           echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
-          df -h /var/lib/docker /var/lib/containers 2>/dev/null || true
+          echo "## Runner diagnostics"
+          printf 'ImageOS=%s ImageVersion=%s RUNNER_ARCH=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "${RUNNER_ARCH:-unknown}"
+          uname -a
+          cat /etc/os-release
+          nproc
+          free -h
+          df -h / /var/lib/docker /var/lib/containers 2>/dev/null || true
+          lsblk -o NAME,SIZE,TYPE,ROTA,MODEL || true
+          for metric in cpu memory io; do cat "/proc/pressure/$metric" || true; done
+          ip -s link || true
+          docker info --format 'Docker driver={{.Driver}} server={{.ServerVersion}}' || true
+          command -v podman && podman --version || true
       - name: Install Podman (setup measured separately)
-        if: matrix.engine == 'podman'
+        if: startsWith(matrix.engine, 'podman')
         shell: bash
         run: |
           set -euo pipefail
           start=$SECONDS
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq podman
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq podman
+          fi
           echo "Podman setup seconds: $((SECONDS-start))" >> "$GITHUB_STEP_SUMMARY"
           podman version
       - name: Measure cold pull and image startup
@@ -46,12 +58,27 @@ jobs:
           TRIAL: ${{ matrix.trial }}
         run: |
           set -euo pipefail
-          "$ENGINE" --version
-          "$ENGINE" image rm "$IMAGE" >/dev/null 2>&1 || true
+          if [[ "$ENGINE" == podman-root ]]; then
+            engine=(sudo podman)
+          else
+            engine=("$ENGINE")
+          fi
+          "${engine[@]}" --version
+          "${engine[@]}" info --format json | head -c 3000 || true
+          echo
+          echo '=== PRE-PULL SYSTEM ==='
+          cat /proc/net/dev
+          cat /proc/diskstats
+          for metric in cpu memory io; do cat "/proc/pressure/$metric" || true; done
+          "${engine[@]}" image rm "$IMAGE" >/dev/null 2>&1 || true
           start=$(date +%s%N)
-          "$ENGINE" pull "$IMAGE"
+          "${engine[@]}" pull "$IMAGE"
           pulled=$(date +%s%N)
-          "$ENGINE" run --rm --entrypoint /bin/sh "$IMAGE" -c 'test -d /ms-playwright'
+          echo '=== POST-PULL SYSTEM ==='
+          cat /proc/net/dev
+          cat /proc/diskstats
+          for metric in cpu memory io; do cat "/proc/pressure/$metric" || true; done
+          "${engine[@]}" run --rm --entrypoint /bin/sh "$IMAGE" -c 'test -d /ms-playwright'
           finished=$(date +%s%N)
           pull_ms=$(( (pulled-start)/1000000 ))
           startup_ms=$(( (finished-pulled)/1000000 ))
@@ -80,6 +107,10 @@ jobs:
         run: |
           set -euo pipefail
           test -d /ms-playwright
+          echo '=== CONTAINER TELEMETRY (not host) ==='
+          uname -a
+          cat /proc/net/dev
+          for metric in cpu memory io; do cat "/proc/pressure/$metric" || true; done
           echo "jobs.container trial ${{ matrix.trial }} ready" >> "$GITHUB_STEP_SUMMARY"
           echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
           printf 'BENCHMARK engine=jobs.container trial=%s runner_image=%s\n' '${{ matrix.trial }}' "${ImageVersion:-unknown}"
