@@ -283,17 +283,22 @@ function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly Na
   };
 }
 
-async function assertEvidenceRevisions(
-  reader: SnapshotReader,
+function manifestFileRevision(manifest: Manifest, path: string): string | null {
+  safePath(path);
+  return Object.hasOwn(manifest.files, path) ? manifest.files[path]!.revision : null;
+}
+
+function assertEvidenceRevisions(
+  manifest: Manifest,
   proposal: ChangeProposal,
   operation: ChangeOperation,
-): Promise<void> {
+): void {
   const evidenceById = new Map((proposal.evidence ?? []).map((item) => [item.id, item]));
   for (const evidenceId of operation.evidenceIds ?? []) {
     const evidence = evidenceById.get(evidenceId);
     if (!evidence) fail(400, "invalid_proposal", "Operation references missing proposal evidence");
     for (const path of evidence.paths) {
-      const currentRevision = (await reader.read(path.path))?.revision ?? null;
+      const currentRevision = manifestFileRevision(manifest, path.path);
       if (currentRevision !== path.revision) {
         fail(409, "evidence_revision_conflict", `The evidence revision changed: ${path.path}`);
       }
@@ -863,11 +868,10 @@ export class CoreStore implements MutationCoordinator {
 
       await transaction.assertProjectVersion(pid(projectId), proposal.snapshot.projectVersion);
       const manifest = await this.currentManifest(transaction, projectId);
-      const reader = makeReader(manifest);
       for (const operation of proposal.operations) {
         assertCurrentOperationPaths(operation);
         assertKnowledgeRevision(manifest, operation);
-        await assertEvidenceRevisions(reader, proposal, operation);
+        assertEvidenceRevisions(manifest, proposal, operation);
       }
 
       const state: ProposalStatus = {
@@ -1174,9 +1178,9 @@ export class CoreStore implements MutationCoordinator {
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
       assertKnowledgeRevision(manifest, operation);
-      await assertEvidenceRevisions(reader, state.proposal, operation);
+      assertEvidenceRevisions(manifest, state.proposal, operation);
       for (const precondition of [...operation.reads, ...operation.writes]) {
-        const currentRevision = (await reader.read(precondition.path))?.revision ?? null;
+        const currentRevision = manifestFileRevision(manifest, precondition.path);
         if (currentRevision !== precondition.revision) {
           fail(409, "revision_conflict", `The revision changed: ${precondition.path}`);
         }

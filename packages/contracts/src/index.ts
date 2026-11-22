@@ -479,18 +479,24 @@ export function snapshotKey(snapshot: SnapshotId): string {
 /** Content-neutral semantic read-set guard; callers choose the relevant project subtree. */
 export async function snapshotScopeRevision(reader: SnapshotReader, prefix: string): Promise<string> {
   assertProjectPath(prefix);
-  const paths = await reader.list(prefix);
+  const files = reader.listRevisions
+    ? await reader.listRevisions(prefix)
+    : (await reader.list(prefix)).map(path => ({ path }));
   const seen = new Set<string>();
   const entries: Array<[string, string]> = [];
-  for (const path of paths) {
+  for (const file of files) {
+    if (!file || typeof file !== "object") throw new ContractError("Invalid snapshot scope listing");
+    const { path } = file;
     assertProjectPath(path);
     if ((path !== prefix && !path.startsWith(`${prefix}/`)) || seen.has(path)) {
       throw new ContractError("Invalid snapshot scope listing");
     }
     seen.add(path);
-    const file = await reader.read(path);
-    if (!file || !/^[a-f0-9]{64}$/.test(file.revision)) throw new ContractError("Snapshot scope contains an unavailable file");
-    entries.push([path, file.revision]);
+    const revision = "revision" in file ? file.revision : (await reader.read(path))?.revision;
+    if (typeof revision !== "string" || !/^[a-f0-9]{64}$/.test(revision)) {
+      throw new ContractError("Snapshot scope contains an unavailable file");
+    }
+    entries.push([path, revision]);
   }
   entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(entries)));

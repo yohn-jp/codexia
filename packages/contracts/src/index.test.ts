@@ -86,6 +86,21 @@ test("scope guards bind unseen insertions, deletions and file revisions independ
     async read(path) { const revision = files.get(path); return revision ? { content: "", revision } : null; },
   };
   const initial = await snapshotScopeRevision(reader, "bible");
+  const hashOnly: SnapshotReader = {
+    ...reader,
+    async list() { assert.fail("Hash-only scope enumeration should use its revision list"); },
+    async read() { assert.fail("A hash-only scope should not read manuscript contents"); },
+    async listRevisions() { return [...files].reverse().map(([path, revision]) => ({ path, revision })); },
+  };
+  assert.equal(await snapshotScopeRevision(hashOnly, "bible"), initial);
+  for (const path of ["manuscript/outside.md", "bible/../outside.md"]) {
+    await assert.rejects(snapshotScopeRevision({
+      ...hashOnly, async listRevisions() { return [{ path, revision: "a".repeat(64) }]; },
+    }, "bible"));
+  }
+  await assert.rejects(snapshotScopeRevision({
+    ...hashOnly, async listRevisions() { return [{ path: "bible/a.yaml", revision: null }]; },
+  }, "bible"));
   reverse = true;
   assert.equal(await snapshotScopeRevision(reader, "bible"), initial);
   files.set("bible/new.yaml", "c".repeat(64));
