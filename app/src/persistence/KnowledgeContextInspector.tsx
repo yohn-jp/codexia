@@ -206,8 +206,8 @@ export function KnowledgeContextInspector({
   return (
     <section className="kci" aria-label="Knowledge詳細">
       <header className="kci__header">
-        <p className="kci__eyebrow">{node.type} · {statusLabel(node.status)}</p>
         <h3 className="kci__title">{node.name}</h3>
+        <p className="kci__meta">{node.type} · {statusLabel(node.status)}</p>
         <p className="kci__lead">作品内のKnowledge。別名・関係・保存済み根拠・命題を、確定状態と一緒に確認できます。</p>
         <details className="kci__technical">
           <summary>識別情報と保存済み属性</summary>
@@ -215,7 +215,7 @@ export function KnowledgeContextInspector({
             <div><dt>Knowledge ID</dt><dd><code>{node.id}</code></dd></div>
             <div><dt>状態</dt><dd>{node.status} · version {node.version}</dd></div>
           </dl>
-          <pre>{JSON.stringify(node.attributes, null, 2)}</pre>
+          <pre role="region" aria-label="Knowledgeの保存済み属性" tabIndex={0}>{JSON.stringify(node.attributes, null, 2)}</pre>
         </details>
       </header>
 
@@ -360,7 +360,7 @@ export function KnowledgeContextInspector({
                   <details className="kci__technical">
                     <summary>命題の保存内容と根拠</summary>
                     <p>Revision <code>{item.anchor.revisionId}</code> · Anchor <code>{item.anchor.id}</code></p>
-                    <pre>{JSON.stringify(assertion.proposition, null, 2)}</pre>
+                    <pre role="region" aria-label="命題の保存内容" tabIndex={0}>{JSON.stringify(assertion.proposition, null, 2)}</pre>
                   </details>
                   {assertion.status === "proposed" && <div className="kci__actions">
                     <button type="button" disabled={busy || !canEdit || node.status !== "confirmed" || item.anchor.status !== "confirmed"} onClick={() => void assertionSave(assertion, "confirmed")}>命題を確定</button>
@@ -442,7 +442,7 @@ export function KnowledgeContextInspector({
               : <p className="kci__status-note">現在確認できる競合はありません。適用前に以下の影響を確認してください。</p>}
             <details className="kci__technical">
               <summary>統合対象とAPIプレビュー</summary>
-              <pre>{JSON.stringify(mergePreview, null, 2)}</pre>
+              <pre role="region" aria-label="Knowledge統合のAPIプレビュー" tabIndex={0}>{JSON.stringify(mergePreview, null, 2)}</pre>
             </details>
             <label className="kci__confirm">
               <input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} />

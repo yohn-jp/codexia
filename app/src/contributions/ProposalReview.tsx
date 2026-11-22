@@ -164,13 +164,10 @@ export function ProposalReview({
     <section className="proposal-review module-proposal-review" aria-labelledby="proposal-review-title">
       <header className="module-review-masthead">
         <div>
-          <p className="module-review-kicker">MODULE CONTRIBUTIONS / AUTHOR REVIEW</p>
           <h2 id="proposal-review-title">確認待ちの提案</h2>
           <p>提案元、変更対象、根拠、状態を確認してから処理します。承認操作は適用まで続けて行います。</p>
         </div>
-        <div className="module-review-count" aria-label={"取得済み提案 " + proposals.length + " 件"}>
-          <strong>{proposals.length.toString().padStart(2, "0")}</strong><span>件</span>
-        </div>
+        <p className="module-review-count">{proposals.length}件</p>
       </header>
       <p className="module-review-authority-note">作者承認後、既存のAPIが各操作をPostgreSQL Revisionへ適用します。この提案経路にはサーバー側の却下APIがありません。「このブラウザーの一覧から隠す」は却下ではなく、PostgreSQL上の提案を保持します。</p>
       {error && <p className="status module-review-error" data-kind="error" role="alert">{error}</p>}
@@ -201,8 +198,8 @@ export function ProposalReview({
               <article className="proposal-card module-proposal-card">
                 <header className="module-proposal-heading">
                   <div>
-                    <p className="module-proposal-origin">{proposalSourceLabel(record.proposal.source)}</p>
                     <h3>{record.proposal.operations[0]?.message || "変更内容を確認できません"}</h3>
+                    <p className="module-proposal-origin">{proposalSourceLabel(record.proposal.source)}</p>
                   </div>
                   <time dateTime={new Date(record.createdAt).toISOString()}>{dateLabel(record.createdAt)}</time>
                 </header>
@@ -232,7 +229,7 @@ export function ProposalReview({
                     return (
                       <section className="proposal-operation module-proposal-operation" key={operationKey(operation)}>
                         <div className="module-operation-heading">
-                          <span className="module-operation-number">{String(operationIndex + 1).padStart(2, "0")}</span>
+                          <span className="module-operation-number">{operationIndex + 1}</span>
                           <div>
                             <h4>{operation.message || "操作内容を確認できません"}</h4>
                             <p>{effectLabel(operation.effect)} · {operation.writes.length}件のファイル変更</p>
@@ -253,7 +250,7 @@ export function ProposalReview({
                                   <summary>変更後の内容を読む</summary>
                                   {write.encoding === "base64"
                                     ? <p>バイナリ内容を含みます。本文をテキストとして表示できません。</p>
-                                    : <pre>{write.content}</pre>}
+                                    : <pre role="region" aria-label={`${write.path}の変更後の内容`} tabIndex={0}>{write.content}</pre>}
                                 </details>}
                             </li>
                           ))}
@@ -264,8 +261,8 @@ export function ProposalReview({
                             <div><dt>Operation ID</dt><dd><code>{operation.id}</code></dd></div>
                             <div><dt>Generation</dt><dd>{operation.generation}</dd></div>
                             <div><dt>Base project version</dt><dd>{operation.baseProjectVersion}</dd></div>
-                            <div><dt>Read set</dt><dd><pre>{JSON.stringify(operation.reads, null, 2)}</pre></dd></div>
-                            {operation.readScopes?.length ? <div><dt>Read scopes</dt><dd><pre>{JSON.stringify(operation.readScopes, null, 2)}</pre></dd></div> : null}
+                            <div><dt>Read set</dt><dd><pre role="region" aria-label="Read setのJSON" tabIndex={0}>{JSON.stringify(operation.reads, null, 2)}</pre></dd></div>
+                            {operation.readScopes?.length ? <div><dt>Read scopes</dt><dd><pre role="region" aria-label="Read scopesのJSON" tabIndex={0}>{JSON.stringify(operation.readScopes, null, 2)}</pre></dd></div> : null}
                           </dl>
                         </details>
                       </section>
@@ -280,7 +277,7 @@ export function ProposalReview({
                         <li key={evidence.id}>
                           <p><strong>{evidence.kind}</strong> · {evidence.module}</p>
                           <ul>{evidence.paths.map((path) => <li key={path.path}><code>{path.path}</code><span>revision: {path.revision ?? "新規"}</span></li>)}</ul>
-                          <details><summary>根拠の詳細データ</summary><pre>{JSON.stringify(evidence.details, null, 2)}</pre></details>
+                          <details><summary>根拠の詳細データ</summary><pre role="region" aria-label={`${evidence.kind}の根拠詳細JSON`} tabIndex={0}>{JSON.stringify(evidence.details, null, 2)}</pre></details>
                         </li>
                       ))}
                     </ul>
