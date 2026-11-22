@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +38,7 @@ export interface BetterAuthFixture {
   readonly ownerSubject: string;
   readonly introspectionClientId: string;
   readonly introspectionClientSecret: string;
+  issueOwnerAccessToken(): Promise<string>;
   readRevocationRecord(jti: string): Promise<{
     issuer: string;
     jti: string;
@@ -388,6 +389,45 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       ownerSubject,
       introspectionClientId: registered.introspectionClientId,
       introspectionClientSecret: runtimeConfig.oauthIntrospectionClientSecret,
+      async issueOwnerAccessToken() {
+        const verifier = randomBytes(32).toString("base64url");
+        const state = randomUUID();
+        const redirectUri = `${apiOrigin}/desktop`;
+        const authorization = await fetch(`${issuer}/oauth2/authorize?${new URLSearchParams({
+          response_type: "code", client_id: registered.webClientId, redirect_uri: redirectUri,
+          scope: `openid ${CODEXIA_OWNER_SCOPE}`, state, prompt: "consent", resource: audience,
+          code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
+        })}`, { redirect: "manual", headers: { accept: "application/json", cookie: productionCookie.header() } });
+        if (!authorization.ok) throw new Error(`Owner OAuth authorization failed (${authorization.status})`);
+        const pending = await authorization.json() as { url?: string };
+        const consentPage = new URL(pending.url ?? "", apiOrigin);
+        if (consentPage.origin !== apiOrigin || consentPage.pathname !== "/oauth/consent") {
+          throw new Error("Owner OAuth authorization did not reach the consent page");
+        }
+
+        const consent = await fetch(`${issuer}/oauth2/consent`, {
+          method: "POST", redirect: "manual",
+          headers: { "content-type": "application/json", cookie: productionCookie.header(), origin: apiOrigin },
+          body: JSON.stringify({ accept: true, oauth_query: consentPage.searchParams.toString() }),
+        });
+        if (!consent.ok) throw new Error(`Owner OAuth consent failed (${consent.status})`);
+        const granted = await consent.json() as { url?: string };
+        const callback = new URL(granted.url ?? "", apiOrigin);
+        const code = callback.searchParams.get("code");
+        if (`${callback.origin}${callback.pathname}` !== redirectUri || !code || callback.searchParams.get("state") !== state) {
+          throw new Error("Owner OAuth consent did not return the bound authorization code");
+        }
+
+        const tokenResponse = await fetch(`${issuer}/oauth2/token`, {
+          method: "POST", redirect: "manual",
+          body: new URLSearchParams({ grant_type: "authorization_code", client_id: registered.webClientId, code,
+            redirect_uri: redirectUri, code_verifier: verifier, resource: audience }),
+        });
+        if (!tokenResponse.ok) throw new Error(`Owner OAuth token exchange failed (${tokenResponse.status})`);
+        const token = await tokenResponse.json() as { access_token?: string; token_type?: string };
+        if (!token.access_token || token.token_type !== "Bearer") throw new Error("OAuth token exchange did not issue an owner bearer token");
+        return token.access_token;
+      },
       async readSigningKeyIds() {
         const context = await runtime!.auth.$context;
         const rows = await context.adapter.findMany({ model: "jwks" });

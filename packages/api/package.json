@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test dist/*.test.js && node --import tsx --test test/better-auth.integration.test.ts test/passkey-bootstrap.acceptance.test.ts",
+    "test": "pnpm run build && node --test dist/*.test.js && node --import tsx --test --test-concurrency=1 test/better-auth.integration.test.ts test/passkey-bootstrap.acceptance.test.ts test/persistence-author-api.integration.test.ts",
     "test:passkey-acceptance": "pnpm run build && node scripts/run-passkey-acceptance.mjs",
     "start": "node dist/server.js",
     "migrate:auth": "node dist/migrate-auth.js",
