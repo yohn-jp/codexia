@@ -1649,20 +1649,38 @@ test("author context maps thread relations to the target scene and matches the o
   }
 });
 
-test("native Knowledge associates evidence through canonical document UUID mapping", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",documentMappings:[{documentId:"doc-uuid-1",storySceneId:"sc-1",mapping:"explicit"}],entries:[{
-    node:{id:"knowledge-1",name:"Cafe",type:"location",status:"confirmed",attributes:{}},aliases:[],relations:[],evidence:[{
-      current:false,stale:true,storySceneId:"sc-1",sourceDocumentId:"doc-uuid-1",sourceRevisionId:"revision-1",quote:null,mention:{status:"confirmed"},anchor:{id:"evidence-1",documentId:"doc-uuid-1",revisionId:"revision-1",fromUtf16:0,toUtf16:11,status:"confirmed",quoteSha256:"sha"},assertions:[]
-    }],evidenceLimitReached:false
-  }]})});
-  type ContextPart={kind:string;value:{evidence:Array<{storySceneId:string;sourceRevisionId:string;quote:string|null;status:string}>}};
-  const result=await invoke<{parts:ContextPart[]}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
-  const knowledge=result.data.parts.find(part=>part.kind==="native-knowledge")!;
-  assert.equal(knowledge.value.evidence[0]?.storySceneId,"sc-1");
-  assert.equal(knowledge.value.evidence[0]?.sourceRevisionId,"revision-1");
-  assert.equal(knowledge.value.evidence[0]?.quote,null,"quote is explicitly missing when the projection has no verified source quote");
-  assert.equal(knowledge.value.evidence[0]?.status,"stale");
+test("native Knowledge uses anchor identities for scene mapping and revision evidence", async()=>{
+  const path = "meta/scriptorium/knowledge-context/v1.json";
+  const entry = (id: string, anchoredDocumentId: string, projectedDocumentId: string) => ({
+    node: { id, name: "Cafe", type: "location", status: "confirmed", attributes: {} }, aliases: [], relations: [],
+    evidence: [{
+      current: false, stale: true, storySceneId: "sc-1",
+      sourceDocumentId: projectedDocumentId, sourceRevisionId: "obsolete-mirror-revision", quote: null,
+      mention: { status: "confirmed" },
+      anchor: { id: `evidence-${id}`, documentId: anchoredDocumentId, revisionId: "revision-1", fromUtf16: 0, toUtf16: 11, status: "confirmed", quoteSha256: "sha" },
+      assertions: [],
+    }],
+    evidenceLimitReached: false,
+  });
+  const files = fixtureFiles({ [path]: JSON.stringify({
+    version: 1, projectId: "repo-work",
+    documentMappings: [{ documentId: "doc-uuid-1", storySceneId: "sc-1", mapping: "explicit" }],
+    entries: [entry("knowledge-1", "doc-uuid-1", "obsolete-mirror-document"), entry("other-document", "doc-uuid-2", "doc-uuid-1")],
+  }) });
+  type ContextPart = { kind: string; value: { knowledgeId: string; evidence: Array<{
+    storySceneId: string; sourceDocumentId: string; sourceRevisionId: string; quote: string | null; status: string;
+  }> } };
+  const result = await invoke<{ parts: ContextPart[] }>("story.context.package", {
+    sceneId: "sc-1", scope: "author", budget: 200000,
+  }, makeActionContext(makeReader(files)));
+  const knowledge = result.data.parts.filter((part) => part.kind === "native-knowledge");
+  assert.deepEqual(knowledge.map((part) => part.value.knowledgeId), ["knowledge-1"]);
+  const evidence = knowledge[0]!.value.evidence[0]!;
+  assert.equal(evidence.storySceneId, "sc-1");
+  assert.equal(evidence.sourceDocumentId, "doc-uuid-1");
+  assert.equal(evidence.sourceRevisionId, "revision-1");
+  assert.equal(evidence.quote, null, "quote is explicitly missing when the projection has no verified source quote");
+  assert.equal(evidence.status, "stale");
 });
 
 test("legacy immutable Knowledge projections retain stale status and candidate evidence", async()=>{
