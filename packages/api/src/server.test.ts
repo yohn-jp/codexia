@@ -436,7 +436,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "corsAllowedOrigins">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -674,6 +674,19 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(token.status, 200);
     assert.deepEqual(delegated, [{ method: "POST", path: "/api/auth/oauth2/token", body: "grant_type=authorization_code&code=fixture-code" }]);
+  });
+
+  it("releases only API-owned Better Auth PostgreSQL pools on shutdown", async () => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-auth-pool-close-"));
+    tempDirs.push(staticDir);
+    for (const apiOwned of [true, false]) {
+      let closedPools = 0;
+      const fake = { pool: { end: async () => { closedPools += 1; } } } as unknown as NonNullable<ApiServerOptions["betterAuth"]>;
+      const api = await startCustomApi(makeStore(), staticDir, { betterAuth: fake, closeBetterAuthOnShutdown: apiOwned });
+      assert.equal((await fetch(`${api.base}/api/health`)).status, 200);
+      await api.close();
+      assert.equal(closedPools, apiOwned ? 1 : 0, "Only a pool owned by the API lifecycle is released");
+    }
   });
 
   it("distinguishes runtime-control key outages from invalid credentials and reuses verified JWKS", async (t) => {

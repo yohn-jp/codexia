@@ -135,6 +135,8 @@ export interface ApiServerOptions {
   persistence: Persistence;
   /** Set only by `start()` when it created the PostgreSQL pool itself. */
   closePersistenceOnShutdown?: boolean;
+  /** Close the API-owned Better Auth PostgreSQL pool, never a caller-owned test/runtime pool. */
+  closeBetterAuthOnShutdown?: boolean;
   authToken?: string;
   /** Opt-in dedicated standalone owner SSO. Never used in hosted mode. */
   cloudflareAccess?: CloudflareAccessOptions;
@@ -794,7 +796,11 @@ export function createServer(options: ApiServerOptions): Server {
     try {
       if (!closed) await shutdownRuntime();
     } finally {
-      if (options.closePersistenceOnShutdown) await options.persistence?.close();
+      try {
+        if (options.closeBetterAuthOnShutdown) await options.betterAuth?.pool.end();
+      } finally {
+        if (options.closePersistenceOnShutdown) await options.persistence?.close();
+      }
     }
   });
 
@@ -2723,37 +2729,38 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
     throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
   }
-  const configuredIssuer = betterAuth?.issuer ?? oauthValues.issuer;
-  const configuredAudience = betterAuth?.audience ?? oauthValues.audience;
-  const configuredJwksUrl = betterAuth ? `${betterAuth.issuer}/jwks` : oauthValues.jwksUrl;
-  const oauthOwner: OAuthOwnerOptions | undefined = betterAuth || oauthConfigured ? {
-    issuer: configuredIssuer!, audience: configuredAudience!, jwksUrl: configuredJwksUrl!,
-    ownerSubject: betterAuthValues.ownerSubject ?? oauthValues.ownerSubject!,
-    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? CODEXIA_OWNER_SCOPE).split(/\s+/u).filter(Boolean),
-    ...(betterAuth ? {
-      allowedClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
-      verifyActiveToken: betterAuth.verifyActiveAccessToken,
-    } : {}),
-  } : undefined;
-  const oauthMcp: OAuthMcpOptions | undefined = betterAuth && betterAuth.mcpClientIds.length > 0 ? {
-    issuer: betterAuth.issuer,
-    audience: betterAuth.audience,
-    jwksUrl: `${betterAuth.issuer}/jwks`,
-    verifyActiveToken: betterAuth.verifyActiveAccessToken,
-    allowedClientIds: betterAuth.mcpClientIds,
-    projectIdsByClient: mcpProjectAssignments,
-    ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
-    ownerSubject: betterAuthValues.ownerSubject!,
-  } : undefined;
-  const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
-    corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
-  if (corsOriginsValue !== undefined && corsAllowedOrigins?.length === 0) {
-    throw new Error("CODEXIA_CORS_ALLOWED_ORIGINS must contain at least one exact HTTPS origin");
-  }
-  const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
-  const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
-  const persistenceOptions = await postgresPersistenceOptions();
+  let persistenceOptions: Awaited<ReturnType<typeof postgresPersistenceOptions>> | undefined;
   try {
+    const configuredIssuer = betterAuth?.issuer ?? oauthValues.issuer;
+    const configuredAudience = betterAuth?.audience ?? oauthValues.audience;
+    const configuredJwksUrl = betterAuth ? `${betterAuth.issuer}/jwks` : oauthValues.jwksUrl;
+    const oauthOwner: OAuthOwnerOptions | undefined = betterAuth || oauthConfigured ? {
+      issuer: configuredIssuer!, audience: configuredAudience!, jwksUrl: configuredJwksUrl!,
+      ownerSubject: betterAuthValues.ownerSubject ?? oauthValues.ownerSubject!,
+      requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? CODEXIA_OWNER_SCOPE).split(/\s+/u).filter(Boolean),
+      ...(betterAuth ? {
+        allowedClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+        verifyActiveToken: betterAuth.verifyActiveAccessToken,
+      } : {}),
+    } : undefined;
+    const oauthMcp: OAuthMcpOptions | undefined = betterAuth && betterAuth.mcpClientIds.length > 0 ? {
+      issuer: betterAuth.issuer,
+      audience: betterAuth.audience,
+      jwksUrl: `${betterAuth.issuer}/jwks`,
+      verifyActiveToken: betterAuth.verifyActiveAccessToken,
+      allowedClientIds: betterAuth.mcpClientIds,
+      projectIdsByClient: mcpProjectAssignments,
+      ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+      ownerSubject: betterAuthValues.ownerSubject!,
+    } : undefined;
+    const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
+      corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
+    if (corsOriginsValue !== undefined && corsAllowedOrigins?.length === 0) {
+      throw new Error("CODEXIA_CORS_ALLOWED_ORIGINS must contain at least one exact HTTPS origin");
+    }
+    const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
+    const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
+    persistenceOptions = await postgresPersistenceOptions();
     if (Object.keys(mcpProjectAssignments).length > 0) {
       const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
         const missing: string[] = [];
@@ -2781,15 +2788,17 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       } } : {}),
       ...(oauthOwner ? { oauthOwner } : {}),
       ...(oauthMcp ? { oauthMcp } : {}),
-      ...(betterAuth ? { betterAuth } : {}),
+      ...(betterAuth ? { betterAuth, closeBetterAuthOnShutdown: true } : {}),
       ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
       profile,
     });
+
   } catch (error) {
-    await persistenceOptions.persistence!.close().catch(() => undefined);
+    await persistenceOptions?.persistence?.close().catch(() => undefined);
+    await betterAuth?.pool.end().catch(() => undefined);
     throw error;
   }
 }
