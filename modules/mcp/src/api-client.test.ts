@@ -68,6 +68,25 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   assert.equal("source" in body, false);
 });
 
+test("stdio action client can read Story context without Assistant actions", async () => {
+  const calls: string[] = [];
+  const payload = { sceneId: "scene-one", scope: "reader", parts: [{ kind: "reader-disclosure" }] };
+  const fetcher: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/actions")) return Response.json({ actions: [{ id: "story.context.package", module: "story", effect: "read" }] });
+    const actionId = path.split("/actions/")[1];
+    calls.push(actionId ?? "");
+    return Response.json({ ok: true, snapshot, data: payload });
+  };
+  const client = new ApiClient({ baseUrl: "https://codexia.test", token: "test-token", projectId: "project-one", fetch: fetcher });
+
+  const actions = await client.listActions();
+  assert.deepEqual(actions.map((action) => action.id), ["story.context.package"]);
+  const result = await client.invoke("story.context.package", { sceneId: "scene-one", scope: "reader" });
+  assert.deepEqual(result, { ok: true, snapshot, data: payload });
+  assert.deepEqual(calls, ["story.context.package"]);
+});
+
 test("stdio API client can bind a requested owner project", async () => {
   const client = new ApiClient({ baseUrl: "http://127.0.0.1:3000", token: "token", projectId: "project-one" });
   assert.equal(client.forProject("project-two").projectId, "project-two");

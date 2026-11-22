@@ -23,6 +23,7 @@ function actionContext(
   const actions: ActionDescriptor[] = [
     { id: "core.status", module: "core", effect: "read" },
     { id: "story.snapshot.materialize", module: "story", effect: "read" },
+    { id: "story.context.package", module: "story", effect: "read" },
     { id: "story.changes.propose", module: "story", effect: "propose" },
     ...extraActions,
   ];
@@ -53,6 +54,9 @@ function actionContext(
       }
       if (actionId === "story.snapshot.materialize") {
         return { ok: true, snapshot, data: { entities: 7, links: 11 } };
+      }
+      if (actionId === "story.context.package") {
+        return { ok: true, snapshot, data: { sceneId: "scene-one", scope: "reader", parts: [{ kind: "reader-disclosure", value: { sceneId: "scene-one" } }] } };
       }
       if (actionId === "story.changes.propose") {
         const changeSet = input as { id: string; projectId: string; operations: Array<{ id: string }> };
@@ -220,7 +224,12 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
       snapshot,
       data: { status: "ready" },
     });
-    assert.deepEqual(calls, ["core.status"]);
+    const context = await client.callTool({ name: "story.context.package", arguments: { scene_id: "scene-one", scope: "reader" } });
+    assert.deepEqual(context.structuredContent, {
+      snapshot,
+      data: { sceneId: "scene-one", scope: "reader", parts: [{ kind: "reader-disclosure", value: { sceneId: "scene-one" } }] },
+    });
+    assert.deepEqual(calls, ["core.status", "story.context.package"]);
   } finally {
     await transport.terminateSession().catch(() => undefined);
     await client.close().catch(() => undefined);
