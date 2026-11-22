@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
-import { createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "../src/better-auth.js";
+import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "../src/better-auth.js";
+import { createServer as createApiServer, type ApiServerOptions } from "../src/server.js";
 
 const grantIdentifier = "codexia:first-owner-passkey:v1";
 const grantContext = "codexia-first-owner-v1";
@@ -56,11 +61,14 @@ function send(response: import("node:http").ServerResponse, status: number, body
   response.end(body);
 }
 
-async function startRuntimeHttpFixture(config: BetterAuthRuntimeConfig): Promise<{
+async function startRuntimeHttpFixture(
+  config: BetterAuthRuntimeConfig,
+  bootstrap?: { readonly nextClientId: () => string },
+): Promise<{
   readonly runtime: ReturnType<typeof createBetterAuthRuntime>;
   readonly fixture: HttpFixture;
 }> {
-  const runtime = createBetterAuthRuntime(config);
+  const runtime = createBetterAuthRuntime(config, bootstrap);
   const server = createHttpServer((request, response) => {
     void (async () => {
       const url = new URL(request.url ?? "/", config.publicOrigin);
@@ -293,12 +301,16 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   let runtime: ReturnType<typeof createBetterAuthRuntime> | undefined;
   let apiFixture: HttpFixture | undefined;
   let bootstrapRuntime: ReturnType<typeof createBetterAuthRuntime> | undefined;
+  let authorApiServer: HttpServer | undefined;
+  let authorApiUsageDirectory: string | undefined;
   let browser: Browser | undefined;
   const contexts: BrowserContext[] = [];
 
   t.after(async () => {
     for (const context of contexts) await context.close().catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
+    if (authorApiServer) await close(authorApiServer).catch(() => undefined);
+    if (authorApiUsageDirectory) await rm(authorApiUsageDirectory, { recursive: true, force: true }).catch(() => undefined);
     if (bootstrapRuntime) await bootstrapRuntime.pool.end().catch(() => undefined);
     if (apiFixture) await apiFixture.close().catch(() => undefined);
     if (runtime) await runtime.pool.end().catch(() => undefined);
@@ -353,7 +365,14 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
     passkeyBootstrap: { ownerId: owner.id, ownerEmail: owner.email, ownerName: owner.name },
     allowInsecureLoopbackForTests: true,
   };
-  const started = await startRuntimeHttpFixture(bootstrapConfig);
+  const registrationId = new AsyncLocalStorage<string>();
+  const started = await startRuntimeHttpFixture(bootstrapConfig, {
+    nextClientId() {
+      const id = registrationId.getStore();
+      if (!id) throw new Error("OAuth acceptance client creation omitted its approved ID");
+      return id;
+    },
+  });
   bootstrapRuntime = started.runtime;
   apiFixture = started.fixture;
   assert.equal(apiFixture.origin, apiOrigin);
@@ -497,6 +516,161 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   });
   assert.equal(authenticated.status, 200);
   assert.equal(authenticated.userId, owner.id);
+
+  const sessionCookies = await winnerPage.context().cookies(apiOrigin);
+  const ownerCookie = sessionCookies.map(({ name, value }) => `${name}=${value}`).join("; ");
+  assert.ok(ownerCookie, "passkey registration must create an owner session usable for OAuth client setup");
+  const ownerHeaders = new Headers({ cookie: ownerCookie, origin: apiOrigin });
+  const webClientId = bootstrapConfig.ownerClientIds[0]!;
+  const iosClientId = bootstrapConfig.ownerClientIds[1]!;
+  const oauthRuntime = bootstrapRuntime;
+  const registerOAuthClient = async (
+    clientId: string,
+    body: NonNullable<Parameters<NonNullable<typeof oauthRuntime.auth.api.adminCreateOAuthClient>>[0]>["body"],
+  ) => registrationId.run(clientId, () => oauthRuntime.auth.api.adminCreateOAuthClient({ headers: ownerHeaders, body }));
+  const ownerScope = `openid ${CODEXIA_OWNER_SCOPE} offline_access`;
+  const webClient = await registerOAuthClient(webClientId, {
+    client_name: "Codexia Acceptance Web",
+    redirect_uris: [`${apiOrigin}/desktop`],
+    resources: [oauthRuntime.audience],
+    scope: ownerScope,
+    token_endpoint_auth_method: "none",
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    application_type: "native",
+    require_pkce: true,
+    skip_consent: false,
+  });
+  assert.equal(webClient.client_id, webClientId);
+  const iosClient = await registerOAuthClient(iosClientId, {
+    client_name: "Codexia Acceptance iOS",
+    redirect_uris: ["jp.yohn.codexia:/oauth2redirect"],
+    resources: [oauthRuntime.audience],
+    scope: ownerScope,
+    token_endpoint_auth_method: "none",
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    application_type: "native",
+    require_pkce: true,
+    skip_consent: false,
+  });
+  assert.equal(iosClient.client_id, iosClientId);
+  const introspectionClient = await registerOAuthClient(bootstrapConfig.oauthIntrospectionClientId, {
+    client_name: "Codexia Acceptance API introspection",
+    redirect_uris: [`${new URL(oauthRuntime.audience).origin}/oauth/introspection`],
+    resources: [oauthRuntime.audience],
+    scope: "openid",
+    token_endpoint_auth_method: "client_secret_post",
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    application_type: "native",
+    require_pkce: true,
+    skip_consent: true,
+  });
+  assert.equal(introspectionClient.client_id, bootstrapConfig.oauthIntrospectionClientId);
+  await oauthRuntime.assertRegisteredClients(owner.id);
+  await oauthRuntime.verifyIntrospectionCredentials();
+
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const state = randomBytes(18).toString("base64url");
+  const authorizationParams = new URLSearchParams({
+    response_type: "code",
+    client_id: webClientId,
+    redirect_uri: `${apiOrigin}/desktop`,
+    scope: ownerScope,
+    resource: oauthRuntime.audience,
+    state,
+    nonce: randomBytes(18).toString("base64url"),
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+  const authorization = await fetch(`${oauthRuntime.issuer}/oauth2/authorize?${authorizationParams}`, {
+    headers: ownerHeaders,
+    redirect: "manual",
+  });
+  assert.equal(authorization.status, 200,
+    `the registered Passkey owner must begin OAuth authorization: ${authorization.status} ${await authorization.clone().text()}`);
+  const authorizationResult = await authorization.json() as { url?: string };
+  assert.ok(authorizationResult.url);
+  const consentLocation = new URL(authorizationResult.url, apiOrigin);
+  assert.equal(consentLocation.pathname, "/oauth/consent");
+  const oauthQuery = consentLocation.search.slice(1);
+  assert.ok(oauthQuery.includes("sig="), "the consent request must be signed by the OAuth provider");
+  const consentContext = await oauthRuntime.getConsentContext(ownerHeaders, oauthQuery);
+  assert.deepEqual(consentContext.requestedScopes, ["openid", CODEXIA_OWNER_SCOPE, "offline_access"]);
+  assert.equal(consentContext.redirectUri, `${apiOrigin}/desktop`);
+  const consent = await fetch(`${oauthRuntime.issuer}/oauth2/consent`, {
+    method: "POST",
+    headers: new Headers({ cookie: ownerCookie, origin: apiOrigin, "content-type": "application/json" }),
+    body: JSON.stringify({ accept: true, oauth_query: oauthQuery }),
+  });
+  assert.equal(consent.status, 200, `OAuth consent must succeed: ${await consent.clone().text()}`);
+  const consentResult = await consent.json() as { url?: string };
+  assert.ok(consentResult.url);
+  const callback = new URL(consentResult.url, apiOrigin);
+  const code = callback.searchParams.get("code");
+  assert.ok(code);
+  assert.equal(callback.searchParams.get("state"), state);
+  assert.equal(callback.searchParams.get("iss"), oauthRuntime.issuer);
+  const tokenResponse = await fetch(`${oauthRuntime.issuer}/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: webClientId,
+      code,
+      redirect_uri: `${apiOrigin}/desktop`,
+      code_verifier: verifier,
+      resource: oauthRuntime.audience,
+    }),
+  });
+  const tokens = await tokenResponse.json() as { access_token?: string; refresh_token?: string; token_type?: string };
+  assert.equal(tokenResponse.status, 200, `PKCE token exchange must succeed: ${JSON.stringify(tokens)}`);
+  assert.equal(tokens.token_type, "Bearer");
+  assert.ok(tokens.access_token);
+  assert.ok(tokens.refresh_token);
+
+  authorApiUsageDirectory = await mkdtemp(join(tmpdir(), "codexia-passkey-owner-api-"));
+  const testStore = {
+    async listProjects() { return []; },
+    async createProject({ title }: { title: string }) { return { id: "fixture-project", title, version: 1 }; },
+    async status() { return { projectId: "fixture-project", projectVersion: 1, state: "durable" }; },
+    async observe() { return { snapshot: { projectId: "fixture-project", projectVersion: 1 }, observedAt: new Date().toISOString(), state: "fresh" }; },
+  } as unknown as ApiServerOptions["store"];
+  const testPersistence = {
+    async checkHealth() {},
+    async read<T>(read: (reader: { getProject(id: string): Promise<unknown> }) => Promise<T>) {
+      return read({ async getProject() { return null; } });
+    },
+  } as unknown as ApiServerOptions["persistence"];
+  authorApiServer = createApiServer({
+    profile: "core",
+    store: testStore,
+    persistence: testPersistence,
+    authToken: randomBytes(32).toString("base64url"),
+    staticDir: process.cwd(),
+    usageDirectory: authorApiUsageDirectory,
+    betterAuth: oauthRuntime,
+    oauthOwner: {
+      issuer: oauthRuntime.issuer,
+      audience: oauthRuntime.audience,
+      jwksUrl: `${oauthRuntime.issuer}/jwks`,
+      ownerSubject: owner.id,
+      requiredScopes: [CODEXIA_OWNER_SCOPE],
+      allowedClientIds: [webClientId, iosClientId],
+      verifyActiveToken: oauthRuntime.verifyActiveAccessToken,
+      allowInsecureLoopbackForTests: true,
+    },
+  });
+  const ownerApiPort = await listen(authorApiServer);
+  const ownerApiOrigin = `http://localhost:${ownerApiPort}`;
+  assert.equal((await fetch(`${ownerApiOrigin}/api/jobs`)).status, 401, "the author API must deny requests without a token");
+  const ownerApiResponse = await fetch(`${ownerApiOrigin}/api/jobs`, {
+    headers: { authorization: `Bearer ${tokens.access_token}` },
+  });
+  assert.equal(ownerApiResponse.status, 200, `the Passkey owner token must reach author-only API routes: ${await ownerApiResponse.clone().text()}`);
+  assert.deepEqual(await ownerApiResponse.json(), []);
 
   await apiFixture.close();
   apiFixture = undefined;
