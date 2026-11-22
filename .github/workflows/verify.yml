@@ -594,7 +594,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ needs.plan.outputs.reuse == 'true' && '0' || '1' }}
+          # Compact proofs bind independently verified merge parents and their trees.
+          fetch-depth: >-
+            ${{ (needs.plan.outputs.reuse == 'true' ||
+                 (needs.plan.outputs.plan != '' &&
+                  fromJSON(needs.plan.outputs.plan).taskInputReuse.coverage.proofSourceSha !=
+                  fromJSON(needs.plan.outputs.plan).taskInputReuse.coverage.sourceSha))
+                && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3

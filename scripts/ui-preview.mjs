@@ -35,9 +35,10 @@ export function parsePreviewArgs(argv) {
 }
 
 export function parsePublishedPort(output) {
-  const matches = output.trim().split(/\r?\n/u).map(line => /^127\.0\.0\.1:(\d+)$/u.exec(line.trim())).filter(Boolean);
-  if (matches.length !== 1) throw new Error(`Expected one loopback PostgreSQL port mapping; got ${JSON.stringify(output.trim())}`);
-  const port = Number(matches[0][1]);
+  const mapping = output.trim();
+  const match = /^127\.0\.0\.1:(\d+)$/u.exec(mapping);
+  if (!match) throw new Error(`Expected one loopback PostgreSQL port mapping; got ${JSON.stringify(mapping)}`);
+  const port = Number(match[1]);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PostgreSQL host port');
   return port;
 }
@@ -51,7 +52,8 @@ function invocation(command, args) {
 async function run(command, args, { env = process.env, inherit = false } = {}) {
   const inv = invocation(command, args);
   return new Promise((resolve, reject) => {
-    let output = '';
+    let stdout = '';
+    let stderr = '';
     const child = spawn(inv.executable, inv.args, {
       cwd: root,
       env,
@@ -60,11 +62,11 @@ async function run(command, args, { env = process.env, inherit = false } = {}) {
       windowsHide: true,
     });
     if (!inherit) {
-      child.stdout.setEncoding('utf8').on('data', chunk => { output += chunk; });
-      child.stderr.setEncoding('utf8').on('data', chunk => { output += chunk; });
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
     }
     child.once('error', reject);
-    child.once('close', code => code === 0 ? resolve(output) : reject(new Error(`${command} ${args.slice(0, 2).join(' ')} failed (${code ?? 'signal'})${inherit ? '' : `: ${output.trim()}`}`)));
+    child.once('close', code => code === 0 ? resolve(stdout) : reject(new Error(`${command} ${args.slice(0, 2).join(' ')} failed (${code ?? 'signal'})${inherit ? '' : `: ${[stdout.trim(), stderr.trim()].filter(Boolean).join('\n')}`}`)));
   });
 }
 
