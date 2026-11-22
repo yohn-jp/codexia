@@ -65,6 +65,14 @@ Inspect the target data and retain an independent backup before adopting an exis
 
 After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. Schema or persistence changes to a nonempty installation are currently unsupported by the production push workflow. Do not bypass admission or enable startup migrations to apply one. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The current isolated restore drill verifies a backup copy but does not run a schema migration or restore PostgreSQL roles and Podman secrets. Until that procedure exists and is accepted, keep the candidate blocked and do not treat application rollback as database rollback.
 
+## Coordinated API epoch cutover
+
+The standalone OAuth cutover requires API epoch 2 for both the Full backend and the static frontend. Persistence format 1 applies to this cutover. The frontend gate rejects an epoch 2 frontend against an epoch 1 backend. Backend admission likewise rejects an epoch 2 backend against an epoch 1 frontend or installed API. Keep these gates in place until a separately reviewed and approved maintenance procedure can switch both components together.
+
+Before cutover, record the prior certified backend digest, frontend artifact and approved authentication configuration. Quiesce the application and make a verified encrypted PostgreSQL and private history backup on independent storage. Rehearse restoration before relying on the backup. With public ingress closed, validate the new pair, including matching Full profile and epoch identities, database readiness, owner sign-in and denial of unauthorized access. Reopen ingress after both artifacts have switched and those checks have passed.
+
+If either component or its authentication checks fail, keep ingress closed. Follow the approved recovery procedure to restore the prior matching pair and its associated configuration. Verify the recovered identities, readiness, access controls and data before reopening ingress. Use the tested backup restore procedure if the maintenance operation changed database state in a way the prior release cannot read safely.
+
 ## Acceptance order
 
 The production job operates on a pre-provisioned host. Before enabling it, the target needs the `codexia` account, rootless Podman and user systemd, canonical database and Tunnel resources, protected Podman secrets, the dedicated SSH key, a pinned host key, and a writable encrypted-backup directory. The approved `auth-runtime` stage initializes an empty application schema during provisioning. The first `deploy` activation, with both explicit approvals, verifies its exact migration ledger. Later `deploy` runs apply compatible image updates. Keep the existing `sophia` storage outside this workflow.

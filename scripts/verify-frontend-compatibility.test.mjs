@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   assertBackendCompatibility,
@@ -23,6 +24,18 @@ const normal = (url, options) => {
   assert.equal(options.headers['CF-Access-Client-Secret'], env.CODEXIA_ACCESS_CLIENT_SECRET);
   return response(url.pathname === '/api/version' ? backend : frontend);
 };
+
+test('the current standalone release pair has a shared API epoch and rejects either mixed pairing with epoch 1', () => {
+  const required = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8')).apiEpoch;
+  const provided = JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json', import.meta.url), 'utf8')).apiEpoch;
+  const candidateFrontend = { ...frontend, apiEpoch: required };
+  const candidateBackend = { ...backend, apiEpoch: provided };
+
+  assertBackendCompatibility(candidateBackend, candidateFrontend.profile, required);
+  assertCertifiedBackendFrontendCompatibility(candidateFrontend, provided);
+  assert.throws(() => assertBackendCompatibility(backend, candidateFrontend.profile, required), /API epochs are incompatible/u);
+  assert.throws(() => assertCertifiedBackendFrontendCompatibility(frontend, provided), /API epochs are incompatible/u);
+});
 
 test('preflight checks two identities and both anonymous and out-of-scope denial without redirecting', async () => {
   const calls = [];
