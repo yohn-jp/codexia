@@ -272,6 +272,9 @@ const CORS_HEADERS = new Map([
   ["idempotency-key", "Idempotency-Key"], ["x-client-id", "X-Client-Id"],
   ["x-codexia-recent-activity-order", "X-Codexia-Recent-Activity-Order"], ["prefer", "Prefer"],
 ]);
+const MCP_CORS_HEADERS = new Map([
+  ["mcp-session-id", "Mcp-Session-Id"], ["mcp-protocol-version", "MCP-Protocol-Version"], ["last-event-id", "Last-Event-ID"],
+]);
 
 function normalizeCorsOrigins(origins: readonly string[] | undefined): ReadonlySet<string> {
   const normalized = new Set<string>();
@@ -644,8 +647,11 @@ export function createServer(options: ApiServerOptions): Server {
   if (options.betterAuth && hosted) throw new Error("Standalone Better Auth is not available in Hosted mode");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
   const authenticateOAuthMcp = options.oauthMcp ? createOAuthMcpAuthenticator(options.oauthMcp) : undefined;
-  const oauthResource = options.oauthMcp?.audience;
-  const oauthAuthorizationServer = options.oauthMcp?.issuer;
+  const publicBetterAuth = options.betterAuth?.audience?.startsWith("https://") && options.betterAuth.issuer?.startsWith("https://")
+    ? options.betterAuth
+    : undefined;
+  const oauthResource = options.oauthMcp?.audience ?? publicBetterAuth?.audience;
+  const oauthAuthorizationServer = options.oauthMcp?.issuer ?? publicBetterAuth?.issuer;
   const oauthMcpMetadataUrl = oauthResource ? protectedResourceMetadataUrl(oauthResource) : undefined;
   const oauthMcpMetadataResponse = oauthResource && oauthAuthorizationServer
     ? createMcpProtectedResourceMetadataResponse({ resource: oauthResource, authorizationServer: oauthAuthorizationServer })
@@ -1652,9 +1658,12 @@ export function createServer(options: ApiServerOptions): Server {
     const styleNonce = STYLE_NONCES.get(request) ?? randomBytes(18).toString("base64");
     if (!response.headersSent) setSecurityHeaders(response, styleNonce);
     const originalPath = requestPath(request);
-    const routePath = hosted && originalPath === "/mcp"
+    const standaloneMcpRoute = !hosted && originalPath === "/mcp";
+    let routePath = hosted && originalPath === "/mcp"
       ? `/api/projects/${encodeURIComponent(hosted.projectId)}/modules/mcp/streamable`
       : originalPath;
+    const mcpStreamableRoute = standaloneMcpRoute || routePath.endsWith("/modules/mcp/streamable");
+    const isApiRoute = standaloneMcpRoute || routePath.startsWith("/api/");
     const method = request.method ?? "GET";
     const query = queryOf(request);
     const isRead = method === "GET" || method === "HEAD";
@@ -1662,7 +1671,7 @@ export function createServer(options: ApiServerOptions): Server {
     const publicModuleRoute = !hosted && routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
     const originHeader = request.headers.origin;
     const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
-    if (routePath.startsWith("/api/") && crossOrigin) {
+    if (isApiRoute && crossOrigin) {
       vary(response, "Origin");
       vary(response, "Access-Control-Request-Method");
       vary(response, "Access-Control-Request-Headers");
@@ -1675,6 +1684,7 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
       response.setHeader("Access-Control-Allow-Origin", originHeader);
+      if (mcpStreamableRoute) response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     }
 
     if (oauthMcpMetadataUrl && oauthMcpMetadataResponse && method === "GET" && routePath === new URL(oauthMcpMetadataUrl).pathname) {
@@ -1779,7 +1789,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (hosted && routePath === RUNTIME_RESUME_PATH && method === "POST") { await platformResume(request, response, parsedBody); return; }
 
     if (method === "OPTIONS") {
-      if (routePath.startsWith("/api/") && crossOrigin) {
+      if (isApiRoute && crossOrigin) {
         const requestedMethod = request.headers["access-control-request-method"];
         if (typeof requestedMethod !== "string" || !CORS_METHODS.has(requestedMethod.toUpperCase())) {
           fail(response, 403, "CORS_METHOD_DENIED", "Cross-origin API method is not allowed");
@@ -1789,13 +1799,14 @@ export function createServer(options: ApiServerOptions): Server {
         const requestedHeaders = typeof rawHeaders === "string" && rawHeaders.trim()
           ? rawHeaders.split(",").map((header) => header.trim().toLowerCase())
           : [];
-        if (requestedHeaders.some((header) => !header || !CORS_HEADERS.has(header))) {
+        const availableHeader = (header: string) => CORS_HEADERS.get(header) ?? (mcpStreamableRoute ? MCP_CORS_HEADERS.get(header) : undefined);
+        if (requestedHeaders.some((header) => !availableHeader(header))) {
           fail(response, 403, "CORS_HEADER_DENIED", "Cross-origin API request headers are not allowed");
           return;
         }
         response.setHeader("Access-Control-Allow-Methods", requestedMethod.toUpperCase());
         if (requestedHeaders.length) {
-          response.setHeader("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map((header) => CORS_HEADERS.get(header)!).join(", "));
+          response.setHeader("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map(availableHeader).join(", "));
         }
       }
       response.writeHead(204, { Allow: "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" });
@@ -1851,14 +1862,22 @@ export function createServer(options: ApiServerOptions): Server {
     const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (hosted && accessCookies.length > 1) { fail(response, 401, "UNAUTHORIZED", "Hosted access cookie is ambiguous"); return; }
     if (hosted && accessToken && bearer) { fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either a hosted browser grant or a bearer grant"); return; }
-    if (!hosted && routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && sessionId && bearer) {
+    if (!hosted && isApiRoute && !publicRead && !publicModuleRoute && sessionId && bearer) {
       fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either an owner session cookie or a bearer credential");
       return;
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
     let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
     const isLegacyBearer = !options.betterAuth && Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
-    if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
+    if (standaloneMcpRoute) {
+      if (!oauthMcpMetadataUrl) throw httpFailure(503, "MCP_OAUTH_UNAVAILABLE", "Standalone MCP OAuth is not configured");
+      if (!bearer || isLegacyBearer || !authenticateOAuthMcp) {
+        response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+        fail(response, 401, "UNAUTHORIZED", "MCP OAuth authentication required");
+        return;
+      }
+    }
+    if (!standaloneMcpRoute && bearer && authenticateOAuthOwner && !isLegacyBearer) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
         if (authenticateOAuthMcp && error instanceof OAuthAuthenticationError && error.code === "OAUTH_SCOPE_REQUIRED") {
@@ -1867,7 +1886,7 @@ export function createServer(options: ApiServerOptions): Server {
             const failure = mcpError instanceof OAuthAuthenticationError
               ? mcpError
               : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
-            if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+            if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
               response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
             }
             fail(response, failure.status, failure.code, failure.message);
@@ -1877,7 +1896,7 @@ export function createServer(options: ApiServerOptions): Server {
           const failure = error instanceof OAuthAuthenticationError
             ? error
             : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
-          if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+          if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
             response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
           }
           fail(response, failure.status, failure.code, failure.message);
@@ -1885,18 +1904,29 @@ export function createServer(options: ApiServerOptions): Server {
         }
       }
     }
-    if (bearer && authenticateOAuthMcp && !authenticateOAuthOwner && !isLegacyBearer) {
+    if (bearer && authenticateOAuthMcp && (standaloneMcpRoute || !authenticateOAuthOwner) && !isLegacyBearer) {
       try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
       catch (error) {
         const failure = error instanceof OAuthAuthenticationError
           ? error
           : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
-        if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+        if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
           response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
         }
         fail(response, failure.status, failure.code, failure.message);
         return;
       }
+    }
+    if (standaloneMcpRoute && oauthMcpPrincipal) {
+      const requested = query.getAll("projectId");
+      if (requested.length > 1 || requested[0] === "") {
+        throw httpFailure(400, "INVALID_PROJECT", "Specify at most one projectId");
+      }
+      const assigned = oauthMcpPrincipal.projectIds;
+      const projectId = requested[0] ?? (assigned.length === 1 ? assigned[0] : undefined);
+      if (!projectId) throw httpFailure(400, "MCP_PROJECT_REQUIRED", "Specify projectId when the OAuth client has several project assignments");
+      assertAssignedProject(projectId, assigned);
+      routePath = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;
     }
     let hostedPrincipal: HostedPrincipal | undefined;
     const presentedHostedToken = hosted ? accessToken ?? (bearer || undefined) : undefined;
@@ -1942,7 +1972,6 @@ export function createServer(options: ApiServerOptions): Server {
       if (oauthMcpMetadataUrl) response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl, requiredScope));
       throw httpFailure(403, "OAUTH_MCP_SCOPE_REQUIRED", `Access token does not grant ${requiredScope}`);
     };
-    const mcpStreamableRoute = routePath.endsWith("/modules/mcp/streamable");
     if (oauthMcpPrincipal && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
       requireMcpEffect("read");
     }
@@ -2497,6 +2526,10 @@ export function createServer(options: ApiServerOptions): Server {
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
         const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds, resolveReorderActor);
+        if (mcpStreamableRoute && oauthMcpPrincipal) {
+          const { issuer, clientId, userId } = oauthMcpPrincipal;
+          host.mcpSessionIdentity = sha256Digest(JSON.stringify([issuer, clientId, userId]));
+        }
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
@@ -2592,7 +2625,7 @@ export function createServer(options: ApiServerOptions): Server {
       RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH,
       "/api/health", "/api/ready", ...VERSION_PATHS,
     ].includes(routePath);
-    const trackedApiRequest = routePath.startsWith("/api/") && !isNonActivityRoute;
+    const trackedApiRequest = (routePath.startsWith("/api/") || originalPath === "/mcp") && !isNonActivityRoute;
     const isMcpRequest = trackedApiRequest && typeof request.raw.headers.authorization === "string" && request.raw.headers.authorization.startsWith("Bearer ");
     const isActiveMutation = hosted && trackedApiRequest && !["GET", "HEAD", "OPTIONS"].includes(method);
     if (trackedApiRequest) activeApiRequests += 1;

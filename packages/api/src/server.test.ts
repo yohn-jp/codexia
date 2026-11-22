@@ -288,10 +288,14 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
       },
     }, {
       id: "streamable", path: "streamable", methods: ["GET"], access: "owner", effect: "propose",
-      async handle() {
+      async handle(_request, context) {
         return new Response(new ReadableStream({
           start(controller) { controller.enqueue(new TextEncoder().encode("data: ready\n\n")); },
-        }), { headers: { "Content-Type": "text/event-stream" } });
+        }), { headers: {
+          "Content-Type": "text/event-stream",
+          "X-Test-MCP-Project": context.projectId,
+          ...(context.mcpSessionIdentity ? { "X-Test-MCP-Identity": context.mcpSessionIdentity } : {}),
+        } });
       },
     }, {
       id: "native-propose", path: "native-propose", methods: ["POST"], access: "owner", effect: "propose",
@@ -648,6 +652,8 @@ describe("Codexia HTTP boundary", () => {
       token_endpoint_auth_methods_supported: ["client_secret_post"],
     });
     const fake = {
+      issuer: "https://api.example.test/api/auth",
+      audience: "https://api.example.test/api",
       handler: async (request: Request) => {
         const body = request.method === "GET" ? "" : await request.text();
         delegated.push({ method: request.method, path: new URL(request.url).pathname, body });
@@ -667,6 +673,15 @@ describe("Codexia HTTP boundary", () => {
       const document = await response.json() as { token_endpoint_auth_methods_supported: string[] };
       assert.ok(document.token_endpoint_auth_methods_supported.includes("none"));
     }
+    const mcp = await fetch(`${api.base}/mcp`, { method: "POST" });
+    assert.equal(mcp.status, 401);
+    assert.match(mcp.headers.get("www-authenticate") ?? "", /resource_metadata="https:\/\/api\.example\.test\/\.well-known\/oauth-protected-resource\/api"/u);
+    const resource = await fetch(`${api.base}/.well-known/oauth-protected-resource/api`);
+    assert.equal(resource.status, 200);
+    assert.deepEqual(await resource.json(), {
+      resource: fake.audience, authorization_servers: [fake.issuer],
+      scopes_supported: ["mcp:read", "mcp:compute", "mcp:propose"], bearer_methods_supported: ["header"],
+    });
     const token = await fetch(`${api.base}/api/auth/oauth2/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -2642,8 +2657,11 @@ describe("Codexia HTTP boundary", () => {
       issuer, audience, jwksUrl: `${issuer}/jwks`,
       ownerSubject: "owner-subject",
       ownerClientIds: ["codexia-web", "codexia-ios"],
-      allowedClientIds: ["codexia-mcp-client"],
-      projectIdsByClient: { "codexia-mcp-client": ["project-1", missingAssignedId, firstAssignedId] },
+      allowedClientIds: ["codexia-mcp-client", "single-project-client"],
+      projectIdsByClient: {
+        "codexia-mcp-client": ["project-1", missingAssignedId, firstAssignedId],
+        "single-project-client": [firstAssignedId],
+      },
       verifyActiveToken: async () => { onlineChecks += 1; return true; },
       fetch: async (input: string | URL | Request) => {
         assert.equal(String(input), `${issuer}/jwks`);
@@ -2660,6 +2678,12 @@ describe("Codexia HTTP boundary", () => {
     const api = await startCustomApi(storeFixture.store, staticDir, {
       usageDirectory: staticDir,
       runtime: actionBoundaryRuntime(staticDir),
+      corsAllowedOrigins: ["https://mcp-client.example.test"],
+      oauthOwner: {
+        issuer, audience, jwksUrl: oauthMcp.jwksUrl, ownerSubject: oauthMcp.ownerSubject,
+        allowedClientIds: oauthMcp.ownerClientIds, requiredScopes: ["codexia:api"],
+        verifyActiveToken: oauthMcp.verifyActiveToken, fetch: oauthMcp.fetch,
+      },
       oauthMcp,
     });
     t.after(api.close);
@@ -2680,6 +2704,48 @@ describe("Codexia HTTP boundary", () => {
     const readToken = makeToken("openid mcp:read");
     const computeToken = makeToken("openid mcp:compute");
     const proposeToken = makeToken("openid mcp:propose");
+    const singleProjectToken = makeToken("mcp:read", { client_id: "single-project-client", azp: "single-project-client" });
+    const ownerToken = makeToken("codexia:api", { client_id: "codexia-web", azp: "codexia-web" });
+
+    const initialize = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }) };
+    const standaloneChallenge = await fetch(api.base + "/mcp", initialize);
+    assert.equal(standaloneChallenge.status, 401);
+    assert.equal(standaloneChallenge.headers.get("www-authenticate"),
+      'Bearer resource_metadata="https://api.codexia.example/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"');
+    const preflight = await fetch(api.base + "/mcp", { method: "OPTIONS", headers: {
+      Origin: "https://mcp-client.example.test",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "authorization, mcp-session-id, mcp-protocol-version",
+    } });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-headers"), "Authorization, Mcp-Session-Id, MCP-Protocol-Version");
+    const corsChallenge = await fetch(api.base + "/mcp", { ...initialize, headers: { ...initialize.headers, Origin: "https://mcp-client.example.test" } });
+    assert.equal(corsChallenge.status, 401);
+    assert.equal(corsChallenge.headers.get("access-control-expose-headers"), "Mcp-Session-Id, WWW-Authenticate");
+    assert.equal((await send("/mcp", ACCESS_TOKEN, initialize)).status, 401);
+    const cookie = (await login(api.base)).cookie;
+    assert.equal((await fetch(api.base + "/mcp", { ...initialize, headers: { ...initialize.headers, Cookie: cookie, Origin: api.base } })).status, 401);
+    assert.equal((await send("/api/session", ownerToken)).status, 200);
+    assert.equal((await send("/mcp", ownerToken, initialize)).status, 403);
+    const selectProject = await send("/mcp", readToken);
+    assert.equal(selectProject.status, 400);
+    assert.equal((await selectProject.json() as { code: string }).code, "MCP_PROJECT_REQUIRED");
+    assert.equal((await send("/mcp?projectId=project-1&projectId=project-1", readToken)).status, 400);
+    assert.equal((await send(`/mcp?projectId=${unassignedId}`, readToken)).status, 404);
+    assert.equal((await send(`/mcp?projectId=${missingAssignedId}`, readToken)).status, 404);
+    const sessionIdentity = async (path: string, token: string): Promise<string> => {
+      const response = await send(path, token);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-test-mcp-project"), firstAssignedId);
+      const identity = response.headers.get("x-test-mcp-identity");
+      assert.ok(identity);
+      await response.body?.cancel();
+      return identity;
+    };
+    const explicitProject = `/mcp?projectId=${firstAssignedId}`;
+    const multiClientIdentity = await sessionIdentity(explicitProject, readToken);
+    assert.equal(await sessionIdentity(explicitProject, makeToken("mcp:read")), multiClientIdentity);
+    assert.notEqual(await sessionIdentity("/mcp", singleProjectToken), multiClientIdentity);
 
     const projects = await send("/api/projects", readToken);
     assert.equal(projects.status, 200);
