@@ -5,7 +5,7 @@ import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/con
 interface SceneItem { id: string; title: string }
 interface ChapterItem { id: string; title: string; scenes: SceneItem[] }
 interface VolumeItem { id: string; title: string; chapters: ChapterItem[] }
-interface ProjectTree { title: string; volumes: VolumeItem[]; rootSceneCount?: number }
+interface ProjectTree { title: string; volumes: VolumeItem[]; rootScenes?: SceneItem[]; rootSceneCount?: number }
 interface Episode extends Record<string, unknown> {
   id: string;
   number: number;
@@ -423,9 +423,12 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
       chapter: volumes.flatMap((volume) => volume.chapters.map((chapter) => ({
         id: chapter.id, title: volume.title + " / " + chapter.title,
       }))),
-      scene: volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes.map((scene) => ({
-        id: scene.id, title: volume.title + " / " + chapter.title + " / " + scene.title,
-      })))),
+      scene: [
+        ...(tree?.rootScenes ?? []).map((scene) => ({ id: scene.id, title: "作品直下 / " + scene.title })),
+        ...volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes.map((scene) => ({
+          id: scene.id, title: volume.title + " / " + chapter.title + " / " + scene.title,
+        })))),
+      ],
     };
   }, [tree]);
   const options = targets[kind];

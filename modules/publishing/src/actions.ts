@@ -173,6 +173,7 @@ export function createPublishingActions(): ModuleAction[] {
     return {
       title: project.title,
       rootSceneCount: project.rootScenes?.length ?? 0,
+      rootScenes: (project.rootScenes ?? []).map((scene) => ({ id: scene.id, title: scene.title })),
       volumes: project.volumes.map((volume) => ({
         id: volume.id,
         title: volume.title,
