@@ -481,10 +481,12 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     };
     const proposedConsent = await fixture.persistence.read(tx => tx.getChangeSet(project.id, changeSet.id));
     assert.equal(proposedConsent?.status, "proposed");
+    assert.equal(proposedConsent?.authorId, consentAuthor);
     assert.equal(await currentConsent(), false);
     const approvedConsent = await fixture.persistence.transaction(tx => tx.approveChangeSet({
       projectId: project.id, changeSetId: changeSet.id, expectedVersion: proposedConsent.version, approvedBy: consentAuthor,
     }));
+    assert.equal(approvedConsent.approvedBy, consentAuthor);
     assert.equal(await currentConsent(), false);
     const consentReceipt = await fixture.persistence.transaction(tx => tx.applyChangeSet({
       projectId: project.id, changeSetId: changeSet.id, expectedVersion: approvedConsent.version,
@@ -560,6 +562,12 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     const rebuiltFeatures = actionData(await restartedRuntime.invokeAction("nlp", "nlp.features", {}, host), "reconnected nlp.features", rebuiltReader);
     assert.equal(rebuiltFeatures.features.find((feature) => feature.id === "setting-qa")?.enabled, true);
     assert.equal(rebuiltFeatures.settings.ownerNote, "preserve-feature-settings");
+    const previousReader = await store.reader(project.id, pinnedConsent);
+    const priorFeatures = actionData(
+      await restartedRuntime.invokeAction("nlp", "nlp.features", {}, actionHost(store, project.id, previousReader)),
+      "reconnected historical nlp.features", previousReader,
+    );
+    assert.equal(priorFeatures.features.find((feature) => feature.id === "setting-qa")?.enabled, false);
     const rebuiltContinuity = actionData(await restartedRuntime.invokeAction("diagnostics", "diagnostics.checkContinuity", {}, host), "reconnected diagnostics.checkContinuity", rebuiltReader);
     assert.ok(rebuiltContinuity.warnings.some((warning) => warning.reason === "unrecorded-teleport"));
     const rebuiltNoOp = actionData(await restartedRuntime.invokeAction("diagnostics", "diagnostics.formatManuscript", {
