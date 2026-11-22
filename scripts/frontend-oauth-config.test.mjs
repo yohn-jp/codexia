@@ -14,6 +14,14 @@ const settings = {
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: 'https://codexia.example.test/desktop',
   VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: 'https://codexia.example.test/mobile',
 };
+const expectedConfig = {
+  issuer: 'https://codexia.example.test/api/auth',
+  clientId: 'codexia-web-public',
+  apiAudience: 'https://codexia.example.test/api',
+  desktopRedirectUri: 'https://codexia.example.test/desktop',
+  mobileRedirectUri: 'https://codexia.example.test/mobile',
+  scopes: ['openid', 'codexia:api'],
+};
 
 test('no OAuth public settings preserve non-OAuth authentication builds', () => {
   assert.equal(readFrontendOAuthConfig({}), null);
@@ -22,14 +30,7 @@ test('no OAuth public settings preserve non-OAuth authentication builds', () => 
 
 test('OAuth public settings require every Web shell callback and a complete client', () => {
   const config = readFrontendOAuthConfig(settings);
-  assert.deepEqual(config, {
-    issuer: settings.VITE_CODEXIA_OAUTH_ISSUER,
-    clientId: settings.VITE_CODEXIA_OAUTH_CLIENT_ID,
-    apiAudience: settings.VITE_CODEXIA_API_AUDIENCE,
-    desktopRedirectUri: settings.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI,
-    mobileRedirectUri: settings.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI,
-    scopes: ['openid', 'codexia:api'],
-  });
+  assert.deepEqual(config, expectedConfig);
   for (const key of Object.keys(settings)) {
     const incomplete = { ...settings };
     delete incomplete[key];
@@ -90,7 +91,7 @@ test('frontend artifacts are admitted only when their OAuth configuration matche
     sourceSha: 'a'.repeat(40),
     profile: 'full',
     apiEpoch: 1,
-    oauthConfigIdentity: frontendOAuthConfigIdentity(settings),
+    oauthConfigIdentity: JSON.stringify({ format: 'codexia-web-oauth-config/v1', settings: expectedConfig }),
   };
   assert.doesNotThrow(() => assertFrontendOAuthConfigIdentity(identity, settings));
   assert.throws(() => assertFrontendOAuthConfigIdentity(identity, {
