@@ -235,12 +235,6 @@ export interface EditorSnapshotRead {
   document: { path: string; revision: string } | null;
 }
 
-/** Bulk snapshot response from earlier compatible backends. */
-export interface SnapshotRead {
-  snapshot: SnapshotId;
-  files: FileDocument[];
-}
-
 export interface Session {
   authenticated: true;
   authorScope: string;
@@ -633,14 +627,10 @@ export const api = {
     if (documentId) query.set("documentId", documentId);
     const result = await request(dto.moduleSnapshot, `${projectPath(projectId, "snapshot")}?${query}`);
     const path = documentId ? `documents/${documentId}.md` : undefined;
-    if ("document" in result) {
-      if (result.document && result.document.path !== path) {
-        throw new ApiError("The server returned a different editor document", 502, "INVALID_RESPONSE");
-      }
-      return result;
+    if (result.document && result.document.path !== path) {
+      throw new ApiError("The server returned a different editor document", 502, "INVALID_RESPONSE");
     }
-    const file = result.files.find((entry) => entry.path === path);
-    return { snapshot: result.snapshot, document: file?.revision ? { path: file.path, revision: file.revision } : null };
+    return result;
   },
   modules: (projectId: string) => request(dto.modules, projectPath(projectId, "modules")),
   contributions: (projectId: string) => request(dto.contributions, projectPath(projectId, "contributions")),

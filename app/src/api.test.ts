@@ -327,6 +327,11 @@ test("module snapshot requests only the active document revision", async () => {
       return Response.json({ snapshot, document });
     };
     assert.deepEqual(await api.moduleSnapshot("project-1", documentId), { snapshot, document });
+    globalThis.fetch = async (input) => {
+      assert.equal(String(input), "/api/projects/project-1/snapshot?projection=editor");
+      return Response.json({ snapshot, document: null });
+    };
+    assert.deepEqual(await api.moduleSnapshot("project-1"), { snapshot, document: null });
     globalThis.fetch = async () => Response.json({ snapshot, document: { ...document, revision: "invalid" } });
     await assert.rejects(api.moduleSnapshot("project-1", documentId), { code: "INVALID_RESPONSE" });
     globalThis.fetch = async () => Response.json({ snapshot, document: { ...document, path: "documents/another.md" } });
@@ -336,7 +341,7 @@ test("module snapshot requests only the active document revision", async () => {
   }
 });
 
-test("module snapshot selects the exact document from an older backend response", async () => {
+test("module snapshot rejects a bulk file response", async () => {
   const originalFetch = globalThis.fetch;
   const snapshot = { projectId: "project-1", projectVersion: 12 };
   const documentId = "00000000-0000-4000-8000-000000000002";
@@ -346,8 +351,8 @@ test("module snapshot selects the exact document from an older backend response"
     { ...document, content: "Manuscript" },
   ] });
   try {
-    assert.deepEqual(await api.moduleSnapshot("project-1", documentId), { snapshot, document });
-    assert.deepEqual(await api.moduleSnapshot("project-1"), { snapshot, document: null });
+    await assert.rejects(api.moduleSnapshot("project-1", documentId), { code: "INVALID_RESPONSE" });
+    await assert.rejects(api.moduleSnapshot("project-1"), { code: "INVALID_RESPONSE" });
   } finally {
     globalThis.fetch = originalFetch;
   }
