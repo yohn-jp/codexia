@@ -168,7 +168,7 @@ async function certifiedCompatibleCandidate(head) {
         apiPages(`actions/runs/${publicationRun.id}/jobs?filter=latest`, 'jobs'),
         apiPages(`actions/runs/${publicationRun.id}/artifacts`, 'artifacts'),
       ]);
-      const certificateArtifact = selectPushDeploymentCertificateArtifact(artifacts, publicationRun);
+      const certificateArtifact = selectPushDeploymentCertificateArtifact(artifacts, publicationRun, { sourceSha: metadata.sourceSha });
       const certificateBytes = await downloadArtifact(certificateArtifact, repository, token, fetch, { maxArchive: 4 * 1024 * 1024, downloadTimeoutMs: 30_000 });
       scratch = await mkdtemp(path.join(tempRoot, 'codexia-lifecycle-release-proof-'));
       const certFiles = await extractArtifactFiles(certificateBytes, scratch, { maxArchive: 4 * 1024 * 1024, maxUncompressed: 4 * 1024 * 1024 });
