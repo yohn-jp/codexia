@@ -70,7 +70,6 @@ export const MODULE_PERSISTENCE_FORMATS: readonly ModulePersistenceFormat[] = [
 
   format("nlp", "synonyms", "meta/scriptorium/modules/nlp/synonyms.yaml", "text", true, true),
   format("nlp", "candidate-ignore-list", "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml", "text", true, true),
-  format("nlp", "feature-settings", "meta/scriptorium/modules/nlp/feature-settings.json", "json", true, true),
   preserved("nlp", "legacy-files", "meta/scriptorium/modules/nlp/legacy/files/"),
 
   format("publishing", "cover", "meta/scriptorium/modules/publishing/assets/cover.jpg", "binary", true, false),

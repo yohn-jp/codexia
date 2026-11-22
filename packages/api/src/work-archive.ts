@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { isPrivatePublishingPath, parsePublishingEpisodesRecord, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
+import {
+  isPrivatePublishingPath, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings,
+  parsePublishingEpisodesRecord, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY,
+} from "@codexia/contracts";
 import { z } from "zod";
 import {
   PersistenceError,
@@ -125,6 +128,9 @@ function excludedRecord(moduleId: string, key: string, value: unknown): boolean 
 function isRetiredPublishingRecord(moduleId: string, key: string): boolean {
   return moduleId === "core.artifacts" && isPrivatePublishingPath(key);
 }
+function isRetiredNlpFeatureSettings(moduleId: string, key: string): boolean {
+  return moduleId === "core.artifacts" && key === NLP_LEGACY_FEATURE_SETTINGS_PATH;
+}
 function safeSettingsValue(value: unknown, omitted: string[], path: string): unknown {
   if (Array.isArray(value)) return value.map((item, index) => safeSettingsValue(item, omitted, path + "[" + index + "]"));
   if (value !== null && typeof value === "object") {
@@ -204,6 +210,9 @@ function validateGraph(archive: WorkArchive): void {
     if (isRetiredPublishingRecord(record.moduleId, record.key)) {
       fail(400, "RETIRED_PUBLISHING_ARCHIVE_FORMAT", "Archive contains a retired Publishing file record");
     }
+    if (isRetiredNlpFeatureSettings(record.moduleId, record.key)) {
+      fail(400, "RETIRED_NLP_FEATURE_SETTINGS_ARCHIVE_FORMAT", "Archive contains the retired NLP feature settings file record");
+    }
     if (excludedRecord(record.moduleId, record.key, record.value)) {
       fail(400, "INVALID_WORK_ARCHIVE", "Archive contains reserved or sensitive module records");
     }
@@ -212,6 +221,12 @@ function validateGraph(archive: WorkArchive): void {
         if (Object.keys(record.value).some(key => key !== "version" && key !== "document")) throw new Error();
         parsePublishingEpisodesRecord(record.value as JsonObject);
       } catch { fail(400, "INVALID_WORK_ARCHIVE", "Archive contains an invalid Publishing episodes record"); }
+    }
+    if (record.moduleId === "nlp" && record.key === NLP_FEATURE_SETTINGS_KEY) {
+      try {
+        if (record.value.externalEnabled == null) throw new Error();
+        parseNlpFeatureSettings(record.value as JsonObject);
+      } catch { fail(400, "INVALID_WORK_ARCHIVE", "Archive contains an invalid NLP feature settings record"); }
     }
   }
 }
@@ -315,6 +330,13 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
       if (isRetiredPublishingRecord(item.moduleId, item.key)) {
         if (item.key === legacyEpisodesPath && item.value.deleted !== true) {
           fail(409, "PUBLISHING_MAINTENANCE_REQUIRED", "Publishing episodes require maintenance before portable export");
+        }
+        omittedRecords.push(item.moduleId + ":" + item.key);
+        continue;
+      }
+      if (isRetiredNlpFeatureSettings(item.moduleId, item.key)) {
+        if (item.value.deleted !== true) {
+          fail(409, "NLP_FEATURE_SETTINGS_MAINTENANCE_REQUIRED", "NLP feature settings require maintenance before portable export");
         }
         omittedRecords.push(item.moduleId + ":" + item.key);
         continue;

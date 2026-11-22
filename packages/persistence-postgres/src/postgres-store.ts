@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
+import { assertProjectPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
 import {
   CORE_DOCUMENT_PATHS,
   HIERARCHY_CREATE_SOURCE,
@@ -2354,9 +2354,21 @@ export class PostgresPersistence implements Persistence {
   async findUnmigratedPublishingProjectIds(
     options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
   ): Promise<readonly ProjectId[]> {
+    return this.findLegacyArtifactProjectIds(PRIVATE_PUBLISHING_PATHS, options);
+  }
+
+  async findUnmigratedNlpFeatureSettingsProjectIds(
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    return this.findLegacyArtifactProjectIds([NLP_LEGACY_FEATURE_SETTINGS_PATH], options);
+  }
+
+  private async findLegacyArtifactProjectIds(
+    paths: readonly string[], options: { projectId?: ProjectId; after?: ProjectId; limit?: number },
+  ): Promise<readonly ProjectId[]> {
     const { projectId = null, after = null, limit = 100 } = options;
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-      throw validationError("Invalid Publishing maintenance project page size");
+      throw validationError("Invalid legacy artifact maintenance project page size");
     }
     const result = await this.pool.query<{ id: ProjectId }>(
       `SELECT p.id FROM project p
@@ -2369,7 +2381,7 @@ export class PostgresPersistence implements Persistence {
              AND source.value->'deleted' IS DISTINCT FROM 'true'::jsonb
          )
        ORDER BY p.id LIMIT $4`,
-      [PRIVATE_PUBLISHING_PATHS, projectId, after, limit],
+      [paths, projectId, after, limit],
     );
     return result.rows.map(row => row.id);
   }

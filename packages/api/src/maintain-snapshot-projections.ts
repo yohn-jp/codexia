@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { CoreStore, SNAPSHOT_PROJECTION_EPOCH } from "@codexia/core";
 import type { ProjectId } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, verifyPostgresSchema } from "@codexia/persistence-postgres";
-import { maintainPublishingRecords } from "./publishing-record-maintenance.js";
+import { maintainNlpFeatureSettings, maintainPublishingRecords } from "./module-record-maintenance.js";
 
 function maintenanceArguments(args: string[]): { mode: "--check" | "--apply"; projectId?: ProjectId } {
   const [mode, scope, projectId] = args;
@@ -13,6 +13,23 @@ function maintenanceArguments(args: string[]): { mode: "--check" | "--apply"; pr
     throw new Error("Usage: maintain-snapshot-projections --check|--apply [--project UUID]");
   }
   return projectId === undefined ? { mode } : { mode, projectId: projectId as ProjectId };
+}
+
+async function promoteRecords(
+  findPendingProjects: (page: { after?: ProjectId; limit?: number }) => Promise<readonly ProjectId[]>,
+  maintain: (projectId: ProjectId) => Promise<{ migrated: number }>,
+  label: string,
+): Promise<number> {
+  let after: ProjectId | undefined;
+  let rowsMigrated = 0;
+  for (;;) {
+    const pending = await findPendingProjects(after === undefined ? {} : { after });
+    if (pending.length === 0) break;
+    for (const id of pending) rowsMigrated += (await maintain(id)).migrated;
+    after = pending.at(-1);
+  }
+  if ((await findPendingProjects({ limit: 1 })).length) throw new Error(`${label} maintenance still has pending projects`);
+  return rowsMigrated;
 }
 
 async function main(): Promise<void> {
@@ -30,30 +47,27 @@ async function main(): Promise<void> {
     if (mode === "--check") {
       const pendingProjectIds = await persistence.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH, { ...scope, limit: 10 });
       const pendingPublishingProjectIds = await persistence.findUnmigratedPublishingProjectIds({ ...scope, limit: 10 });
-      const pending = pendingProjectIds.length > 0 || pendingPublishingProjectIds.length > 0;
-      console.log(JSON.stringify({ status: pending ? "maintenance_required" : "ready", pendingProjectIds, pendingPublishingProjectIds }));
+      const pendingNlpFeatureSettingsProjectIds = await persistence.findUnmigratedNlpFeatureSettingsProjectIds({ ...scope, limit: 10 });
+      const pending = pendingProjectIds.length > 0 || pendingPublishingProjectIds.length > 0 || pendingNlpFeatureSettingsProjectIds.length > 0;
+      console.log(JSON.stringify({ status: pending ? "maintenance_required" : "ready", pendingProjectIds, pendingPublishingProjectIds,
+        ...(pendingNlpFeatureSettingsProjectIds.length ? { pendingNlpFeatureSettingsProjectIds } : {}),
+      }));
       if (pending) process.exitCode = 2;
       return;
     }
     if (databaseMode !== "transition") throw new Error("Snapshot projection maintenance requires the writable PostgreSQL role");
 
-    let after: ProjectId | undefined;
-    let publishingRowsMigrated = 0;
-    for (;;) {
-      const pending = await persistence.findUnmigratedPublishingProjectIds({ ...scope, ...(after === undefined ? {} : { after }) });
-      if (pending.length === 0) break;
-      for (const id of pending) {
-        const { migrated } = await maintainPublishingRecords(persistence, id, "apply");
-        publishingRowsMigrated += migrated;
-      }
-      after = pending.at(-1);
-    }
-    if ((await persistence.findUnmigratedPublishingProjectIds({ ...scope, limit: 1 })).length) {
-      throw new Error("Publishing record maintenance still has pending projects");
-    }
+    const publishingRowsMigrated = await promoteRecords(
+      page => persistence.findUnmigratedPublishingProjectIds({ ...scope, ...page }),
+      id => maintainPublishingRecords(persistence, id, "apply"), "Publishing record",
+    );
+    const nlpFeatureSettingsRowsMigrated = await promoteRecords(
+      page => persistence.findUnmigratedNlpFeatureSettingsProjectIds({ ...scope, ...page }),
+      id => maintainNlpFeatureSettings(persistence, id, "apply"), "NLP feature settings",
+    );
 
     const store = new CoreStore({ persistence });
-    after = undefined;
+    let after: ProjectId | undefined;
     let projectsProcessed = 0;
     for (;;) {
       const pending = await persistence.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH,
@@ -65,7 +79,9 @@ async function main(): Promise<void> {
     }
     const remaining = await persistence.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH, { ...scope, limit: 1 });
     if (remaining.length) throw new Error("Snapshot projection maintenance still has pending projects");
-    console.log(JSON.stringify({ status: "ready", projectsProcessed, publishingRowsMigrated }));
+    console.log(JSON.stringify({ status: "ready", projectsProcessed, publishingRowsMigrated,
+      ...(nlpFeatureSettingsRowsMigrated ? { nlpFeatureSettingsRowsMigrated } : {}),
+    }));
   } finally {
     await persistence.close();
   }

@@ -74,6 +74,27 @@ test("a portable work round trip reconstitutes manuscript, hierarchy, knowledge,
   assert.equal(restored.moduleRecords[0]?.value.editorNote, "保持");
 });
 
+test("portable NLP consent keeps native settings and refuses the retired source record", async () => {
+  const project = await core.createProject({ title: "Portable NLP settings " + randomUUID() });
+  const settings = { externalEnabled: { "setting-qa": false, futureFeature: true }, nextPolicy: { notes: "保持" } };
+  const retired = { moduleId: "core.artifacts", key: "meta/scriptorium/modules/nlp/feature-settings.json" };
+  await persistence.transaction(async tx => {
+    await tx.saveModuleRecord({ projectId: project.id, moduleId: "nlp", key: "feature-settings", value: settings, expectedVersion: null });
+    await tx.saveModuleRecord({ projectId: project.id, ...retired, value: { deleted: true }, expectedVersion: null });
+  });
+  const archive = await exportWorkArchive(persistence, project.id);
+  assert.deepEqual(archive.moduleRecords, [{ moduleId: "nlp", key: "feature-settings", value: settings }]);
+  const restored = await importWorkArchive(persistence, archive, "owner");
+  assert.deepEqual((await exportWorkArchive(persistence, restored.project.id)).moduleRecords, archive.moduleRecords);
+
+  await assert.rejects(importWorkArchive(persistence, {
+    ...archive, moduleRecords: [...archive.moduleRecords, { ...retired, value: { content: JSON.stringify(settings) } }],
+  }, "owner"), { code: "RETIRED_NLP_FEATURE_SETTINGS_ARCHIVE_FORMAT" });
+  await assert.rejects(importWorkArchive(persistence, {
+    ...archive, moduleRecords: [{ moduleId: "nlp", key: "feature-settings", value: { externalEnabled: [] } }],
+  }, "owner"), { code: "INVALID_WORK_ARCHIVE" });
+});
+
 test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQL", async () => {
   const source = await core.createProject({ title: "Archive reservation " + randomUUID() });
   const proposeCreation = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyCreate"]>[1]) => {
