@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { apiRequestUrl, beginOAuthAuthorization, completeOAuthAuthorization, type OAuthWebConfig } from "./oauth.js";
 
 const config: OAuthWebConfig = {
@@ -50,7 +50,6 @@ function installBrowserStubs() {
     origin: new URL(config.redirectUri).origin,
   } } });
   return {
-    storage,
     get assigned() { return assigned; },
     restore() {
       for (const [key, descriptor] of [["crypto", originalCrypto], ["sessionStorage", originalSessionStorage], ["window", originalWindow]] as const) {
@@ -69,21 +68,15 @@ test("OAuth browser client uses state and S256 PKCE, then exchanges once without
     assert.equal(authorization.searchParams.get("client_id"), config.clientId);
     assert.equal(authorization.searchParams.get("resource"), config.apiAudience);
     assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
-    assert.equal(authorization.searchParams.get("state")?.length, 43);
-    const transaction = JSON.parse(browser.storage.get("codexia.oauth.pkce.v1")!) as { verifier: string };
-    assert.equal(transaction.verifier.length, 64);
-    const digest = await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(transaction.verifier));
-    const bytes = new Uint8Array(digest);
-    let binary = "";
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    const expectedChallenge = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-    assert.equal(authorization.searchParams.get("code_challenge"), expectedChallenge);
+    const state = authorization.searchParams.get("state");
+    assert.match(state ?? "", /^[A-Za-z0-9_-]{43,}$/u);
+    const callback = `${config.redirectUri}?code=authorization-code&state=${state}&iss=${encodeURIComponent(config.issuer)}`;
 
     let submitted = new URLSearchParams();
-    const token = await completeOAuthAuthorization(config,
-      `${config.redirectUri}?code=authorization-code&state=${authorization.searchParams.get("state")}&iss=${encodeURIComponent(config.issuer)}`,
-      async (_input, init) => {
+    const token = await completeOAuthAuthorization(config, callback,
+      async (input, init) => {
         if (init?.method !== "POST") return Response.json(metadata);
+        assert.equal(String(input), metadata.token_endpoint);
         submitted = new URLSearchParams(init?.body as URLSearchParams);
         assert.equal(init?.credentials, "omit");
         assert.equal(init?.redirect, "error");
@@ -95,10 +88,15 @@ test("OAuth browser client uses state and S256 PKCE, then exchanges once without
         });
       });
     assert.equal(token, "codexia-api-access-token", "the API client uses the OAuth access token, never the OIDC ID token");
-    assert.equal(submitted.get("code_verifier"), transaction.verifier);
+    const verifier = submitted.get("code_verifier") ?? "";
+    assert.match(verifier, /^[A-Za-z0-9._~-]{43,128}$/u);
+    assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(verifier).digest("base64url"));
+    assert.equal(submitted.get("code"), "authorization-code");
     assert.equal(submitted.get("resource"), config.apiAudience);
     assert.equal(submitted.has("client_secret"), false, "a public Web client never sends a client secret");
-    assert.equal(browser.storage.has("codexia.oauth.pkce.v1"), false);
+    await assert.rejects(completeOAuthAuthorization(config, callback, async () => {
+      assert.fail("a consumed transaction cannot send another request");
+    }), /state validation/u);
   } finally { browser.restore(); }
 });
 
@@ -106,8 +104,10 @@ test("OAuth callback rejects state mismatch and clears the one-time transaction"
   const browser = installBrowserStubs();
   try {
     await beginOAuthAuthorization(config, metadataFetch());
-    await assert.rejects(completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=wrong`), /state validation/u);
-    assert.equal(browser.storage.has("codexia.oauth.pkce.v1"), false);
+    const state = new URL(browser.assigned).searchParams.get("state");
+    const unexpectedFetch = async () => assert.fail("a rejected or consumed transaction cannot send a request");
+    await assert.rejects(completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=wrong`, unexpectedFetch), /state validation/u);
+    await assert.rejects(completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=${state}`, unexpectedFetch), /state validation/u);
   } finally { browser.restore(); }
 });
 

@@ -2,16 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { attemptNativeLogout } from "./nativeLogout";
 
-test("native logout blocks the workspace and reports confirmed local and server logout", async () => {
+test("native logout waits for draft protection and blocks the workspace before invoking the bridge", async () => {
   const events: string[] = [];
-  const result = await attemptNativeLogout({
-    protectDraft: async () => { events.push("protected"); return true; },
+  let confirmProtection!: (protectedDraft: boolean) => void;
+  const protection = new Promise<boolean>(resolve => { confirmProtection = resolve; });
+  const result = attemptNativeLogout({
+    protectDraft: () => protection,
     blockWorkspace: () => { events.push("blocked"); },
-    signOut: async () => ({ localCredentialsCleared: true, revoked: true }),
+    signOut: async () => {
+      events.push("bridge");
+      return { localCredentialsCleared: true, revoked: true };
+    },
   });
 
-  assert.deepEqual(result, { kind: "complete" });
-  assert.deepEqual(events, ["protected", "blocked"]);
+  assert.deepEqual(events, []);
+  confirmProtection(true);
+  assert.deepEqual(await result, { kind: "complete" });
+  assert.deepEqual(events, ["blocked", "bridge"]);
 });
 
 test("native logout reports an unconfirmed server revocation after clearing device credentials", async () => {
