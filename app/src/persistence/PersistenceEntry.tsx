@@ -96,6 +96,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
           if (authorization) {
             setOAuthAccessToken(authorization.accessToken);
             window.history.replaceState(window.history.state, "", authorization.returnPath);
+            window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
           }
         }
       } catch (error) {
