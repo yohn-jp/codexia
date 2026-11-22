@@ -130,7 +130,7 @@ async function hasPasskeyAuthRuntime(): Promise<boolean> {
   }
 }
 
-export function IdentityManagementPanel({ placement }: { placement: "desktop" | "mobile" }) {
+export function IdentityManagementPanel({ placement, hosted }: { placement: "desktop" | "mobile"; hosted?: boolean }) {
   const [access, setAccess] = useState<OwnerAccess>({ status: "checking" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -153,7 +153,17 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
 
   useEffect(() => {
     let active = true;
+    if (hosted === true) {
+      setAccess({ status: "hidden" });
+      return () => { active = false; };
+    }
     void (async () => {
+      // This endpoint exists only in the Better Auth runtime. Check it before
+      // the broader API session route so token-mode shells incur no owner lookup.
+      if (!await hasPasskeyAuthRuntime()) {
+        if (active) setAccess({ status: "hidden" });
+        return;
+      }
       let apiSession: Awaited<ReturnType<typeof api.session>>;
       try {
         apiSession = await api.session();
@@ -162,10 +172,6 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
         return;
       }
       if (apiSession.authenticated !== true || apiSession.authorScope !== "owner") {
-        if (active) setAccess({ status: "hidden" });
-        return;
-      }
-      if (!await hasPasskeyAuthRuntime()) {
         if (active) setAccess({ status: "hidden" });
         return;
       }
@@ -197,7 +203,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [hosted]);
 
   const loadPasskeys = useCallback(async (): Promise<boolean> => {
     setPasskeyLoading(true);
