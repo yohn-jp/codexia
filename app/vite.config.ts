@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const workspaceRoot = resolve(appRoot, "..");
@@ -15,7 +15,7 @@ const generatedBrowserModules = browserModuleProfilePath
   : resolve(workspaceRoot, "profiles", profile, "generated", "browser.mjs");
 
 const ui = process.env.CODEXIA_UI ?? process.env.SCRIPTORIUM_UI ?? "launcher";
-if (!["launcher", "desktop", "mobile"].includes(ui)) throw new Error("Invalid CODEXIA_UI");
+if (!["launcher", "desktop", "mobile", "oauth"].includes(ui)) throw new Error("Invalid CODEXIA_UI");
 const uiDirectory = ui === "launcher" ? "" : ui;
  
 // OAuth browser fixture assets must not overwrite app/dist while other shards
@@ -25,16 +25,51 @@ if (isolatedBuildRoot && !isAbsolute(isolatedBuildRoot)) {
   throw new Error("CODEXIA_VITE_BUILD_OUTPUT_ROOT must be an absolute directory");
 }
 const buildRoot = isolatedBuildRoot ?? resolve(appRoot, "dist");
+const oauthSourceFiles = new Set([
+  "OAuthConsentPage.tsx",
+  "OAuthLoginPage.tsx",
+  "auth-client.ts",
+  "oauth-consent.ts",
+  "oauth-login.ts",
+  "oauth.css",
+  "theme.ts",
+  "entries/oauth-consent.tsx",
+  "entries/oauth-login.tsx",
+].map((file) => resolve(appRoot, "src", file)));
+
+function oauthSourceBoundary(): Plugin {
+  const sourceRoot = resolve(appRoot, "src");
+  return {
+    name: "codexia-oauth-source-boundary",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const unexpected = new Set<string>();
+      for (const output of Object.values(bundle)) {
+        if (output.type !== "chunk") continue;
+        for (const id of Object.keys(output.modules)) {
+          const path = resolve(id.split("?", 1)[0] ?? id);
+          if (path.startsWith(`${sourceRoot}${sep}`) && !oauthSourceFiles.has(path)) {
+            unexpected.add(relative(appRoot, path));
+          }
+        }
+      }
+      if (unexpected.size) {
+        throw new Error(`OAuth entry imports non-OAuth application modules: ${[...unexpected].sort().join(", ")}`);
+      }
+    },
+  };
+}
 
 export default defineConfig({
   root: appRoot,
+  publicDir: ui === "oauth" ? false : resolve(appRoot, "public"),
   plugins: [react(), {
     name: "codexia-ui-entry",
     transformIndexHtml: {
       order: "pre",
       handler: (html: string) => ui === "launcher" ? html : html.replace("/src/launcher.tsx", `/src/entries/${ui}.tsx`),
     },
-  }],
+  }, ...(ui === "oauth" ? [oauthSourceBoundary()] : [])],
   base: uiDirectory ? `/${uiDirectory}/` : "/",
   resolve: {
     alias: [{
@@ -48,7 +83,12 @@ export default defineConfig({
     manifest: true,
     cssCodeSplit: false,
     rollupOptions: {
-      input: resolve(appRoot, "index.html"),
+      input: ui === "oauth"
+        ? {
+          login: resolve(appRoot, "oauth-login.html"),
+          consent: resolve(appRoot, "oauth-consent.html"),
+        }
+        : resolve(appRoot, "index.html"),
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",

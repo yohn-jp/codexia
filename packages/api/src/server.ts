@@ -444,7 +444,8 @@ async function staticAliasTarget(
 }
 
 function isContentHashedAssetPath(pathname: string): boolean {
-  return /^\/(?:desktop\/|mobile\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname);
+  return /^\/(?:desktop\/|mobile\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname) ||
+    /^\/oauth\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css|svg)$/u.test(pathname);
 }
 
 async function serveStatic(
@@ -458,8 +459,8 @@ async function serveStatic(
   const publicReaderPath = isPublicReaderPath(path);
   const files: Record<string, { filename: string; contentType: string }> = {
     "/": { filename: "index.html", contentType: "text/html; charset=utf-8" },
-    "/oauth/login": { filename: "index.html", contentType: "text/html; charset=utf-8" },
-    "/oauth/consent": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/login": { filename: "oauth/oauth-login.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/consent": { filename: "oauth/oauth-consent.html", contentType: "text/html; charset=utf-8" },
     "/main.js": { filename: "main.js", contentType: "text/javascript; charset=utf-8" },
     "/api.js": { filename: "api.js", contentType: "text/javascript; charset=utf-8" },
     "/drafts.js": { filename: "drafts.js", contentType: "text/javascript; charset=utf-8" },
@@ -474,7 +475,9 @@ async function serveStatic(
   if (ui && /^(?:main\.js|styles\.css)$/u.test(uiPath)) {
     file = { filename: `${ui}/${uiPath}`, contentType: uiPath.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8" };
   }
-  const assetPrefix = ui ? `/${ui}/assets/` : "/assets/";
+  const oauthAssetRequest = !ui && path.startsWith("/oauth/assets/");
+  const assetPrefix = ui ? `/${ui}/assets/` : oauthAssetRequest ? "/oauth/assets/" : "/assets/";
+  const staticAssetsDirectory = resolve(staticDir, ...(ui ? [ui] : oauthAssetRequest ? ["oauth"] : []), "assets");
   if (!file && path.startsWith(assetPrefix)) {
     const name = path.slice(assetPrefix.length);
     if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") return false;
@@ -486,7 +489,7 @@ async function serveStatic(
       ".ttf": "font/ttf", ".otf": "font/otf", ".ico": "image/x-icon",
     };
     if (!contentTypes[extension] || !/^[A-Za-z0-9._-]{1,180}$/u.test(name)) return false;
-    file = { filename: resolve(staticDir, ...(ui ? [ui] : []), "assets", name), contentType: contentTypes[extension] };
+    file = { filename: resolve(staticAssetsDirectory, name), contentType: contentTypes[extension] };
   }
   if (!file) return false;
   try {
@@ -497,10 +500,13 @@ async function serveStatic(
     }
     const target = file.filename.startsWith(sep) ? file.filename : resolve(staticDir, file.filename);
     const root = await realpath(staticDir);
-    const uiAssetsDirectory = resolve(staticDir, ...(ui ? [ui] : []), "assets");
-    const assetsDirectory = path.startsWith(assetPrefix) || target.startsWith(`${uiAssetsDirectory}${sep}`)
-      ? uiAssetsDirectory
+    const assetsDirectory = path.startsWith(assetPrefix) || target.startsWith(`${staticAssetsDirectory}${sep}`)
+      ? staticAssetsDirectory
       : undefined;
+    if (path.startsWith("/oauth/") && (await lstat(resolve(staticDir, "oauth"))).isSymbolicLink()) {
+      sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
+      return true;
+    }
     if (ui && (await lstat(resolve(staticDir, ui))).isSymbolicLink()) {
       sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
       return true;
@@ -535,7 +541,7 @@ async function serveStatic(
     response.end(request.method === "HEAD" ? undefined : content);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (path.startsWith(assetPrefix) && (code === "ENOENT" || code === "ENOTDIR")) {
+    if ((path.startsWith(assetPrefix) || path.startsWith("/oauth/assets/")) && (code === "ENOENT" || code === "ENOTDIR")) {
       sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
     } else {
       sendJson(response, 503, { error: "Writing application is not built", code: "APP_NOT_BUILT" });
