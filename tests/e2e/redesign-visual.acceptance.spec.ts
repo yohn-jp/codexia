@@ -2,8 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+
+const captureDirectory = process.env.CODEXIA_UI_REVIEW_CAPTURE_DIR ?? "evidence/ui-redesign-v2";
 
 const prose = [
   "　港町の朝は、潮の匂いと、まだ眠っている街の静けさから始まる。凪は古い灯台の階段を上りながら、昨夜から胸に残っている小さな違和感を、ひとつずつ確かめていた。",
@@ -159,7 +162,7 @@ async function openMobileReferenceSheet(page: Page, buttonName: "構成" | "知�
 }
 
 test("renders and exercises the full Quiet Page authoring surfaces", async ({ page }) => {
-  await mkdir("evidence/ui-redesign-v2", { recursive: true });
+  await mkdir(captureDirectory, { recursive: true });
   await page.addInitScript(() => {
     const windowWithMetrics = window as Window & {
       __codexiaVitals?: {
@@ -289,10 +292,10 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
 
   await selectTheme(page, "light");
   await expect(page.getByRole("button", { name: "執筆" })).toHaveAttribute("aria-pressed", "true");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-writing.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-writing.png") });
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(manuscriptEditor(page)).toBeVisible();
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-writing-1024.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-writing-1024.png") });
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.locator(".pg-editor-command-menu > summary").click();
@@ -301,7 +304,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await page.getByText("最新版との違い", { exact: true }).click();
   await expect(page.locator(".pg-revision-diff-preview")).toContainText("まだ誰にも読まれていない海図");
   await page.locator(".pg-revision-diff-preview").scrollIntoViewIfNeeded();
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-revisions.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-revisions.png") });
   await openRevisionHistory(page);
 
   await page.evaluate(() => performance.mark("desktop-research:start"));
@@ -309,9 +312,9 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await expect(page.locator('.st-workspace[data-preset="research"]')).toBeVisible();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
   interactionMeasurementsMs.desktopResearchPreset = await measureSince("desktop-research");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-research.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-research.png") });
   await selectTheme(page, "dark");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-research-dark.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-research-dark.png") });
   await selectTheme(page, "light");
 
   await page.evaluate(() => performance.mark("desktop-review:start"));
@@ -320,30 +323,30 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
   await expect(page.locator('[data-workspace-panel="review"]')).toContainText("凪");
   interactionMeasurementsMs.desktopReviewPreset = await measureSince("desktop-review");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-review.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-review.png") });
   await selectTheme(page, "dark");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-review-dark.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-review-dark.png") });
   await selectTheme(page, "light");
 
   await page.getByRole("button", { name: "執筆" }).click();
   await selectTheme(page, "paper");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-paper.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-paper.png") });
   await selectTheme(page, "dark");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-desktop-dark.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-desktop-dark.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing`, page.url()).toString());
   await expect(manuscriptEditor(page)).toBeVisible();
   await capturePerformance("mobile");
   await selectMobileTheme(page, "light");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-writing.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-writing.png") });
   const editor = manuscriptEditor(page);
   await editor.evaluate((element) => { (window as Window & { __redesignEditorNode?: Element }).__redesignEditorNode = element; });
   await page.evaluate(() => performance.mark("mobile-outline-sheet:start"));
   await openMobileReferenceSheet(page, "構成", "outline");
   await expect(page.locator("ion-modal")).toContainText("第二章　濡れた目録");
   interactionMeasurementsMs.mobileOutlineSheet = await measureSince("mobile-outline-sheet");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-reference.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-reference.png") });
   await page.getByRole("button", { name: "閉じる" }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
   await expect(editor).toBeVisible();
@@ -352,18 +355,18 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await openMobileReferenceSheet(page, "知識・保存", "inspector");
   await expect(page.locator("ion-modal")).toContainText("真鍮の羅針盤");
   await expectServerSaved(page);
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-knowledge.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-knowledge.png") });
   await page.getByRole("button", { name: "閉じる" }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
   await expect(page.getByRole("button", { name: "構成", exact: true })).toBeVisible();
   await selectMobileTheme(page, "dark");
   await openMobileReferenceSheet(page, "構成", "outline");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-reference-dark.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-reference-dark.png") });
   await page.getByRole("button", { name: "閉じる" }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
   await openMobileReferenceSheet(page, "知識・保存", "inspector");
   await expect(page.locator("ion-modal")).toContainText("真鍮の羅針盤");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-knowledge-dark.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-knowledge-dark.png") });
   await page.getByRole("button", { name: "閉じる" }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
 
@@ -371,10 +374,10 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await expect(manuscriptEditor(page)).toBeVisible();
   const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(pageWidth).toBeLessThanOrEqual(320);
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-320.png" });
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-320.png") });
   await selectMobileTheme(page, "dark");
-  await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-dark.png" });
-  await writeFile("evidence/ui-redesign-v2/performance.json", JSON.stringify({
+  await page.screenshot({ path: join(captureDirectory, "after-mobile-dark.png") });
+  await writeFile(join(captureDirectory, "performance.json"), JSON.stringify({
     method: "Local Chromium headless navigation timing; lab evidence, not field Core Web Vitals.",
     observations: performanceRecords,
     interactions: interactionMeasurementsMs,
