@@ -19,7 +19,7 @@ import type { createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, isPrivatePublishingPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
+import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostgresAdditiveSchema, packagedMigrationFingerprint, runPostgresAdditiveMigrations, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
@@ -2576,7 +2576,7 @@ function parsePositivePort(value: string | undefined): number {
 
 export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
-  const { CoreStore } = await import("@codexia/core");
+  const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
   const cacheDirectory = resolve(readCodexiaEnvironment("MODULE_CACHE_DIR") ?? "./data/module-cache");
   const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
   const hostedModeValue = readCodexiaEnvironment("HOSTED_MODE");
@@ -2609,9 +2609,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     try {
       const assignedProject = await persistenceOptions.persistence!.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
       if (assignedProject?.id !== projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
-      const store = new CoreStore({ persistence: persistenceOptions.persistence! });
-      if (await persistenceOptions.persistence.snapshotStartupMode() !== "transition") throw new Error("Hosted startup requires the PostgreSQL writer");
-      await store.prepareSnapshotReuse(projectId);
+      await assertSnapshotProjectionReady(persistenceOptions.persistence, SNAPSHOT_PROJECTION_EPOCH, assignedProject.id);
+      const store = new CoreStore({ persistence: persistenceOptions.persistence });
       return await startServer({
         store,
         ...persistenceOptions,
@@ -2720,8 +2719,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       });
       if (missingMcpProjects.length) throw new Error("CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS contains a project that does not exist");
     }
-    const store = new CoreStore({ persistence: persistenceOptions.persistence! });
-    await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
+    await assertSnapshotProjectionReady(persistenceOptions.persistence, SNAPSHOT_PROJECTION_EPOCH);
+    const store = new CoreStore({ persistence: persistenceOptions.persistence });
     return await startServer({
       store,
       ...persistenceOptions,
@@ -2740,6 +2739,26 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     await persistenceOptions?.persistence?.close().catch(() => undefined);
     await betterAuth.pool.end().catch(() => undefined);
     throw error;
+  }
+}
+
+async function assertSnapshotProjectionReady(
+  persistence: PostgresPersistence,
+  projectionEpoch: number,
+  hostedProjectId?: ProjectId,
+): Promise<void> {
+  const mode = await persistence.snapshotStartupMode();
+  if (hostedProjectId !== undefined && mode !== "transition") throw new Error("Hosted startup requires the PostgreSQL writer");
+  const pending = await persistence.findUnprovenCurrentSnapshotProjectIds(projectionEpoch, {
+    ...(hostedProjectId !== undefined ? { projectId: hostedProjectId } : {}),
+    limit: 10,
+  });
+  if (pending.length > 0) {
+    const scope = hostedProjectId === undefined ? "" : ` --project ${hostedProjectId}`;
+    throw new Error(
+      `SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED: PostgreSQL projects ${pending.join(", ")} require projection maintenance. ` +
+      `Run node dist/maintain-snapshot-projections.js --check${scope}, then repeat with --apply using the PostgreSQL writer before starting Codexia.`,
+    );
   }
 }
 
