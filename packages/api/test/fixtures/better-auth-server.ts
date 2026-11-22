@@ -440,6 +440,13 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       async restartApi() {
         if (apiServer) await close(apiServer);
         apiServer = undefined;
+        const moduleCache = options.appProfile?.runtimeOptions?.cacheDirectory;
+        if (moduleCache) await rm(moduleCache, { recursive: true, force: true });
+        if (options.usePostgresPersistence) {
+          await domainPersistence?.close();
+          domainPersistence = createPostgresPersistence(options.databaseUrl);
+          domainStore = new CoreStore({ persistence: domainPersistence });
+        }
         await runtime!.pool.end();
         runtime = createBetterAuthRuntime(runtimeConfig);
         await runtime.assertRegisteredClients();
