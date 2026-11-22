@@ -2781,14 +2781,16 @@ async function assertSnapshotProjectionReady(
 ): Promise<void> {
   const mode = await persistence.snapshotStartupMode();
   if (hostedProjectId !== undefined && mode !== "transition") throw new Error("Hosted startup requires the PostgreSQL writer");
-  const pending = await persistence.findUnprovenCurrentSnapshotProjectIds(projectionEpoch, {
-    ...(hostedProjectId !== undefined ? { projectId: hostedProjectId } : {}),
-    limit: 10,
-  });
+  const selection = hostedProjectId === undefined ? { limit: 10 } : { projectId: hostedProjectId, limit: 10 };
+  const [unprovenSnapshots, unmigratedPublishing] = await Promise.all([
+    persistence.findUnprovenCurrentSnapshotProjectIds(projectionEpoch, selection),
+    persistence.findUnmigratedPublishingProjectIds(selection),
+  ]);
+  const pending = [...new Set([...unprovenSnapshots, ...unmigratedPublishing])];
   if (pending.length > 0) {
     const scope = hostedProjectId === undefined ? "" : ` --project ${hostedProjectId}`;
     throw new Error(
-      `SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED: PostgreSQL projects ${pending.join(", ")} require projection maintenance. ` +
+      `SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED: PostgreSQL projects ${pending.join(", ")} require snapshot projection or Publishing record maintenance. ` +
       `Run node dist/maintain-snapshot-projections.js --check${scope}, then repeat with --apply using the PostgreSQL writer before starting Codexia.`,
     );
   }
