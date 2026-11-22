@@ -21,7 +21,7 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   await migratePostgresDatabase(connectionString!);
   const persistence = createPostgresPersistence(connectionString!);
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "codexia-postgres-api-"));
-  const store = { async listProjects() { return []; } } as unknown as CoreStore;
+  const store = new CoreStore({ persistence });
   const server = createServer({
     store,
     authToken: ACCESS_TOKEN,
@@ -41,12 +41,14 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
 
   const unauthorized = await fetch(`${base}/api/v1/persistence/projects`);
   assert.equal(unauthorized.status, 401);
+  const forbiddenTitle = `forbidden-${randomUUID()}`;
   const bearerWrite = await fetch(`${base}/api/v1/persistence/projects`, {
     method: "POST",
     headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "must-not-write" }),
+    body: JSON.stringify({ title: forbiddenTitle }),
   });
   assert.equal(bearerWrite.status, 403);
+  assert.ok(!(await persistence.read(reader => reader.listProjects(200))).some(project => project.title === forbiddenTitle));
 
   const login = await fetch(`${base}/api/login`, {
     method: "POST",
@@ -62,10 +64,11 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   });
   assert.equal(projectResponse.status, 201);
   const { project } = await projectResponse.json() as { project: { id: string } };
+  const initialMarkdown = "前😀 東京\n";
   const documentResponse = await fetch(`${base}/api/v1/persistence/projects/${project.id}/documents`, {
     method: "POST",
     headers: { ...ownerHeaders, "Idempotency-Key": `create-${randomUUID()}` },
-    body: JSON.stringify({ kind: "scene", title: "Scene", orderKey: "0001", markdown: "前😀 東京\n" }),
+    body: JSON.stringify({ kind: "scene", title: "Scene", orderKey: "0001", markdown: initialMarkdown }),
   });
   assert.equal(documentResponse.status, 201);
   const created = await documentResponse.json() as {
@@ -74,7 +77,7 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   };
   const documentId = created.document.id;
   const initialRevision = created.revision.id;
-  const initialMarkdown = created.revision.markdown;
+  assert.equal(created.revision.markdown, initialMarkdown);
   const pinnedRevision = await fetch(`${base}/api/v1/persistence/projects/${project.id}/documents/${documentId}?revision=${initialRevision}`, { headers: { Cookie: cookie! } });
   assert.equal(pinnedRevision.status, 200);
   assert.equal((await pinnedRevision.json() as { revision: { id: string; markdown: string } }).revision.markdown, initialMarkdown);

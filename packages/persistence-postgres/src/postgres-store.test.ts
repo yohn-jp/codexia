@@ -258,15 +258,14 @@ test("Knowledge browse searches literals and aliases, pages 501 nodes in stable 
 
   const loaded: string[] = [];
   let after: { name: string; id: KnowledgeNodeId } | undefined;
-  for (;;) {
+  for (const expectedCount of [101, 101, 101, 101, 97]) {
     const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 101, after }));
+    assert.equal(page.length, expectedCount);
     loaded.push(...page.map(node => node.id));
-    if (page.length < 101) break;
     const last = page.at(-1)!;
     after = { name: last.name, id: last.id };
   }
-  assert.equal(loaded.length, 501);
-  assert.equal(new Set(loaded).size, 501);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 101, after })), []);
   assert.deepEqual(loaded, ids);
   const literal = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: "%_!", limit: 10 }));
   assert.deepEqual(literal.map(node => node.id), [ids[500]]);
@@ -316,14 +315,16 @@ test("Knowledge keyset cursors use PostgreSQL lower semantics and preserve custo
   assert.deepEqual(all.map(node => node.type), names.map(() => "my_custom_type"));
   const paged: KnowledgeNodeId[] = [];
   let after: { name: string; id: KnowledgeNodeId } | undefined;
-  for (;;) {
+  for (let count = 0; count < names.length; count++) {
     const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 1, after }));
-    paged.push(...page.map(node => node.id));
-    if (page.length === 0) break;
+    assert.equal(page.length, 1);
     const last = page[0]!;
+    paged.push(last.id);
     after = { name: last.name, id: last.id };
   }
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 1, after })), []);
   assert.deepEqual(paged, all.map(node => node.id));
+  assert.deepEqual(new Set(paged), new Set(ids));
   const custom = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { type: "my_custom_type", limit: 10 }));
   assert.equal(custom.length, names.length);
 });
@@ -617,6 +618,15 @@ test("concurrent document saves use compare-and-swap on the observed revision", 
   assert.ok(rejected && rejected.status === "rejected");
   assert.ok(rejected.reason instanceof PersistenceError);
   assert.equal(rejected.reason.code, "conflict");
+
+  const winner = results.find(result => result.status === "fulfilled");
+  assert.ok(winner);
+  const durable = await persistence.read(async reader => ({
+    head: await reader.getDocument(project.id, initial.document.id),
+    history: await reader.listRevisions(project.id, initial.document.id, 10),
+  }));
+  assert.equal(durable.head?.headRevisionId, winner.value.revision.id);
+  assert.deepEqual(durable.history.revisions.map(revision => revision.id), [winner.value.revision.id, initial.revision.id]);
 });
 
 test("transaction failures roll back document, revision and idempotency rows", async () => {
