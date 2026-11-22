@@ -3,8 +3,6 @@ import { createHash } from "node:crypto";
 import type { KnowledgeProjectionData, KnowledgeProjectionEntry, KnowledgeProjectionEvidence, SnapshotId, SnapshotKnowledgeProjection } from "@codexia/contracts";
 import { canonicalJson } from "./operation-records.js";
 
-/** Read-only snapshot projection. PostgreSQL remains the sole authority. */
-export const KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.json";
 const MAX_PROJECTED_QUOTE_BYTES = 4096;
 const MAX_PROJECTED_QUOTES_TOTAL_BYTES = 256 * 1024;
 const MAX_PROJECTED_ALIASES_PER_NODE = 500;

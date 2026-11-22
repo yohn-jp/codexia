@@ -61,12 +61,16 @@ async function readWorkloads(store, project, sceneRecords, repeats) {
     await sample('snapshot.pinned.warm', () => store.readTreeSnapshot(project.id, cold.snapshot));
     await sample('snapshot.scene.pinned', () => store.readSceneSnapshot(project.id, sceneRecords[index % sceneRecords.length].document.id, cold.snapshot));
   }
-  const path = 'meta/scriptorium/knowledge-context/v1.json';
-  const projection = await sample('knowledge.evidence.projection', () => pinnedReader.read(path));
-  if (!projection) throw new Error('PostgreSQL Knowledge/Evidence projection is missing from the pinned Core snapshot');
-  report.projection = { path, bytes: Buffer.byteLength(projection.content), revision: projection.revision,
-    sha256: createHash('sha256').update(projection.content).digest('hex') };
+  await measureKnowledgeProjection(pinnedReader);
   await sample('tree.retrieve', () => store.readTreeSnapshot(project.id, cold.snapshot));
+}
+
+async function measureKnowledgeProjection(reader) {
+  const projection = await sample('knowledge.evidence.projection', () => reader.knowledge);
+  if (!projection) throw new Error('PostgreSQL Knowledge/Evidence projection is missing from the pinned Core snapshot');
+  const content = JSON.stringify(projection);
+  report.projection = { kind: projection.source.kind, bytes: Buffer.byteLength(content), revision: projection.source.revision,
+    sha256: createHash('sha256').update(content).digest('hex') };
 }
 
 async function historyWorkloads(persistence, project, target, repeats) {
@@ -155,10 +159,7 @@ try {
     if (selected.includes('read')) await readWorkloads(fixture.store, fixture.project, fixture.sceneRecords, repeats);
     if (selected.includes('projection') && !selected.includes('read')) {
       const reader = await fixture.store.reader(fixture.project.id);
-      const projected = await sample('knowledge.evidence.projection', () => reader.read('meta/scriptorium/knowledge-context/v1.json'));
-      if (!projected) throw new Error('PostgreSQL Knowledge/Evidence projection is missing');
-      report.projection = { path: 'meta/scriptorium/knowledge-context/v1.json', bytes: Buffer.byteLength(projected.content),
-        revision: projected.revision, sha256: createHash('sha256').update(projected.content).digest('hex') };
+      await measureKnowledgeProjection(reader);
     }
     if (selected.includes('tree')) await sample('tree.retrieve', () => fixture.store.readTreeSnapshot(fixture.project.id));
     if (selected.includes('scene')) await sample('scene.retrieve', () => fixture.store.readSceneSnapshot(fixture.project.id, fixture.sceneRecords[0].document.id));

@@ -240,6 +240,8 @@ test('Knowledge-dense PostgreSQL fixture persists exact Knowledge and Evidence c
     assert.equal(result.fixture.persisted.evidence.mentions, 400);
     assert.equal(result.fixture.persisted.evidence.assertions, 100);
     assert.equal(result.fixture.persisted.evidence.assertionLinks, 100);
+    assert.equal(result.projection.kind, 'knowledge-projection');
+    assert.match(result.projection.revision, /^[a-f0-9]{64}$/u);
     assert.ok(result.projection.bytes > 0);
     const projection = result.samples.find(row => row.name === 'knowledge.evidence.projection');
     assert.ok(projection?.status === 'complete' && projection.counters.gitProcesses === 0);

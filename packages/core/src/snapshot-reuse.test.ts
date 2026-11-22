@@ -17,6 +17,7 @@ import type {
 } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { CoreStore } from "./index.js";
+import { makeKnowledgeProjection } from "./knowledge-context.js";
 import YAML from "yaml";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -390,13 +391,16 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
     const project = await createProject();
     const snapshot = {projectId:project.id, projectVersion:project.version};
     const file = (content: string) => ({content,encoding:"utf8",revision:createHash("sha256").update(content).digest("hex")});
+    const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
+    const emptyKnowledge = { documentMappings: [], entries: [], nodeLimitReached: false };
+    const legacyKnowledge = JSON.stringify({ version: 1, projectId: project.id, ...emptyKnowledge });
     const files: Record<string, ReturnType<typeof file>> = compatible ? {} : {
       "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
+      [knowledgePath]: file(legacyKnowledge),
     };
-    const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
-    if (compatible) files[knowledgePath] = file(JSON.stringify({version:1,projectId:project.id,documentMappings:[],entries:[],nodeLimitReached:false}));
-    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...(compatible ? { publishingRecords: {} } : {})} as unknown as JsonObject,expectedVersion:null}));
-    return {project,snapshot,knowledgePath};
+    const currentFacets = compatible ? { publishingRecords: {}, knowledge: makeKnowledgeProjection(snapshot, emptyKnowledge) } : {};
+    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...currentFacets} as unknown as JsonObject,expectedVersion:null}));
+    return {project,snapshot,knowledgePath,legacyKnowledge};
   }
   const compatible = await seedLegacy(true);
   const incompatible = await seedLegacy(false);
@@ -426,7 +430,8 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   assert.equal((await oldPinned.read("meta/project.yaml"))?.content, YAML.stringify({ title: incompatible.project.title }));
   await assert.rejects(store.readPublishingSnapshotRecord(incompatible.project.id, incompatible.snapshot, "episodes"),
     { code: "snapshot_unavailable" });
-  assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
+  assert.equal(oldPinned.knowledge, undefined);
+  assert.equal((await oldPinned.read(incompatible.knowledgePath))?.content, incompatible.legacyKnowledge);
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
   assert.deepEqual(await exactFiles(await store.reader(compatible.project.id)), compatibleFiles);
@@ -443,9 +448,9 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   assert.ok(misses >= 2);
   const current = await store.reader(incompatible.project.id);
   assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
-  assert.ok(await current.read(incompatible.knowledgePath));
+  assert.deepEqual(current.knowledge?.source.snapshot, current.snapshot);
+  assert.equal(await current.read(incompatible.knowledgePath), null);
   assert.equal(await current.read("meta/project.yaml"), null);
-  assert.equal(await (await store.reader(incompatible.project.id,incompatible.snapshot)).read(incompatible.knowledgePath),null);
   assert.deepEqual(await exactFiles(await store.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
   await store.prepareSnapshotReuse(incompatible.project.id);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion,incompatible.project.version+1);

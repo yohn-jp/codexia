@@ -302,18 +302,56 @@ test("pinned Knowledge projection retains original identity and anchored quote a
     await tx.saveEvidenceAnchor({projectId:p.id,id:evidenceId,documentId:scene.id,revisionId:revision,fromUtf16:0,toUtf16:"Text 😀\n".length,quoteSha256:createHash("sha256").update("Text 😀\n").digest("hex"),status:"confirmed",expectedVersion:null});
     await tx.saveMentionLink({projectId:p.id,evidenceId,nodeId,status:"confirmed",source:"author",confidence:1,extractorVersion:null});
   });
-  const pinned=await core.reader(p.id),contextPath="meta/scriptorium/knowledge-context/v1.json",original=JSON.parse((await pinned.read(contextPath))!.content);
+  const pinned = await core.reader(p.id);
+  const original = pinned.knowledge;
+  assert.ok(original);
+  assert.equal(await pinned.read("meta/scriptorium/knowledge-context/v1.json"), null);
   await persistence.transaction(tx=>tx.saveKnowledgeNode({projectId:p.id,id:nodeId,type:"lore",name:"Edited clue",attributes:{},status:"confirmed",expectedVersion:1}));
   const knowledgeEdited=await core.reader(p.id),manuscriptPath="manuscript/v1/c1/s1.md",body=(await knowledgeEdited.read(manuscriptPath))!;
   await accept(p.id,operation(knowledgeEdited.snapshot,manuscriptPath,"Edited manuscript",body.revision));
-  const current=JSON.parse((await (await core.reader(p.id)).read(contextPath))!.content),pinnedAgain=JSON.parse((await pinned.read(contextPath))!.content);
-  assert.equal(original.entries[0].node.name,"Original clue");
-  assert.equal(original.entries[0].evidence[0].quote,"Text 😀\n");
-  assert.equal(current.entries[0].node.name,"Edited clue");
-  assert.notEqual(current.entries[0].evidence[0].sourceRevisionId,revision);
-  assert.equal(current.entries[0].evidence[0].quote,"Edited manuscript","the current snapshot resolves only the new exact anchor quote");
-  assert.equal(current.entries[0].evidence[0].stale,false);
-  assert.deepEqual(pinnedAgain,original);
+  const currentReader = await core.reader(p.id);
+  const current = currentReader.knowledge;
+  assert.ok(current);
+  assert.deepEqual(original.source.snapshot, pinned.snapshot);
+  assert.deepEqual(current.source.snapshot, currentReader.snapshot);
+  assert.notEqual(current.source.revision, original.source.revision);
+  assert.equal(original.entries[0]?.node.name, "Original clue");
+  assert.equal(original.entries[0]?.evidence[0]?.quote, "Text 😀\n");
+  assert.equal(current.entries[0]?.node.name, "Edited clue");
+  assert.notEqual(current.entries[0]?.evidence[0]?.anchor.revisionId, revision);
+  assert.equal(current.entries[0]?.evidence[0]?.quote, "Edited manuscript", "the current snapshot resolves only the new exact anchor quote");
+  assert.equal(current.entries[0]?.evidence[0]?.current, true);
+  assert.deepEqual((await new CoreStore({ persistence }).reader(p.id, pinned.snapshot)).knowledge, original);
+});
+
+test("Knowledge proposal scope binds the exact projection without a global version fence", async () => {
+  const p = await project();
+  const reader = await core.reader(p.id);
+  const revision = reader.knowledge?.source.revision;
+  const other = (await core.reader((await project()).id)).knowledge;
+  assert.ok(revision && other);
+  const first = { ...operation(reader.snapshot, "bible/first.yaml", "Retain unrelated edits"), readKnowledgeRevision: revision };
+  const invalid = { ...first, readKnowledgeRevision: other.source.revision };
+  await assert.rejects(approve(p.id, { operation: invalid, snapshot: reader.snapshot }), { code: "scope_conflict" });
+  await approve(p.id, { operation: first, snapshot: reader.snapshot });
+  await assert.rejects(core.apply(p.id, invalid), { code: "operation_not_approved" });
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: p.id, expectedVersion: reader.snapshot.projectVersion, title: "Unrelated project title",
+  }));
+  const current = await core.reader(p.id);
+  assert.notEqual(current.snapshot.projectVersion, reader.snapshot.projectVersion);
+  assert.equal(current.knowledge?.source.revision, revision);
+  const second = { ...operation(current.snapshot, "bible/second.yaml", "Do not apply stale Knowledge"), readKnowledgeRevision: revision };
+  await approve(p.id, { operation: second, snapshot: current.snapshot });
+  await core.apply(p.id, first);
+  await persistence.transaction(tx => tx.saveKnowledgeNode({
+    projectId: p.id, id: randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId,
+    type: "lore", name: "Changed evidence scope", attributes: {}, status: "confirmed", expectedVersion: null,
+  }));
+  await assert.rejects(core.apply(p.id, second), { code: "scope_conflict" });
+  const latest = await core.reader(p.id);
+  assert.equal((await latest.read("bible/first.yaml"))?.content, "Retain unrelated edits");
+  assert.equal(await latest.read("bible/second.yaml"), null);
 });
 test("proposal approval binds exact payload and durable replay receipts",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/notes.yaml","name: A\n");await assert.rejects(core.apply(p.id,op),/approved/);const receipt=await accept(p.id,op);assert.deepEqual(await core.apply(p.id,op),receipt);await assert.rejects(core.apply(p.id,{...op,writes:[{...op.writes[0]!,content:"forged"}]}),/approved/);assert.equal((await new CoreStore({persistence}).listProposals(p.id))[0]?.state,"applied");});
 test("duplicate proposal identities reject changed envelopes",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/a.yaml","A");const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);assert.deepEqual(await core.propose(p.id,proposal),proposal);await assert.rejects(core.propose(p.id,{...proposal,source:"module"}),/different payload/);});

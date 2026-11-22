@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
+import { makeKnowledgeProjection, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
 import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
@@ -178,6 +178,7 @@ type Manifest = {
   documents: Document[];
   project: Project;
   publishingRecords?: Partial<Record<(typeof PUBLISHING_RECORD_KEYS)[number], OwnModuleRecord>>;
+  knowledge?: SnapshotKnowledgeProjection;
 };
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
 type StoryProjectionEntry = { documents: NativeStoryDocument[]; fingerprint: string; bytes: number };
@@ -191,6 +192,7 @@ function projectionProofKey(version: number): string {
 }
 const ARTIFACTS = "core.artifacts";
 const RETIRED_PROJECT_SETTINGS_PATH = "meta/project.yaml";
+const RETIRED_KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.json";
 const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
 const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
@@ -205,6 +207,11 @@ function assertCurrentOperationPaths(operation: ChangeOperation): void {
     if (isPrivatePublishingPath(path)) {
       fail(409, "publishing_reproposal_required", "Propose this update from the Publishing panel using the current project state");
     }
+  }
+}
+function assertKnowledgeRevision(manifest: Manifest, operation: ChangeOperation): void {
+  if (operation.readKnowledgeRevision !== undefined && operation.readKnowledgeRevision !== manifest.knowledge?.source.revision) {
+    fail(409, "scope_conflict", "The Knowledge projection changed since this operation was prepared");
   }
 }
 function safePath(value: string): void { assertProjectPath(value); }
@@ -248,6 +255,16 @@ function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly Na
     .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? "Project";
   const subtitle = typeof settings.subtitle === "string" ? settings.subtitle.trim() : "";
   return { snapshot: structuredClone(manifest.snapshot), projectPresentation: { title, ...(subtitle ? { subtitle } : {}) },
+    get knowledge() {
+      const knowledge = manifest.knowledge;
+      if (!knowledge) return undefined;
+      if (knowledge.source?.kind !== "knowledge-projection" ||
+          knowledge.source.snapshot?.projectId !== manifest.snapshot.projectId ||
+          knowledge.source.snapshot.projectVersion !== manifest.snapshot.projectVersion) {
+        fail(409, "snapshot_unavailable", "Select a current snapshot for the typed Knowledge projection");
+      }
+      return structuredClone(knowledge);
+    },
     get nativeStoryDocuments() {
       const documents = nativeStoryDocuments?.() ?? [];
       return documents.length ? structuredClone(documents) : undefined;
@@ -406,13 +423,15 @@ export class CoreStore implements MutationCoordinator {
       }
     }
     for (const record of artifacts) {
-      if (record.value.deleted === true || record.key === RETIRED_PROJECT_SETTINGS_PATH || isPrivatePublishingPath(record.key)) continue;
+      if (record.value.deleted === true || record.key === RETIRED_PROJECT_SETTINGS_PATH ||
+          record.key === RETIRED_KNOWLEDGE_CONTEXT_PATH || isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
     }
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
-    add(KNOWLEDGE_CONTEXT_PATH, JSON.stringify(await projectKnowledgeContext(reader,pid(projectId),documents,documentMappings)));
-    return {snapshot:{projectId,projectVersion:project.version},files,documents,project,publishingRecords};
+    const snapshot = { projectId, projectVersion: project.version };
+    const knowledge = makeKnowledgeProjection(snapshot, await projectKnowledgeContext(reader, pid(projectId), documents, documentMappings));
+    return { snapshot, files, documents, project, publishingRecords, knowledge };
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
     if (pinned && pinned.projectId !== projectId) fail(409,"snapshot_scope_mismatch","Snapshot belongs to another project");
@@ -803,6 +822,7 @@ export class CoreStore implements MutationCoordinator {
       const reader = makeReader(manifest);
       for (const operation of proposal.operations) {
         assertCurrentOperationPaths(operation);
+        assertKnowledgeRevision(manifest, operation);
         await assertEvidenceRevisions(reader, proposal, operation);
       }
 
@@ -1109,6 +1129,7 @@ export class CoreStore implements MutationCoordinator {
       const state = first.status;
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
+      assertKnowledgeRevision(manifest, operation);
       await assertEvidenceRevisions(reader, state.proposal, operation);
       for (const precondition of [...operation.reads, ...operation.writes]) {
         const currentRevision = (await reader.read(precondition.path))?.revision ?? null;
