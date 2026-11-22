@@ -102,8 +102,8 @@ observe_runtime() {
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
   api_unit=$(rootless_systemctl show --property=ActiveState --value codexia-api.service)
-  quadlet_sha=$(sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
-  release_sha=$(sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
+  quadlet_sha=$(rootless sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
+  release_sha=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
   db_container=$(rootless_podman inspect --format '{{.Id}}' codexia-db)
   pg_volume=$(rootless_podman volume inspect --format '{{.Name}}' codexia-postgres)
   pg_mount=$(rootless_podman volume inspect --format '{{.Mountpoint}}' codexia-postgres)
@@ -184,7 +184,7 @@ cleanup() {
   fi
   if [[ "$registry_configured" == true ]]; then
     rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_status=1
-    [[ ! -e "$fixture_home/.config/containers/registries.conf" ]] || cleanup_status=1
+    rootless test ! -e "$fixture_home/.config/containers/registries.conf" || cleanup_status=1
   fi
   if [[ "$environment_generator_installed" == true ]]; then
     sudo rm -f -- "$environment_generator" || cleanup_status=1
@@ -383,8 +383,8 @@ build_context="$fixture_home/.local/state/codexia-lifecycle-build"
 rootless_podman pull docker.io/library/ubuntu:26.04 >/dev/null
 ubuntu_image_digest=$(rootless_podman image inspect --format '{{json .RepoDigests}}' docker.io/library/ubuntu:26.04 | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^docker\.io\/library\/ubuntu@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v)})')
 rootless mkdir -p "$build_context/sshfs"
-cp "$tmp/backup_key.pub" "$build_context/sshfs/authorized_keys"
-cat > "$build_context/sshfs/Dockerfile" <<'DOCKERFILE'
+sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/sshfs/authorized_keys"
+cat > "$tmp/sshfs.Dockerfile" <<'DOCKERFILE'
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 RUN apt-get update -qq && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash backup && mkdir -p /home/backup/.ssh /backups && chown -R backup:backup /home/backup/.ssh /backups && chmod 0700 /home/backup/.ssh
@@ -395,7 +395,7 @@ RUN chmod 0755 /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]
 DOCKERFILE
-cat > "$build_context/sshfs/entrypoint.sh" <<'ENTRYPOINT'
+cat > "$tmp/sshfs.entrypoint.sh" <<'ENTRYPOINT'
 #!/bin/sh
 set -eu
 mkdir -p /run/sshd
@@ -403,17 +403,16 @@ ssh-keygen -A
 chown -R backup:backup /backups
 exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o AllowUsers=backup
 ENTRYPOINT
-sudo chown -R codexia:codexia "$build_context/sshfs"
+sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs.Dockerfile" "$build_context/sshfs/Dockerfile"
+sudo install -o codexia -g codexia -m 0755 "$tmp/sshfs.entrypoint.sh" "$build_context/sshfs/entrypoint.sh"
 rootless_podman build --build-arg "BASE_IMAGE=$ubuntu_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >/dev/null
 rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup -p 127.0.0.1:2222:22 codexia-sshfs-fixture >/dev/null
 fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
 test -n "$fixture_ip"
 printf '%s codexia-backup-fixture\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
 rootless mkdir -p "$fixture_home/.ssh" "$fixture_home/.local/state/codexia-backup-mount"
-cp "$tmp/backup_key" "$fixture_home/.ssh/codexia-backup-key"
-sudo chown -R codexia:codexia "$fixture_home/.ssh" "$fixture_home/.local/state/codexia-backup-mount"
-chmod 0700 "$fixture_home/.ssh"
-chmod 0600 "$fixture_home/.ssh/codexia-backup-key"
+rootless chmod 0700 "$fixture_home/.ssh"
+sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key" "$fixture_home/.ssh/codexia-backup-key"
 cat > "$tmp/ssh-config" <<'SSH_CONFIG'
 Host codexia-backup-fixture
   HostName 127.0.0.1
@@ -477,7 +476,7 @@ database_image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-db)
 database_repo_digests=$(rootless_podman image inspect --format '{{json .RepoDigests}}' "$database_image_name")
 sshfs_image_id=$(rootless_podman image inspect --format '{{.Id}}' codexia-sshfs-fixture)
 registry_image_id=$(rootless_podman image inspect --format '{{.Id}}' "$registry_image_digest")
-sshfs_context_sha=$(cat "$build_context/sshfs/Dockerfile" "$build_context/sshfs/entrypoint.sh" "$build_context/sshfs/authorized_keys" | sha256sum | cut -d' ' -f1)
+sshfs_context_sha=$(rootless cat "$build_context/sshfs/Dockerfile" "$build_context/sshfs/entrypoint.sh" "$build_context/sshfs/authorized_keys" | sha256sum | cut -d' ' -f1)
 node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$ubuntu_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
 const fs=require('node:fs');const [path,dbName,dbId,dbDigests,ubuntu,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',contextSha256:sshfsSourceSha,baseImage:ubuntu}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY
@@ -487,10 +486,10 @@ IMAGE_INVENTORY
 set_state first_activation IN_PROGRESS
 run_deploy head true
 observe_runtime first-activation
-mapfile -t backup_artifacts < <(find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
+mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
-backup_checksum=$(sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
+backup_checksum=$(rootless sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
 node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum" <<'BACKUP_EVIDENCE'
 const fs=require('node:fs');const [path,artifact,validation,checksum]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.backupEvidence={filesystem:'sshfs',remoteAlias:'codexia-backup-fixture',artifactPath:artifact,validatedBy:'deploy/backup/backup.sh validate-artifact',validation:validation.slice(0,300),sha256SumsFile:checksum,physicalIndependence:'NOT_PROVEN_BY_CI_FIXTURE'};r.states.backup_remote_filesystem={status:'PASS',detail:'canonical deploy transaction created and validated encrypted backup on isolated SSHFS server'};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 BACKUP_EVIDENCE
@@ -527,10 +526,10 @@ failed_digest=$(sudo -u codexia cat "$failed_digest_file")
 rootless rm -f "$failed_digest_file"
 failed_image="ghcr.io/yohn-jp/codexia-backend@$failed_digest"
 node "$repo_root/scripts/push-app-lifecycle.mjs" record-failed "$failed_image"
-before_failure=$(sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
+before_failure=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
 if run_deploy failed false; then echo 'Deliberately failing candidate unexpectedly deployed' >&2; exit 1; fi
 observe_runtime failed-candidate-rollback
-[[ "$(sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
+[[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'
 
 # Kill the transaction shell only after the durable pending intent is observable.
@@ -548,10 +547,10 @@ exit "$status"
 FAULT_SYSTEMCTL
 sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/systemctl"
 if run_deploy head false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
-grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
+rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 run_deploy compatible false
 observe_runtime interrupted-recovery
-[[ ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json" ]]
+rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
 node - "$report" <<'REPORT_COMPLETE'
