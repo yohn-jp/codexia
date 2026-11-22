@@ -147,20 +147,23 @@ export interface KnowledgeProjectionData {
 export interface SnapshotKnowledgeProjection extends KnowledgeProjectionData {
   readonly source: KnowledgeProjectionRef;
 }
+export interface SnapshotFile {
+  content: string;
+  revision: string;
+  /** Canonical PostgreSQL kind for projected metadata and body files, even when bytes omit it. */
+  documentKind?: string;
+  /** Snapshot-local PostgreSQL document sequence, consistent with sibling order. */
+  documentOrder?: number;
+}
 export interface SnapshotReader {
   snapshot: SnapshotId;
   readonly knowledge?: SnapshotKnowledgeProjection;
   projectPresentation?: SnapshotProjectPresentation;
   /** Typed projection of canonical PostgreSQL Story documents for native readers. */
   nativeStoryDocuments?: readonly NativeStoryDocument[];
-  /** Canonical PostgreSQL kind for projected metadata and body files, even when the bytes omit it. */
-  read(path: string, encoding?: "utf8" | "base64"): Promise<{
-    content: string;
-    revision: string;
-    documentKind?: string;
-    /** Snapshot-local PostgreSQL document sequence; sibling-relative order matches `listDocuments`. */
-    documentOrder?: number;
-  } | null>;
+  read(path: string, encoding?: "utf8" | "base64"): Promise<SnapshotFile | null>;
+  /** Read up to SNAPSHOT_READ_MANY_LIMIT files at this snapshot, in input order with null for absent paths. */
+  readMany?(paths: readonly string[], encoding?: "utf8" | "base64"): Promise<readonly (SnapshotFile | null)[]>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
@@ -381,7 +384,7 @@ export function assertProjectPath(value: unknown): asserts value is string {
     throw new ContractError("Unsafe project path");
   }
 }
-const DOCUMENT_READ_BATCH_SIZE = 32;
+export const SNAPSHOT_READ_MANY_LIMIT = 32;
 
 function documentPrefix(prefix: string | undefined): string | undefined {
   if (prefix === undefined) return undefined;
@@ -404,8 +407,8 @@ function assertDocumentPath(path: unknown, prefix?: string): asserts path is str
 
 async function inBatches<T, R>(values: readonly T[], action: (value: T) => Promise<R>): Promise<R[]> {
   const output: R[] = [];
-  for (let offset = 0; offset < values.length; offset += DOCUMENT_READ_BATCH_SIZE) {
-    output.push(...await Promise.all(values.slice(offset, offset + DOCUMENT_READ_BATCH_SIZE).map(action)));
+  for (let offset = 0; offset < values.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
+    output.push(...await Promise.all(values.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT).map(action)));
   }
   return output;
 }
@@ -444,12 +447,21 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
         if (seen.has(path)) throw new ContractError("Snapshot document read contains duplicate paths");
         seen.add(path);
       }
-      return inBatches(paths, async path => {
-        const file = await reader.read(path);
+      function documentFile(path: string, file: SnapshotFile | null | undefined) {
         if (!file) throw new ContractError("Snapshot document is unavailable");
         assertDocumentRevision(file.revision);
         return { path, content: file.content, revision: file.revision };
-      });
+      }
+      if (!reader.readMany) return inBatches(paths, async path => documentFile(path, await reader.read(path)));
+
+      const result: Array<{ path: string; content: string; revision: string }> = [];
+      for (let offset = 0; offset < paths.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
+        const batch = paths.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT);
+        const files = await reader.readMany(batch);
+        if (files.length !== batch.length) throw new ContractError("Invalid snapshot document batch");
+        result.push(...batch.map((path, index) => documentFile(path, files[index])));
+      }
+      return result;
     },
     async changes(previous, prefix) {
       const scope = documentPrefix(prefix);

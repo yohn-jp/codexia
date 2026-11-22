@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
+import { assertChangeOperation, createDocumentSource, nextOrderKey, SNAPSHOT_READ_MANY_LIMIT, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
 test("new decimal order keys sort after padded, unpadded, and reordered siblings", () => {
   const first = nextOrderKey([]);
   assert.match(first, /^\d+$/u);
@@ -187,4 +187,23 @@ test("document source rejects unsafe and out-of-scope snapshot paths", async () 
     async listRevisions() { return [{ path: "meta/other.md", revision: "a".repeat(64) }]; },
   };
   await assert.rejects(createDocumentSource(outsideReader).enumerate("manuscript"));
+});
+
+test("document source uses bounded native body batches in input order", async () => {
+  const paths = Array.from({ length: SNAPSHOT_READ_MANY_LIMIT + 1 }, (_, index) => `documents/${index}.md`).reverse();
+  const sizes: number[] = [];
+  const reader: SnapshotReader = {
+    snapshot: { projectId: operation.projectId, projectVersion: operation.baseProjectVersion },
+    async list() { return paths; },
+    async read() { assert.fail("Native batching must not open individual reads"); },
+    async readMany(batch) {
+      sizes.push(batch.length);
+      return batch.map(path => ({ content: path, revision: "a".repeat(64) }));
+    },
+  };
+  assert.deepEqual((await createDocumentSource(reader).readMany(paths)).map(({ path, content }) => [path, content]),
+    paths.map(path => [path, path]));
+  assert.deepEqual(sizes, [SNAPSHOT_READ_MANY_LIMIT, 1]);
+  await assert.rejects(createDocumentSource({ ...reader, async readMany() { return []; } }).readMany([paths[0]!]),
+    /Invalid snapshot document batch/u);
 });
