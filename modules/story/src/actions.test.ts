@@ -233,6 +233,47 @@ test("native PostgreSQL manuscript projections are visible to scene context alon
   assert.equal(metadataOnly.entities.has(id), true);
 });
 
+test("native scene context preserves Markdown horizontal rules and parses explicit YAML frontmatter", async () => {
+  const ordinaryId = "33333333-3333-4333-8333-333333333333";
+  const unclosedRuleId = "44444444-4444-4444-8444-444444444444";
+  const frontmatterId = "55555555-5555-4555-8555-555555555555";
+  const ordinaryMarkdown = "---\n普通の回想\n---\n「すぐに戻ります。」";
+  const unclosedRuleMarkdown = "---\n\n水平線の後に続く本文です。";
+  const frontmatterMarkdown = "---\ntitle: Explicit title\nstatus: draft\n---\n本文です。";
+  const scenePath = (id: string) => `plot/volumes/vol-main/chapters/ch-main-1/scenes/${id}.yaml`;
+  const documentPath = (id: string) => `documents/${id}.md`;
+  const files = fixtureFiles({
+    [scenePath(ordinaryId)]: yaml({ id: ordinaryId, title: "Ordinary Markdown", manuscript: documentPath(ordinaryId) }),
+    [scenePath(unclosedRuleId)]: yaml({ id: unclosedRuleId, title: "Unclosed rule", manuscript: documentPath(unclosedRuleId) }),
+    [scenePath(frontmatterId)]: yaml({ id: frontmatterId, title: "Explicit frontmatter", manuscript: documentPath(frontmatterId) }),
+    [documentPath(ordinaryId)]: ordinaryMarkdown,
+    [documentPath(unclosedRuleId)]: unclosedRuleMarkdown,
+    [documentPath(frontmatterId)]: frontmatterMarkdown,
+  });
+  const reader = makeReader(files);
+  const context = makeActionContext(reader);
+
+  for (const [id, markdown] of [
+    [ordinaryId, ordinaryMarkdown],
+    [unclosedRuleId, unclosedRuleMarkdown],
+  ] as const) {
+    const result = await invoke<{ manuscript?: { id: string }; manuscriptBody?: string }>(
+      "story.scene.context", { sceneId: id }, context,
+    );
+    assert.equal(result.data.manuscript?.id, `doc-ms-${id}`);
+    assert.equal(result.data.manuscriptBody, markdown);
+    assert.deepEqual(result.snapshot, reader.snapshot);
+  }
+
+  const explicit = await invoke<{ manuscript?: { id: string; name?: string; status?: string }; manuscriptBody?: string }>(
+    "story.scene.context", { sceneId: frontmatterId }, context,
+  );
+  assert.equal(explicit.data.manuscript?.id, `doc-ms-${frontmatterId}`);
+  assert.equal(explicit.data.manuscript?.name, "Explicit title");
+  assert.equal(explicit.data.manuscript?.status, "draft");
+  assert.equal(explicit.data.manuscriptBody, "本文です。");
+});
+
 test("snapshot materialization reads each pinned Story snapshot without proposing writes", async () => {
   const counted = (files: Map<string, string>, projectId: string, projectVersion: number) => {
     const base = makeReader(files, projectId);
@@ -1406,6 +1447,74 @@ test("native Knowledge uses explicit ID, not matching names, and keeps unconfirm
   }
   const wrong=makeActionContext(makeReader(files,"another-project"));
   assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
+});
+
+test("author context maps thread relations to the target scene and matches the overview snapshot", async () => {
+  const scenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-2.yaml";
+  const threadPath = (id: string) => `plot/threads/${id}.yaml`;
+  const files = fixtureFiles({
+    [scenePath]: yaml({
+      id: "sc-2", title: "Table", type: "scene", volume: "vol-main", chapter: "ch-main-1", order: 2,
+      threads: { plants: ["thread-legacy-plant", "thread-duplicate"], advances: ["thread-legacy-advance"] },
+      manuscript: "manuscript/vol-main/ch-main-1/sc-2.md",
+    }),
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml": yaml({
+      id: "sc-1", title: "Door", type: "scene", volume: "vol-main", chapter: "ch-main-1", order: 1,
+      threads: { plants: ["thread-other-scene"] },
+      manuscript: "manuscript/vol-main/ch-main-1/sc-1.md",
+    }),
+    [threadPath("thread-canonical-plant")]: yaml({ id: "thread-canonical-plant", type: "thread", planted: ["sc-2"] }),
+    [threadPath("thread-canonical-payoff")]: yaml({ id: "thread-canonical-payoff", type: "thread", payoff: ["sc-2"] }),
+    [threadPath("thread-duplicate")]: yaml({ id: "thread-duplicate", type: "thread", planted: ["sc-2"] }),
+    [threadPath("thread-legacy-plant")]: yaml({ id: "thread-legacy-plant", type: "thread" }),
+    [threadPath("thread-legacy-advance")]: yaml({ id: "thread-legacy-advance", type: "thread" }),
+    [threadPath("thread-other-scene")]: yaml({ id: "thread-other-scene", type: "thread" }),
+  });
+  const context = makeActionContext(makeReader(files));
+  const overview = await invoke<Array<{
+    thread: { id: string };
+    planted: Array<{ scene: { id: string } }>;
+    advanced: Array<{ scene: { id: string } }>;
+    payoff: Array<{ scene: { id: string } }>;
+  }>>("story.threads.overview", {}, context);
+  const author = await invoke<{
+    parts: Array<{ kind: string; value: Array<{ threadId: string; relation: string; meaning: string; revision: string | null }> }>;
+  }>("story.context.package", { sceneId: "sc-2", scope: "author", budget: 200_000 }, context);
+
+  assert.deepEqual(overview.snapshot, author.snapshot);
+  assert.deepEqual(author.snapshot, context.reader.snapshot);
+  const part = author.data.parts.find((item) => item.kind === "threads");
+  assert.ok(part);
+  const contextRelations = part.value.map(({ threadId, meaning }) => [threadId, meaning]).sort(([a], [b]) => a!.localeCompare(b!));
+  const overviewRelations = overview.data.flatMap(({ thread, planted, advanced, payoff }) => [
+    ...planted.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "planted"]),
+    ...advanced.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "advanced"]),
+    ...payoff.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "payoff"]),
+  ]).sort(([a], [b]) => a!.localeCompare(b!));
+  assert.deepEqual(contextRelations, overviewRelations);
+  assert.deepEqual(contextRelations, [
+    ["thread-canonical-payoff", "payoff"],
+    ["thread-canonical-plant", "planted"],
+    ["thread-duplicate", "planted"],
+    ["thread-legacy-advance", "advanced"],
+    ["thread-legacy-plant", "planted"],
+  ]);
+
+  const byThread = new Map(part.value.map((entry) => [entry.threadId, entry]));
+  assert.equal(byThread.get("thread-canonical-plant")?.revision, revision(files.get(threadPath("thread-canonical-plant"))!));
+  assert.equal(byThread.get("thread-canonical-payoff")?.revision, revision(files.get(threadPath("thread-canonical-payoff"))!));
+  assert.equal(byThread.get("thread-legacy-plant")?.revision, revision(files.get(scenePath)!));
+  assert.equal(byThread.get("thread-legacy-advance")?.revision, revision(files.get(scenePath)!));
+  assert.equal(byThread.get("thread-duplicate")?.relation, "planted", "the canonical direction wins when the same relation is duplicated");
+  assert.equal(byThread.has("thread-other-scene"), false, "relations from another scene must not leak into this package");
+
+  for (const scope of ["reader", "character"]) {
+    const restricted = await invoke<{ parts: Array<{ kind: string }> }>("story.context.package", {
+      sceneId: "sc-2", scope, characterId: "char-uma", budget: 200_000,
+    }, context);
+    assert.equal(restricted.data.parts.some((item) => item.kind === "threads"), false);
+    assert.doesNotMatch(JSON.stringify(restricted.data), /thread-canonical|thread-legacy|thread-duplicate/);
+  }
 });
 
 test("native Knowledge associates evidence through canonical document UUID mapping", async()=>{

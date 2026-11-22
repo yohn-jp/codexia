@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="革装の古書を開き、羽根ペンで物語を書き始めるCodexiaのアイコン">
+<title>革装の古書を開き、羽根ペンで物語を書き始めるCodexiaのアイコン</title><rect width="16" height="16" fill="#24152F"/><g>
+      <!-- At 16px the book is drawn on a deliberate half-pixel grid. -->
+      <path d="M1.5 9 Q4 8 7.5 10 Q11.5 8 14.5 9 V13.5 Q11.5 12.5 8 15 Q4.5 12.5 1.5 13.5 Z" fill="#F1C67D"/>
+      <path d="M2 8.5 Q4.5 8 7.5 10 V13.5 Q4.5 12 2 12.5 Z" fill="#FFF4DC"/>
+      <path d="M8.5 10 Q11.5 8 14 8.5 V12.5 Q11.5 12 8.5 13.5 Z" fill="#FFF4DC"/>
+      <path d="M8 10 V14.5" stroke="#53314B" stroke-width="1"/><path d="M7.5 9.5 C7.5 6 9.5 3 13.5 1 C13 4.5 11 7.5 7.5 9.5 Z" fill="#F1C67D"/>
+       <path d="M8 9 Q10.5 4 13 1.5" fill="none" stroke="#53314B" stroke-width="1"/></g></svg>

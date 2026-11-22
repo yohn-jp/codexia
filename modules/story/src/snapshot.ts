@@ -38,6 +38,7 @@ export interface StoryFile {
   content: string;
   revision: string;
   documentKind?: string;
+  documentOrder?: number;
 }
 
 export interface LoadedStorySnapshot extends StoryGraphInput {
@@ -123,9 +124,14 @@ function parseMarkdown(content: string): { raw: Record<string, unknown>; body: s
   const delimiter = /^---[ \t]*\r?$/gm;
   delimiter.lastIndex = opening[0].length;
   const closing = delimiter.exec(content);
-  if (!closing) return null;
-  const raw = asRecord(YAML.parse(content.slice(opening[0].length, closing.index)));
-  if (!raw) return null;
+  if (!closing) return { raw: {}, body: content.trim() };
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = asRecord(YAML.parse(content.slice(opening[0].length, closing.index)));
+  } catch {
+    return { raw: {}, body: content.trim() };
+  }
+  if (!raw) return { raw: {}, body: content.trim() };
   let bodyStart = closing.index + closing[0].length;
   if (content.startsWith("\r\n", bodyStart)) bodyStart += 2;
   else if (content.startsWith("\n", bodyStart)) bodyStart += 1;
@@ -197,6 +203,7 @@ async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): P
         content: value.content,
         revision: value.revision,
         ...(value.documentKind ? { documentKind: value.documentKind } : {}),
+        ...(value.documentOrder === undefined ? {} : { documentOrder: value.documentOrder }),
       });
     }
   }
@@ -212,11 +219,13 @@ export async function readStorySnapshot(
   const entities = new Map<string, StoryEntity>();
   const filePathsById = new Map<string, string[]>();
   const links: StoryLink[] = [];
+  const documentOrderByEntityId = new Map<string, number>();
 
   for (const file of files.values()) {
     const entity = parseStoryEntity(file);
     if (!entity) continue;
     entities.set(entity.id, entity);
+    if (file.documentOrder !== undefined) documentOrderByEntityId.set(entity.id, file.documentOrder);
     const paths = filePathsById.get(entity.id) ?? [];
     paths.push(entity.filePath);
     filePathsById.set(entity.id, paths);
@@ -245,6 +254,7 @@ export async function readStorySnapshot(
     snapshot: reader.snapshot,
     entities,
     links,
+    documentOrderByEntityId,
     files,
     revisions: new Map([...files].map(([filePath, file]) => [filePath, file.revision])),
     duplicateIds: new Map([...filePathsById].filter(([, paths]) => paths.length > 1)),

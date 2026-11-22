@@ -1,5 +1,6 @@
 import { collect } from './collection.mjs';
 import { comparableHistory } from './analysis.mjs';
+import { buildDiagnosticExport } from './diagnostics.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const API = 'https://api.github.com/repos/' + REPOSITORY + '/';
@@ -33,7 +34,7 @@ function quantile(numbers, p) {
   const sorted = [...numbers].sort((a,b) => a - b);
   return sorted[Math.ceil(p * sorted.length) - 1];
 }
-let all = [], selected = null, coverage = {};
+let all = [], selected = null, coverage = {}, verifySource = '';
 
 async function request(endpoint) {
   const response = await fetch(API + endpoint, {
@@ -61,6 +62,22 @@ function renderContext(pr) {
     contextRow('観測期間', formatTime(pr.createdAt)),
     contextRow('収集時刻', formatTime(coverage.observedAt)),
   );
+  const bottleneck = verify?.bottleneck;
+  if (bottleneck?.available) {
+    out.append(
+      contextRow('最後の必須検証', bottleneck.leafName),
+      contextRow('検証ジョブ所要時間', duration(bottleneck.leafSeconds)),
+      contextRow('検証開始前（ジョブ内）', duration(bottleneck.beforeValidationSeconds)),
+      contextRow('うちコンテナ初期化', duration(bottleneck.containerSeconds)),
+      contextRow('検証ステップ', duration(bottleneck.validationSeconds)),
+      contextRow('検証後〜ジョブ終了', duration(bottleneck.afterValidationSeconds)),
+      contextRow('次点ジョブとの差', bottleneck.runnerUpName
+        ? duration(bottleneck.runnerUpGapSeconds) + ' / ' + bottleneck.runnerUpName : '—'),
+      contextRow('認証処理を含む残り', duration(bottleneck.certificationTailSeconds)),
+    );
+  } else {
+    out.append(contextRow('ボトルネック判定', bottleneck?.reason ?? '未計測'));
+  }
   if (verify?.url) {
     const a = link('GitHubでVerifyを開く', verify.url);
     a.className = 'context-row';
@@ -76,9 +93,18 @@ function renderChain(pr) {
     el('chain-note').textContent = chain?.reason ?? 'Verifyジョブの実測がありません。';
     return;
   }
-  for (const name of chain.names) list.append(node('li', '', name));
+  for (const name of chain.names) {
+    const job = verify.jobs.find(item => item.name === name);
+    list.append(node('li', '', name + (job ? ' · ' + duration(job.durationSeconds) : '')));
+  }
+  const bottleneck = verify.bottleneck;
+  const near = bottleneck?.available
+    ? bottleneck.nearFinish.filter(item => item.name !== bottleneck.leafName) : [];
   el('chain-note').textContent = chain.reason +
-    '。共有Runnerの競合・未記録の外部Workflow依存はこのチェーンに含まれません。';
+    '。共有Runnerの競合・未記録の外部Workflow依存はこのチェーンに含まれません。' +
+    (near.length ? ' 最終ジョブの15秒以内に終了した別ジョブ: ' +
+      near.map(item => item.name + ' (' + duration(item.behindSeconds) + '差)').join('、') + '。' : '') +
+    ' 個別タスク時間はActionsのステップAPIだけでは取得できません。';
 }
 function renderSteps(pr) {
   const target = el('steps'); clear(target);
@@ -168,6 +194,7 @@ function renderHistory(pr) {
     button.addEventListener('click', () => {
       selected = item;
       el('pr').value = String(all.indexOf(item));
+      el('copy-status').textContent = '';
       render();
     });
     target.append(button);
@@ -189,14 +216,37 @@ function render() {
   renderContext(pr);
   renderHistory(pr);
 }
+async function copyDiagnostics() {
+  const target = selected;
+  if (!target) return;
+  const button = el('copy-diagnostics');
+  const status = el('copy-status');
+  button.disabled = true;
+  status.textContent = '診断JSONをコピーしています。';
+  try {
+    if (!window.isSecureContext || !navigator.clipboard?.writeText) {
+      throw new Error('Clipboard API unavailable');
+    }
+    const diagnostic = buildDiagnosticExport(target, all, coverage, verifySource);
+    await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+    status.textContent = 'PR #' + target.number + ' の診断JSONをコピーしました。';
+  } catch {
+    status.textContent = 'コピーできませんでした。クリップボード権限とHTTPS接続を確認してください。';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function main() {
+  el('copy-diagnostics').addEventListener('click', copyDiagnostics);
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
       signal: AbortSignal.timeout(20_000),
       redirect: 'error',
     });
     if (!workflowResponse.ok) throw new Error('Verify workflow source unavailable (HTTP ' + workflowResponse.status + ')');
-    const result = await collect(request, await workflowResponse.text());
+    verifySource = await workflowResponse.text();
+    const result = await collect(request, verifySource);
     if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
     all = result.prs;
     coverage = { ...result.coverage, observedAt: result.observedAt };
@@ -213,8 +263,9 @@ async function main() {
       return;
     }
     selected = all[0];
+    el('copy-diagnostics').disabled = false;
     select.value = '0';
-    select.addEventListener('change', () => { selected = all[Number(select.value)]; render(); });
+    select.addEventListener('change', () => { selected = all[Number(select.value)]; el('copy-status').textContent = ''; render(); });
     el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +

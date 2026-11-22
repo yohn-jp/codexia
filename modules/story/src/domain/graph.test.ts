@@ -29,8 +29,14 @@ function entity(
 function input(
   entities: StoryEntity[],
   links: StoryGraphInput["links"] = [],
-): StoryGraphInput {
-  return { snapshot, entities: new Map(entities.map((item) => [item.id, item])), links };
+  documentOrderByEntityId?: ReadonlyMap<string, number>,
+): StoryGraphInput & { documentOrderByEntityId?: ReadonlyMap<string, number> } {
+  return {
+    snapshot,
+    entities: new Map(entities.map((item) => [item.id, item])),
+    links,
+    ...(documentOrderByEntityId ? { documentOrderByEntityId } : {}),
+  };
 }
 
 test("backlinks retain source relation order and omit missing source entities", () => {
@@ -81,6 +87,46 @@ test("appearances aggregate relation kinds by scene and sort by scene order", ()
   );
 });
 
+test("appearances follow the same mixed-width sibling chronology as the volume tree", () => {
+  const story = input([
+    entity("char-a", "character"),
+    entity("vol-a", "volume", { order: "0000000001" }),
+    entity("ch-a", "chapter", { id: "ch-a", volume: "vol-a", order: "0000000001" }),
+    entity("scene-long-key", "scene", { chapter: "ch-a", order: "0000000002" }),
+    entity("scene-short-key", "scene", { chapter: "ch-a", order: "00000001" }),
+  ], [
+    { from: "scene-short-key", to: "char-a", kind: "appears" },
+    { from: "scene-long-key", to: "char-a", kind: "appears" },
+  ]);
+
+  assert.deepEqual(getEntityAppearances({ ...story, entityId: "char-a" }).data.map(({ scene }) => scene.id), [
+    "scene-long-key", "scene-short-key",
+  ]);
+});
+
+test("appearance chronology follows hierarchy order across PostgreSQL parent groups", () => {
+  const story = input([
+    entity("char-a", "character"),
+    entity("vol-first", "volume", { order: "0001" }),
+    entity("vol-second", "volume", { order: "0002" }),
+    entity("ch-first", "chapter", { id: "ch-first", volume: "vol-first", order: "0001" }),
+    entity("ch-second", "chapter", { id: "ch-second", volume: "vol-second", order: "0001" }),
+    entity("scene-first", "scene", { chapter: "ch-first", order: "0001" }),
+    entity("scene-second", "scene", { chapter: "ch-second", order: "0001" }),
+  ], [
+    { from: "scene-second", to: "char-a", kind: "appears" },
+    { from: "scene-first", to: "char-a", kind: "appears" },
+  ], new Map([
+    ["vol-first", 0], ["vol-second", 1],
+    ["ch-second", 2], ["scene-second", 3],
+    ["ch-first", 4], ["scene-first", 5],
+  ]));
+
+  assert.deepEqual(getEntityAppearances({ ...story, entityId: "char-a" }).data.map(({ scene }) => scene.id), [
+    "scene-first", "scene-second",
+  ]);
+});
+
 test("scene context resolves POV, raw location, relation collections and manuscript path", () => {
   const story = input(
     [
@@ -111,6 +157,39 @@ test("scene context resolves POV, raw location, relation collections and manuscr
   assert.equal(result.data?.manuscriptBody, "scene text");
 });
 
+test("scene context infers only location entities from appears links", () => {
+  const story = input(
+    [
+      entity("scene-person-first", "scene"),
+      entity("scene-location-first", "scene"),
+      entity("scene-people-only", "scene"),
+      entity("scene-explicit", "scene", { location: "loc-explicit" }),
+      entity("scene-wrong-type-location", "scene", { location: "char-c" }),
+      entity("char-a", "character"),
+      entity("char-b", "character"),
+      entity("char-c", "character"),
+      entity("loc-linked", "location"),
+      entity("loc-explicit", "location"),
+    ],
+    [
+      { from: "scene-person-first", to: "char-a", kind: "appears" },
+      { from: "scene-person-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "char-b", kind: "appears" },
+      { from: "scene-people-only", to: "char-c", kind: "appears" },
+    ],
+  );
+
+  const locationFor = (sceneId: string) =>
+    buildSceneContext({ ...story, sceneId }).data?.location?.id;
+
+  assert.equal(locationFor("scene-person-first"), "loc-linked");
+  assert.equal(locationFor("scene-location-first"), "loc-linked");
+  assert.equal(locationFor("scene-people-only"), undefined);
+  assert.equal(locationFor("scene-explicit"), "loc-explicit");
+  assert.equal(locationFor("scene-wrong-type-location"), undefined);
+});
+
 test("volume tree and scene-location chronology use volume/chapter/scene order", () => {
   const story = input(
     [
@@ -136,6 +215,68 @@ test("volume tree and scene-location chronology use volume/chapter/scene order",
     chronology.map((item) => [item.sceneId, item.order, item.locationId, item.characterIds]),
     [["sc-a", 1, "loc-a", ["char-a"]], ["sc-b", 2, "loc-b", []], ["sc-c", 3, "loc-b", ["char-a"]]],
   );
+});
+
+test("hierarchy order follows text order keys and stable IDs across root and nested documents", () => {
+  const story = input([
+    entity("vol-long-key", "volume", { order: "0000000002" }, { name: "Long key" }),
+    entity("vol-short-key", "volume", { order: "00000001" }, { name: "Short key" }),
+    entity("vol-tie-z", "volume", { order: "same" }, { name: "A title" }),
+    entity("vol-tie-a", "volume", { order: "same" }, { name: "Z title" }),
+    entity("ch-long-key", "chapter", { id: "ch-long-key", volume: "vol-long-key", order: "0000000002" }),
+    entity("ch-short-key", "chapter", { id: "ch-short-key", volume: "vol-long-key", order: "00000001" }),
+    entity("ch-tie-z", "chapter", { id: "ch-tie-z", volume: "vol-long-key", order: "same" }, { name: "A title" }),
+    entity("ch-tie-a", "chapter", { id: "ch-tie-a", volume: "vol-long-key", order: "same" }, { name: "Z title" }),
+    entity("sc-long-key", "scene", { chapter: "ch-long-key", order: "0000000002" }),
+    entity("sc-short-key", "scene", { chapter: "ch-long-key", order: "00000001" }),
+    entity("sc-tie-z", "scene", { chapter: "ch-long-key", order: "same" }, { name: "A title" }),
+    entity("sc-tie-a", "scene", { chapter: "ch-long-key", order: "same" }, { name: "Z title" }),
+    entity("00000000-root-scene", "scene", { order: "0000000002", chapter: null }),
+  ]);
+
+  const tree = getVolumeTree(story).data;
+  assert.deepEqual(tree.map(({ volume }) => volume.id), [
+    "vol-long-key", "vol-short-key", "vol-tie-a", "vol-tie-z",
+  ]);
+  const chapters = tree.find(({ volume }) => volume.id === "vol-long-key")!.chapters;
+  assert.deepEqual(chapters.map(({ chapter }) => chapter.id), [
+    "ch-long-key", "ch-short-key", "ch-tie-a", "ch-tie-z",
+  ]);
+  assert.deepEqual(chapters[0]!.scenes.map((scene) => scene.id), [
+    "sc-long-key", "sc-short-key", "sc-tie-a", "sc-tie-z",
+  ]);
+  assert.deepEqual(buildSceneLocationInfos(story).data.map(({ sceneId }) => sceneId), [
+    "00000000-root-scene",
+    "sc-long-key", "sc-short-key", "sc-tie-a", "sc-tie-z",
+  ]);
+});
+
+test("hierarchy siblings preserve PostgreSQL order from the selected snapshot", () => {
+  const story = input([
+    entity("vol-logical-late", "volume", { order: "same" }, { name: "Z title" }),
+    entity("vol-logical-early", "volume", { order: "same" }, { name: "A title" }),
+    entity("ch-logical-late", "chapter", { id: "ch-logical-late", volume: "vol-logical-late", order: "same" }, { name: "Z title" }),
+    entity("ch-logical-early", "chapter", { id: "ch-logical-early", volume: "vol-logical-late", order: "same" }, { name: "A title" }),
+    entity("sc-logical-late", "scene", { chapter: "ch-logical-late", order: "same" }, { name: "Z title" }),
+    entity("sc-logical-early", "scene", { chapter: "ch-logical-late", order: "same" }, { name: "A title" }),
+    entity("root-scene", "scene", { order: "same", chapter: null }),
+  ], [], new Map([
+    ["root-scene", 0],
+    ["vol-logical-late", 1],
+    ["vol-logical-early", 2],
+    ["ch-logical-late", 3],
+    ["ch-logical-early", 4],
+    ["sc-logical-late", 5],
+    ["sc-logical-early", 6],
+  ]));
+
+  const tree = getVolumeTree(story).data;
+  assert.deepEqual(tree.map(({ volume }) => volume.id), ["vol-logical-late", "vol-logical-early"]);
+  assert.deepEqual(tree[0]!.chapters.map(({ chapter }) => chapter.id), ["ch-logical-late", "ch-logical-early"]);
+  assert.deepEqual(tree[0]!.chapters[0]!.scenes.map((scene) => scene.id), ["sc-logical-late", "sc-logical-early"]);
+  assert.deepEqual(buildSceneLocationInfos(story).data.map(({ sceneId }) => sceneId), [
+    "root-scene", "sc-logical-late", "sc-logical-early",
+  ]);
 });
 
 test("thread overview combines both planted relation directions and deduplicates by scene", () => {

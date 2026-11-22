@@ -143,7 +143,7 @@ function trainWithScoredHoldout(input: Extract<SpeakerWorkerInput, { kind: "trai
   let pipelineTotal = 0;
   for (const { pipeline } of preparedHoldout) {
     assertNotAborted(signal);
-    const { attributions } = runSpeakerPipeline({ ...pipeline, ignoreOverrides: true, model });
+    const { attributions } = runSpeakerPipeline({ ...pipeline, ignoreOverrides: true, skipReranker: false, model });
     const overrides = Array.isArray(pipeline.scene.raw.speakerOverrides) ? pipeline.scene.raw.speakerOverrides as Parameters<typeof buildSceneEvalResult>[1] : [];
     const { matched } = buildSceneEvalResult(pipeline.scene.id, overrides, attributions);
     for (const row of matched) { pipelineTotal++; if (row.gold === row.predicted) pipelineCorrect++; }

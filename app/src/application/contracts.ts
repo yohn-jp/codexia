@@ -40,6 +40,8 @@ export interface ApplicationShellProps {
   beforeLayoutChange?: () => Promise<boolean>;
   /** Ask the workspace to reveal and focus a panel, for example History. */
   requestedPanel?: WorkspacePanelRequest;
+  /** Finish mobile editor navigation after the reference sheet has dismissed. */
+  onReferenceSheetDismissed?: () => boolean;
 }
 
 export type ApplicationShell = ComponentType<ApplicationShellProps>;

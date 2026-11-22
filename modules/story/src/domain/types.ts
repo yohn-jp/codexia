@@ -42,6 +42,8 @@ export interface StoryGraphInput {
   snapshot: SnapshotId;
   entities: ReadonlyMap<string, StoryEntity>;
   links: readonly StoryLink[];
+  /** PostgreSQL's canonical document order for entities in this selected snapshot. */
+  documentOrderByEntityId?: ReadonlyMap<string, number>;
 }
 
 /** Every read model returns the exact snapshot identity selected by its caller. */

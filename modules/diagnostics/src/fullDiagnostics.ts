@@ -106,7 +106,10 @@ export async function composeSceneDiagnostics(
   if (!scene) throw fail("not_found", `Scene not found: ${input.sceneId}`);
   let savedBody: string | undefined;
   if (typeof scene.raw.manuscript === "string") {
-    savedBody = entities.find((entity) => entity.type === "manuscript" && entity.filePath === scene.raw.manuscript)?.body;
+    savedBody = entities.find((entity) =>
+      (entity.type === "manuscript" || entity.type === "scene") &&
+      entity.filePath === scene.raw.manuscript && typeof entity.body === "string",
+    )?.body;
   }
   const text = input.text ?? savedBody;
   if (text === undefined) throw fail("not_found", `Scene not found or has no manuscript body: ${input.sceneId}`);

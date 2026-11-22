@@ -128,6 +128,59 @@ export function temporalScene(story: LoadedStorySnapshot, sceneId: string, hypot
 }
 
 export type ContextScope = "author" | "character" | "reader";
+type ThreadContextMeaning = "planted" | "advanced" | "payoff";
+
+function sceneThreadContextLinks(story: LoadedStorySnapshot, sceneId: string) {
+  const byRelation = new Map<string, {
+    threadId: string;
+    relation: string;
+    meaning: ThreadContextMeaning;
+    revision: string | null;
+    priority: number;
+  }>();
+  const scene = story.entities.get(sceneId);
+  if (scene?.type !== "scene") return [];
+
+  for (const link of story.links) {
+    let threadId: string;
+    let relation: string;
+    let meaning: ThreadContextMeaning;
+    let sourcePath: string;
+    let priority: number;
+    if (link.to === sceneId && (link.kind === "planted" || link.kind === "payoff")) {
+      const thread = story.entities.get(link.from);
+      if (thread?.type !== "thread") continue;
+      threadId = thread.id;
+      relation = link.kind;
+      meaning = link.kind;
+      sourcePath = thread.filePath;
+      priority = 0;
+    } else if (link.from === sceneId && (link.kind === "plants" || link.kind === "advances" || link.kind === "payoff")) {
+      const thread = story.entities.get(link.to);
+      if (thread?.type !== "thread") continue;
+      threadId = thread.id;
+      relation = link.kind;
+      meaning = link.kind === "plants" ? "planted" : link.kind === "advances" ? "advanced" : "payoff";
+      sourcePath = scene.filePath;
+      priority = 1;
+    } else {
+      continue;
+    }
+
+    const key = JSON.stringify([sceneId, threadId, meaning]);
+    const existing = byRelation.get(key);
+    if (existing && existing.priority <= priority) continue;
+    byRelation.set(key, {
+      threadId,
+      relation,
+      meaning,
+      revision: story.revisions.get(sourcePath) ?? null,
+      priority,
+    });
+  }
+  return [...byRelation.values()].map(({ priority: _priority, ...link }) => link);
+}
+
 export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string, scope: ContextScope, characterId: string | undefined, budget: number, nativeParts: Array<{kind:string;value:unknown}> = [], nativeOmissions: Array<{reason:string}> = []) {
   if (!["author", "character", "reader"].includes(scope)) throw new TypeError("Invalid context scope");
   if (!Number.isSafeInteger(budget) || budget < 128 || budget > 200000) throw new TypeError("Invalid context budget");
@@ -136,8 +189,7 @@ export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string,
   const scene = story.entities.get(sceneId)!;
   const parts: Array<{ kind: string; value: unknown }> = [];
   const perspectiveLinks=story.links.filter(link=>link.from===sceneId&&link.kind==="pov").map(link=>({characterId:link.to}));
-  const threadLinks=story.links.filter(link=>link.from===sceneId&&["plants","advances","payoff"].includes(link.kind))
-    .map(link=>({threadId:link.to,relation:link.kind,revision:story.revisions.get(story.entities.get(link.to)?.filePath??"")??null}));
+  const threadLinks = sceneThreadContextLinks(story, sceneId);
   const authorizedFacts=scope==="character"?temporal.beliefs.filter(fact=>fact.subject===characterId):scope==="reader"?temporal.disclosed:[];
   const acquiredIds=new Set(authorizedFacts.filter(fact=>fact.predicate==="knowledge"&&fact.value!==null).map(fact=>fact.value!));
   // Restricted scopes expose only author-confirmed knowledge, not whole entity notes or scene text.

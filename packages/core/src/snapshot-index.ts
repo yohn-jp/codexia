@@ -29,8 +29,27 @@ export interface SnapshotIndex {
 
 const WHITESPACE = /\s/u;
 
-function manuscriptBody(content: string): string {
-  return content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n)?/, "");
+export function manuscriptBody(content: string): string {
+  const opening = /^---[ \t]*\r?\n/.exec(content);
+  if (!opening) return content;
+
+  const delimiter = /^---[ \t]*\r?$/gm;
+  delimiter.lastIndex = opening[0].length;
+  const closing = delimiter.exec(content);
+  if (!closing) return content;
+
+  let metadata: unknown;
+  try {
+    metadata = YAML.parse(content.slice(opening[0].length, closing.index));
+  } catch {
+    return content;
+  }
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) return content;
+
+  let bodyStart = closing.index + closing[0].length;
+  if (content.startsWith("\r\n", bodyStart)) bodyStart += 2;
+  else if (content.startsWith("\n", bodyStart)) bodyStart += 1;
+  return content.slice(bodyStart);
 }
 
 function countNonWhitespaceCodePoints(content: string): number {

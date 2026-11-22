@@ -810,6 +810,48 @@ function sceneContext(snapshot: LoadedStorySnapshot, sceneId: string): { scene: 
   return { scene, manuscript, body: manuscript.content.slice(bodyOffset).trim(), bodyOffset };
 }
 
+type ZukanSource = { source: ReturnType<typeof sceneContext>; quote: string };
+
+/** Resolve Semantic sentence hits to current, sourceable scene manuscripts in the same Story snapshot. */
+export function resolveZukanEvidenceSources(snapshot: LoadedStorySnapshot, hits: readonly RecordValue[]): ZukanSource[] {
+  const sources = new Map<string, ZukanSource>();
+  for (const hit of hits) {
+    const hitId = typeof hit.sceneId === "string" ? hit.sceneId : typeof hit.entityId === "string" ? hit.entityId : undefined;
+    if (!hitId) continue;
+    let canonical = snapshot.entities.get(hitId);
+    if (canonical) {
+      if (snapshot.duplicateIds.has(canonical.id) || (canonical.type !== "scene" && canonical.type !== "manuscript")) continue;
+    } else {
+      // Native Core scene passages use Semantic's document-scoped ID while Story
+      // exposes the same canonical document through its file-shaped manuscript projection.
+      if (hit.type !== "scene" && hit.type !== "manuscript") continue;
+      const filePath = typeof hit.filePath === "string" ? hit.filePath : undefined;
+      if (!filePath) continue;
+      const matches = [...snapshot.entities.values()].filter((candidate) => candidate.filePath === filePath);
+      if (matches.length !== 1 || snapshot.duplicateIds.has(matches[0]!.id) ||
+          (matches[0]!.type !== "scene" && matches[0]!.type !== "manuscript")) continue;
+      canonical = matches[0];
+    }
+
+    const scene = canonical.type === "scene"
+      ? canonical
+      : (() => {
+          const owners = [...snapshot.entities.values()].filter((candidate) =>
+            candidate.type === "scene" && candidate.raw.manuscript === canonical!.filePath && !snapshot.duplicateIds.has(candidate.id));
+          return owners.length === 1 ? owners[0] : undefined;
+        })();
+    if (!scene || sources.has(scene.id)) continue;
+    const manuscriptPath = typeof scene.raw.manuscript === "string" ? scene.raw.manuscript : undefined;
+    if (!manuscriptPath || !snapshot.files.has(manuscriptPath)) continue;
+    const source = sceneContext(snapshot, scene.id);
+    const quote = typeof hit.snippet === "string" ? hit.snippet.trim() : typeof hit.text === "string" ? hit.text.trim() : "";
+    if (!quote || !source.body.includes(quote)) continue;
+    sources.set(scene.id, { source, quote });
+    if (sources.size >= 8) break;
+  }
+  return [...sources.values()];
+}
+
 function chapterScenes(snapshot: LoadedStorySnapshot, chapterId: string): { chapter: StoryEntity; scenes: Array<ReturnType<typeof sceneContext>> } {
   const chapter = entity(snapshot, chapterId);
   if (chapter.type !== "chapter") throw new TypeError(`${chapterId} is not a chapter`);
@@ -2144,19 +2186,15 @@ async function runZukanSuggestions(moduleContext: ModuleContext, context: Module
   await reportProgress(context, 0.1);
   const target = entity(story, input.entityId!);
   const name = target.name ?? target.id;
-  const search = await invokeData(context, "semantic.search", { query: name, mode: "sentence", limit: 12, rerank: false });
+  const searchResult = await context.invoke("semantic.search", { query: name, mode: "sentence", limit: 12, rerank: false });
+  if (!searchResult.ok) throw codeError(searchResult.error.code, searchResult.error.message);
+  if (snapshotKey(searchResult.snapshot) !== snapshotKey(story.snapshot)) throw codeError("stale_source", "Semantic results belong to a different Story snapshot");
+  const search = record(searchResult.data, "semantic.search result");
   const candidates = Array.isArray(search.results) ? search.results.map((item) => record(item)) : [];
-  const eligible = new Map<string, { source: ReturnType<typeof sceneContext>; file: StoryFile }>();
-  for (const hit of candidates) {
-    if (typeof hit.sceneId !== "string" || eligible.has(hit.sceneId)) continue;
-    const source = sceneContext(story, hit.sceneId);
-    const quote = typeof hit.snippet === "string" ? hit.snippet.trim() : typeof hit.text === "string" ? hit.text.trim() : "";
-    if (quote && source.body.includes(quote)) eligible.set(hit.sceneId, { source, file: source.manuscript });
-    if (eligible.size >= 8) break;
-  }
-  if (!eligible.size) throw codeError("assistant_evidence_missing", "No current manuscript references were found for this entity");
+  const eligible = resolveZukanEvidenceSources(story, candidates);
+  if (!eligible.length) throw codeError("assistant_evidence_missing", "No current manuscript references were found for this entity");
   const notesExcerpt = JSON.stringify(target.raw.notes ?? "").slice(0, 4_000) || "(空)";
-  const evidenceBlock = [...eligible.values()].map(({ source }) => `--- scene ${source.scene.id} ---\n${source.body.slice(0, 3_000)}`).join("\n\n");
+  const evidenceBlock = eligible.map(({ source }) => `--- scene ${source.scene.id} ---\n${source.body.slice(0, 3_000)}`).join("\n\n");
   const desiredBlockPath = input.blockPath ?? "lead.0";
   const prompt = await composePrompt([
     "あなたは小説の図鑑ノート編集アシスタントです。新しい言及から現行ノートへの差分追記案を1件だけ作ってください。",
@@ -2166,13 +2204,13 @@ async function runZukanSuggestions(moduleContext: ModuleContext, context: Module
     "blockPath は lead.<i> または sections.<si>.body.<bi> 形式。",
     promptJson('{"blockPath":"lead.0","proposedText":"...","evidence":[{"sceneId":"...","quote":"exact source quote"}]}'),
   ].join("\n\n"));
-  const sourceRevisions = revisionList([...story.files.values()].filter((file) => file.path === target.filePath || [...eligible.values()].some((item) => item.source.scene.filePath === file.path || item.file.path === file.path)));
+  const sourceRevisions = revisionList([...story.files.values()].filter((file) => file.path === target.filePath || eligible.some((item) => item.source.scene.filePath === file.path || item.source.manuscript.path === file.path)));
   await reportProgress(context, 0.35);
   const generated = await generate(moduleContext, context, { feature: "zukan-proposal", prompt, promptVersion: CUSTOM_PROMPT_VERSIONS.zukan, sourceRevisions, outputTokens: 1_024 });
   const parsed = parseStructured(generated.text, zukanSchema);
   if (!/^(?:lead\.\d+|sections\.\d+\.body\.\d+)$/.test(parsed.blockPath)) throw codeError("assistant_output_invalid", "Zukan output used an unsupported notes block path");
   if (input.blockPath && parsed.blockPath !== input.blockPath) throw codeError("assistant_output_invalid", "Zukan output changed the selected notes block path");
-  const allowed = new Map([...eligible].map(([sceneId, item]) => [sceneId, item.source]));
+  const allowed = new Map(eligible.map(({ source }) => [source.scene.id, source]));
   const verifiedEvidence: Array<{ sceneId: string; quote: string }> = [];
   const citations: SourceCitation[] = [];
   for (const item of parsed.evidence) {

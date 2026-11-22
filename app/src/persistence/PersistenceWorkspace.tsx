@@ -15,7 +15,7 @@ import { api, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
-import { parseApplicationLocation, switchApplicationPath } from "../application/navigation";
+import { parseApplicationLocation, rememberUiMode, switchApplicationPath } from "../application/navigation";
 import { PersistenceScratch, type ScratchGuard } from "./PersistenceScratch";
 import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
@@ -35,7 +35,8 @@ import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/jou
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
 import { RevisionDifference } from "./RevisionDifference";
-import { DocumentOutlineTree } from "./DocumentOutlineTree";
+import { DocumentOutlineTree, type OutlineTreeDocument } from "./DocumentOutlineTree";
+import { extractMarkdownHeadings } from "./markdownOutline";
 
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
@@ -192,6 +193,66 @@ function firstOutlineNodeId(items: readonly OutlineDocument[]): string | null {
   return items[0]?.id ?? null;
 }
 
+function buildOutlineTreeItems(items: readonly OutlineDocument[], active: ActiveDocument | null): OutlineTreeDocument[] {
+  const occupiedIds = new Set<string>();
+  const collectDocumentIds = (nodes: readonly OutlineDocument[]) => {
+    for (const node of nodes) {
+      occupiedIds.add(node.id);
+      collectDocumentIds(node.children);
+    }
+  };
+  collectDocumentIds(items);
+
+  const headingRoots: OutlineTreeDocument[] = [];
+  // OutlineDocument contains metadata only. Derive headings from the active
+  // editor's already-loaded markdown instead of reading every inactive revision
+  // during outline refresh; switching documents rebuilds this projection.
+  if (active) {
+    const stack: Array<{ level: number; node: OutlineTreeDocument }> = [];
+    for (const heading of extractMarkdownHeadings(active.markdown)) {
+      let id = `${active.document.id}:heading:${heading.offset}`;
+      while (occupiedIds.has(id)) id = `heading:${id}`;
+      occupiedIds.add(id);
+      const node: OutlineTreeDocument = {
+        id,
+        title: heading.title,
+        kind: "heading",
+        children: [],
+        headingDocumentId: active.document.id,
+        headingOffset: heading.offset,
+        headingLevel: heading.level,
+        headingLine: heading.line,
+      };
+      while (stack.length && stack[stack.length - 1]!.level >= heading.level) stack.pop();
+      const parent = stack[stack.length - 1]?.node;
+      if (parent) parent.children.push(node);
+      else headingRoots.push(node);
+      stack.push({ level: heading.level, node });
+    }
+  }
+
+  const convert = (nodes: readonly OutlineDocument[]): OutlineTreeDocument[] => nodes.map((document) => ({
+    id: document.id,
+    title: document.title,
+    kind: document.kind,
+    ...(document.misplaced ? { misplaced: true } : {}),
+    children: [
+      ...convert(document.children),
+      ...(document.id === active?.document.id ? headingRoots : []),
+    ],
+  }));
+  return convert(items);
+}
+
+function findOutlineTreeItem(items: readonly OutlineTreeDocument[], id: string): OutlineTreeDocument | null {
+  for (const item of items) {
+    if (item.id === id) return item;
+    const found = findOutlineTreeItem(item.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 function outlineAncestors(items: readonly OutlineDocument[], id: string, ancestors: OutlineDocument[] = []): OutlineDocument[] | null {
   for (const item of items) {
     if (item.id === id) return ancestors;
@@ -338,6 +399,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const scratchGuardRef = useRef<ScratchGuard | null>(null);
   const registerScratchGuard = useCallback((guard: ScratchGuard | null) => { scratchGuardRef.current = guard; }, []);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const pendingHeadingRevealRef = useRef<{ projectId: string; documentId: string; offset: number } | null>(null);
+  const onReferenceSheetDismissed = useCallback((): boolean => {
+    const pending = pendingHeadingRevealRef.current;
+    pendingHeadingRevealRef.current = null;
+    const current = activeRef.current;
+    if (!pending || current?.document.projectId !== pending.projectId || current.document.id !== pending.documentId) return false;
+    return editorRef.current?.revealOffset(pending.offset) ?? false;
+  }, []);
   const [editorPortalContainer] = useState<HTMLElement | null>(() => {
     if (typeof document === "undefined") return null;
     const container = document.createElement("div");
@@ -420,8 +489,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const zoomNode = useMemo(() => outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null, [documentOutline, outlineZoomRoot]);
   const zoomResults = useMemo(() => zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [], [zoomNode, outlineQuery]);
   const visibleDocumentOutline = zoomNode ? zoomResults : filteredDocumentOutline;
-  const outlineFocusId = findOutlineNode(visibleDocumentOutline, outlineFocusedId)?.id
-    ?? findOutlineNode(visibleDocumentOutline, documentId)?.id
+  const outlineTreeItems = useMemo(() => buildOutlineTreeItems(
+    visibleDocumentOutline,
+    active?.document.projectId === projectId ? active : null,
+  ), [visibleDocumentOutline, active?.document.id, active?.document.projectId, active?.markdown, projectId]);
+  const outlineFocusId = findOutlineTreeItem(outlineTreeItems, outlineFocusedId)?.id
+    ?? findOutlineTreeItem(outlineTreeItems, documentId)?.id
     ?? firstOutlineNodeId(visibleDocumentOutline);
   const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   const activeDocument = active?.document;
@@ -2350,8 +2423,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const handleTermNavigate = useCallback((path: string) => {
     void navigateReference(path).catch((error) => setPageError(error instanceof Error ? error.message : "参照を開けませんでした。"));
   }, [navigateReference]);
-  const switchPath = switchApplicationPath(window.location.href, mode === "desktop" ? "mobile" : "desktop");
-
   const editorFontFamily = typography.fontFamily === "mincho" ? "serif" : "sans-serif";
   const typographyStyle = {
     fontSize: typography.fontSize,
@@ -2431,7 +2502,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {zoomNode && <span><span aria-hidden="true"> › </span><strong>{zoomNode.title}</strong></span>}
           </nav>}
           <DocumentOutlineTree
-            items={visibleDocumentOutline}
+            items={outlineTreeItems}
             selectedId={documentId}
             focusedId={outlineFocusId ?? ""}
             onFocusedIdChange={setOutlineFocusedId}
@@ -2440,6 +2511,27 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             forceExpanded={Boolean(outlineQuery || outlineZoomRoot)}
             busy={loading}
             onSelect={(id) => { void selectDocument(id); }}
+            onSelectHeading={(targetDocumentId, offset) => {
+              const current = activeRef.current;
+              const editor = editorRef.current;
+              if (!current || current.document.id !== targetDocumentId || current.document.projectId !== projectId || !editor) return;
+              let markdown: string;
+              try { markdown = editor.readForNavigation(); } catch { return; }
+              if (!extractMarkdownHeadings(markdown).some((heading) => heading.offset === offset)) return;
+              if (mode === "mobile") {
+                if (reading) setReading(false);
+                pendingHeadingRevealRef.current = { projectId: current.document.projectId, documentId: current.document.id, offset };
+                setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+                return;
+              }
+              if (reading) {
+                setReading(false);
+                requestAnimationFrame(() => { editorRef.current?.revealOffset(offset); });
+              } else {
+                if (!editor.revealOffset(offset)) return;
+              }
+              setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+            }}
             onZoom={setOutlineZoomRoot}
             onRename={(id, title) => { void editStructure({ title }, false, id); }}
             onMove={async (id, parentId) => {
@@ -2812,8 +2904,15 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
       requestedPanel={requestedPanel}
+      onReferenceSheetDismissed={mode === "mobile" ? onReferenceSheetDismissed : undefined}
       beforeLayoutChange={protectTransition}
-      onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
+      onSwitchMode={async () => {
+        const nextMode = mode === "desktop" ? "mobile" : "desktop";
+        if (!await protectTransition()) return false;
+        rememberUiMode(nextMode);
+        window.location.assign(switchApplicationPath(window.location.href, nextMode));
+        return true;
+      }}
     />
   </div>;
 }

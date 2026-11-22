@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { parse, stringify } from "yaml";
 import { assertChangeOperation, type ChangeOperation, type ChangeProposal, type ModuleContext, type ModuleManifest, type SnapshotId } from "@codexia/contracts";
 import { ModuleRuntime } from "@codexia/module-runtime";
 import { createModule as createStoryModule } from "@codexia/module-story";
@@ -78,7 +79,7 @@ function initialFiles(sceneCount = 14): Map<string, { content: string; revision:
       `manuscript: ${manuscriptPath}`,
       "",
     ].join("\n"));
-    add(manuscriptPath, sceneText());
+    add(manuscriptPath, index === 0 ? `---\n普通の回想\n---\n${sceneText()}` : sceneText());
   }
   const voiceProbeText = "星野は灯りを見た。『俺がゆっくり行きます。』";
   add("plot/volumes/volume-1/chapters/chapter-1/scenes/sc-synthetic-voice-probe.yaml", [
@@ -225,7 +226,7 @@ test("evaluation and retraining actions advertise their source job types", async
   assert.deepEqual(actions.get("speaker.retraining.run")?.job, { type: "speaker-retrain" });
 });
 
-test("speaker actions run real CPU attribution, propose corrections/model adoption, and reload from the reviewed snapshot", { timeout: 180_000 }, async () => {
+test("speaker actions retain dialogue from Markdown beginning with a horizontal rule and run real CPU attribution", { timeout: 180_000 }, async () => {
   const files = initialFiles();
   let snapshot = snapshotFor(files);
   const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-p10-cache-"));
@@ -300,17 +301,22 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.ok(Array.isArray(reviewData.rows));
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
 
+    const holdoutIds = ["sc-synthetic-11", "sc-synthetic-12", "sc-synthetic-13", "sc-synthetic-14"];
+    const holdoutGoldByScene = new Map<string, string | null>(holdoutIds.map((id) => [id, null]));
+    holdoutGoldByScene.set("sc-synthetic-11", "char-hero");
+    const holdoutPredictionsBeforeTraining = new Map<string, string | null>();
     for (let index = 0; index < 14; index += 1) {
       const currentSceneId = `sc-synthetic-${String(index + 1).padStart(2, "0")}`;
       const sceneResult = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: currentSceneId }, host);
       const sceneData = dataOf(sceneResult);
       const row = (sceneData.attributions as typeof attributions)[0]!;
       assert.equal(row.speakerEntityId, "char-hero", `synthetic rule attribution ${currentSceneId}`);
+      if (holdoutIds.includes(currentSceneId)) holdoutPredictionsBeforeTraining.set(currentSceneId, row.speakerEntityId);
       const proposed = await runtime.invokeAction("speaker", "speaker.override", {
         sceneId: currentSceneId,
         sentenceIndex: row.sentenceIndex,
         dialogueText: row.text,
-        speakerEntityId: null,
+        speakerEntityId: holdoutGoldByScene.get(currentSceneId) ?? null,
       }, host);
       const proposalData = dataOf(proposed);
       if (index === 0) assertSpeakerIdentity(proposalData, null);
@@ -330,12 +336,19 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.equal(corrections.trim().split("\n").length, 14);
     assert.ok(corrections.includes('"speakerEntityId":null'));
 
-    const holdoutIds = ["sc-synthetic-13", "sc-synthetic-14"];
     const trained = await runtime.invokeAction("speaker", "speaker.retraining.run", { holdoutSceneIds: holdoutIds }, host);
     assert.deepEqual(jobProgress.get("speaker-retrain"), [[0.05, 1]], "retraining reports only its source preparation and successful completion phases");
     const trainingData = dataOf(trained);
     assertSpeakerIdentity(trainingData, null);
     assert.equal(trainingData.adopted, true, JSON.stringify({ accuracyWithoutModel: trainingData.accuracyWithoutModel, accuracyWithModel: trainingData.accuracyWithModel, deltaPt: trainingData.deltaPt }));
+    const accuracyFromPredictions = (predictions: Map<string, string | null>) => {
+      assert.equal(predictions.size, holdoutIds.length, "accuracy uses one observed prediction for every fixed holdout scene");
+      const correct = [...predictions].filter(([sceneId, predicted]) => holdoutGoldByScene.get(sceneId) === predicted).length;
+      return correct / holdoutIds.length;
+    };
+    assert.equal(trainingData.accuracyWithoutModel, accuracyFromPredictions(holdoutPredictionsBeforeTraining));
+    assert.equal(trainingData.accuracyWithoutModel, 0.25);
+    assert.equal(trainingData.accuracyWithModel, 0.75);
     assert.ok(Number(trainingData.deltaPt) >= 5, JSON.stringify(trainingData));
     assert.ok(Number(trainingData.trainExampleCount) >= 10);
     const trainingProvenance = trainingData.provenance as Record<string, unknown>;
@@ -375,7 +388,7 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.equal(typeof evaluationProvenance.adoptedModelRevision, "string");
     const report = evaluationData.report as { scenes: Array<{ sceneId: string }>; metrics: { attributionAccuracy: number } };
     assert.equal(report.scenes.length, 14);
-    assert.equal(report.metrics.attributionAccuracy, 1, JSON.stringify(report.metrics));
+    assert.equal(report.metrics.attributionAccuracy, 13 / 14, JSON.stringify(report.metrics));
     const latest = await runtime.invokeAction("speaker", "speaker.evaluation.latest", {}, host);
     const latestData = dataOf(latest);
     assertSpeakerIdentity(latestData, adoptedModelRevision);
@@ -417,6 +430,30 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.equal(reloadedRow.reason, "rerank", JSON.stringify(reloadedRow));
     assert.equal((dataOf(await runtime.invokeAction("speaker", "speaker.evaluation.latest", {}, restarted.host))).exists, true);
     assert.equal((dataOf(await runtime.invokeAction("speaker", "speaker.ruleGates", {}, restarted.host))).exists, true);
+
+    for (const id of holdoutIds) {
+      const scenePath = `plot/volumes/volume-1/chapters/chapter-1/scenes/${id}.yaml`;
+      const sceneFile = files.get(scenePath);
+      assert.ok(sceneFile, `holdout scene ${id} exists`);
+      const scene = parse(sceneFile.content) as Record<string, unknown>;
+      delete scene.speakerOverrides;
+      const content = stringify(scene);
+      files.set(scenePath, { content, revision: fileRevision(content) });
+    }
+    snapshot = snapshotFor(files);
+
+    const holdoutPredictionsAfterTraining = new Map<string, string | null>();
+    for (const id of holdoutIds) {
+      const prediction = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: id }, restarted.host);
+      const predictionData = dataOf(prediction);
+      const row = (predictionData.attributions as typeof attributions).find((item) => item.text === "『俺が行く。』");
+      assert.ok(row, `holdout prediction exists for ${id}`);
+      assert.equal(row.reason, "rerank", JSON.stringify(row));
+      holdoutPredictionsAfterTraining.set(id, row.speakerEntityId);
+      assert.notEqual(row.speakerEntityId, holdoutPredictionsBeforeTraining.get(id), `the new model changes the prediction for ${id}`);
+    }
+    assert.equal(accuracyFromPredictions(holdoutPredictionsAfterTraining), 0.75);
+    assert.equal(trainingData.pipelineHoldoutAccuracy, accuracyFromPredictions(holdoutPredictionsAfterTraining));
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "all worker and shared tokenizer processes exit after reload checks");
   } finally {
     await runtime?.shutdown();

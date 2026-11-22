@@ -564,3 +564,209 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Diagnostics consistency and continuity resolve PostgreSQL UUID scopes by canonical type", { timeout: 30_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codexia-diagnostics-scopes-"));
+  const volumeBefore = randomUUID();
+  const volumeScope = randomUUID();
+  const volumeAfter = randomUUID();
+  const chapterBefore = randomUUID();
+  const chapterScope = randomUUID();
+  const chapterSibling = randomUUID();
+  const chapterAfter = randomUUID();
+  const sceneBefore = randomUUID();
+  const sceneScope = randomUUID();
+  const sceneSibling = randomUUID();
+  const sceneAfter = randomUUID();
+  const characterId = randomUUID();
+  const openThreadId = randomUUID();
+  let fixture;
+  let runtime;
+  try {
+    const files = {};
+    const put = (path, value) => { files[path] = YAML.stringify(value); };
+    const volumePath = (id) => `plot/volumes/${id}`;
+    put(`${volumePath(volumeBefore)}/volume.yaml`, { id: volumeBefore, name: "前巻", order: 1 });
+    put(`${volumePath(volumeScope)}/volume.yaml`, { id: volumeScope, name: "対象巻", order: 2 });
+    put(`${volumePath(volumeAfter)}/volume.yaml`, { id: volumeAfter, name: "後巻", order: 3 });
+    put(`${volumePath(volumeBefore)}/chapters/${chapterBefore}/chapter.yaml`, { id: chapterBefore, volume: volumeBefore, order: 1 });
+    put(`${volumePath(volumeScope)}/chapters/${chapterScope}/chapter.yaml`, { id: chapterScope, volume: volumeScope, order: 1 });
+    put(`${volumePath(volumeScope)}/chapters/${chapterSibling}/chapter.yaml`, { id: chapterSibling, volume: volumeScope, order: 2 });
+    put(`${volumePath(volumeAfter)}/chapters/${chapterAfter}/chapter.yaml`, { id: chapterAfter, volume: volumeAfter, order: 1 });
+    const scene = (id, chapter, order, location, mentions) => ({
+      id, type: "scene", chapter, order, location, appears: [characterId], ...(mentions ? { mentions } : {}),
+    });
+    put(`${volumePath(volumeBefore)}/chapters/${chapterBefore}/scenes/${sceneBefore}.yaml`, scene(sceneBefore, chapterBefore, 1, "loc-a"));
+    put(`${volumePath(volumeScope)}/chapters/${chapterScope}/scenes/${sceneScope}.yaml`, scene(sceneScope, chapterScope, 1, "loc-b", ["missing-from-selected-scene"]));
+    put(`${volumePath(volumeScope)}/chapters/${chapterSibling}/scenes/${sceneSibling}.yaml`, scene(sceneSibling, chapterSibling, 1, "loc-a", ["missing-from-sibling-scene"]));
+    put(`${volumePath(volumeAfter)}/chapters/${chapterAfter}/scenes/${sceneAfter}.yaml`, scene(sceneAfter, chapterAfter, 1, "loc-b"));
+    put(`bible/characters/${characterId}/profile.yaml`, { id: characterId, type: "character", name: "主人公" });
+    put("bible/locations/loc-a.yaml", { id: "loc-a", type: "location", name: "場所A" });
+    put("bible/locations/loc-b.yaml", { id: "loc-b", type: "location", name: "場所B" });
+    put(`plot/threads/${openThreadId}.yaml`, { id: openThreadId, type: "thread", status: "open" });
+
+    fixture = await postgresFixture(files, "UUID scope acceptance");
+    runtime = await createRuntime(join(root, "runtime-cache"));
+    const { store, project } = fixture;
+    const reader = await currentReader(store, project.id);
+    const host = actionHost(store, project.id, reader);
+    const invoke = (action, scope) => runtime.invokeAction("diagnostics", action, { scope }, host);
+    const actionDataFor = async (action, scope) => actionData(await invoke(action, scope), `${action} scope ${scope}`, reader);
+
+    const projectConsistency = await actionDataFor("diagnostics.checkConsistency", project.id);
+    const unscopedConsistency = await actionDataFor("diagnostics.checkConsistency", undefined);
+    assert.equal(projectConsistency.scope, project.id, "the PostgreSQL project UUID selects the complete pinned snapshot");
+    assert.deepEqual(projectConsistency.issues, unscopedConsistency.issues);
+    assert.ok(projectConsistency.issues.some((issue) => issue.code === "THREAD_NO_PLANT"));
+    const projectContinuity = await actionDataFor("diagnostics.checkContinuity", project.id);
+    const unscopedContinuity = await actionDataFor("diagnostics.checkContinuity", undefined);
+    assert.equal(projectContinuity.scope, project.id);
+    assert.deepEqual(projectContinuity.warnings, unscopedContinuity.warnings);
+
+    const sceneConsistency = await actionDataFor("diagnostics.checkConsistency", sceneScope);
+    assert.equal(sceneConsistency.scope, sceneScope);
+    assert.ok(sceneConsistency.issues.some((issue) => issue.code === "MISSING_LINK_TARGET" && issue.entityId === sceneScope));
+    assert.ok(!sceneConsistency.issues.some((issue) => issue.entityId === sceneSibling), "scene scope excludes issues sourced from a sibling scene");
+    assert.ok(!sceneConsistency.issues.some((issue) => issue.code === "THREAD_NO_PLANT"), "scene scope excludes project-wide findings unrelated to the selected scene");
+
+    const chapterConsistency = await actionDataFor("diagnostics.checkConsistency", chapterScope);
+    assert.deepEqual(chapterConsistency.issues.map((issue) => issue.entityId), [sceneScope]);
+    const volumeConsistency = await actionDataFor("diagnostics.checkConsistency", volumeScope);
+    assert.deepEqual(new Set(volumeConsistency.issues.map((issue) => issue.entityId)), new Set([sceneScope, sceneSibling]));
+
+    const sceneContinuity = await actionDataFor("diagnostics.checkContinuity", sceneScope);
+    const sceneBoundaryPairs = sceneContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
+      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`);
+    assert.deepEqual(new Set(sceneBoundaryPairs), new Set([
+      `${sceneBefore}->${sceneScope}`, `${sceneScope}->${sceneSibling}`, `${sceneSibling}->${sceneAfter}`,
+    ]), "scene scope includes its adjacent scene context and the context's continuity boundary");
+
+    const chapterContinuity = await actionDataFor("diagnostics.checkContinuity", chapterScope);
+    assert.deepEqual(new Set(chapterContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
+      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`)), new Set(sceneBoundaryPairs));
+    const volumeContinuity = await actionDataFor("diagnostics.checkContinuity", volumeScope);
+    assert.deepEqual(new Set(volumeContinuity.warnings.filter((warning) => warning.reason === "unrecorded-teleport")
+      .map((warning) => `${warning.previousSceneId}->${warning.sceneId}`)), new Set([
+      `${sceneBefore}->${sceneScope}`, `${sceneScope}->${sceneSibling}`, `${sceneSibling}->${sceneAfter}`,
+    ]), "volume scope covers its scenes and the continuity boundary at each end");
+
+    for (const action of ["diagnostics.checkConsistency", "diagnostics.checkContinuity"]) {
+      for (const invalidId of [characterId, randomUUID()]) {
+        const invalid = await invoke(action, invalidId);
+        assert.equal(invalid.ok, false, `${action} must fail closed for entity types other than volume/chapter/scene and unknown IDs`);
+        assert.equal(invalid.error.code, "scope_invalid");
+      }
+    }
+    t.diagnostic("Verified project, volume, chapter, and scene UUID scopes plus continuity boundaries and fail-closed invalid IDs on PostgreSQL.");
+  } finally {
+    await runtime?.shutdown().catch(() => undefined);
+    await fixture?.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("native PostgreSQL scene body diagnostics and revision-bound proposals", { timeout: 120_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codexia-native-diagnostics-"));
+  let fixture;
+  let runtime;
+  try {
+    fixture = await postgresFixture(syntheticFiles(), "Native Diagnostics Work");
+    const { store, project } = fixture;
+    const volumeId = randomUUID();
+    const chapterId = randomUUID();
+    const sceneId = randomUUID();
+    const noteId = randomUUID();
+    const foreignProject = await store.createProject({ title: "Foreign Diagnostics Work" });
+    const foreignDocumentId = randomUUID();
+    const nativeScenePath = `documents/${sceneId}.md`;
+    const nativeNotePath = `documents/${noteId}.md`;
+    const foreignPath = `documents/${foreignDocumentId}.md`;
+    const originalBody = "星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
+    const noteBody = "Do not edit this note…";
+    const authorId = "native-diagnostics-fixture";
+    await fixture.persistence.transaction(async (transaction) => {
+      await transaction.createDocument({
+        projectId: project.id, documentId: volumeId, kind: "volume", title: "Native volume", orderKey: "0001",
+        markdown: "", authorId, idempotencyKey: `native-diagnostics-volume-${volumeId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: chapterId, parentId: volumeId, kind: "chapter", title: "Native chapter", orderKey: "0001",
+        markdown: "", authorId, idempotencyKey: `native-diagnostics-chapter-${chapterId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: sceneId, parentId: chapterId, kind: "scene", title: "Native scene", orderKey: "0001",
+        markdown: originalBody, authorId, idempotencyKey: `native-diagnostics-scene-${sceneId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: noteId, kind: "note", title: "Unrelated note", orderKey: "0001",
+        markdown: noteBody, authorId, idempotencyKey: `native-diagnostics-note-${noteId}`,
+      });
+      await transaction.createDocument({
+        projectId: foreignProject.id, documentId: foreignDocumentId, kind: "scene", title: "Foreign scene", orderKey: "0001",
+        markdown: "foreign scene text…", authorId, idempotencyKey: `native-diagnostics-foreign-${foreignDocumentId}`,
+      });
+    });
+
+    const reader = await currentReader(store, project.id);
+    let host = actionHost(store, project.id, reader);
+    runtime = await createRuntime(join(root, "runtime-cache"));
+    const nativeFile = await reader.read(nativeScenePath);
+    assert.equal(nativeFile?.documentKind, "scene");
+    assert.equal(await reader.read(foreignPath), null, "a PostgreSQL document from another project is absent from the selected snapshot");
+
+    const fullResult = await runtime.invokeAction("diagnostics", "diagnostics.scene", { sceneId }, host);
+    const full = actionData(fullResult, "diagnostics.scene saved native body", reader);
+    assert.equal(full.analysis.charCount, originalBody.length);
+    assert.equal(full.textHash, fnv1aHash(originalBody));
+
+    const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: nativeScenePath, baseRevision: nativeFile.revision, operationId: "native-pg-lint-fix",
+    }, host);
+    const lint = actionData(lintResult, "diagnostics.proposeLintFix native body", reader);
+    const lintProposal = proposalFor(lintResult, "diagnostics.proposeLintFix native body");
+    assert.equal(lint.fixed, true);
+    assert.equal(lintProposal.operations[0].reads[0].revision, nativeFile.revision);
+    assert.equal(lintProposal.operations[0].writes[0].path, nativeScenePath);
+    assert.equal((await store.listProposals(project.id)).find((item) => item.proposal.id === lintProposal.id)?.state, "proposed");
+    assert.equal((await currentReader(store, project.id)).snapshot.projectVersion, reader.snapshot.projectVersion,
+      "an unapproved native lint proposal does not advance the PostgreSQL project version");
+    assert.equal((await reader.read(nativeScenePath)).content, originalBody);
+    assert.equal((await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", { path: nativeNotePath }, host)).ok, false);
+    const foreignLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", { path: foreignPath }, host);
+    assert.equal(foreignLint.ok, false, "a foreign-project document cannot be resolved through this project action context");
+
+    await approveAndApply(store, project.id, lintProposal);
+    let appliedReader = await currentReader(store, project.id);
+    host = actionHost(store, project.id, appliedReader);
+    assert.notEqual((await appliedReader.read(nativeScenePath)).revision, nativeFile.revision);
+    const staleLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: nativeScenePath, baseRevision: nativeFile.revision,
+    }, host);
+    assert.equal(staleLint.ok, false);
+    if (!staleLint.ok) assert.equal(staleLint.error.code, "revision_conflict");
+
+    const storyContext = actionData(await runtime.invokeAction("story", "story.scene.context", { sceneId }, host), "story.scene.context native body", appliedReader);
+    const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId }, host);
+    const formatted = actionData(formatResult, "diagnostics.formatManuscript native body", appliedReader);
+    assert.equal(formatted.formattedText, "星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    const formatProposal = proposalFor(formatResult, "diagnostics.formatManuscript native body");
+    assert.equal(formatProposal.operations[0].reads[0].revision, (await appliedReader.read(nativeScenePath)).revision);
+    assert.equal(formatProposal.operations[0].writes[0].path, nativeScenePath);
+    assert.equal(formatted.sourceProposal.operations[0].target.manuscriptId, storyContext.manuscript.id);
+    assert.equal(formatted.sourceProposal.operations[0].precondition.value, storyContext.manuscriptRevision);
+    assert.equal((await store.listProposals(project.id)).find((item) => item.proposal.id === formatProposal.id)?.state, "proposed");
+    assert.equal((await currentReader(store, project.id)).snapshot.projectVersion, appliedReader.snapshot.projectVersion,
+      "an unapproved native format proposal does not advance the PostgreSQL project version");
+    assert.equal((await appliedReader.read(nativeScenePath)).content, "星野は夜明けを待った……。\n\n\t「もう大丈夫だ。」");
+
+    await approveAndApply(store, project.id, formatProposal);
+    appliedReader = await currentReader(store, project.id);
+    assert.equal((await appliedReader.read(nativeScenePath)).content, formatted.formattedText);
+    assert.equal((await appliedReader.read(nativeNotePath)).content, noteBody);
+    t.diagnostic("Verified saved native-scene diagnostics, scene-only revision-bound proposals, note/foreign-project rejection, stale-revision protection, and PostgreSQL application after approval.");
+  } finally {
+    await runtime?.shutdown().catch(() => undefined);
+    await fixture?.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});

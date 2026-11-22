@@ -51,6 +51,7 @@ const MAX_DIALOGUES = 500;
 const MAX_VOICE_CORPUS_CHARACTERS = 20_000;
 const MAX_VOICE_ATTRIBUTIONS = 100;
 const LINT_PATH_PREFIX = "manuscript/";
+const NATIVE_SCENE_BODY_PATH = /^documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.md$/u;
 const MAX_WORKER_TIME_MS = 120_000;
 const LINT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
 const TONE_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml";
@@ -117,7 +118,9 @@ function parseFix(value: unknown): { path: string; baseRevision?: string; operat
   const input = record(value, "input");
   if (typeof input.path !== "string") throw new TypeError("path must be a manuscript path");
   assertProjectPath(input.path);
-  if (!input.path.startsWith(LINT_PATH_PREFIX) || !input.path.endsWith(".md")) throw new TypeError("path must point to a Markdown file under manuscript/");
+  if (!((input.path.startsWith(LINT_PATH_PREFIX) && input.path.endsWith(".md")) || NATIVE_SCENE_BODY_PATH.test(input.path))) {
+    throw new TypeError("path must point to a Markdown scene manuscript");
+  }
   if (input.baseRevision !== undefined && (typeof input.baseRevision !== "string" || input.baseRevision.length > 256)) throw new TypeError("baseRevision must be a revision string");
   if (input.operationId !== undefined && (typeof input.operationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(input.operationId))) throw new TypeError("operationId must be a stable operation identifier");
   return { path: input.path, ...(typeof input.baseRevision === "string" ? { baseRevision: input.baseRevision } : {}), ...(typeof input.operationId === "string" ? { operationId: input.operationId } : {}) };
@@ -296,6 +299,20 @@ interface SnapshotAnalysisEntity {
   kind: "scene" | "other";
   filePath: string;
   body?: string;
+}
+
+function storyManuscriptId(path: string, fallbackId: string): string {
+  const nativeDocumentId = NATIVE_SCENE_BODY_PATH.exec(path)?.[1];
+  return nativeDocumentId ? `doc-ms-${nativeDocumentId}` : fallbackId;
+}
+
+function isSupportedManuscriptPath(path: string): boolean {
+  return (path.startsWith(LINT_PATH_PREFIX) && path.endsWith(".md")) || NATIVE_SCENE_BODY_PATH.test(path);
+}
+
+function isCanonicalSceneBodyDocument(path: string, file: { documentKind?: string }): boolean {
+  if (NATIVE_SCENE_BODY_PATH.test(path)) return file.documentKind === "scene";
+  return file.documentKind === undefined || file.documentKind === "scene";
 }
 
 /**
@@ -632,7 +649,15 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       const { path, baseRevision, operationId } = value as ReturnType<typeof parseFix>;
       const file = await context.reader.read(path);
       if (!file) throw Object.assign(new Error(`Manuscript not found: ${path}`), { code: "not_found" });
+      if (!isCanonicalSceneBodyDocument(path, file)) {
+        throw Object.assign(new Error("Only canonical scene manuscript bodies can receive lint-fix proposals"), { code: "invalid_path" });
+      }
       if (baseRevision !== undefined && baseRevision !== file.revision) throw Object.assign(new Error("Manuscript revision changed; reload before formatting"), { code: "revision_conflict" });
+      const entities = await readSnapshotAnalysisEntities(context);
+      const linkedScene = entities.find((entity) => entity.kind === "scene" && entity.data.manuscript === path);
+      if (!linkedScene) {
+        throw Object.assign(new Error("Lint-fix path is not the manuscript body of a canonical scene"), { code: "invalid_path" });
+      }
       if (file.content.length > MAX_TEXT_LENGTH + 100_000) throw new TypeError("Manuscript exceeds the lint size limit");
       const config = await loadLintRulesConfig(context.reader);
       const { frontMatter, body } = extractFrontMatter(file.content);
@@ -656,11 +681,17 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       const path = scene.data.manuscript;
       if (typeof path !== "string") throw Object.assign(new Error(`Scene has no manuscript: ${sceneId}`), { code: "not_found" });
       assertProjectPath(path);
-      if (!path.startsWith(LINT_PATH_PREFIX) || !path.endsWith(".md")) throw Object.assign(new Error("Scene manuscript path is invalid"), { code: "invalid_path" });
-      const manuscript = entities.find((entity) => entity.type === "manuscript" && entity.filePath === path);
-      if (!manuscript) throw Object.assign(new Error(`Scene manuscript not found: ${sceneId}`), { code: "not_found" });
+      if (!isSupportedManuscriptPath(path)) throw Object.assign(new Error("Scene manuscript path is invalid"), { code: "invalid_path" });
       const file = await context.reader.read(path);
       if (!file) throw Object.assign(new Error(`Scene manuscript not found: ${sceneId}`), { code: "not_found" });
+      const nativeSceneBody = NATIVE_SCENE_BODY_PATH.test(path);
+      if (!isCanonicalSceneBodyDocument(path, file)) {
+        throw Object.assign(new Error("Scene manuscript path does not identify a canonical scene body"), { code: "invalid_path" });
+      }
+      const manuscript = entities.find((entity) =>
+        entity.filePath === path && (entity.type === "manuscript" || (nativeSceneBody && entity.type === "scene")) && typeof entity.body === "string",
+      );
+      if (!manuscript) throw Object.assign(new Error(`Scene manuscript not found: ${sceneId}`), { code: "not_found" });
       if (file.content.length > MAX_TEXT_LENGTH + 100_000) throw Object.assign(new Error("Manuscript exceeds the formatting size limit"), { code: "too_large" });
 
       const { frontMatter, body } = extractFrontMatter(file.content);
@@ -671,7 +702,7 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       const source = sourceFormatterProposal({
         projectId: context.projectId,
         sceneId,
-        manuscriptId: manuscript.id,
+        manuscriptId: storyManuscriptId(path, manuscript.id),
         manuscriptRevision: sourceManuscriptRevision(manuscript.data, sourceText),
         text: sourceText,
         formattedText,

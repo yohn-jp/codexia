@@ -11,6 +11,7 @@ import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from './ci-coverage-inputs.mjs';
+import { captureTaskInputClosure, taskInputProof } from './ci-task-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -153,6 +154,19 @@ async function executeTaskInContext(task, index, scope) {
     const closure = await captureCoverageInputClosure({ root: process.cwd(), runtime,
       invocation: coverageInvocation(runtime.execPath), workflowJob });
     inputProof = coverageInputProof({ closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime });
+  }
+  if (task !== 'coverage' && !blocked && !error && process.env.GITHUB_RUN_ID !== undefined) {
+    const workflowRunId = Number(process.env.GITHUB_RUN_ID);
+    const workflowAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+    const workflowJob = process.env.GITHUB_JOB;
+    try {
+      const runtime = coverageRuntime();
+      const closure = await captureTaskInputClosure({ root: process.cwd(), sha, task, runtime, invocations: scope.invocations });
+      inputProof = taskInputProof({ task, closure, sourceSha: sha, planDigest: planDigest(plan),
+        workflowRunId, workflowAttempt, workflowJob, runtime });
+    } catch (caught) {
+      console.log(`Task input proof unavailable for ${task}; task result remains executed and future reuse will fall back (${String(caught).replace(/[\r\n]+/gu, ' | ')}).`);
+    }
   }
   const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, invocations: scope.invocations, ...(inputProof ? { inputProof } : {}), ...(error ? { error } : {}) };
   completed.set(task, result);

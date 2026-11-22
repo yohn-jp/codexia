@@ -15,6 +15,7 @@ async function fixture(html, bundle = "void 0;") {
 
 const nativeEnvironment = {
   VITE_CODEXIA_API_ORIGIN: "https://api.example.test",
+  VITE_CODEXIA_PUBLIC_READER_ORIGIN: "https://reader.example.test",
   VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: "codexia-ios-test-public",
   VITE_CODEXIA_API_AUDIENCE: "https://api.example.test/api",
 };
@@ -97,10 +98,22 @@ test("rejects remote production server configuration in the document", async () 
 test("native bundle validation requires its bridge and embedded public iOS configuration", async () => {
   const directory = await fixture(
     '<!doctype html><script type="module" src="./assets/app.js"></script>',
-    ["mobile-shell", "CodexiaAuth", "https://api.example.test/", "codexia-ios-test-public", "https://api.example.test/api"].join(" "),
+    ["mobile-shell", "CodexiaAuth", "https://api.example.test/", "https://reader.example.test/", "codexia-ios-test-public", "https://api.example.test/api"].join(" "),
   );
   try {
     await validateWebBundle(directory, { mode: "native", env: nativeEnvironment });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("native bundle validation allows missing reader configuration but refuses to ship a configured origin without embedding it", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    ["mobile-shell", "CodexiaAuth", "https://api.example.test/", "codexia-ios-test-public", "https://api.example.test/api"].join(" "),
+  );
+  try {
+    const { VITE_CODEXIA_PUBLIC_READER_ORIGIN: _readerOrigin, ...withoutReader } = nativeEnvironment;
+    await validateWebBundle(directory, { mode: "native", env: withoutReader });
+    await assert.rejects(validateWebBundle(directory, { mode: "native", env: nativeEnvironment }), /public reader origin/u);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

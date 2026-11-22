@@ -249,10 +249,12 @@ test("the canonical full plaintext export includes project root scenes once in s
   assert.match(await rootOnlyZip.file("OEBPS/scene-only.xhtml")!.async("string"), /ONLY ROOT BODY/u);
 });
 
-test("the publishing tree lists chapter scenes and counts root scenes without reading manuscript bodies", async () => {
+test("the publishing tree exposes titled root scenes without leaking notes or reading manuscript bodies", async () => {
   const files = fixtureFiles();
-  files.set("plot/volumes/root/chapters/root/scenes/root.yaml", "kind: scene\nid: root\nmanuscript: documents/root.md\n");
+  files.set("plot/volumes/root/chapters/root/scenes/root.yaml", "kind: scene\nid: root\ntitle: 夜の駅\nmanuscript: documents/root.md\n");
+  files.set("plot/volumes/root/chapters/root/scenes/private-note.yaml", "kind: note\nid: private-note\ntitle: Private note\nmanuscript: documents/private-note.md\n");
   files.set("documents/root.md", "Root manuscript body");
+  files.set("documents/private-note.md", "Private note body");
   const reader = new MemoryReader(files);
   const bodyReads: string[] = [];
   const read = reader.read.bind(reader);
@@ -263,7 +265,7 @@ test("the publishing tree lists chapter scenes and counts root scenes without re
   const tree = await invokeAction(await createPublishing(), "publishing.project.tree", {}, actionContext(reader, []));
   assert.deepEqual(bodyReads, []);
   assert.deepEqual(tree, {
-    title: project.title, rootSceneCount: 1, volumes: [{ id: "vol-1", title: "第一巻", chapters: [{
+    title: project.title, rootSceneCount: 1, rootScenes: [{ id: "root", title: "夜の駅" }], volumes: [{ id: "vol-1", title: "第一巻", chapters: [{
       id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }],
     }] }],
   });
@@ -622,6 +624,56 @@ test("project-wide public shares include root scenes in their catalogue and scen
   const scopedCatalogue = await rootSceneCatalogue.json() as { sceneCount: number; rootScenes: Array<{ id: string }> };
   assert.equal(scopedCatalogue.sceneCount, 1);
   assert.deepEqual(scopedCatalogue.rootScenes, [{ id: "root-scene", title: "作品直下のシーン" }]);
+});
+
+test("a proposed root-scene share publishes only the selected same-title manuscript", async () => {
+  const files = fixtureFiles();
+  const rootScenePath = "plot/volumes/root/chapters/root/scenes/root-scene.yaml";
+  files.set(rootScenePath, "kind: scene\nid: root-scene\ntitle: 夜の駅\nmanuscript: documents/root-scene.md\n");
+  files.set("documents/root-scene.md", "ROOT-ONLY BODY\n");
+  const rootNotePath = "plot/volumes/root/chapters/root/scenes/root-note.yaml";
+  files.set(rootNotePath, "id: root-note\ntitle: Private root note\nmanuscript: documents/root-note.md\n");
+  files.set("documents/root-note.md", "PRIVATE NOTE BODY\n");
+  let remote = new MemoryReader(files, makeSnapshot(), new Map([[rootNotePath, "note"]]));
+  const definition = await createPublishing();
+  const proposals: ChangeProposal[] = [];
+  const created = await invokeAction(definition, "publishing.shares.create", {
+    kind: "scene", id: "root-scene", label: "直下シーンの確認", expiresInHours: 24,
+  }, actionContext(remote, proposals));
+  const token = String(created.token);
+  const createOperation = proposals[0]!.operations[0]!;
+  assert.deepEqual(JSON.parse(createOperation.writes[0]!.content!).scope, { kind: "scene", id: "root-scene" });
+
+  const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
+  const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
+  const publicContext = (reader: SnapshotReader) => {
+    const context = actionContext(reader, []);
+    context.invoke = async () => ({ ok: false, snapshot: reader.snapshot, error: {
+      code: "public_action_unavailable", message: "Public routes cannot invoke composed actions", retryable: false,
+    } });
+    return context;
+  };
+  const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
+  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "the proposed share is not public before apply");
+
+  remote = applyOperation(remote, createOperation, NEXT_VERSION);
+  const catalogueResponse = await publicBase.handle(new Request(url), publicContext(remote));
+  assert.equal(catalogueResponse.status, 200);
+  const catalogue = await catalogueResponse.json() as {
+    sceneCount: number;
+    rootScenes: Array<{ id: string; title: string }>;
+    tree: unknown[];
+  };
+  assert.equal(catalogue.sceneCount, 1);
+  assert.deepEqual(catalogue.rootScenes, [{ id: "root-scene", title: "夜の駅" }]);
+  assert.deepEqual(catalogue.tree, []);
+  assert.doesNotMatch(JSON.stringify(catalogue), /PRIVATE NOTE BODY/u);
+
+  const rootResponse = await publicScene.handle(new Request(url + "/scenes/root-scene"), publicContext(remote));
+  assert.equal(rootResponse.status, 200);
+  assert.equal((await rootResponse.json() as { body: string }).body, "ROOT-ONLY BODY\n");
+  assert.equal((await publicScene.handle(new Request(url + "/scenes/sc-1"), publicContext(remote))).status, 404,
+    "the same-title chapter scene is outside the selected root-scene scope");
 });
 
 test("public share refuses a root scene that collides with an existing chapter scene ID", async () => {

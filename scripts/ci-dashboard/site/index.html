@@ -32,6 +32,9 @@
         <div class="control">
           <label for="pr">対象PR・リビジョン</label>
           <select id="pr" aria-label="分析対象のPRを選択" disabled><option>データを取得しています</option></select>
+          <button id="copy-diagnostics" class="copy-diagnostics" type="button" disabled aria-describedby="copy-hint">診断JSONをコピー</button>
+          <small id="copy-hint">選択したPRの実測値と比較サンプルをコピー</small>
+          <span id="copy-status" role="status" aria-live="polite"></span>
         </div>
       </div>
       <div class="status" id="status" role="status">実測データを読み込んでいます。</div>

@@ -8,6 +8,8 @@ Native API requests use the plugin's restricted HTTPS transport, not WebView `fe
 
 The API transport requires `VITE_CODEXIA_API_ORIGIN` to be an explicit HTTPS origin. Native OAuth remains disabled unless `VITE_CODEXIA_OAUTH_IOS_CLIENT_ID` is set. The public resource indicator uses `VITE_CODEXIA_API_AUDIENCE` when supplied, otherwise it is `${VITE_CODEXIA_API_ORIGIN}/api`. The issuer and OAuth endpoints are fixed by the Better Auth contract under that API origin. The native OAuth client ID is public configuration, not a secret; do not set a client secret in the iOS bundle.
 
+Set `VITE_CODEXIA_PUBLIC_READER_ORIGIN` to the public reader site's HTTPS origin when the native app should create distributable publication links. It accepts an origin only, without credentials, path, query, or fragment, and is independent of `VITE_CODEXIA_API_ORIGIN`. If it is unset, the share panel cannot create a link and never substitutes the Capacitor WebView origin. Web builds continue to use their current page origin.
+
 Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Better Auth 1.7.27 does not individually revoke already-issued API JWTs; those short-lived tokens can remain valid until their expiration.
 
 `npm test` runs native configuration, API-origin, callback-scheme, and bridge guard checks. The unsigned iOS workflow installs the isolated Capacitor toolchain before bundling, generates the project, registers the callback scheme, and resolves AppAuth through Swift Package Manager. Its macOS build verifies native compilation and IPA structure, not a configured provider, live API, signed install, or physical-device acceptance.

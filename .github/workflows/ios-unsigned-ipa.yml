@@ -28,6 +28,10 @@ on:
         description: Explicit HTTPS API origin for this native bundle. Public configuration only; no credentials or path.
         required: true
         type: string
+      reader_origin:
+        description: Optional public HTTPS reader origin for native publication links. No credentials or path.
+        required: false
+        type: string
       ios_client_id:
         description: Registered public iOS OAuth client ID. Do not enter a client secret.
         required: true
@@ -88,6 +92,7 @@ jobs:
           CODEXIA_PROFILE: ${{ matrix.profile }}
           CODEXIA_UI: mobile
           VITE_CODEXIA_API_ORIGIN: ${{ inputs.api_origin }}
+          VITE_CODEXIA_PUBLIC_READER_ORIGIN: ${{ inputs.reader_origin }}
           VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: ${{ inputs.ios_client_id }}
           VITE_CODEXIA_API_AUDIENCE: ${{ inputs.api_audience }}
         run: |
@@ -96,6 +101,7 @@ jobs:
             if [ -z "$VITE_CODEXIA_OAUTH_IOS_CLIENT_ID" ]; then echo "A registered public iOS client ID is required for distribution." >&2; exit 1; fi
           else
             export VITE_CODEXIA_API_ORIGIN=https://api.example.test
+            export VITE_CODEXIA_PUBLIC_READER_ORIGIN=https://reader.example.test
             export VITE_CODEXIA_OAUTH_IOS_CLIENT_ID=codexia-ios-build-test-public
             export VITE_CODEXIA_API_AUDIENCE=https://api.example.test/api
           fi
@@ -104,11 +110,13 @@ jobs:
       - name: Validate Mobile Web and native web bundles
         env:
           VITE_CODEXIA_API_ORIGIN: ${{ inputs.api_origin }}
+          VITE_CODEXIA_PUBLIC_READER_ORIGIN: ${{ inputs.reader_origin }}
           VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: ${{ inputs.ios_client_id }}
           VITE_CODEXIA_API_AUDIENCE: ${{ inputs.api_audience }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
             export VITE_CODEXIA_API_ORIGIN=https://api.example.test
+            export VITE_CODEXIA_PUBLIC_READER_ORIGIN=https://reader.example.test
             export VITE_CODEXIA_OAUTH_IOS_CLIENT_ID=codexia-ios-build-test-public
             export VITE_CODEXIA_API_AUDIENCE=https://api.example.test/api
           fi

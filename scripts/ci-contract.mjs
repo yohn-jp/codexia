@@ -17,7 +17,7 @@ export const PROFILES = ['core', 'full'];
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
   { id: 'oauth-web', project: 'chromium', file: 'oauth-web.acceptance.spec.ts' },
-  ...['core', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
+  ...['core', 'outline-headings', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
   { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
 export const NATIVE_SELECTIONS = ['catalog', 'core', 'selected', 'full'];
@@ -45,7 +45,7 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-writing`, ['core', 'outline-headings', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
     [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],

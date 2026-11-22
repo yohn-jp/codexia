@@ -4,12 +4,14 @@ import { ApiError } from "../api-error";
 import { beginOAuthAuthorization, completeOAuthAuthorization, webOAuthConfig, type OAuthWebConfig } from "../oauth";
 import { authClient } from "../auth-client";
 import { PersistenceWorkspace } from "./PersistenceWorkspace";
+import { attemptNativeLogout } from "./nativeLogout";
+import type { NativeSignOutResult } from "../../native/plugins/codexia-auth/src/index.mjs";
 
 type EntryState = "checking" | "signed-out" | "database" | "failed";
 
 export interface NativePersistenceAuth {
   signIn(): Promise<void>;
-  signOut(): Promise<void>;
+  signOut(): Promise<NativeSignOutResult>;
 }
 
 export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null }) {
@@ -164,14 +166,24 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     setBusy(true);
     setMessage("");
     try {
-      if (!await protectBeforeAuthTransition("ログアウト")) return;
-      setSessionBlocked(true);
-      await nativeAuth.signOut();
-      workspaceScopeRef.current = null;
-      setSessionBlocked(false);
-      setState("signed-out");
-    } catch (error) {
-      setMessage(`ログアウトを確認できませんでした。原稿を保護したまま再試行してください。${error instanceof Error ? ` ${error.message}` : ""}`);
+      const outcome = await attemptNativeLogout({
+        protectDraft: () => protectBeforeAuthTransition("ログアウト"),
+        blockWorkspace: () => setSessionBlocked(true),
+        signOut: nativeAuth.signOut,
+      });
+      if (outcome.kind === "draft-unprotected") return;
+      if (outcome.kind === "complete") {
+        workspaceScopeRef.current = null;
+        setSessionBlocked(false);
+        setState("signed-out");
+        return;
+      }
+      if (outcome.kind === "revocation-unconfirmed") {
+        workspaceScopeRef.current = null;
+        setSessionBlocked(false);
+        setState("signed-out");
+      }
+      setMessage(outcome.message);
     } finally {
       setBusy(false);
     }

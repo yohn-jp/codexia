@@ -164,27 +164,23 @@ function orderedScenes(entities: Map<string, Entity>): Entity[] {
       .sort((a, b) => Number(a.raw.order ?? 0) - Number(b.raw.order ?? 0))));
 }
 
-function resolveScope(entities: Map<string, Entity>, scope?: string): { kind: ScopeKind; sceneIds: string[] } {
+function resolveScope(entities: Map<string, Entity>, projectId: string, scope?: string): { kind: ScopeKind; sceneIds: string[] } {
   const trimmed = scope?.trim() || undefined;
-  if (!trimmed) return { kind: "all", sceneIds: [...entities.values()].filter((entity) => entity.type === "scene").map((entity) => entity.id) };
-  const scenes = orderedScenes(entities);
-  if (trimmed.startsWith("sc-")) {
-    if (entities.get(trimmed)?.type !== "scene") throw Object.assign(new Error(`Scene not found: ${trimmed}`), { code: "scope_invalid" });
-    return { kind: "scene", sceneIds: [trimmed] };
+  if (!trimmed || trimmed === projectId) return { kind: "all", sceneIds: [...entities.values()].filter((entity) => entity.type === "scene").map((entity) => entity.id) };
+  const entity = entities.get(trimmed);
+  if (entity?.type === "scene") return { kind: "scene", sceneIds: [entity.id] };
+  if (entity?.type === "chapter") {
+    const parentVolume = entities.get(String(entity.raw.volume));
+    if (parentVolume?.type !== "volume") throw Object.assign(new Error(`Chapter not found: ${trimmed}`), { code: "scope_invalid" });
+    const scenes = orderedScenes(entities);
+    return { kind: "chapter", sceneIds: scenes.filter((scene) => scene.raw.chapter === entity.id || scene.raw.chapter === entity.raw.id).map((scene) => scene.id) };
   }
-  if (trimmed.startsWith("ch-")) {
-    const chapter = [...entities.values()].find((entity) => entity.type === "chapter" && entity.id === trimmed);
-    const volumes = [...entities.values()].filter((entity) => entity.type === "volume");
-    if (!chapter || !volumes.some((volume) => chapter.raw.volume === volume.id || String(chapter.raw.volume) === volume.id)) throw Object.assign(new Error(`Chapter not found: ${trimmed}`), { code: "scope_invalid" });
-    return { kind: "chapter", sceneIds: scenes.filter((scene) => scene.raw.chapter === chapter.id || scene.raw.chapter === chapter.raw.id).map((scene) => scene.id) };
-  }
-  if (trimmed.startsWith("vol-")) {
-    const volume = [...entities.values()].find((entity) => entity.type === "volume" && entity.id === trimmed);
-    if (!volume) throw Object.assign(new Error(`Volume not found: ${trimmed}`), { code: "scope_invalid" });
-    const chapterIds = new Set([...entities.values()].filter((entity) => entity.type === "chapter" && (entity.raw.volume === volume.id || String(entity.raw.volume) === volume.id)).map((entity) => entity.id));
+  if (entity?.type === "volume") {
+    const scenes = orderedScenes(entities);
+    const chapterIds = new Set([...entities.values()].filter((candidate) => candidate.type === "chapter" && (candidate.raw.volume === entity.id || String(candidate.raw.volume) === entity.id)).map((candidate) => candidate.id));
     return { kind: "volume", sceneIds: scenes.filter((scene) => typeof scene.raw.chapter === "string" && chapterIds.has(scene.raw.chapter)).map((scene) => scene.id) };
   }
-  throw Object.assign(new Error(`Invalid scope "${trimmed}": expected sc-*, ch-*, or vol-* prefix`), { code: "scope_invalid" });
+  throw Object.assign(new Error(`Invalid scope "${trimmed}": expected a project, volume, chapter, or scene ID from this snapshot`), { code: "scope_invalid" });
 }
 
 function expandScopeWithNeighbors(entities: Map<string, Entity>, sceneIds: string[], kind: ScopeKind): string[] {
@@ -407,7 +403,7 @@ function detectContinuityWarnings(entities: Map<string, Entity>, sceneInfos: Sce
 
 export async function checkProjectConsistency(reader: SnapshotReader, signal: AbortSignal, scope?: string): Promise<ValidationIssue[]> {
   const project = await readProject(reader, signal);
-  const resolved = resolveScope(project.entities, scope);
+  const resolved = resolveScope(project.entities, reader.snapshot.projectId, scope);
   const issues = validateProject(project.entities, project.links, project.duplicateIds);
   if (resolved.kind === "all") return issues;
   const selected = new Set(resolved.sceneIds);
@@ -421,7 +417,7 @@ export async function checkProjectConsistency(reader: SnapshotReader, signal: Ab
 
 export async function checkProjectContinuity(reader: SnapshotReader, signal: AbortSignal, scope?: string): Promise<ContinuityWarning[]> {
   const project = await readProject(reader, signal);
-  const resolved = resolveScope(project.entities, scope);
+  const resolved = resolveScope(project.entities, reader.snapshot.projectId, scope);
   const selected = resolved.kind === "all" ? null : new Set(expandScopeWithNeighbors(project.entities, resolved.sceneIds, resolved.kind));
   const sceneInfos = buildSceneLocationInfos(project.entities, project.links);
   const timelineScenes = sceneInfos.map((info) => {

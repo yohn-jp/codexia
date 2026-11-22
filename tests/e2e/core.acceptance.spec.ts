@@ -184,7 +184,7 @@ test("revision history keeps immutable content through a foreground refresh", as
 test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   const second = await context.newPage(); await second.goto(page.url());
-  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
+  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
   try {
     await editor(page).fill("First tab protected draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "First tab protected draft.")).toBe(true);
@@ -203,7 +203,7 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   });
   const text = "Printed from the newest editor input."; await replaceEditor(page, text);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
   await expect(editorAlert).toContainText("日本語入力の変換が完了していません");
@@ -438,9 +438,9 @@ test("undoing an autosave draft back to the saved revision removes only that dra
   await editor(page).press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
   await expect(page.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeEnabled();
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await page.clock.fastForward(1_100);
@@ -500,7 +500,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     // PostgreSQL save before switching documents.
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
     await gate.seen;
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     // The guarded selection is asynchronous: do not type until Scene Two owns
     // the mounted editor, otherwise the test edits Scene One again.
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
@@ -511,7 +511,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
       return records.find((entry) => entry.documentId === f.one.document.id)?.markdown
         ?? `Missing Scene One draft (present: ${records.map((entry) => entry.documentId).join(", ")})`;
     }).toBe("Scene One protected draft.");
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
     await expectEditor(page, "Scene One protected draft.");
   } finally { gate.release(); }
 });
@@ -694,7 +694,7 @@ async function delayImages(page: Page): Promise<void> {
 test("a pending scratch image read is flushed to its captured document before navigation", async ({ page }) => {
   await delayImages(page); const f = await fixture(page); await scratch(page);
   await memo(page).fill("Attachment belongs to Scene One."); await image(page).setInputFiles(png);
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One.") && r.text.includes("data:image/png;base64"))).toBe(true);
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
@@ -801,9 +801,9 @@ test("scratch still protects text and accepts a new image after an oversized att
   await image(page).setInputFiles({ name: "too-large.png", mimeType: "image/png", buffer: Buffer.alloc(3 * 1024 * 1024 + 1) });
   await expect(page.locator(".scratch-panel").getByRole("alert")).toContainText("3MB以下");
   await memo(page).fill("Scratch remains usable after a rejected attachment.");
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await scratch(page);
   await expect(memo(page)).toHaveValue("Scratch remains usable after a rejected attachment.");
@@ -949,7 +949,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(memo(page)).toBeDisabled();
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   expect(await record()).toMatchObject(original!);
   await page.evaluate(() => sessionStorage.removeItem("hold-scratch-read"));
@@ -959,7 +959,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   expect(await record()).toMatchObject(unreadable);
 });
@@ -1040,7 +1040,7 @@ test("scratch text and image input survive while navigation waits for protection
   await memo(page).fill("Scratch write held during navigation.");
   await page.waitForFunction(() => (window as Window & { __scratchProtectionGate?: { started: boolean } }).__scratchProtectionGate?.started === true);
 
-  const sceneTwo = page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ });
+  const sceneTwo = page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true });
   await sceneTwo.click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await memo(page).fill("Latest scratch input during protection.");
@@ -1102,12 +1102,12 @@ test("late document activation cannot replace explicit scene navigation", async 
   const f = await fixture(page); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
   try {
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    const sceneOne = page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ });
+    const sceneOne = page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true });
     await sceneOne.click(); await seen;
     await expect(sceneOne).toHaveAttribute("aria-current", "page");
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible(); release();
     await expectEditor(page, f.two.revision.markdown);
   } finally { release(); }
@@ -1117,7 +1117,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
     await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(page, f, "External PostgreSQL version.");
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     await expectEditor(page, f.two.revision.markdown); gate.release();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Pending Scene One draft before explicit navigation.")).toBe(true);
@@ -1126,7 +1126,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
 
 test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page }) => {
   const f = await fixture(page);
-  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   for (const name of ["online", "focus", "visibilitychange"]) await page.evaluate((event) => window.dispatchEvent(new Event(event)), name);
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expectEditor(page, f.two.revision.markdown);
@@ -1140,7 +1140,7 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   await page.reload(); await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
   expect((await page.request.get("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
-  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
+  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
   await expectEditor(page, f.one.revision.markdown);
 });
 
@@ -1164,39 +1164,208 @@ test("a project containing only root scenes can export its full text from the pu
   for (const scene of [one, two]) expect(text).toContain(scene.revision.markdown.trim());
 });
 
-test("publishing lists link states and chapter names independently of the new link selection", async ({ page }) => {
+test("native publishing does not create a distributable link without a public reader origin", async ({ page }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  const { projectId } = await fixture(page);
-  const volumeId = randomUUID();
-  const chapterId = randomUUID();
-  const sceneId = randomUUID();
-  const tree = { title: "潮待ち", volumes: [{ id: volumeId, title: "第一巻", chapters: [{
-    id: chapterId, title: "第二章", scenes: [{ id: sceneId, title: "出港" }],
-  }] }] };
-  const shares = [
-    { label: "現行リンク", active: true, expiresAt: "2099-02-01T00:00:00Z" },
-    { label: "期限切れのリンク", active: false, expiresAt: "2000-02-01T00:00:00Z" },
-    { label: "失効したリンク", active: false, expiresAt: "2099-02-01T00:00:00Z", revokedAt: "2000-01-02T00:00:00Z" },
-  ].map((share) => ({ ...share, id: randomUUID(), scope: { kind: "chapter", id: chapterId }, createdAt: "2000-01-01T00:00:00Z" }));
-
-  for (const [action, data] of Object.entries({ "publishing.project.tree": tree, "publishing.shares.list": { shares } })) {
-    await page.route(`**/api/projects/${projectId}/actions/${action}`, async (route) => {
-      const response = await route.fetch();
-      const result = await response.json();
-      await route.fulfill({ response, json: { ...result, data } });
-    });
-  }
+  await page.addInitScript(() => {
+    (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: null };
+  });
+  const f = await fixture(page);
   const menu = page.locator(".st-workspace-panel-menu");
   await menu.locator("summary").click();
   await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
   const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
-  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(chapterId);
-  await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("volume");
-  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(volumeId);
+  await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("scene");
+  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(f.one.document.id);
+  await expect(panel.getByRole("status")).toContainText("公開読者サイトのHTTPS URLが未設定");
+  await expect(panel.getByRole("button", { name: "リンク発行の提案を作成" })).toBeDisabled();
+  await expect(panel.locator("code")).toHaveCount(0);
+});
 
-  for (const [label, state] of [["現行リンク", "公開済み"], ["期限切れのリンク", "期限切れ"], ["失効したリンク", "失効済み"]]) {
-    const row = panel.getByRole("listitem").filter({ has: page.getByText(label, { exact: true }) });
-    await expect(row).toContainText("第一巻 / 第二章");
-    await expect(row.getByText(state, { exact: true })).toBeVisible();
+test("native publishing uses the external reader origin and preserves proposal, scope, expiration, and revocation", async ({ page, browser }) => {
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
+  const webViewOrigin = new URL(appBaseURL).origin;
+  const publicReaderOrigin = new URL(webViewOrigin);
+  publicReaderOrigin.protocol = "https:";
+  publicReaderOrigin.hostname = "reader.example.test";
+  await page.addInitScript((readerOrigin) => {
+    (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: readerOrigin };
+  }, publicReaderOrigin.origin);
+  await ownerLogin(page);
+  const origin = new URL(page.url()).origin;
+  expect(origin).toBe(webViewOrigin);
+  expect(origin).not.toBe(publicReaderOrigin.origin);
+  const projectResponse = await page.request.post(`${origin}${rootPath}`, {
+    headers: mutationHeaders(),
+    data: { title: `Publishing root share ${randomUUID()}` },
+  });
+  expect(projectResponse.status(), await projectResponse.text()).toBe(201);
+  const { project } = await projectResponse.json() as { project: { id: string } };
+  const projectId = project.id;
+  const createDocument = async (input: { kind: string; title: string; orderKey: string; markdown: string; parentId?: string | null }) => {
+    const response = await page.request.post(`${origin}${rootPath}/${projectId}/documents`, {
+      headers: mutationHeaders({ "Idempotency-Key": randomUUID() }),
+      data: input,
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return response.json() as Promise<{ document: { id: string } }>;
+  };
+  const volume = await createDocument({ kind: "volume", title: "第一巻", orderKey: "a", markdown: "" });
+  const chapter = await createDocument({ kind: "chapter", title: "第二章", orderKey: "a", markdown: "", parentId: volume.document.id });
+  const chapterScene = await createDocument({
+    kind: "scene", title: "同じタイトル", orderKey: "a", markdown: "CHAPTER-ONLY BODY\n", parentId: chapter.document.id,
+  });
+  const otherChapterScene = await createDocument({ kind: "scene", title: "別の節", orderKey: "b", markdown: "ANOTHER CHAPTER BODY\n", parentId: chapter.document.id });
+  const rootScene = await createDocument({ kind: "scene", title: "同じタイトル", orderKey: "a", markdown: "ROOT-ONLY BODY\n", parentId: null });
+  await createDocument({ kind: "note", title: "PRIVATE NOTE", orderKey: "b", markdown: "PRIVATE NOTE BODY\n", parentId: null });
+  await page.goto(`/desktop/projects/${projectId}/scenes/${chapterScene.document.id}`);
+  await expect(editor(page)).toBeVisible();
+
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
+  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
+  const scope = panel.getByRole("combobox", { name: "範囲", exact: true });
+  const target = panel.getByRole("combobox", { name: "対象", exact: true });
+  const approveAndApply = async (proposalId: string) => {
+    const proposalResponse = await page.request.get(`${origin}/api/projects/${projectId}/proposals/${encodeURIComponent(proposalId)}`);
+    expect(proposalResponse.ok(), await proposalResponse.text()).toBe(true);
+    const proposalStatus = await proposalResponse.json() as {
+      proposal: { operations: Array<{ id: string }> };
+    };
+    const operations = proposalStatus.proposal.operations;
+    expect(operations.length).toBeGreaterThan(0);
+    const approval = await page.request.post(`${origin}/api/projects/${projectId}/approvals`, {
+      headers: mutationHeaders(),
+      data: { proposalId, operationIds: operations.map((operation) => operation.id) },
+    });
+    expect(approval.status(), await approval.text()).toBe(204);
+    for (const operation of operations) {
+      const applied = await page.request.post(`${origin}/api/projects/${projectId}/apply`, {
+        headers: mutationHeaders(),
+        data: operation,
+      });
+      expect(applied.status(), await applied.text()).toBe(201);
+    }
+  };
+  await scope.selectOption("volume");
+  await expect(target).toHaveValue(volume.document.id);
+  await scope.selectOption("chapter");
+  await expect(target).toHaveValue(chapter.document.id);
+  await scope.selectOption("scene");
+  await expect(target).toHaveValue(rootScene.document.id);
+  await expect(target.locator("option")).toHaveText([
+    "作品直下 / 同じタイトル",
+    "第一巻 / 第二章 / 同じタイトル",
+    "第一巻 / 第二章 / 別の節",
+  ]);
+  await target.selectOption(rootScene.document.id);
+  await panel.getByLabel("表示名").fill("作品直下リンク");
+  const shareResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST" && url.pathname.endsWith("/actions/publishing.shares.create");
+  });
+  await panel.getByRole("button", { name: "リンク発行の提案を作成", exact: true }).click();
+  const actionResponse = await shareResponse;
+  expect(actionResponse.ok(), await actionResponse.text()).toBe(true);
+  const actionBody = await actionResponse.json() as {
+    ok: boolean;
+    data: { token: string; proposalId: string; share: { id: string } };
+  };
+  expect(actionBody.ok).toBe(true);
+  expect(actionResponse.request().postDataJSON()).toMatchObject({ input: { kind: "scene", id: rootScene.document.id } });
+  await expect(panel).toContainText("発行提案中 作品直下 / 同じタイトル");
+  await expect(panel).toContainText(`提案 ${actionBody.data.proposalId}`);
+
+  const issuedUrl = new URL(await panel.locator("code").innerText());
+  expect(issuedUrl.origin).toBe(publicReaderOrigin.origin);
+  expect(issuedUrl.origin).not.toBe(origin);
+  expect(issuedUrl.pathname).toBe(`/r/publishing/${projectId}/${actionBody.data.token}`);
+  const readerContext = await browser.newContext();
+  await readerContext.route(`${publicReaderOrigin.origin}/**`, async (route) => {
+    const forwarded = new URL(route.request().url());
+    forwarded.protocol = "http:";
+    forwarded.hostname = new URL(webViewOrigin).hostname;
+    await route.fulfill({ response: await route.fetch({ url: forwarded.toString() }) });
+  });
+  const readerPage = await readerContext.newPage();
+  const publicReaderRequests: string[] = [];
+  readerPage.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/public/projects/")) publicReaderRequests.push(url.origin);
+  });
+  try {
+    await readerPage.goto(issuedUrl.toString());
+    await expect(readerPage.getByRole("heading", { name: "共有された原稿" })).toBeVisible();
+    await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
+
+    await approveAndApply(actionBody.data.proposalId);
+
+    const publicBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(actionBody.data.token)}`;
+    const catalogueResponse = await page.request.get(publicBase);
+    expect(catalogueResponse.ok(), await catalogueResponse.text()).toBe(true);
+    const catalogue = await catalogueResponse.json() as {
+      sceneCount: number;
+      rootScenes: Array<{ id: string; title: string }>;
+      tree: unknown[];
+    };
+    expect(catalogue.sceneCount).toBe(1);
+    expect(catalogue.rootScenes).toEqual([{ id: rootScene.document.id, title: "同じタイトル" }]);
+    expect(catalogue.tree).toEqual([]);
+    await expect.poll(() => publicReaderRequests.length).toBeGreaterThan(0);
+    expect(publicReaderRequests.every((requestOrigin) => requestOrigin === publicReaderOrigin.origin)).toBe(true);
+    await readerPage.goto(issuedUrl.toString());
+    const selected = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(rootScene.document.id)}`);
+    expect(selected.ok(), await selected.text()).toBe(true);
+    expect(await selected.json()).toMatchObject({ id: rootScene.document.id, body: "ROOT-ONLY BODY\n" });
+    const other = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(chapterScene.document.id)}`);
+    expect(other.status()).toBe(404);
+    const secondChapterScene = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(otherChapterScene.document.id)}`);
+    expect(secondChapterScene.status()).toBe(404);
+    await expect(readerPage.getByRole("region", { name: "作品直下のシーン" }).getByRole("button")).toHaveText("同じタイトル");
+    await readerPage.getByRole("button", { name: "同じタイトル", exact: true }).click();
+    await expect(readerPage.getByText("ROOT-ONLY BODY")).toBeVisible();
+    await expect(readerPage.getByText("CHAPTER-ONLY BODY")).toHaveCount(0);
+
+    const shortExpiryResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.create`, {
+      headers: mutationHeaders(),
+      data: { input: { kind: "scene", id: rootScene.document.id, label: "短時間リンク", expiresInHours: 0.005 } },
+    });
+    expect(shortExpiryResponse.ok(), await shortExpiryResponse.text()).toBe(true);
+    const shortExpiryAction = await shortExpiryResponse.json() as {
+      data: { token: string; proposalId: string; share: { id: string; expiresAt: string } };
+    };
+    await approveAndApply(shortExpiryAction.data.proposalId);
+    const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
+    const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
+    expect((await page.request.get(shortExpiryBase)).ok()).toBe(true);
+    await page.waitForTimeout(Math.max(0, Date.parse(shortExpiryAction.data.share.expiresAt) - Date.now() + 100));
+    await readerPage.goto(shortExpiryUrl.toString());
+    await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
+    const expiredListResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
+      headers: mutationHeaders(), data: { input: {} },
+    });
+    expect(expiredListResponse.ok(), await expiredListResponse.text()).toBe(true);
+    const expiredList = await expiredListResponse.json() as { data: { shares: Array<{ id: string; active: boolean }> } };
+    expect(expiredList.data.shares.find((share) => share.id === shortExpiryAction.data.share.id)?.active).toBe(false);
+
+    const revokeResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.revoke`, {
+      headers: mutationHeaders(), data: { input: { id: actionBody.data.share.id } },
+    });
+    expect(revokeResponse.ok(), await revokeResponse.text()).toBe(true);
+    const revokeAction = await revokeResponse.json() as { data: { proposalId: string } };
+    expect((await page.request.get(publicBase)).ok(), "proposed revocation does not affect the published snapshot").toBe(true);
+    await approveAndApply(revokeAction.data.proposalId);
+    await readerPage.goto(issuedUrl.toString());
+    await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
+    const revokedListResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
+      headers: mutationHeaders(), data: { input: {} },
+    });
+    expect(revokedListResponse.ok(), await revokedListResponse.text()).toBe(true);
+    const revokedList = await revokedListResponse.json() as { data: { shares: Array<{ id: string; active: boolean; revokedAt?: string }> } };
+    const revokedShare = revokedList.data.shares.find((share) => share.id === actionBody.data.share.id);
+    expect(revokedShare?.active).toBe(false);
+    expect(revokedShare?.revokedAt).toBeTruthy();
+  } finally {
+    await readerContext.close();
   }
 });

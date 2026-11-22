@@ -24,6 +24,7 @@ export interface ManuscriptInputHandle {
   flushComposition(): Promise<string>;
   readForNavigation(): string;
   insert(symbol: WritingSymbolId): void;
+  revealOffset(offset: number, focus?: boolean): boolean;
   restorePosition(position: ManuscriptPosition): void;
   getScrollTop(): number;
   getSelection(): { from: number; to: number; text: string } | null;
@@ -178,6 +179,19 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       const cursorDomPosition = view.domAtPos(plan.cursor);
       view.contentDOM.ownerDocument.getSelection()?.collapse(cursorDomPosition.node, cursorDomPosition.offset);
     },
+    revealOffset(offset, focus = true) {
+      const view = viewRef.current;
+      if (!view || isViewComposing(view) || !Number.isSafeInteger(offset) || offset < 0 || offset > view.state.doc.length) return false;
+      suppressPositionRef.current = true;
+      view.dispatch({
+        selection: { anchor: offset },
+        scrollIntoView: true,
+        annotations: Transaction.addToHistory.of(false),
+      });
+      if (focus) view.focus();
+      requestAnimationFrame(() => requestAnimationFrame(() => { suppressPositionRef.current = false; }));
+      return true;
+    },
     restorePosition,
     getScrollTop() {
       return Math.max(0, viewRef.current?.scrollDOM.scrollTop ?? 0);
@@ -239,7 +253,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
               to: Math.max(selection.anchor, selection.head),
               text: update.state.sliceDoc(Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)),
             });
-            if (!externalSyncRef.current) {
+            if (!externalSyncRef.current && !suppressPositionRef.current) {
               latestRef.current.onCursorPositionChange?.(
                 (changedDocumentIndex ?? sentencePositionIndex(update.state.doc)).indexAtOffset(selection.head),
                 Math.max(0, viewRef.current?.scrollDOM.scrollTop ?? 0),

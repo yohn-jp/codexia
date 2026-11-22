@@ -59,6 +59,29 @@ test("native public-client configuration cannot replace the registered callback"
   assert.throws(() => createNativeAuth({ ...config, redirectUri: "https://attacker.example.test/callback" }), /configuration is invalid/);
 });
 
+test("native sign-out preserves device credential clearing and revocation outcomes from the bridge", async () => {
+  for (const revoked of [true, false]) {
+    const auth = createNativeAuth(config, {
+      nativePlugin: { signOut: async () => ({ localCredentialsCleared: true, revoked }) },
+    });
+    assert.deepEqual(await auth.signOut(), { localCredentialsCleared: true, revoked });
+  }
+});
+
+test("native sign-out exposes an injected bridge exception for the entry to report", async () => {
+  const auth = createNativeAuth(config, {
+    nativePlugin: { signOut: async () => { throw new Error("Native bridge unavailable"); } },
+  });
+  await assert.rejects(auth.signOut(), /Native bridge unavailable/u);
+});
+
+test("native sign-out does not infer local credential clearing from an incomplete bridge result", async () => {
+  const auth = createNativeAuth(config, {
+    nativePlugin: { signOut: async () => ({ revoked: true }) },
+  });
+  assert.deepEqual(await auth.signOut(), { localCredentialsCleared: false, revoked: true });
+});
+
 test("native API transport carries only the validated bearer request over its injected bridge", async () => {
   const calls = [];
   const auth = createNativeAuth(config, {

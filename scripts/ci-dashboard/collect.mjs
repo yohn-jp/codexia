@@ -19,6 +19,7 @@ async function main() {
   await cp(fileURLToPath(new URL('./collection.mjs', import.meta.url)), join(dest, 'collection.mjs'));
   await cp(fileURLToPath(new URL('../../.github/workflows/verify.yml', import.meta.url)), join(dest, 'verify.yml'));
   await cp(fileURLToPath(new URL('./analysis.mjs', import.meta.url)), join(dest, 'analysis.mjs'));
+  await cp(fileURLToPath(new URL('./diagnostics.mjs', import.meta.url)), join(dest, 'diagnostics.mjs'));
   await cp(fileURLToPath(new URL('../ci-timing.mjs', import.meta.url)), join(root, 'ci-timing.mjs'));
   await cp(fileURLToPath(new URL('../ci-contract.mjs', import.meta.url)), join(root, 'ci-contract.mjs'));
   console.log('CI dashboard assets bundled; the browser reads public Actions metadata on demand.');
