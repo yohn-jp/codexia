@@ -1,17 +1,12 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./author-oauth-fixture";
-import { expectDeviceDraft, manuscriptEditor, readManuscriptMarkdown, readPersistenceDrafts, seedWritingProject, selectManuscriptProject, type FixtureDocument } from "./postgres-fixture";
+import { expect, test, type AuthorizeAuthor } from "./author-oauth-fixture";
+import { expectDeviceDraft, manuscriptEditor, openWritingProject, readManuscriptMarkdown, readPersistenceDrafts, seedWritingProject, type WritingFixture } from "./postgres-fixture";
 
-async function openFixtureScene(page: Page, shell: "desktop" | "mobile", projectId: string, scene: FixtureDocument): Promise<void> {
-  const navigation = page.getByRole("navigation", { name: "モバイル画面" });
-  if (shell === "mobile") await navigation.getByRole("button", { name: "作品", exact: true }).click();
-  await selectManuscriptProject(page, projectId);
-  await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] > .pg-outline-row > .pg-outline-document`).click();
-  if (shell === "mobile" && !await manuscriptEditor(page).isVisible()) {
-    await navigation.getByRole("button", { name: "書く", exact: true }).click();
-  }
-  await expect(manuscriptEditor(page)).toBeVisible();
-  await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+async function openFixtureScene(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile", fixture: WritingFixture) {
+  const author = await openWritingProject(authorizeAuthor, page, shell, fixture.project, fixture.scene);
+  const pathname = `/${shell}/projects/${fixture.project.id}/scenes/${fixture.scene.id}`;
+  await expect(page).toHaveURL(url => url.pathname === pathname);
+  return author;
 }
 
 function duplicateHeadingManuscript(): string {
@@ -67,9 +62,8 @@ test("desktop outline keyboard navigation reaches the second duplicate heading w
   const markdown = duplicateHeadingManuscript();
   const storedMarkdown = markdown.replaceAll("\n", "\r\n");
   const fixture = await seedWritingProject(author.fetch, author.origin, "Outline headings", storedMarkdown);
-  const currentAuthor = await authorizeAuthor("desktop");
   await page.clock.install();
-  await openFixtureScene(page, "desktop", fixture.project.id, fixture.scene);
+  const currentAuthor = await openFixtureScene(authorizeAuthor, page, "desktop", fixture);
   const path = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
   const before = await currentAuthor.fetch(path);
   expect(before.ok()).toBe(true);
@@ -114,8 +108,7 @@ test("switching documents protects the draft and derives headings from the newly
     }
     return route.continue();
   });
-  await authorizeAuthor("desktop");
-  await openFixtureScene(page, "desktop", fixture.project.id, fixture.scene);
+  await openFixtureScene(authorizeAuthor, page, "desktop", fixture);
   const firstDraft = "Unsaved first document draft.";
   await fillExactDraft(page, firstDraft);
   const otherDocumentButton = page.locator(`.pg-outline-item[data-document-id="${other.id}"] > .pg-outline-row > .pg-outline-document`);
@@ -142,9 +135,8 @@ test.describe("mobile touch outline heading navigation", () => {
     const author = await authorizeAuthor("mobile");
     const markdown = duplicateHeadingManuscript();
     const fixture = await seedWritingProject(author.fetch, author.origin, "Outline headings", markdown);
-    await authorizeAuthor("mobile");
     await page.clock.install();
-    await openFixtureScene(page, "mobile", fixture.project.id, fixture.scene);
+    await openFixtureScene(authorizeAuthor, page, "mobile", fixture);
     const writes = observeWrites(page, fixture.project.id);
     await page.getByRole("button", { name: "構成", exact: true }).tap();
     await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeVisible();
