@@ -82,44 +82,38 @@ describe("hosted runtime platform contract", () => {
   });
 
   it("binds private controls to assignment, operation, payload and lifetime", () => {
-    const value = {
-      contractVersion: "praetorium-runtime-control/v1",
-      iss: ASSIGNMENT.controlServicePolicy.issuer,
-      sub: "control-plane",
-      aud: ASSIGNMENT.controlServicePolicy.audience,
+    const payloadDigest = "sha256:230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5";
+    assert.equal(sha256Digest("body"), payloadDigest);
+    const expected = {
+      issuer: ASSIGNMENT.controlServicePolicy.issuer,
+      audience: ASSIGNMENT.controlServicePolicy.audience,
       instanceId: ASSIGNMENT.instanceId,
       repositoryId: ASSIGNMENT.repositoryId,
       runtimeEpoch: ASSIGNMENT.runtimeEpoch,
       operationId: "operation-1",
+      action: "quiesce" as const,
+      payloadDigest,
+      nowSeconds: 110,
+    };
+    const credential = {
+      contractVersion: "praetorium-runtime-control/v1",
+      iss: expected.issuer,
+      sub: "control-plane",
+      aud: expected.audience,
+      instanceId: expected.instanceId,
+      repositoryId: expected.repositoryId,
+      runtimeEpoch: expected.runtimeEpoch,
+      operationId: "operation-1",
       action: "quiesce",
-      payloadDigest: sha256Digest("body"),
+      payloadDigest,
       iat: 100,
       nbf: 100,
       exp: 130,
       jti: "credential-1",
     };
-    assert.equal(parseRuntimeControlCredential(value, {
-      issuer: ASSIGNMENT.controlServicePolicy.issuer,
-      audience: ASSIGNMENT.controlServicePolicy.audience,
-      instanceId: ASSIGNMENT.instanceId,
-      repositoryId: ASSIGNMENT.repositoryId,
-      runtimeEpoch: ASSIGNMENT.runtimeEpoch,
-      operationId: "operation-1",
-      action: "quiesce",
-      payloadDigest: sha256Digest("body"),
-      nowSeconds: 110,
-    }).jti, "credential-1");
-    assert.throws(() => parseRuntimeControlCredential(value, {
-      issuer: ASSIGNMENT.controlServicePolicy.issuer,
-      audience: ASSIGNMENT.controlServicePolicy.audience,
-      instanceId: ASSIGNMENT.instanceId,
-      repositoryId: ASSIGNMENT.repositoryId,
-      runtimeEpoch: ASSIGNMENT.runtimeEpoch + 1,
-      operationId: "operation-1",
-      action: "quiesce",
-      payloadDigest: sha256Digest("body"),
-      nowSeconds: 110,
-    }), /binding mismatch/u);
+    assert.equal(parseRuntimeControlCredential(credential, expected).jti, "credential-1");
+    assert.throws(() => parseRuntimeControlCredential(credential, { ...expected, runtimeEpoch: 4 }), /binding mismatch/u);
+    assert.throws(() => parseRuntimeControlCredential(credential, { ...expected, payloadDigest: `sha256:${"1".repeat(64)}` }), /binding mismatch/u);
   });
 
   it("reports the exact PostgreSQL project version after a healthy durable read", async () => {
