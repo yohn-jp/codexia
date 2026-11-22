@@ -16,8 +16,6 @@ import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
-import "./recent-activity-store.test.js";
-import "./platform-runtime.test.js";
 import { createServer, importLegacyJobHistory, type ApiServerOptions, type HostedAuthorizationPolicy, type HostedPrincipal } from "./server.js";
 import { RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_STATUS_PATH, sha256Digest, type RuntimeAssignment } from "./platform-runtime.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
@@ -3773,34 +3771,46 @@ describe("Codexia HTTP boundary", () => {
 });
 
 
-for (const status of [502, 503] as const) {
-  for (const phase of ["read", "write"] as const) {
-    it(`audit Hosted ${phase} dependency HTTP ${status} is not authentication denial`, async () => {
-      const directory = await mkdtemp(resolve(tmpdir(), "codexia-auth-outage-"));
-      const normal = hostedTestPolicy();
-      const policy: HostedAuthorizationPolicy = {
-        ...normal,
-        async authenticate(token, permission = "read") {
-          if (permission === phase) throw Object.assign(new Error("private upstream detail"), { status });
-          return normal.authenticate(token, permission);
-        },
-      };
-      const apiServer = await startHostedApi(makeStore(), directory, policy, undefined, undefined, resolve(directory, "history"));
-      try {
-        const response = await fetch(`${apiServer.base}${phase === "read" ? "/api/session" : "/api/inbox/read-all"}`, {
-          method: phase === "read" ? "GET" : "POST", headers: { Authorization: "Bearer write-grant" },
-        });
-        assert.equal(response.status, status);
-        assert.equal(response.headers.has("www-authenticate"), false);
-        const body = await response.json() as { code: string; error: string };
-        assert.equal(body.code, "AUTHORIZATION_UNAVAILABLE");
-        assert.ok(!body.error.includes("private"));
-      } finally {
-        await apiServer.close();
-        await rm(directory, { recursive: true, force: true });
-      }
+for (const phase of ["read", "write"] as const) {
+  it(`Hosted ${phase} reports credential denial, permission denial, and provider outages distinctly`, async (t) => {
+    const directory = await mkdtemp(resolve(tmpdir(), "codexia-auth-outage-"));
+    const normal = hostedTestPolicy();
+    const privateDetail = "private upstream detail";
+    let upstreamFailure: Error;
+    const policy: HostedAuthorizationPolicy = {
+      ...normal,
+      async authenticate(token, permission = "read") {
+        if (permission === phase) throw upstreamFailure;
+        return normal.authenticate(token, permission);
+      },
+    };
+    const apiServer = await startHostedApi(makeStore(), directory, policy, undefined, undefined, resolve(directory, "history"));
+    t.after(async () => {
+      await apiServer.close();
+      await rm(directory, { recursive: true, force: true });
     });
-  }
+    const permissionDenial = phase === "read" ? "FORBIDDEN" : "WRITE_PERMISSION_REQUIRED";
+    const cases = [
+      { upstreamStatus: 401, status: 401, code: "UNAUTHORIZED" },
+      { upstreamStatus: 403, status: 403, code: permissionDenial },
+      { upstreamStatus: 502, status: 502, code: "AUTHORIZATION_UNAVAILABLE" },
+      { upstreamStatus: 503, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
+      { upstreamStatus: undefined, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
+    ];
+    for (const { upstreamStatus, status, code } of cases) {
+      upstreamFailure = new Error(privateDetail);
+      if (upstreamStatus !== undefined) Object.assign(upstreamFailure, { status: upstreamStatus });
+      const path = phase === "read" ? "/api/session" : "/api/inbox/read-all";
+      const response = await fetch(`${apiServer.base}${path}`, {
+        method: phase === "read" ? "GET" : "POST", headers: { Authorization: "Bearer write-grant" },
+      });
+      assert.equal(response.status, status, `upstream status ${upstreamStatus}`);
+      assert.equal(response.headers.has("www-authenticate"), false);
+      const body = await response.json() as { code: string; error: string };
+      assert.equal(body.code, code);
+      assert.doesNotMatch(body.error, /private upstream detail/u);
+    }
+  });
 }
 
 

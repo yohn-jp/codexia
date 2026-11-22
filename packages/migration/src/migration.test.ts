@@ -8,7 +8,7 @@ import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { ChangeOperation, SnapshotId, SnapshotReader } from "@codexia/contracts";
-import { assertChangeOperation, BUILTIN_MODULE_IDS } from "@codexia/contracts";
+import { assertChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, MigrationProducerRegistry, planExactFileImport, proposeMigrationImport } from "./index.js";
 
 const snapshot: SnapshotId = { projectId: "new-project", projectVersion: 1 };
@@ -82,7 +82,8 @@ test("legacy inspection defaults to all built-in modules and preserves an explic
   const options = { sourceRoot, registry, target: targetReader(new Map()) };
   await inspectLegacyProject(options);
   await inspectLegacyProject({ ...options, enabledModules: ["search"] });
-  assert.deepEqual(observed, [BUILTIN_MODULE_IDS, ["search"]]);
+  const { modules } = JSON.parse(await fs.readFile(new URL("../../../profiles/full.json", import.meta.url), "utf8")) as { modules: string[] };
+  assert.deepEqual(observed.map(ids => [...ids].sort()), [[...modules].sort(), ["search"]]);
 });
 
 function applyOperations(files: TargetFiles, operations: ChangeOperation[]): void {

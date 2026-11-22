@@ -116,12 +116,12 @@ describe("RecentActivityStore", () => {
     assert.equal((await lstat(archivePath)).mode & 0o777, 0o600);
     const store = new RecentActivityStore(usageDirectory);
     assert.deepEqual(await store.list("owner", repository), [sourceItem("mobile")]);
-    await store.upsert("owner", repository, { sceneId: "new-mobile", sentenceOffset: 9, pageIndex: 12, deviceType: "mobile" });
+    const accepted = await store.upsert("owner", repository, { sceneId: "new-mobile", sentenceOffset: 9, pageIndex: 12, deviceType: "mobile" });
 
     const repeated = await importLegacyRecentActivity(mappings);
     assert.equal(repeated.preservedNewerItems, 1, "an incomplete mapping can be retried without replacing newer live state");
     assert.deepEqual(await store.list("owner", repository), [
-      { sceneId: "new-mobile", sentenceOffset: 9, pageIndex: 12, deviceType: "mobile", updatedAt: (await store.list("owner", repository))[0]!.updatedAt },
+      { sceneId: "new-mobile", sentenceOffset: 9, pageIndex: 12, deviceType: "mobile", updatedAt: accepted[0]!.updatedAt },
     ]);
   });
 

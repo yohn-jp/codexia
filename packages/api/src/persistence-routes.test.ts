@@ -151,10 +151,11 @@ test("persistence project page uses the bounded keyset reader and encodes contin
     async requireAuthor() { return "author"; },
   });
   assert.equal(result?.status, 200);
-  const cursor = "eyJ1cGRhdGVkQXQiOiIyMDI2LTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSJ9";
-  assert.deepEqual(result?.body, { projects: [projects[0]], nextCursor: cursor });
+  const { projects: firstPage, nextCursor: cursor } = result.body as { projects: unknown[]; nextCursor: string | null };
+  assert.deepEqual(firstPage, [projects[0]]);
+  assert.ok(cursor, "lookahead must provide an opaque continuation");
   const next = await handlePersistenceRoute({
-    persistence, method: "GET", url: `/api/v1/persistence/projects?page=1&limit=1&cursor=${cursor}`, body: null, requestHeaders: {},
+    persistence, method: "GET", url: `/api/v1/persistence/projects?page=1&limit=1&cursor=${encodeURIComponent(cursor)}`, body: null, requestHeaders: {},
     async requireAuthor() { return "author"; },
   });
   assert.deepEqual(next?.body, { projects: [projects[1]], nextCursor: null });

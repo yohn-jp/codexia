@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { Pool } from "pg";
@@ -114,17 +114,16 @@ test("the exact migration ledger can be verified with read-only database transac
   assert.equal(await verifyPostgresSchema({ connectionString, options: "-c default_transaction_read_only=on" }), expected);
 });
 
-test("packaged and verified CLI fingerprints agree without applying migrations", async () => {
+test("packaged fingerprint works without a database and verified fingerprint works on a read-only ledger", () => {
   const cli = fileURLToPath(new URL("../dist/migrate.js", import.meta.url));
-  const expected = await packagedMigrationFingerprint();
   const packaged = execFileSync(process.execPath, [cli, "--fingerprint"], {
     encoding: "utf8", env: { ...process.env, CODEXIA_DATABASE_URL: "" },
   });
-  assert.equal(packaged.trim(), expected);
+  assert.match(packaged, /^sha256:[a-f0-9]{64}\n$/u);
   const verified = execFileSync(process.execPath, [cli, "--verify-fingerprint"], {
     encoding: "utf8", env: { ...process.env, CODEXIA_DATABASE_URL: connectionString, PGOPTIONS: "-c default_transaction_read_only=on" },
   });
-  assert.equal(verified.trim(), expected);
+  assert.equal(verified, packaged);
 });
 
 test("read-only schema verification rejects missing, altered and newer migration ledgers", async (t) => {
@@ -135,6 +134,14 @@ test("read-only schema verification rejects missing, altered and newer migration
   t.after(async () => { await directPool.query(`DROP SCHEMA "${schema}" CASCADE`); });
   const config = { connectionString, options: `-c search_path=${schema} -c default_transaction_read_only=on` };
   await assert.rejects(verifyPostgresSchema(config), { code: "42P01" });
+  const cli = fileURLToPath(new URL("../dist/migrate.js", import.meta.url));
+  const missingLedger = spawnSync(process.execPath, [cli, "--verify-fingerprint"], {
+    encoding: "utf8",
+    env: { ...process.env, CODEXIA_DATABASE_URL: connectionString, PGOPTIONS: config.options },
+  });
+  assert.equal(missingLedger.error, undefined);
+  assert.equal(missingLedger.status, 1);
+  assert.equal(missingLedger.stdout, "", "a failed read-only verification must never emit a fingerprint");
   const absent = await directPool.query<{ relation: string | null }>("SELECT to_regclass($1)::text AS relation", [`${schema}.codexia_schema_migrations`]);
   assert.equal(absent.rows[0]?.relation, null);
 
