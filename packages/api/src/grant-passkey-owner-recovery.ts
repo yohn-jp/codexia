@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   main().catch(() => {
-    process.stderr.write("Passkey owner recovery was not started. Check the configured owner, explicit --apply flag, and auth database state.\n");
+    process.stderr.write("Better Auth Passkey owner recovery was not started. Check the configured owner, explicit --apply flag, and auth database state.\n");
     process.exitCode = 1;
   });
 }
