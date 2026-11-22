@@ -129,44 +129,21 @@ async function treeEntries(root, sha) {
   });
 }
 
-// The canonical impact selector is the source-of-truth for each task's source and
-// test inputs. Unknown/shared paths map to the full task inventory (fail closed).
-// Cache per immutable tree because the same source is proved by many task groups.
-const taskImpactCache = new Map();
-async function taskImpactIndex(root, sha, entries) {
-  const key = root + '\\0' + sha;
-  const cached = taskImpactCache.get(key);
-  if (cached) return cached;
-  // Delayed import avoids the ci-impact -> ci-task-inputs module initialization cycle.
-  const { createVerificationPlan } = await import('./ci-impact.mjs');
-  const index = new Map();
-  for (const { file } of entries) {
-    if (docsOnlyPath(file)) continue;
-    const plan = createVerificationPlan({ files: [file], event: 'pull_request', sha, base: sha });
-    index.set(file, new Set(plan.tasks));
-  }
-  taskImpactCache.set(key, index);
-  return index;
-}
-
-/** Source/test closure derived from reviewed per-path task impact; unknown paths remain global. */
+/** Conservative source closure for an exact Git tree; docs excluded by the canonical PR impact selector are non-executable inputs. */
 export async function captureTaskInputClosure({ root, sha, task, runtime, invocations = taskInvocation(task, runtime.execPath) }) {
   assert.match(sha ?? '', /^[a-f0-9]{40}$/u, 'Invalid task proof source SHA');
   assert.ok(runtime && typeof runtime === 'object', 'Task proof runtime is required');
   const group = taskGroup(task);
   const all = await treeEntries(root, sha);
   const executable = all.filter(({ file }) => !docsOnlyPath(file));
-  const index = await taskImpactIndex(root, sha, all);
-  const taskInputs = executable.filter(({ file }) => index.get(file)?.has(task));
-  const tests = taskInputs.filter(({ file }) => testFilePattern.test(file));
-  // Manifests and lockfiles are global toolchain inputs, regardless of task scope.
+  const tests = executable.filter(({ file }) => testFilePattern.test(file));
   const dependencies = executable.filter(({ file }) => dependencyPath(file));
   const rootPackage = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
   const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
     executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
   const closure = {
-    source: sha256(taskInputs.map(({ mode, file, oid }) => [mode, file, oid])),
+    source: sha256(executable.map(({ mode, file, oid }) => [mode, file, oid])),
     tests: sha256(tests.map(({ mode, file, oid }) => [mode, file, oid])),
     dependencies: sha256(dependencies.map(({ mode, file, oid }) => [mode, file, oid])),
     environment: sha256(taskEnvironment(task, runtime)),
