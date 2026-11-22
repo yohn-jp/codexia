@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { chromium, webkit } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { BROWSER_SHARDS, VERIFICATION_GROUPS } from "./ci-contract.mjs";
+import { PLAYWRIGHT_IMAGE_DIGESTS } from "./ci-browser-image-digests.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -28,8 +29,8 @@ const requiredProjects = new Set(groupTasks.map(task => {
 }));
 assert.ok(requiredProjects.has("chromium"), "Every browser group must validate Chromium");
 const expectedImageDigest = requiredProjects.has("webkit")
-  ? "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579"
-  : "sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725";
+  ? PLAYWRIGHT_IMAGE_DIGESTS.webkit
+  : PLAYWRIGHT_IMAGE_DIGESTS.chromium;
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node, "24.22.3", "The browser runner must use pinned Node 24.22.3");
