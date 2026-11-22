@@ -176,7 +176,9 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    browser = await chromium.launch(process.env.CODEXIA_E2E_CHROMIUM
+      ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM, headless: true }
+      : { channel: 'chrome', headless: true });
     const page = await browser.newPage({ acceptDownloads: true });
     const url = 'http://127.0.0.1:' + server.address().port + '/';
     await page.goto(url);

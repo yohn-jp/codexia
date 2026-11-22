@@ -282,6 +282,12 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.origin.executedSha, 'a'.repeat(40));
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
+
+  await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', route => route.fulfill({ status: 503 }));
+  await page.reload();
+  await page.getByRole('status').filter({ hasText: /CIデータを読み込めませんでした.*503/u }).waitFor();
+  assert.equal(await copyButton.isDisabled(), true);
+  assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
 });
 
 test('browser JavaScript syntax is valid without requiring a DOM at test time', () => {

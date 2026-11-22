@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildDiagnosticExport, distribution, DIAGNOSTIC_SCHEMA } from './diagnostics.mjs';
+import { buildDiagnosticExport, distribution } from './diagnostics.mjs';
 import { observeRun, summarizePR } from './analysis.mjs';
 
 const at = offset => new Date(Date.UTC(2026,10,22,2,0,0)+offset*1000).toISOString();
@@ -45,8 +45,8 @@ test('percentiles only cover finite measured nonnegative seconds', () => {
 });
 test('diagnostic JSON is source-bound, complete and keeps measured stages and competitors', () => {
   const selected=revision();
-  const payload=buildDiagnosticExport(selected,[selected],coverage,graph);
-  assert.equal(payload.schema,DIAGNOSTIC_SCHEMA);
+  const payload=JSON.parse(JSON.stringify(buildDiagnosticExport(selected,[selected],coverage,graph)));
+  assert.equal(payload.schema,'codexia-ci-diagnostics/v1');
   assert.equal(payload.origin.pr,42);
   assert.equal(payload.origin.executedSha,'a'.repeat(40));
   assert.equal(payload.origin.bounds.historyTruncated,true);
@@ -68,7 +68,6 @@ test('diagnostic JSON is source-bound, complete and keeps measured stages and co
   assert.equal(payload.comparableJobShapeHistory.matchingCount,1);
   assert.equal(payload.comparableJobShapeHistory.certification.p50Seconds,105);
   assert.match(payload.interpretation.notMeasured.taskDurations,/artifacts/u);
-  assert.doesNotThrow(()=>JSON.parse(JSON.stringify(payload)));
 });
 test('history separates same job shape from other workloads and truncated runs', () => {
   const selected=revision();
