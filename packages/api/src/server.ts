@@ -2714,6 +2714,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     });
     try {
       await betterAuth.assertRegisteredClients();
+      await betterAuth.verifyIntrospectionCredentials();
     } catch (error) {
       await betterAuth.pool.end().catch(() => undefined);
       throw error;

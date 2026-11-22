@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
+import { startBetterAuthFixture, type BootstrapRegistration } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appAssets = mkdtempSync(join(tmpdir(), "codexia-oauth-web-assets-"));
 const fixtureDatabaseUrl = process.env.CODEXIA_WEB_OAUTH_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
@@ -34,9 +34,29 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
   assert.ok(optedLocalFixtureDatabase || ciFixtureDatabase, "OAuth fixture database must be explicitly opted-in or uniquely disposable in CI");
   assert.ok(!database.search && !database.hash, "OAuth fixture URL must not include query parameters or fragments");
 
-    // Auth clients, sessions, token records, and canonical manuscript revisions
-    // use PostgreSQL. Only the unrelated job history is an in-memory test double.
-    const fixture = await startBetterAuthFixture({ databaseUrl: fixtureDatabaseUrl, staticDirectory: appAssets, usePostgresPersistence: true });
+  // Auth clients, sessions, token records, and manuscript revisions use PostgreSQL.
+  const fixture = await startBetterAuthFixture({
+    databaseUrl: fixtureDatabaseUrl,
+    staticDirectory: appAssets,
+    usePostgresPersistence: true,
+    async registerInBrowser(origin) {
+      const bootstrapContext = await browser.newContext();
+      try {
+        const page = await bootstrapContext.newPage();
+        await page.goto(origin);
+        await page.getByRole("button", { name: "Sign in to the identity provider" }).click();
+        await page.getByRole("link", { name: "Continue to the identity provider" }).click();
+        await expect(page).toHaveURL(origin + "/");
+        const response = page.waitForResponse(origin + "/register");
+        await page.getByRole("button", { name: "Register the approved clients" }).click();
+        const registration = await response;
+        assert.equal(registration.status(), 200, await registration.text());
+        return await registration.json() as BootstrapRegistration;
+      } finally {
+        await bootstrapContext.close();
+      }
+    },
+  });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     const buildEnvironment = {
@@ -146,7 +166,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
       assert.equal(consentPrompt.get(name), originalPrompt.get(name), `the consent continuation must preserve ${name}`);
     }
     assert.equal(consentPrompt.getAll("sig").length, 1, "the consent route must carry one server-signed query");
-    await page.getByText("Codexia Fixture Web", { exact: false }).waitFor();
+    await page.getByText("Codexia Web", { exact: false }).waitFor();
     await Promise.all(responseTasks);
     applyResponseStatuses();
     assert.ok(seen.some((request) => request.pathname === "/api/auth/oauth2/consent-context" && request.status === 200), `the server must verify the signed prompt before consent display; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);

@@ -8,6 +8,7 @@ export async function verifyBetterAuthClientRegistrations(): Promise<void> {
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await runtime.assertRegisteredClients();
+    await runtime.verifyIntrospectionCredentials();
     process.stdout.write("Better Auth public and introspection client registrations verified.\n");
   } finally {
     await runtime.pool.end();

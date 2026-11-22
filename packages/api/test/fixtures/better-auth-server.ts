@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer } from "../../src/server.js";
 import { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } from "../../src/better-auth.js";
+import { createBetterAuthBootstrap } from "../../src/bootstrap-auth.js";
 import { migrateJwtAccessTokenRevocationSchema, pruneExpiredJwtAccessTokenRevocations } from "../../src/jwt-access-token-revocation.js";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
 import { Pool } from "pg";
@@ -17,6 +18,14 @@ export interface BetterAuthFixtureOptions {
   readonly staticDirectory?: string;
   readonly apiPort?: number;
   readonly usePostgresPersistence?: boolean;
+  readonly registerInBrowser?: (bootstrapOrigin: string) => Promise<BootstrapRegistration>;
+}
+
+export interface BootstrapRegistration {
+  readonly ownerSubject: string;
+  readonly webClientId: string;
+  readonly iosClientId: string;
+  readonly introspectionClientId: string;
 }
 
 export interface BetterAuthFixture {
@@ -137,6 +146,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   const codes = new Map<string, IdpCodeState>();
   const subject = `fixture-owner-${randomUUID()}`;
   const email = `${subject}@example.test`;
+  let upstreamSubject = subject;
   let idpIssuer = "";
   let ownerSubject = "";
   let apiServer: Server | undefined;
@@ -144,6 +154,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   let idpServer: Server | undefined;
   let runtime: ReturnType<typeof createBetterAuthRuntime> | undefined;
   let bootstrapPool: Pool | undefined;
+  let bootstrap: ReturnType<typeof createBetterAuthBootstrap> | undefined;
   let usageDirectory: string | undefined;
   let domainPersistence: ApiServerOptions["persistence"] | undefined;
   let domainStore: CoreStore | undefined;
@@ -193,11 +204,11 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         codes.delete(code);
         const idToken = await new SignJWT({ email, email_verified: true, name: "Codexia Fixture Owner", nonce: codeState.nonce })
           .setProtectedHeader({ alg: "RS256", kid: idpPublicJwk.kid })
-          .setIssuer(idpIssuer).setAudience("codexia-fixture-client").setSubject(subject)
+          .setIssuer(idpIssuer).setAudience("codexia-fixture-client").setSubject(upstreamSubject)
           .setIssuedAt().setExpirationTime("5m").sign(idpKeyPair.privateKey);
         sendJson(response, { access_token: "fixture-upstream-access-token", token_type: "Bearer", expires_in: 300, id_token: idToken });
       } else if (url.pathname === "/userinfo") {
-        sendJson(response, { sub: subject, email, email_verified: true, name: "Codexia Fixture Owner" });
+        sendJson(response, { sub: upstreamSubject, email, email_verified: true, name: "Codexia Fixture Owner" });
       } else {
         response.statusCode = 404;
         response.end();
@@ -229,7 +240,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       oidcClientSecret: "fixture-oidc-client-secret-with-sufficient-length",
       authSecret: "codexia-fixture-auth-secret-at-least-32-bytes-long",
       oauthIntrospectionClientId: "fixture-introspector-pending-registration",
-      oauthIntrospectionClientSecret: "fixture-introspector-secret-placeholder-long",
+      oauthIntrospectionClientSecret: "fixture-introspector-secret-placeholder-32-long",
       ownerSubject: "",
       ownerClientIds,
       mcpClientIds: [],
@@ -268,44 +279,76 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       } } : {}),
     });
 
-    bootstrapServer = makeApi(false);
-    await listen(bootstrapServer, apiPort);
-    const baseAuth = `${apiOrigin}/api/auth`;
+    const bootstrapOrigin = "http://127.0.0.1:" + await (async () => {
+      const probe = createHttpServer();
+      const port = await listen(probe);
+      await close(probe);
+      return port;
+    })();
+    bootstrap = createBetterAuthBootstrap({
+      ...runtimeConfig,
+      publicOrigin: bootstrapOrigin,
+      apiAudience: audience,
+      ownerClientIds: ["fixture-web-" + randomUUID(), "fixture-ios-" + randomUUID()],
+      oauthIntrospectionClientId: "fixture-introspection-" + randomUUID(),
+    }, {
+      ownerOidcSubject: subject,
+      webRedirectUris: [apiOrigin + "/desktop", apiOrigin + "/mobile"],
+    });
+    bootstrapServer = createHttpServer(bootstrap.listener);
+    await listen(bootstrapServer, Number(new URL(bootstrapOrigin).port));
     const cookie = cookieJar();
-    const signIn = await fetch(`${baseAuth}/sign-in/social`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "workspace-oidc", callbackURL: "/oauth/login", requestSignUp: true }),
+    const postBootstrap = (path: string, headers: HeadersInit = {}) => fetch(bootstrapOrigin + path, {
+      method: "POST", redirect: "manual",
+      headers: { origin: bootstrapOrigin, cookie: cookie.header(), ...headers },
     });
-    cookie.remember(signIn);
-    const signInData = await signIn.json() as { url?: string };
-    if (!signIn.ok || !signInData.url) throw new Error("Synthetic owner bootstrap sign-in was rejected");
-    const upstream = await fetch(signInData.url, { redirect: "manual" });
-    const callback = upstream.headers.get("location");
-    if (!callback) throw new Error("Synthetic OIDC authorization did not return to the API");
-    const callbackResponse = await fetch(callback, { redirect: "manual", headers: { cookie: cookie.header() } });
-    cookie.remember(callbackResponse);
-    const session = await runtime.auth.api.getSession({ headers: new Headers({ cookie: cookie.header() }) });
-    if (!session) throw new Error("Synthetic OIDC bootstrap did not establish a Better Auth session");
-    ownerSubject = session.user.id;
+    if ((await postBootstrap("/register")).status !== 401) throw new Error("Bootstrap accepted a request without an IdP session");
+    if ((await postBootstrap("/login", { origin: apiOrigin })).status !== 403) throw new Error("Bootstrap accepted a foreign origin");
+    async function signIntoBootstrap(): Promise<void> {
+      const signIn = await postBootstrap("/login");
+      cookie.remember(signIn);
+      const link = (await signIn.text()).match(/href="([^"]+)"/u)?.[1];
+      if (!link) throw new Error("Bootstrap did not issue an IdP sign-in link");
+      const upstream = await fetch(link.replaceAll("&amp;", "&"), { redirect: "manual" });
+      const callback = upstream.headers.get("location");
+      if (!callback) throw new Error("Synthetic OIDC authorization did not return to bootstrap");
+      const callbackResponse = await fetch(callback, { redirect: "manual", headers: { cookie: cookie.header() } });
+      cookie.remember(callbackResponse);
+    }
+    upstreamSubject = subject + "-unauthorized";
+    await signIntoBootstrap();
+    if ((await postBootstrap("/register")).status !== 401) throw new Error("Bootstrap established an owner session for a different IdP subject");
+    upstreamSubject = subject;
+    const registered = options.registerInBrowser
+      ? await options.registerInBrowser(bootstrapOrigin)
+      : await (async () => {
+        await signIntoBootstrap();
+        const registration = await postBootstrap("/register");
+        if (registration.status !== 200) throw new Error("Protected bootstrap registration failed: " + await registration.text());
+        const result = await registration.json() as BootstrapRegistration;
+        const retry = await postBootstrap("/register");
+        if (JSON.stringify(await retry.json()) !== JSON.stringify(result)) throw new Error("Bootstrap registration retry changed the registered IDs");
+        if ((await postBootstrap("/api/auth/admin/oauth2/create-client")).status !== 404) throw new Error("Bootstrap exposed the raw registration API");
+        return result;
+      })();
+    ownerSubject = registered.ownerSubject;
     runtimeConfig.ownerSubject = ownerSubject;
+    ownerClientIds.splice(0, ownerClientIds.length, registered.webClientId, registered.iosClientId);
+    runtimeConfig.oauthIntrospectionClientId = registered.introspectionClientId;
 
-    const webClient = await runtime.auth.api.adminCreateOAuthClient({
-      headers: new Headers({ cookie: cookie.header() }),
-      body: {
-        redirect_uris: [`${apiOrigin}/desktop`],
-        client_name: "Codexia Fixture Web",
-        resources: [audience],
-        scope: `openid ${CODEXIA_OWNER_SCOPE} offline_access`,
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        application_type: "native",
-        require_pkce: true,
-        skip_consent: false,
-      },
+    const productionSignIn = await runtime.auth.api.signInSocial({
+      body: { provider: "workspace-oidc", callbackURL: "/oauth/login", requestSignUp: true }, asResponse: true,
     });
+    const productionCookie = cookieJar();
+    productionCookie.remember(productionSignIn);
+    const productionUrl = (await productionSignIn.json() as { url: string }).url;
+    const productionUpstream = await fetch(productionUrl, { redirect: "manual" });
+    const productionCallback = await runtime.handler(new Request(productionUpstream.headers.get("location")!, {
+      headers: { cookie: productionCookie.header() },
+    }));
+    productionCookie.remember(productionCallback);
     const foreignClient = await runtime.auth.api.adminCreateOAuthClient({
-      headers: new Headers({ cookie: cookie.header() }),
+      headers: new Headers({ cookie: productionCookie.header() }),
       body: {
         redirect_uris: [`${apiOrigin}/foreign-client`],
         client_name: "Codexia Fixture Foreign Public Client",
@@ -319,29 +362,13 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         skip_consent: false,
       },
     });
-    const introspectionClient = await runtime.auth.api.adminCreateOAuthClient({
-      headers: new Headers({ cookie: cookie.header() }),
-      body: {
-        redirect_uris: ["https://api.example.test/introspection-callback"],
-        client_name: "Codexia Fixture Introspector",
-        resources: [audience],
-        scope: CODEXIA_OWNER_SCOPE,
-        token_endpoint_auth_method: "client_secret_post",
-        grant_types: ["authorization_code"],
-        response_types: ["code"],
-        application_type: "web",
-        require_pkce: true,
-        skip_consent: true,
-      },
-    });
-    if (!introspectionClient.client_secret) throw new Error("Fixture introspection client credentials were not created as expected");
-    ownerClientIds.splice(0, ownerClientIds.length, webClient.client_id);
-    runtimeConfig.oauthIntrospectionClientId = introspectionClient.client_id;
-    runtimeConfig.oauthIntrospectionClientSecret = introspectionClient.client_secret;
+    runtimeConfig.oauthIntrospectionClientSecret = "fixture-introspector-secret-placeholder-32-long";
     await runtime.assertRegisteredClients();
 
     await close(bootstrapServer);
     bootstrapServer = undefined;
+    await bootstrap.close();
+    bootstrap = undefined;
     apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
     await listen(apiServer, apiPort);
 
@@ -350,11 +377,11 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       issuer,
       audience,
       idpIssuer,
-      webClientId: webClient.client_id,
+      webClientId: registered.webClientId,
       foreignClientId: foreignClient.client_id,
       ownerSubject,
-      introspectionClientId: introspectionClient.client_id,
-      introspectionClientSecret: introspectionClient.client_secret,
+      introspectionClientId: registered.introspectionClientId,
+      introspectionClientSecret: runtimeConfig.oauthIntrospectionClientSecret,
       async readSigningKeyIds() {
         const context = await runtime!.auth.$context;
         const rows = await context.adapter.findMany({ model: "jwks" });
@@ -409,6 +436,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   } catch (error) {
     if (apiServer) await close(apiServer).catch(() => undefined);
     if (bootstrapServer) await close(bootstrapServer).catch(() => undefined);
+    await bootstrap?.close().catch(() => undefined);
     if (idpServer) await close(idpServer).catch(() => undefined);
     if (runtime) await runtime.pool.end().catch(() => undefined);
     if (domainPersistence) await domainPersistence.close().catch(() => undefined);

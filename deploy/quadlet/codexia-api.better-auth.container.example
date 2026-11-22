@@ -19,10 +19,10 @@ Secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL
 Secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET
 Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET
 Secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET
-EnvironmentFile=/home/codexia/.config/codexia-auth/runtime.env
+EnvironmentFile=/home/codexia/.config/codexia-auth/runtime-AUTH_SETTINGS_DIGEST_PLACEHOLDER.env
 Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token
 Environment=CODEXIA_AUTH_MODE=better-auth
-Environment=CODEXIA_AUTH_SETTINGS_SHA256=CODEXIA_AUTH_SETTINGS_SHA256
+Environment=CODEXIA_AUTH_SETTINGS_SHA256=AUTH_SETTINGS_DIGEST_PLACEHOLDER
 Environment=CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password
 Environment=CODEXIA_DATABASE_USER=codexia
 Environment=CODEXIA_DATABASE_NAME=codexia

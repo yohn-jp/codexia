@@ -17,7 +17,7 @@ function csvSetting(suffix: string): string[] {
   return [...new Set(requiredSetting(suffix).split(",").map((value) => value.trim()).filter(Boolean))];
 }
 
-export function readBetterAuthMigrationConfig(): BetterAuthRuntimeConfig {
+export function readBetterAuthMigrationConfig(requireOwner = true): BetterAuthRuntimeConfig {
   return {
     databaseUrl: requiredSetting("AUTH_DATABASE_URL"),
     publicOrigin: requiredSetting("PUBLIC_ORIGIN"),
@@ -27,7 +27,7 @@ export function readBetterAuthMigrationConfig(): BetterAuthRuntimeConfig {
     authSecret: requiredSetting("AUTH_SECRET"),
     oauthIntrospectionClientId: requiredSetting("OAUTH_INTROSPECTION_CLIENT_ID"),
     oauthIntrospectionClientSecret: requiredSetting("OAUTH_INTROSPECTION_CLIENT_SECRET"),
-    ownerSubject: requiredSetting("OAUTH_OWNER_SUBJECT"),
+    ...(requireOwner ? { ownerSubject: requiredSetting("OAUTH_OWNER_SUBJECT") } : {}),
     ownerClientIds: csvSetting("OAUTH_OWNER_CLIENT_IDS"),
     mcpClientIds: (readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
     ...(readCodexiaEnvironment("API_AUDIENCE") ? { apiAudience: readCodexiaEnvironment("API_AUDIENCE")! } : {}),
@@ -52,8 +52,7 @@ export async function assertAuthMigrationDatabaseIdentity(pool: Pool): Promise<v
   }
 }
 
-export async function migrateBetterAuth(): Promise<void> {
-  const config = readBetterAuthMigrationConfig();
+export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()): Promise<void> {
   const runtime = createBetterAuthRuntime(config);
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);

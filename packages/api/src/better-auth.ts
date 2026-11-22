@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
@@ -10,7 +10,7 @@ import {
   verifyOAuthQueryParams,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
-import { decodeProtectedHeader } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
@@ -188,7 +188,12 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
   return values[0];
 }
 
-export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
+interface BetterAuthBootstrapRegistration {
+  readonly ownerOidcSubject: string;
+  readonly nextClientId: () => string;
+}
+
+export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstrap?: BetterAuthBootstrapRegistration) {
   let databaseUrl: URL;
   try { databaseUrl = new URL(config.databaseUrl); }
   catch { throw new Error("CODEXIA_AUTH_DATABASE_URL must be an absolute PostgreSQL URL without query or fragment"); }
@@ -230,6 +235,16 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
         clientSecret: config.oidcClientSecret,
         discoveryUrl: `${oidcIssuer}/.well-known/openid-configuration`,
         requireIdTokenVerification: true,
+        ...(bootstrap ? {
+          accountSubject({ tokens }) {
+            // Better Auth verifies the signature, audience, expiry, and nonce before calling this resolver.
+            const claims = tokens.idToken && decodeJwt(tokens.idToken);
+            if (!claims || claims.iss !== oidcIssuer || claims.sub !== bootstrap.ownerOidcSubject) {
+              throw new Error("OIDC identity is outside the approved bootstrap account");
+            }
+            return claims.sub;
+          },
+        } : {}),
         pkce: true,
         scopes: ["openid", "email", "profile"],
       }] }),
@@ -256,6 +271,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
           token_endpoint_auth_methods_supported: ["none", ...CONFIDENTIAL_TOKEN_AUTH_METHODS],
         },
         clientRegistrationRequirePKCE: true,
+        ...(bootstrap ? {
+          generateClientId: bootstrap.nextClientId,
+          generateClientSecret: () => config.oauthIntrospectionClientSecret,
+        } : {}),
       }),
     ],
   });
@@ -286,11 +305,11 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
   return {
     auth,
     pool,
-    async assertRegisteredClients(): Promise<void> {
+    async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ""): Promise<void> {
       const context = await auth.$context;
       await assertBetterAuthClientRegistrations({
         audience,
-        ownerSubject: config.ownerSubject ?? "",
+        ownerSubject,
         ownerClientIds: config.ownerClientIds,
         mcpClientIds,
         introspectionClientId: config.oauthIntrospectionClientId,
@@ -305,6 +324,16 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
           return context.adapter.findMany({ model: "oauthClientResource", where: [{ field: "clientId", value: clientId }] });
         },
       });
+    },
+    async verifyIntrospectionCredentials(): Promise<void> {
+      const result = await auth.api.oauth2Introspect({
+        body: {
+          token: randomBytes(32).toString("base64url"),
+          client_id: config.oauthIntrospectionClientId,
+          client_secret: config.oauthIntrospectionClientSecret,
+        },
+      });
+      if (result.active !== false) throw new Error("Unable to verify Better Auth introspection credentials");
     },
     issuer,
     audience,
