@@ -38,8 +38,8 @@ jobs:
           for metric in cpu memory io; do cat "/proc/pressure/$metric" || true; done
           ip -s link || true
           docker info --format 'Docker driver={{.Driver}} server={{.ServerVersion}}' || true
-          command -v podman && podman --version || true
-      - name: Install Podman (setup measured separately)
+          if command -v podman >/dev/null 2>&1; then echo 'PODMAN_PREINSTALLED=true'; podman --version; else echo 'PODMAN_PREINSTALLED=false'; fi
+      - name: Ensure Podman exists (fallback setup measured separately)
         if: startsWith(matrix.engine, 'podman')
         shell: bash
         run: |
@@ -49,7 +49,7 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq podman
           fi
-          echo "Podman setup seconds: $((SECONDS-start))" >> "$GITHUB_STEP_SUMMARY"
+          echo "Podman fallback setup seconds: $((SECONDS-start))" >> "$GITHUB_STEP_SUMMARY"
           podman version
       - name: Measure cold pull and image startup
         shell: bash
