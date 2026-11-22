@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Codexia | optical icon review</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#21182a;background:#f6f2ee}body{margin:0;padding:24px}
+h1{font-size:clamp(22px,3vw,32px)}p{line-height:1.7;max-width:65ch}
+.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px}
+.card{border:1px solid #bbadb8;border-radius:14px;padding:18px;background:white;min-width:0}
+.strip{display:flex;align-items:center;gap:16px;min-height:92px;max-width:100%;overflow-x:auto;overflow-y:hidden}
+.strip svg{flex-shrink:0}.zoom{display:flex;align-items:center;justify-content:center;background:#24152f;padding:16px;min-height:180px}
+.zoom canvas{width:160px;height:160px;image-rendering:pixelated}
+h2{font-size:1.1rem}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
+</style></head>
+<body><main><h1>Codexia — optical size review</h1>
+<p>16 / 24 / 32pxの実寸と、画素をそのまま拡大した表示を比較します。拡大時の四角い輪郭はピクセル観察用です。</p>
+<div class="gallery" id="gallery"></div>
+<p>180px以上はプレビュー幅に縮小しています。実際のOS・デバイスの見え方を保証するものではありません。</p>
+</main>
+<script src="./codexia-icon.cjs"></script>
+<script>
+(()=>{const sizes=[16,24,32,48,64,180,512],grid=document.querySelector('#gallery');
+for(const n of sizes){
+ const div=document.createElement('section');div.className='card';
+ const svg=CodexiaIcon.renderIcon({size:n,accessible:false});
+ div.innerHTML='<h2>'+n+'px</h2><div class="strip">'+svg+'</div>'+(n<=32?'<div class="zoom"><canvas width="'+n+'" height="'+n+'" role="img" aria-label="'+n+'pxの画素を拡大した画像"></canvas></div>':'');
+ grid.append(div);
+ if(n>96){const el=div.querySelector('svg');el.style.width='min(100%, 150px)';el.style.height='auto';el.setAttribute('data-preview-scale','true');}
+ const canvas=div.querySelector('canvas');
+ if(canvas){const img=new Image();const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'}));
+ img.onload=()=>{canvas.getContext('2d').drawImage(img,0,0,n,n);URL.revokeObjectURL(url)};
+ img.onerror=()=>URL.revokeObjectURL(url);img.src=url;}
+}})();
+</script></body></html>
