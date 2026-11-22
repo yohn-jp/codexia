@@ -1670,14 +1670,6 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
 
-    if (hosted && routePath === "/api/login" && method === "POST") {
-      fail(response, 410, "HOSTED_LOGIN_RETIRED", "Hosted access is issued by Praetorium. Open this instance through Praetorium.");
-      return;
-    }
-    if (hosted && routePath === "/api/logout" && method === "POST") {
-      fail(response, 410, "HOSTED_LOGOUT_RETIRED", "Hosted logout is handled by Instance Access.");
-      return;
-    }
     if (routePath === RUNTIME_METADATA_PATH && method === "GET") {
       try {
         sendJson(response, 200, metadataForRuntime({
@@ -1964,10 +1956,6 @@ export function createServer(options: ApiServerOptions): Server {
       });
       return;
     }
-    if (routePath === "/api/logout" && method === "POST") {
-      fail(response, 410, "LEGACY_LOGOUT_RETIRED", "Use the Better Auth session revocation endpoint");
-      return;
-    }
     if (routePath === "/api/projects/events" && method === "GET") {
       if (admittedMcpClient) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
@@ -2133,9 +2121,6 @@ export function createServer(options: ApiServerOptions): Server {
         const selected = optionalSnapshot(query, projectId);
         sendJson(response, 200, await options.store.readSceneSnapshot(projectId, sceneId, selected.pinned));
         return;
-      }
-      if (sceneMatch && method === "PUT") {
-        throw httpFailure(410, "SCENE_PROPOSAL_REQUIRED", "Direct scene saves are retired. Submit a revision-bound proposal, then approve and apply it.");
       }
       if (suffix === "snapshot" && method === "GET") {
         const selected = optionalSnapshot(query, projectId);
