@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -23,11 +24,13 @@ import { createSemanticMigrationProducer } from "@codexia/module-semantic/migrat
 import { createSpeakerMigrationProducer } from "@codexia/module-speaker/migration";
 import { createAssistantMigrationProducer } from "@codexia/module-assistant/migration";
 import { createPublishingMigrationProducer } from "@codexia/module-publishing/migration";
-import { hashDialogueText } from "@codexia/module-speaker";
+
+const { parse: parseYaml } = createRequire(new URL("../../packages/core/package.json", import.meta.url))("yaml");
 
 const SPEAKER_OVERRIDE_SCENE_PATH = "plot/volumes/volume-1/chapters/chapter-1/scenes/sc-speaker-override-stable.yaml";
 const SPEAKER_OVERRIDE_MANUSCRIPT_PATH = "manuscript/v1/sc-speaker-override-stable.md";
 const SPEAKER_OVERRIDE_DIALOGUE = "『俺が行く。』";
+const LEGACY_SPEAKER_CORRECTIONS = '{"id":"speaker-correction-stable","speakerId":"speaker-1","label":"Mika","extension":{"retain":true}}\n';
 const LEGACY_DESKTOP_CURSOR_UPDATED_AT = "2025-04-03T10:00:00.000Z";
 const LEGACY_MOBILE_CURSOR_UPDATED_AT = "2025-04-03T11:00:00.000Z";
 const SPEAKER_OVERRIDE_SCENE = [
@@ -41,7 +44,8 @@ const SPEAKER_OVERRIDE_SCENE = [
   `manuscript: ${SPEAKER_OVERRIDE_MANUSCRIPT_PATH}`,
   "speakerOverrides:",
   "  - sentenceIndex: 1",
-  `    textHash: ${hashDialogueText(SPEAKER_OVERRIDE_DIALOGUE)}`,
+  // Legacy bytes precede the migration and must be independent of today's Speaker writer.
+  "    textHash: f9b7b225",
   `    dialogueText: "${SPEAKER_OVERRIDE_DIALOGUE}"`,
   "    speakerEntityId: char-hero",
   "    source: direct",
@@ -243,7 +247,7 @@ async function addLegacyDatabases(sourceRoot, workspaceRoot) {
 
 async function addLegacyFiles(sourceRoot, workspaceRoot) {
   const textFiles = new Map([
-    ["meta/speaker-corrections.jsonl", "{\"id\":\"speaker-correction-stable\",\"speakerId\":\"speaker-1\",\"label\":\"Mika\",\"extension\":{\"retain\":true}}\n"],
+    ["meta/speaker-corrections.jsonl", LEGACY_SPEAKER_CORRECTIONS],
     ["meta/speaker-model.json", "{\"version\":1,\"featureNames\":[\"manual\"],\"weights\":[0.5],\"bias\":0,\"extension\":\"retain\"}\n"],
     ["meta/synonyms.yaml", "groups:\n  - canonical: lantern\n    variants: [lamp, light]\nunknown-extension: retain\n"],
     ["meta/candidate-ignore-list.yaml", "terms:\n  - keep-out\nunknown-extension: retain\n"],
@@ -437,7 +441,7 @@ test("legacy inspection stays read-only and approved imports persist in PostgreS
     assert.equal(writeByPath.get(SPEAKER_OVERRIDE_SCENE_PATH)?.content, SPEAKER_OVERRIDE_SCENE,
       "the exact author-maintained Speaker override must remain reviewable");
     assert.equal(writeByPath.get("meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl")?.content,
-      "{\"id\":\"speaker-correction-stable\",\"speakerId\":\"speaker-1\",\"label\":\"Mika\",\"extension\":{\"retain\":true}}\n",
+      LEGACY_SPEAKER_CORRECTIONS,
       "disabled Speaker correction data must be retained as opaque bytes");
     assert.ok(writeByPath.has("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl"),
       "disabled legacy workflow rows must remain opaque for later module review");
@@ -486,12 +490,19 @@ test("legacy inspection stays read-only and approved imports persist in PostgreS
     reopenedPersistence = createPostgresPersistence(connectionString);
     const reopenedCore = new CoreStore({ persistence: reopenedPersistence });
     const recoveredReader = await reopenedCore.reader(project.id);
-    const recoveredScene = (await recoveredReader.read(SPEAKER_OVERRIDE_SCENE_PATH))?.content ?? "";
-    assert.match(recoveredScene, /textHash: f9b7b225/u, "the author-maintained Speaker correction survives canonical import");
-    assert.match(recoveredScene, /speakerEntityId: char-hero/u);
-    assert.match(recoveredScene, /unknown-scene-field: retain exactly/u);
+    const recoveredSceneFile = await recoveredReader.read(SPEAKER_OVERRIDE_SCENE_PATH);
+    assert.ok(recoveredSceneFile, "approved scene must exist after reconnecting to PostgreSQL");
+    const recoveredScene = parseYaml(recoveredSceneFile.content);
+    assert.deepEqual(recoveredScene.speakerOverrides, [{
+      source: "direct",
+      textHash: "f9b7b225",
+      dialogueText: SPEAKER_OVERRIDE_DIALOGUE,
+      sentenceIndex: 1,
+      speakerEntityId: "char-hero",
+    }], "the author-maintained Speaker correction must retain every field after import");
+    assert.equal(recoveredScene["unknown-scene-field"], "retain exactly");
     assert.equal((await recoveredReader.read("meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl"))?.content,
-      writeByPath.get("meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl")?.content);
+      LEGACY_SPEAKER_CORRECTIONS);
     const recoveredProposal = await reopenedCore.getProposal(project.id, proposal.id);
     assert.deepEqual(recoveredProposal?.approvedOperationIds, approvedIds);
     assert.deepEqual(recoveredProposal?.appliedOperationIds, approvedIds);
@@ -500,6 +511,8 @@ test("legacy inspection stays read-only and approved imports persist in PostgreS
       assert.deepEqual(await reopenedCore.apply(project.id, operation), applicationReceipts[index],
         "replaying an applied import operation returns its existing receipt without duplication");
     }
+    assert.deepEqual((await reopenedCore.getProposal(project.id, proposal.id))?.applications, recoveredProposal?.applications,
+      "replaying approved imports must not append another PostgreSQL application receipt");
     assert.deepEqual(await treeState(legacyRoot), beforeSource, "author application must not write to the legacy source");
     assert.deepEqual(await treeState(workspaceRoot), beforeWorkspace);
   } finally {
