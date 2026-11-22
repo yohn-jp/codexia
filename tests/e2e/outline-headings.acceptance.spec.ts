@@ -90,6 +90,15 @@ test("switching documents protects the draft and derives headings from the newly
   );
   expect(created.status()).toBe(201);
   const other = (await created.json() as { document: { id: string } }).document;
+  // Keep the drafts local while exercising document switching and undo.
+  // A successful autosave would correctly clear the IndexedDB draft.
+  const documentsPath = `/api/v1/persistence/projects/${fixture.project.id}/documents/`;
+  await page.route((url) => url.pathname.startsWith(documentsPath), (route) => {
+    if (route.request().method() === "PATCH") {
+      return route.fulfill({ status: 503, json: { error: "Manuscript saving temporarily unavailable" } });
+    }
+    return route.continue();
+  });
   await page.goto(new URL(`/desktop/projects/${fixture.project.id}/scenes/${fixture.scene.id}`, page.url()).toString());
   const firstDraft = "Unsaved first document draft.";
   await fillExactDraft(page, firstDraft);
