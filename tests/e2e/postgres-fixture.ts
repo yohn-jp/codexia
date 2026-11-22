@@ -1,8 +1,6 @@
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import type { AuthorizeAuthor, AuthorSession } from "./author-oauth-fixture";
 
-export const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-export const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
 export interface WritingFixture { project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }
@@ -39,28 +37,6 @@ export async function readManuscriptMarkdown(page: Page): Promise<string> {
   return manuscriptEditor(page).evaluate(element => Array.from(element.querySelectorAll(".cm-line"), line => line.textContent ?? "").join("\n"));
 }
 
-export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> {
-  await page.goto(new URL(path, appBaseURL).toString());
-  await expect(page.getByLabel("アクセス・トークン").or(page.getByRole("heading", { name: "Database workspace" }))).toBeVisible();
-  if (await page.getByLabel("アクセス・トークン").isVisible()) {
-    await page.getByLabel("アクセス・トークン").fill(authToken);
-    await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  }
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-}
-
-export async function fixtureProject(request: APIRequestContext): Promise<{ project: FixtureProject; scenes: FixtureDocument[] }> {
-  const response = await request.get("/api/v1/persistence/projects?limit=100");
-  expect(response.ok()).toBe(true);
-  const { projects } = await response.json() as { projects: FixtureProject[] };
-  const project = projects.find((item) => item.title === process.env.CODEXIA_E2E_PROJECT_TITLE) ?? projects.find((item) => item.title.startsWith("Acceptance manuscript"));
-  expect(project, "disposable browser project must exist").toBeTruthy();
-  const documentsResponse = await request.get(`/api/v1/persistence/projects/${project!.id}/documents`);
-  expect(documentsResponse.ok()).toBe(true);
-  const { documents } = await documentsResponse.json() as { documents: FixtureDocument[] };
-  return { project: project!, scenes: documents.filter((item) => item.kind === "scene") };
-}
-
 /** Shared canonical UI operators for acceptance and performance probes. */
 export async function selectManuscriptProject(page: Page, projectId: string): Promise<void> {
   await page.getByLabel("作品", { exact: true }).selectOption(projectId);
@@ -76,16 +52,6 @@ export async function openManuscriptScene(page: Page, scene: Pick<FixtureDocumen
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
 }
-export async function openFixtureScene(page: Page, index = 0): Promise<{ project: FixtureProject; scene: FixtureDocument }> {
-  await ownerLogin(page);
-  const { project, scenes } = await fixtureProject(page.request);
-  const scene = scenes[index];
-  expect(scene).toBeTruthy();
-  await selectManuscriptProject(page, project.id);
-  await openManuscriptScene(page, scene!);
-  return { project, scene: scene! };
-}
-
 export async function replaceManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
   // Let CodeMirror handle the selection as an editor command before typing.
@@ -114,27 +80,6 @@ export async function appendManuscript(page: Page, text: string): Promise<void> 
 export async function fillDraft(page: Page, text: string): Promise<void> {
   await replaceManuscript(page, text);
   await expectDeviceDraft(page);
-}
-
-export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<WritingFixture> {
-  const headers = { Origin: new URL(appBaseURL).origin };
-  const session = await page.request.get(new URL("/api/session", appBaseURL).href);
-  if (session.status() === 401) {
-    const login = await page.request.post(new URL("/api/login", appBaseURL).href, { headers, data: { token: authToken } });
-    expect(login.status()).toBe(200);
-  } else {
-    expect(session.status()).toBe(200);
-  }
-  const fixture = await seedWritingProject(page.request.fetch.bind(page.request), appBaseURL, title, manuscript);
-  const { project, scene } = fixture;
-  // Fixture setup must not race an unrelated prior project's guarded selector.
-  // Exercise the supported canonical deep link instead of mutating UI selection.
-  const writingRoute = writingFixturePath(mode, project, scene);
-  await page.goto(new URL(writingRoute, appBaseURL).toString());
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(manuscriptEditor(page)).toBeVisible();
-  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-  return fixture;
 }
 
 export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<WritingFixture> {

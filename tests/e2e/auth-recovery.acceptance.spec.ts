@@ -1,6 +1,33 @@
 import type { Page } from "@playwright/test";
+import { resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "./author-oauth-fixture";
 import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fillDraft, seedWritingProject, writingFixturePath } from "./postgres-fixture";
+
+const mockShellOrigin = "http://127.0.0.1:4173";
+const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
+test.use({ baseURL: mockShellOrigin });
+
+test.beforeEach(async ({ context }) => {
+  await context.route(`${mockShellOrigin}/**`, async (route) => {
+    const request = route.request();
+    const { pathname } = new URL(request.url());
+    const shell = pathname.split("/")[1];
+    if (request.method() !== "GET" || (shell !== "desktop" && shell !== "mobile")) {
+      await route.fulfill({ status: 404 });
+      return;
+    }
+    const shellDirectory = resolve(shellAssets, shell);
+    const file = pathname === `/${shell}` || pathname === `/${shell}/`
+      ? resolve(shellDirectory, "index.html")
+      : resolve(shellAssets, `.${pathname}`);
+    if (!file.startsWith(shellDirectory + sep)) {
+      await route.fulfill({ status: 404 });
+      return;
+    }
+    await route.fulfill({ path: file });
+  });
+});
 
 async function mockAuthenticatedWorkspace(page: Page, hosted: boolean, session?: () => { status: number; body: unknown }): Promise<void> {
   await page.route("**/api/browser/version", (route) => route.fulfill({ json: { name: "codexia", version: "test", hosted, profile: hosted ? "hosted" : "core" } }));

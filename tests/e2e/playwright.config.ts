@@ -1,46 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { defineConfig } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 
-const externalDatabase = process.env.CODEXIA_E2E_EXTERNAL_DATABASE === "1";
 const selectedTestFile = process.env.CODEXIA_E2E_TEST_FILE;
 const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
-const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
-const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
-const externalServer = Boolean(configuredBaseURL);
-const selfHostedAuthFixture = [
-  "core.acceptance.spec.ts",
-  "job-inbox.acceptance.spec.ts",
-  "modular-workspace.acceptance.spec.ts",
-  "native-review.acceptance.spec.ts",
-  "oauth-web.acceptance.spec.ts",
-  "outline-headings.acceptance.spec.ts",
-  "persistence-database.acceptance.spec.ts",
-  "recent-activity.acceptance.spec.ts",
-  "redesign-visual.acceptance.spec.ts",
-  "review-contributions.acceptance.spec.ts",
-  "ui-v1.acceptance.spec.ts",
-].includes(selectedTestFile ?? "");
-const legacyServer = !externalServer && !selfHostedAuthFixture;
-const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && legacyServer;
-const stateDir = process.env.CODEXIA_E2E_STATE_DIR
-  ?? (isTemporaryStateDir ? mkdtempSync(join(tmpdir(), "codexia-e2e-")) : tmpdir());
-if (!selfHostedAuthFixture) {
-  process.env.CODEXIA_E2E_AUTH_TOKEN ??= (configuredBaseURL ? process.env.CODEXIA_AUTH_TOKEN : undefined)
-    ?? "codexia-e2e-token-for-local-testing-only";
-}
-
-process.env.CODEXIA_E2E_STATE_DIR = stateDir;
-process.env.CODEXIA_E2E_PROJECT_TITLE ??= `Acceptance manuscript ${randomUUID()}`;
-process.env.CODEXIA_E2E_PORT ??= "4173";
-process.env.CODEXIA_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
-if (!externalServer && !process.env.CODEXIA_E2E_DATABASE_URL) {
-  throw new Error("Set CODEXIA_E2E_DATABASE_URL to an isolated disposable PostgreSQL database or schema");
-}
-if (externalServer && !externalDatabase) {
-  throw new Error("Set CODEXIA_E2E_EXTERNAL_DATABASE=1 to acknowledge a disposable PostgreSQL fixture when targeting an external app");
+if (!process.env.CODEXIA_E2E_DATABASE_URL) {
+  throw new Error("Set CODEXIA_E2E_DATABASE_URL to an isolated disposable PostgreSQL database");
 }
 if (selectedTestFile && !/^[a-z0-9-]+\.acceptance\.spec\.ts$/u.test(selectedTestFile)) {
   throw new Error("CODEXIA_E2E_TEST_FILE must name one acceptance spec");
@@ -62,7 +26,6 @@ export default defineConfig({
       ]
     : "list",
   use: {
-    baseURL,
     headless: true,
     trace: "retain-on-failure",
   },
@@ -87,13 +50,4 @@ export default defineConfig({
       },
     },
   ],
-  webServer: legacyServer
-    ? {
-        command: "node --import tsx/esm tests/e2e/test-server.ts",
-        cwd: resolve("."),
-        url: `${baseURL}/api/health`,
-        reuseExistingServer: false,
-        timeout: 120_000,
-      }
-    : undefined,
 });
