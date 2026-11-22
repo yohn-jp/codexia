@@ -17,11 +17,12 @@ verify_lock_descriptor(){
   [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the declared deployment lock'
   flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not own the maintenance lock'
 }
-remote_directory(){
-  [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
+backup_directory(){
+  [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute backup directory without symlinks'
+  [[ -w "$1" ]] || die 'Backup destination is not writable'
   local fstype mount_source remote_host local_addresses remote_addresses address
   fstype="$(findmnt -T "$1" -n -o FSTYPE)"
-  case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) die 'Destination is not an approved remote filesystem';; esac
+  case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) return 0;; esac
   mount_source="$(findmnt -T "$1" -n -o SOURCE)"
   case "$fstype" in
     nfs|nfs4)
@@ -58,7 +59,7 @@ remote_directory(){
 # Identify the exact ciphertext set without interpreting filenames from the manifest.
 validate_artifact(){
   local dir="$1" file
-  remote_directory "$dir"
+  backup_directory "$dir"
   for file in database.dump.age history.tar.age manifest.age SHA256SUMS; do
     [[ -f "$dir/$file" && ! -L "$dir/$file" ]] || die 'Backup artifact contains a missing or unsafe file'
   done
@@ -77,13 +78,13 @@ case "$operation" in
     flock --exclusive --nonblock 9 || die 'Backup or deployment already running'
     ;;
   validate-artifact)
-    [[ $# == 2 ]] || die 'Usage: validate-artifact /absolute/remote/backup'
+    [[ $# == 2 ]] || die 'Usage: validate-artifact /absolute/backup'
     validate_artifact "$2"
     exit 0
     ;;
   validate-destination)
-    [[ $# == 2 ]] || die 'Usage: validate-destination /absolute/remote/mount'
-    remote_directory "$2"
+    [[ $# == 2 ]] || die 'Usage: validate-destination /absolute/backup/directory'
+    backup_directory "$2"
     printf '%s\n' 'Backup destination preflight passed'
     exit 0
     ;;
@@ -170,14 +171,14 @@ assert_restore_resource_absent(){
 }
 case "${1:-}" in
   backup-locked)
-    [[ $# == 8 ]] || die 'Usage: backup-locked /remote/mount age1-recipient --approved --lock-file /absolute/lock --lock-fd fd'
-    remote_directory "$2"
+    [[ $# == 8 ]] || die 'Usage: backup-locked /absolute/backup/directory age1-recipient --approved --lock-file /absolute/lock --lock-fd fd'
+    backup_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
     backup_artifact "$2" "$3"
     ;;
   drill)
-    [[ $# == 4 && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/remote/backup/directory /absolute/private/age-identity --approved'
-    remote_directory "$2"
+    [[ $# == 4 && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved'
+    backup_directory "$2"
     identity_mode="$(stat -Lc '%a' -- "$3")"
     identity_owner="$(stat -Lc '%u' -- "$3")"
     [[ "$identity_mode" == 400 || "$identity_mode" == 600 ]] || die 'Recovery identity must be mode 0400 or 0600'
