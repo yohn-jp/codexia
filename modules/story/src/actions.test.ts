@@ -423,7 +423,7 @@ test("graph query keeps native documents for manuscript graphs and skips them fo
   assert.deepEqual(graph.snapshot, reader.snapshot);
   const empty = await invoke<Graph>("story.graph.query", { types: [] }, context);
   assert.deepEqual(empty.data, { nodes: [], edges: [] });
-  assert.deepEqual(documentsRead, [], "a graph with these explicit types does not need native document bodies");
+  assert.equal(documentsRead.length, 0, "a graph with these explicit types does not need native document bodies");
 
   const defaults = await invoke<Graph>("story.graph.query", {}, context);
   assert.deepEqual(defaults.data.nodes.map(({ id }) => id), ["char-uma", "loc-cafe", "char-source"]);
