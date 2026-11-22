@@ -12,7 +12,7 @@ Read only the contracts relevant to the task:
 - Application boundaries: [Core](docs/architecture/CORE.md), [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md), and [Modules](docs/architecture/MODULES.md).
 - Backend read/performance: [Backend read model](docs/architecture/BACKEND-READ-MODEL.md).
 - UI/UX: [Design and UX contract](docs/design/UX-CONTRACT.md). Preserve distinct Desktop/Mobile shells and shared authoring, durability, and authorization boundaries. Mockups are not specifications.
-- Web frontend design, implementation, or review: project-local [Modern Web Guidance](.agents/skills/modern-web-guidance/SKILL.md).
+- Web frontend design, implementation, or review: [app design system](app/DESIGN.md), project-local [Impeccable](.agents/skills/impeccable/SKILL.md) and [Modern Web Guidance](.agents/skills/modern-web-guidance/SKILL.md).
 - CI/release: [CI/CD architecture](docs/verification/CI-CD.md) and [Test architecture](docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.md).
 - VM configuration: [Infrastructure as code](docs/deployment/IAC.md), the Ansible desired-state and lifecycle contract. Keep Cloudflare Terraform, protected release publication, and the exclusive updater as distinct authorities.
 

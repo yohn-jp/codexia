@@ -1,0 +1,44 @@
+name: Impeccable design scan
+
+on:
+  pull_request:
+    branches: [main]
+    paths: &design-inputs
+      - 'app/**'
+      - 'modules/*/src/**'
+      - '.agents/skills/impeccable/**'
+      - '.github/workflows/impeccable.yml'
+      - '.impeccable/**'
+      - '.gitignore'
+      - 'skills-lock.json'
+  push:
+    branches: [main]
+    paths: *design-inputs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: impeccable-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scan:
+    name: Scan UI source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan application and module source
+        run: |
+          .agents/skills/impeccable/scripts/impeccable detect --sarif --no-advisory \
+            app modules/*/src > "$RUNNER_TEMP/impeccable.sarif" || test "$?" -eq 2
+      - name: Upload design findings
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ runner.temp }}/impeccable.sarif
+          category: impeccable

@@ -1,6 +1,16 @@
 # UI preview and Impeccable Detector (Windows / Linux / macOS)
 
-This is a disposable visual-review environment, **not** a production or alternative persistence implementation. It serves the current built Desktop and Mobile UIs using the **existing E2E test server, real Codexia API and PostgreSQL fixtures**. It never points at an existing database, disables authentication or changes production routes. The UX acceptance authority remains [UX-CONTRACT](../design/UX-CONTRACT.md); its [visual-system proposal](../design/VISUAL-SYSTEM.md) is not automatically promoted to a design-system baseline.
+The preview serves the built Desktop and Mobile UIs using the existing E2E server, real Codexia API and disposable PostgreSQL fixtures. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+
+## Design checks on GitHub
+
+The [Impeccable workflow](../../.github/workflows/impeccable.yml) runs on pull requests to `main` and pushes to `main` that touch its inputs. It scans the complete app and module sources on each selected run. To reproduce the scan from the repository root:
+
+```sh
+.agents/skills/impeccable/scripts/impeccable detect --sarif --no-advisory app modules/*/src
+```
+
+The project includes the skill and a launcher that fetches and verifies the pinned engine on a fresh runner. The workflow uses the [upstream SARIF integration](https://github.com/pbakaus/impeccable/blob/b49177d32788f2dc585c42831d845dacf1ebed2c/README.md#three-ways-to-run-the-detector) to publish primary findings to GitHub Code scanning under `impeccable`. Exit 0 uploads a clean report and exit 2 uploads findings. A scanner error fails the job before upload. Omit `--no-advisory` locally to include suggestions such as font sizes outside the documented scale. The detector reads the app's design system during source scans. Automatic agent hooks are disabled.
 
 ## Prerequisites
 
@@ -49,4 +59,4 @@ Options: `--port 4173`, `--profile core|full`, `--engine auto|docker|podman`, `-
 - **Browser capture failed**: install Chromium as above, then retry `ui:preview`, or use `ui:preview --no-capture` temporarily for API diagnosis.
 - **Port already in use**: `corepack pnpm ui:preview --port 4181`; the scanner discovers the snapshot port from the running session.
 
-UI design decisions belong in the existing `docs/design` authority. Impeccable slop-style findings (e.g. `overused-font`) are suggestions, not mandatory accessibility failures; never mass-change styles to force zero warnings.
+Review findings against the visual design and UX contract. Use the authenticated snapshots to check rendered layout and contrast, and the interactive preview to verify focus and editing behavior.
