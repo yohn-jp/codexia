@@ -35,6 +35,7 @@ function sourceInput(): StoryGraphInput {
   const entities = [
     entity("vol-1", "volume", { order: 1 }),
     entity("ch-1", "chapter", { volume: "vol-1", order: 1 }),
+    ...manuscriptScene("sc-before", 0, "まだ印は見えない。"),
     ...manuscriptScene("sc-1", 1, "白い印を見つけた。"),
     ...manuscriptScene("sc-2", 2, "白い印の形が変わった。"),
     ...manuscriptScene("sc-3", 3, "白い印の謎が解けた。"),
@@ -72,10 +73,12 @@ test("thread lifecycle selects plant/payoff order and treats advances and mentio
 
 test("point-in-time status keeps source labels and omits threads not planted yet", async () => {
   const source = sourceInput();
+  const before = await getThreadStatus({ ...source, at: "sc-before" });
   const atOne = await getThreadStatus({ ...source, at: "sc-1" });
   const atTwo = await getThreadStatus({ ...source, at: "sc-2" });
   const atThree = await getThreadStatus({ ...source, at: "sc-3" });
-  assert.strictEqual(atTwo.snapshot, snapshot);
+  assert.deepEqual(atTwo.snapshot, snapshot);
+  assert.deepEqual(before.data.threads, []);
   assert.equal(atOne.data.threads[0]?.status, "planted");
   assert.equal(atTwo.data.threads[0]?.status, "advanced");
   assert.equal(atThree.data.threads[0]?.status, "resolved");
