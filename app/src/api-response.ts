@@ -1,5 +1,5 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
+import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 
@@ -88,7 +88,11 @@ export const responseContracts = {
   session: (v: unknown): v is Session => record(v) && v.authenticated === true && text(v.authorScope) && (v.permissions === undefined || (Array.isArray(v.permissions) && v.permissions.every(p => oneOf(p, ["read", "write", "maintain", "admin"])))),
   tree, treeRead: (v: unknown): v is TreeRead => record(v) && snapshot(v.snapshot) && tree(v.tree),
   scene, sceneRead,
-  snapshotRead: (v: unknown): v is SnapshotRead => record(v) && snapshot(v.snapshot) && array(document)(v.files),
+  moduleSnapshot: (v: unknown): v is EditorSnapshotRead | SnapshotRead => record(v) && snapshot(v.snapshot) && (
+    "document" in v
+      ? v.document === null || record(v.document) && text(v.document.path) && text(v.document.revision) && /^[0-9a-f]{64}$/u.test(v.document.revision)
+      : array(document)(v.files)
+  ),
   recentActivity: (v: unknown): v is RecentActivityResponse => record(v) && Array.isArray(v.items) && v.items.every(i => record(i) && text(i.sceneId) && nullableInteger(i.sentenceOffset) && optional(i.pageIndex, nullableInteger) && oneOf(i.deviceType, ["desktop", "mobile"]) && text(i.updatedAt)),
   proposal,
   proposals: (v: unknown): v is { proposals: ProposalStatus[] } => record(v) && array(proposalStatus)(v.proposals),

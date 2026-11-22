@@ -3169,6 +3169,64 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth })).status, 404);
   });
 
+  it("serves the editor snapshot revision independently of bulk file limits", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-editor-snapshot-"));
+    tempDirs.push(staticDir);
+    for (const fixture of [
+      { name: "file count", count: 1000, content: "small" },
+      { name: "UTF-8 bytes", count: 1, content: "字".repeat(3 * 1024 * 1024) },
+    ]) {
+      await t.test(fixture.name, async (t) => {
+        const native = await nativeProject(t, `Editor snapshot ${fixture.name}`);
+        const created = await native.persistence.transaction(async (tx) => {
+          const document = await tx.createDocument({
+            projectId: native.project.id, kind: "scene", title: "Opening", orderKey: "0001",
+            markdown: "First revision", authorId: "owner", idempotencyKey: randomUUID(),
+          });
+          for (let index = 0; index < fixture.count; index++) {
+            await tx.saveModuleRecord({
+              projectId: native.project.id, moduleId: "core.artifacts", key: `bible/artifact-${index}.txt`,
+              value: { content: fixture.content }, expectedVersion: null,
+            });
+          }
+          return document;
+        });
+        const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+        t.after(apiServer.close);
+        const endpoint = `${apiServer.base}/api/projects/${native.project.id}/snapshot`;
+        const selector = `projection=editor&documentId=${created.document.id}`;
+        const auth = { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } };
+        assert.equal((await fetch(`${endpoint}?${selector}`)).status, 401);
+        const bulk = await fetch(endpoint, auth);
+        assert.equal(bulk.status, 413);
+        assert.match((await bulk.json()).error, fixture.name === "file count" ? /1000 files/u : /response size/u);
+
+        const exact = await fetch(`${endpoint}?${selector}`, auth);
+        assert.equal(exact.status, 200);
+        const expectedSnapshot = (await native.store.observe(native.project.id)).snapshot;
+        const expectedDocument = { path: `documents/${created.document.id}.md`, revision: created.revision.sha256 };
+        assert.deepEqual(await exact.json(), { snapshot: expectedSnapshot, document: expectedDocument });
+
+        if (fixture.name === "file count") {
+          const identity = await fetch(`${endpoint}?projection=editor`, auth);
+          assert.deepEqual(await identity.json(), { snapshot: expectedSnapshot, document: null });
+          await native.persistence.transaction((tx) => tx.saveDocument({
+            projectId: native.project.id, documentId: created.document.id, baseRevisionId: created.revision.id,
+            changes: [{ fromUtf16: 0, toUtf16: 5, insert: "Second" }],
+            resultingSha256: createHash("sha256").update("Second revision").digest("hex"),
+            authorId: "owner", clientId: "test", idempotencyKey: randomUUID(),
+          }));
+          const historical = await fetch(`${endpoint}?${selector}&projectVersion=${expectedSnapshot.projectVersion}`, auth);
+          assert.deepEqual(await historical.json(), { snapshot: expectedSnapshot, document: expectedDocument });
+          const missing = await fetch(`${endpoint}?projection=editor&documentId=${randomUUID()}`, auth);
+          assert.equal(missing.status, 200);
+          assert.equal((await missing.json()).document, null);
+          assert.equal((await fetch(`${endpoint}?projection=editor&documentId=../meta/project.yaml`, auth)).status, 400);
+        }
+      });
+    }
+  });
+
   it("keeps review-queue projectVersion and stale status on one PostgreSQL snapshot", async (t) => {
     const native = await nativeProject(t, "Review queue snapshot");
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-review-snapshot-"));
