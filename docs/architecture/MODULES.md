@@ -41,6 +41,6 @@ Browser contributions use host-owned panels and permitted snapshot-scoped action
 
 ## One-time source compatibility and normal work import
 
-The ordinary end-user workflow is the PostgreSQL [portable work archive](../authoring-portable.md); old Git/Scriptorium data may be converted into that format as a one-time external operation. The existing read-only compatibility package `packages/migration` classifies legacy records as authoritative, provisional, secret, derived or relocated, but is not a required ongoing product import mode. Human corrections remain authoritative even if stored beside disposable vectors. Import produces a dry-run report and reviewable ChangeSet, preserves stable identities and formats, supports idempotent reruns, and leaves source files untouched.
+The ordinary end-user workflow is the PostgreSQL [portable work archive](../authoring-portable.md). For one-time conversion of old Git/Scriptorium data, follow the [archived converter procedure](CORE.md#portable-work-import-export-and-backup). Review the converter's proposed changes and any unresolved records before exporting the work. Human corrections remain authoritative even when stored beside disposable vectors.
 
-Pending local commits and provisional browser work must remain recoverable. Secrets and private source data do not become public fixtures. Validate imports through approval, PostgreSQL application, API state replacement and optional-module reactivation; generic file compatibility alone does not prove semantic preservation.
+Keep source copies for pending local commits, provisional browser work and records that the portable archive does not carry. Keep secrets and private source data out of public fixtures.

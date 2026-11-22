@@ -16,7 +16,6 @@ Desktop and Mobile shells use the authenticated API. API admission owns authenti
 | Project read models and module proposal coordination | `packages/core` |
 | Authentication, API admission and host integration | `packages/api` |
 | Lazy module activation and supervised workers | `packages/module-runtime` |
-| Read-only legacy inspection and import proposals | `packages/migration` |
 | Authoring, browser recovery and separate shells | `app` |
 
 ## Canonical state and snapshots
@@ -42,6 +41,6 @@ Browser IndexedDB stores recoverable drafts and pending proposals separately fro
 
 The standard product exchange is a versioned `codexia-work/v1` JSON current-state archive. Export reads one consistent PostgreSQL snapshot of work metadata, Markdown, Knowledge, supported Evidence and author-owned module records. Import validates references and hashes, creates a fresh project atomically, and never overwrites an existing project. Stale Evidence is retained explicitly without forging a current anchor. Historical revisions, credentials, approval state and browser drafts are not silently presented as portable content; see [Portable works](../authoring-portable.md).
 
-Legacy inspection reads explicitly selected source directories without modifying files, SQLite sidecars or Git metadata. Git source inspection is restricted to offline migration recovery; it never serves as application persistence, synchronization or runtime fallback. The one-time source conversion is an operator task external to the normal product importer. Existing read-only migration inspection capabilities do not act as a second manuscript authority; author-approved import operations remain subject to Core permissions. Secrets are excluded, unresolved records are reported, and source data remains intact.
+For one-time conversion of older Git, SQLite or workspace data, use the [archived converter and its operator instructions](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/packages/migration/README.md) from an isolated checkout of that revision. Keep source backups and use a disposable PostgreSQL database for conversion and author review. Export the converted work as `codexia-work/v1` for import into the current release.
 
 Publishing exports read pinned PostgreSQL projections. Operational recovery uses protected PostgreSQL backups plus private host-history backups; see [deployment](../deployment/README.md). Rehearse restoration into an isolated replacement database before changing service routing. Do not restore over the only copy or operate on production data during verification.
