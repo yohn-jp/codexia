@@ -21,7 +21,14 @@
   register: codexia_deploy_recovery
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
 
-- name: Verify the protected off-VM backup mount before pulling or stopping services
+- name: Create the private encrypted backup directory on the target host
+  ansible.builtin.file:
+    path: "{{ codexia_backup_destination }}"
+    state: directory
+    mode: '0700'
+  when: not (codexia_lifecycle_fixture | default(false) | bool)
+
+- name: Verify the encrypted backup destination before pulling or stopping services
   ansible.builtin.command:
     argv:
       - "{{ home }}/.local/bin/codexia-backup"
@@ -619,7 +626,7 @@
       if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
         --approved --lock-file "$lock_file" --lock-fd 9; then
         restore_previous || echo 'Previous API recovery failed after backup failure' >&2
-        echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
+        echo 'Encrypted backup failed; candidate was not applied' >&2
         exit 1
       fi
       if [[ "$auth_mode" == better-auth && "$prior_auth_mode" == token ]]; then
