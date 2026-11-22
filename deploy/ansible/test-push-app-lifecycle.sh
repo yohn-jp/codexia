@@ -63,6 +63,27 @@ redact_log() {
     -e 's/((password|token)(_file)?[=: ]+)[^[:space:]]+/\1[REDACTED]/Ig' \
     "$source" | tail -n 160 > "$target"
 }
+record_failure() {
+  local status=$1 line=$2 command=$3 latest_log='' log
+  trap - ERR
+  [[ -n "$command" ]] || command='unknown command'
+  node - "$report" "$status" "$line" "$command" <<'FAILURE'
+const fs=require('node:fs');const [path,status,line,command]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.failure={exitCode:Number(status),line:Number(line),command:command.replace(/(Bearer\s+)[A-Za-z0-9._~-]+/giu,'$1[REDACTED]').replace(/((password|token)(_file)?[=: ]+)[^\s]+/giu,'$1[REDACTED]').replace(/(fixture-(auth|tunnel)-token-)[A-Za-z0-9]+/giu,'$1[REDACTED]').slice(0,500)};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+FAILURE
+  printf 'Lifecycle fixture failed at line %s (exit %s): %s\n' "$line" "$status" \
+    "$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).failure.command' "$report")" >&2
+  for log in "$tmp"/*.log; do
+    [[ -f "$log" ]] || continue
+    if [[ -z "$latest_log" || "$log" -nt "$latest_log" ]]; then latest_log=$log; fi
+  done
+  if [[ -n "$latest_log" ]]; then
+    local bounded="$RUNNER_TEMP/codexia-push-app-lifecycle/failure-bounded.log"
+    redact_log "$latest_log" "$bounded"
+    printf '%s\n' "Last Ansible log ($latest_log), redacted tail:" >&2
+    cat "$bounded" >&2
+  fi
+  return "$status"
+}
 run_playbook() {
   local vars=$1 name=$2 status=0
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
@@ -240,6 +261,7 @@ mkdir -p "$(dirname "$report")"
 node - "$report" "$source_sha" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'NODE'
 const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);const states={};for(const key of ['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','fixture_cleanup'])states[key]={status:'NOT_CHECKED'};fs.mkdirSync(require('node:path').dirname(path),{recursive:true,mode:0o700});fs.writeFileSync(path,JSON.stringify({schemaVersion:1,sourceSha:sha,runId:Number(run),runAttempt:Number(attempt),status:'IN_PROGRESS',states,images:[],observations:{},logs:[],capabilities:{},createdAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
 NODE
+trap 'record_failure "$?" "${BASH_LINENO[0]:-0}" "$BASH_COMMAND"' ERR
 set_state first_activation NOT_CHECKED 'runtime fixture not started'
 if [[ "${GITHUB_ACTIONS:-}" != true ]]; then
   mark_fixture_unavailable 'execution is not on an isolated GitHub Actions runner'

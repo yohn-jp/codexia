@@ -55,6 +55,8 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /CAPABILITY_UNAVAILABLE/u);
   assert.match(fixture, /rootless_podman --version/u);
   assert.doesNotMatch(fixture, /\.Host\.Version/u);
+  assert.match(fixture, /trap 'record_failure .* ERR/u);
+  assert.match(fixture, /Last Ansible log .* redacted tail/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
