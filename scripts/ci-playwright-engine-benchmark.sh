@@ -109,7 +109,7 @@ runtime_start=$(date +%s%N)
   --volume "$GITHUB_WORKSPACE:/work" --volume "$host_node_prefix:/opt/codexia-node:ro" --workdir /work \
   --env PATH="/opt/codexia-node/bin:/usr/local/bin:/usr/bin:/bin" \
   --env CODEXIA_BENCH_NODE_MOUNT=1 \
-  --env CI --env CODEXIA_PROFILE --env CODEXIA_E2E_DATABASE_URL \
+  --env CI --env CODEXIA_PROFILE --env CODEXIA_E2E_DATABASE_URL --env CODEXIA_BENCH_DUAL_DIGEST \
   --entrypoint /bin/bash "$image" \
   /work/scripts/ci-playwright-engine-benchmark.sh native "$variant" acceptance
 runtime_ms=$(( ($(date +%s%N)-runtime_start)/1000000 ))
