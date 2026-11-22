@@ -907,6 +907,36 @@ test("audit MCP expires idle SDK sessions and cannot allocate after disposal", a
   await stopped.text();
 });
 
+test("an MCP session continues only for its authenticated principal and project", async () => {
+  const sessions = new Map<string, import("./http.js").McpSession>();
+  const contribution = createMcpHttpContribution(sessions);
+  const firstClient = { ...actionContext([]), mcpSessionIdentity: "verified-client-one" };
+  const otherClient = { ...firstClient, mcpSessionIdentity: "verified-client-two" };
+  const send = (method: string, id: number, sessionId?: string) => new Request("http://codexia.test/streamable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream",
+      ...(sessionId ? { "Mcp-Session-Id": sessionId, "MCP-Protocol-Version": "2025-03-26" } : {}) },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params: method === "initialize"
+      ? { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "authenticated-client", version: "1" } }
+      : {} }),
+  });
+  try {
+    const initialized = await contribution.handle(send("initialize", 1), firstClient);
+    assert.equal(initialized.status, 200);
+    const id = initialized.headers.get("mcp-session-id");
+    assert.ok(id);
+    await initialized.text();
+    for (const context of [otherClient, actionContext([]), { ...firstClient, projectId: "another-project" }]) {
+      const refused = await contribution.handle(send("ping", 2, id), context);
+      assert.equal(refused.status, 404);
+      await refused.text();
+    }
+    const resumed = await contribution.handle(send("ping", 3, id), firstClient);
+    assert.equal(resumed.status, 200);
+    assert.match(await resumed.text(), /"id":3/u);
+  } finally { await closeMcpSessions(sessions); }
+});
+
 test("audit actual SDK event stream reserves capacity past idle expiry and releases on cancel", async () => {
   let now = 0;
   const sessions = new Map<string, import("./http.js").McpSession>();

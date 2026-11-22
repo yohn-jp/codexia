@@ -12,6 +12,7 @@ export interface McpSession extends SessionLifetime {
   initialized: boolean;
   closePromise: Promise<void> | undefined;
   projectId: string;
+  principal: string | undefined;
   server: McpServer;
   transport: WebStandardStreamableHTTPServerTransport;
   actionContext: AsyncLocalStorage<ModuleActionContext>;
@@ -86,7 +87,7 @@ function closeSession(session: McpSession, sessions: Map<string, McpSession>): P
   return session.closePromise;
 }
 
-function createSession(projectId: string, sessions: Map<string, McpSession>, now: number): McpSession {
+function createSession(context: ModuleActionContext, sessions: Map<string, McpSession>, now: number): McpSession {
   const actionContext = new AsyncLocalStorage<ModuleActionContext>();
   const server = new McpServer({ name: "codexia-mcp", version: "0.1.0" });
   registerMcpTools(server, requestClient(actionContext));
@@ -101,7 +102,7 @@ function createSession(projectId: string, sessions: Map<string, McpSession>, now
       if (sessions.get(sessionId) === session) sessions.delete(sessionId);
     },
   });
-  session = { projectId, server, transport, actionContext, sessionId, ready: Promise.resolve(),
+  session = { projectId: context.projectId, principal: context.mcpSessionIdentity, server, transport, actionContext, sessionId, ready: Promise.resolve(),
     initialized: false, closing: false, activeRequests: 0, lastUsedAt: now, timer: undefined, closePromise: undefined };
   sessions.set(sessionId, session);
   session.ready = server.connect(transport);
@@ -129,11 +130,14 @@ export function createMcpHttpContribution(sessions: Map<string, McpSession>, opt
         try {
           if (!(await isInitializationRequest(request))) return errorResponse(400, "An MCP session ID is required; initialize a session first");
           if (disposedRegistries.has(sessions)) return errorResponse(503, "MCP module is stopping");
-          session = createSession(context.projectId, sessions, now());
+          session = createSession(context, sessions, now());
         } finally { pendingInitializations--; }
       } else {
         const existing = sessions.get(sessionId);
-        if (!existing || !existing.initialized || existing.closing || existing.projectId !== context.projectId) return errorResponse(404, "MCP session not found for this project");
+        if (!existing || !existing.initialized || existing.closing ||
+            existing.projectId !== context.projectId || existing.principal !== context.mcpSessionIdentity) {
+          return errorResponse(404, "MCP session not found");
+        }
         session = existing;
       }
       session.activeRequests++;

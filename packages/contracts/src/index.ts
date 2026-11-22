@@ -208,6 +208,8 @@ export interface ActionDescriptor { id: string; module: ModuleId | "core"; effec
 export interface ModuleActionContext {
   projectId: string;
   reader: SnapshotReader;
+  /** Host-verified identity binding for an MCP HTTP session. */
+  mcpSessionIdentity?: string;
   /** Same authenticated project/snapshot; never exposes author mutation ports. */
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
   listActions(): Promise<ActionDescriptor[]>;

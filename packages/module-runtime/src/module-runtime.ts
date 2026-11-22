@@ -38,6 +38,8 @@ export interface ActionHostContext {
   access?: "owner" | "public";
   /** Host-derived principal class; MCP transport is external even when it carries an owner session. */
   caller?: "author" | "external-agent";
+  /** Opaque identity for an authenticated MCP HTTP transport session. */
+  mcpSessionIdentity?: string;
   /** Optional host capability ceiling for nested action discovery and invocation. */
   allowedEffects?: readonly ActionDescriptor["effect"][];
   /** Host-owned durable tracking around a declared module action. `execute` is safe to call once. */
@@ -495,6 +497,7 @@ export class ModuleRuntime {
     const proposals: ChangeProposal[] = [];
     try {
       const context = this.createActionContext(manifest.id, contribution.effect, contribution.effect, host, signal, proposals, 0, false);
+      if (manifest.id === "mcp" && host.mcpSessionIdentity !== undefined) context.mcpSessionIdentity = host.mcpSessionIdentity;
       const response = await contribution.handle(request, context);
       if (signal.aborted) return httpFailure(499, "request_cancelled", "HTTP request was cancelled");
       if (!(response instanceof Response)) return httpFailure(502, "invalid_http_response", "HTTP contribution returned an invalid response");
