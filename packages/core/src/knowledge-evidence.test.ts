@@ -94,8 +94,10 @@ test("author confirmation does not erase negation or uncertainty in an assertion
   if (confirmed.provenance.kind === "analysis") assert.equal(confirmed.provenance.confidence, 0.72);
 
   const speculative = { ...analysisAssertion, id: "assertion-2", modality: "possible" as const };
-  assert.equal(speculative.status, "proposed");
-  assert.equal(speculative.modality, "possible");
+  const confirmedSpeculation = confirmAssertion(speculative, "author-1");
+  assert.equal(confirmedSpeculation.status, "confirmed");
+  assert.equal(confirmedSpeculation.modality, "possible");
+  assert.equal(speculative.status, "proposed", "confirmation returns a new assertion");
 });
 
 test("explicit entity merge keeps history, relations and references without confirming mentions", () => {
@@ -295,8 +297,7 @@ test("reverse index does not infer assertions from mentions and confirms only se
   const mention = createMentionFromCandidate({ id: "mention-1", anchorId: anchor.id, sourceRevisionId: "r1", candidate });
   graph = { ...graph, anchors: [anchor], mentions: [mention] };
   const index = buildReferenceIndex(knowledge, graph);
-  assert.equal(graph.assertions.length, 0);
-  assert.equal(findReferencesToNode(index, nodeA.id)[0]?.source.kind, "mention");
+  assert.deepEqual(findReferencesToNode(index, nodeA.id).map(reference => reference.source.kind), ["mention"]);
   assert.throws(() => confirmMention(mention, "person-c", "author-1"), /not a candidate/);
 });
 

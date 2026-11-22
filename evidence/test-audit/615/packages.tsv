@@ -1,0 +1,45 @@
+path	kind	status	decision	contract	observable_behavior	oracle	counterexample	layer	real_mock_boundary	duplicate_or_retained_proof	execution_cost	action_and_verification	commit_sha	existing_work
+packages/api/src/auth-mode.test.ts	suite	UNASSESSED												-
+packages/api/src/authorization-error.test.ts	suite	UNASSESSED												-
+packages/api/src/better-auth.persistence.test.ts	suite	UNASSESSED												-
+packages/api/src/better-auth.registration.test.ts	suite	UNASSESSED												-
+packages/api/src/better-auth.test.ts	suite	UNASSESSED												-
+packages/api/src/deadline-timer.test.ts	suite	UNASSESSED												-
+packages/api/src/environment.test.ts	suite	UNASSESSED												-
+packages/api/src/event-streams.test.ts	suite	UNASSESSED												-
+packages/api/src/history-project-scope.test.ts	suite	UNASSESSED												-
+packages/api/src/hosted-policy.test.ts	suite	UNASSESSED												-
+packages/api/src/migrate-auth.test.ts	suite	UNASSESSED												-
+packages/api/src/native-knowledge-actions.test.ts	suite	UNASSESSED												-
+packages/api/src/native-knowledge-merge-service.test.ts	suite	UNASSESSED												-
+packages/api/src/native-knowledge-service.test.ts	suite	UNASSESSED												-
+packages/api/src/oauth-mcp.test.ts	suite	UNASSESSED												-
+packages/api/src/persistence-api.test.ts	suite	UNASSESSED												-
+packages/api/src/persistence-routes.test.ts	suite	UNASSESSED												-
+packages/api/src/platform-runtime.test.ts	suite	UNASSESSED												-
+packages/api/src/prune-auth-revocations.test.ts	suite	UNASSESSED												-
+packages/api/src/recent-activity-store.test.ts	suite	UNASSESSED												-
+packages/api/src/server.test.ts	suite	UNASSESSED												-
+packages/api/src/verify-auth-clients.ts	local auth verification	UNASSESSED												-
+packages/api/src/work-archive-limits.test.ts	suite	UNASSESSED												-
+packages/api/src/work-archive.test.ts	suite	UNASSESSED												-
+packages/api/test/better-auth.integration.test.ts	suite	UNASSESSED												-
+packages/contracts/src/index.test.ts	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+packages/contracts/src/oauth-metadata.test.ts	suite	UNASSESSED												-
+packages/core/src/index.test.ts	suite	UNASSESSED												-
+packages/core/src/knowledge-context.test.ts	suite	UNASSESSED												-
+packages/core/src/knowledge-evidence.test.ts	suite	UNASSESSED												-
+packages/core/src/operation-records.test.ts	suite	UNASSESSED												-
+packages/core/src/snapshot-index.test.ts	suite	UNASSESSED												-
+packages/core/src/snapshot-reuse.test.ts	suite	UNASSESSED												-
+packages/core/src/transactions.test.ts	suite	UNASSESSED												-
+packages/migration/src/migration.test.ts	suite	UNASSESSED												-
+packages/migration/tests/import-recovery.mjs	standalone suite	UNASSESSED												-
+packages/module-runtime/src/build-catalog.test.ts	suite	UNASSESSED												-
+packages/module-runtime/src/module-runtime.test.ts	suite	UNASSESSED												-
+packages/module-runtime/src/runtime-error.test.ts	suite	UNASSESSED												-
+packages/module-runtime/src/worker-supervisor.test.ts	suite	UNASSESSED												-
+packages/persistence-contracts/src/index.test.ts	suite	UNASSESSED												-
+packages/persistence-postgres/src/migration-set.test.ts	suite	UNASSESSED												-
+packages/persistence-postgres/src/postgres-store.test.ts	suite	UNASSESSED												-
+packages/persistence-postgres/src/schema-maintenance.test.ts	suite	UNASSESSED												-

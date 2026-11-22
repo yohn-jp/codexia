@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CALLBACK_URI, nativeApiOrigin, nativeOAuthConfig, nativeReaderOrigin } from "./native-config.mjs";
+import { nativeApiOrigin, nativeOAuthConfig, nativeReaderOrigin } from "./native-config.mjs";
 
 const input = {
   VITE_CODEXIA_API_ORIGIN: "https://api.example.test",
@@ -34,7 +34,7 @@ test("builds a separate public iOS client for the Better Auth issuer and API res
   assert.equal(config.apiOrigin, "https://api.example.test/");
   assert.equal(config.apiAudience, "https://api.example.test/api");
   assert.equal(config.clientId, "codexia-ios-public");
-  assert.equal(config.redirectUri, CALLBACK_URI);
+  assert.equal(config.redirectUri, "jp.yohn.codexia:/oauth2redirect");
   assert.deepEqual(config.scopes, ["openid", "codexia:api", "offline_access"]);
 });
 

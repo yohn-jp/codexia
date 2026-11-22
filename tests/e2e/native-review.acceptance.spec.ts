@@ -116,7 +116,10 @@ for (const mode of ["desktop", "mobile"] as const) {
     await page.getByRole("button", { name: "承認する" }).click();
     await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
     const approved = await page.request.get(`/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}`);
-    expect((await approved.json() as { changeSet: { status: string } }).changeSet.status).toBe("approved");
+    expect(approved.ok()).toBe(true);
+    const { changeSet: approvedChangeSet } = await approved.json() as { changeSet: { status: string; version: number } };
+    expect(approvedChangeSet.status).toBe("approved");
+    expect(Number.isInteger(approvedChangeSet.version)).toBe(true);
     const beforeApply = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
     expect((await beforeApply.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === proposal.id)).toBe(false);
 
@@ -132,7 +135,7 @@ for (const mode of ["desktop", "mobile"] as const) {
     await expect(page.locator(".native-review-message")).toContainText("適用receiptはまだ確認できません。再試行は同じChangeSet versionで行います。");
     await page.getByRole("button", { name: "承認済み提案を適用" }).click();
     await expect(page.getByRole("region", { name: "適用receipt" })).toBeVisible();
-    expect(applyVersions).toEqual([2, 2]);
+    expect(applyVersions).toEqual([approvedChangeSet.version, approvedChangeSet.version]);
     const afterApply = await page.request.get(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`);
     expect((await afterApply.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === proposal.id)).toBe(true);
     await returnToEditor(page, mode);
@@ -179,6 +182,8 @@ test("author review reads native ChangeSets from the unified feed and keeps one 
   const { project } = await createWritingFixture(page, "desktop", "Unified author review feed");
   const coreProposalId = await proposeCoreMetadata(page, project.id, "Core feed proposal");
   const native = await proposeNode(page, project.id, "Native feed proposal");
+  await page.reload();
+  await expect(manuscriptEditor(page)).toBeVisible();
   let feedReads = 0;
   let nativeListReads = 0;
   page.on("request", request => {
@@ -188,7 +193,10 @@ test("author review reads native ChangeSets from the unified feed and keeps one 
   });
   await openReview(page, "desktop");
   await expect(page.getByRole("region", { name: "Core提案の承認と適用状況" })).toHaveCount(0);
-  expect(coreProposalId).toMatch(/^[0-9a-f-]{36}$/u);
+  const coreCard = page.locator(".proposal-card").filter({ hasText: coreProposalId });
+  await expect(coreCard).toHaveCount(1);
+  await expect(coreCard).toContainText("Core feed proposal");
+  await expect(coreCard.getByRole("button", { name: "承認して PostgreSQL Revision" })).toBeEnabled();
   const nativeCard = page.locator(".native-changeset-card");
   await expect(nativeCard).toContainText(native.changeSetId);
   await expect(nativeCard).toContainText("提案");

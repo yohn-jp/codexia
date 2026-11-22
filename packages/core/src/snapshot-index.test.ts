@@ -72,10 +72,7 @@ test("scene writing counts preserve a leading Markdown horizontal rule unless it
     "body/frontmatter.md": file(frontmatterMarkdown, frontmatterScene.id),
   });
 
-  assert.equal(
-    index.sceneCharacterCountsByDocumentId.get(ordinaryScene.id),
-    Array.from(ordinaryMarkdown).filter((character) => !/\s/u.test(character)).length,
-  );
+  assert.equal(index.sceneCharacterCountsByDocumentId.get(ordinaryScene.id), 21);
   assert.equal(index.sceneCharacterCountsByDocumentId.get(frontmatterScene.id), 5);
   assert.equal(manuscriptBody(ordinaryMarkdown), ordinaryMarkdown);
   assert.equal(manuscriptBody(frontmatterMarkdown), "本文です。");

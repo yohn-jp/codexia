@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --import tsx --test src/*.test.ts"
+    "test": "pnpm run build && node --import tsx --test src/*.test.ts tests/core-scope-conflict.acceptance.mjs"
   },
   "dependencies": {
     "@codexia/contracts": "workspace:*",

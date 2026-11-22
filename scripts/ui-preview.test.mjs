@@ -21,7 +21,10 @@ test('UI preview rejects unknown flags and dangerous invalid options', () => {
 
 test('only a loopback-bound PostgreSQL port can be adopted', () => {
   assert.equal(parsePublishedPort('127.0.0.1:49153\n'), 49153);
-  for (const output of ['0.0.0.0:49153', '[::]:49153', '127.0.0.1:0', '127.0.0.1:49153\n127.0.0.1:49154', '']) {
+  for (const output of [
+    '0.0.0.0:49153', '[::]:49153', '127.0.0.1:0', '127.0.0.1:49153\n127.0.0.1:49154',
+    '127.0.0.1:49153\n0.0.0.0:49154', '[::]:49154\r\n127.0.0.1:49153', '',
+  ]) {
     assert.throws(() => parsePublishedPort(output));
   }
 });

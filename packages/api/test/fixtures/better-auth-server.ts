@@ -140,9 +140,10 @@ function persistenceForAuthFixture(): ApiServerOptions["persistence"] {
 export async function startBetterAuthFixture(options: BetterAuthFixtureOptions): Promise<BetterAuthFixture> {
   assertDisposableAuthFixtureDatabaseUrl(options.databaseUrl);
   const previousNodeEnv = process.env.NODE_ENV;
-  process.env.NODE_ENV = "test";
-  const idpKeyPair = await generateKeyPair("RS256");
-  const idpPublicJwk = { ...(await exportJWK(idpKeyPair.publicKey)), kid: "codexia-fixture-idp-key", use: "sig", alg: "RS256" };
+  const restoreNodeEnv = () => {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  };
   const codes = new Map<string, IdpCodeState>();
   const subject = `fixture-owner-${randomUUID()}`;
   const email = `${subject}@example.test`;
@@ -159,6 +160,9 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   let domainPersistence: ApiServerOptions["persistence"] | undefined;
   let domainStore: CoreStore | undefined;
   try {
+    process.env.NODE_ENV = "test";
+    const idpKeyPair = await generateKeyPair("RS256");
+    const idpPublicJwk = { ...(await exportJWK(idpKeyPair.publicKey)), kid: "codexia-fixture-idp-key", use: "sig", alg: "RS256" };
     idpServer = createHttpServer(async (request, response) => {
       const url = new URL(request.url ?? "/", idpIssuer);
       if (url.pathname === "/.well-known/openid-configuration") {
@@ -425,14 +429,17 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         return pruneExpiredJwtAccessTokenRevocations(runtime!.pool);
       },
       async close() {
-        if (apiServer) await close(apiServer);
-        if (bootstrapServer) await close(bootstrapServer);
-        if (idpServer) await close(idpServer);
-        if (runtime) await runtime.pool.end();
-        if (domainPersistence) await domainPersistence.close();
-        if (bootstrapPool) await bootstrapPool.end();
-        if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
-        process.env.NODE_ENV = previousNodeEnv;
+        try {
+          if (apiServer) await close(apiServer);
+          if (bootstrapServer) await close(bootstrapServer);
+          if (idpServer) await close(idpServer);
+          if (runtime) await runtime.pool.end();
+          if (domainPersistence) await domainPersistence.close();
+          if (bootstrapPool) await bootstrapPool.end();
+          if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
+        } finally {
+          restoreNodeEnv();
+        }
       },
     };
   } catch (error) {
@@ -443,8 +450,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     if (runtime) await runtime.pool.end().catch(() => undefined);
     if (domainPersistence) await domainPersistence.close().catch(() => undefined);
     if (bootstrapPool) await bootstrapPool.end().catch(() => undefined);
-    if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
-    process.env.NODE_ENV = previousNodeEnv;
+    if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true }).catch(() => undefined);
+    restoreNodeEnv();
     throw error;
   }
 }

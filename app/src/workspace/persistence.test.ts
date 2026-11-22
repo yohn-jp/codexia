@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspacePreset, hideWorkspacePanel, resizeWorkspaceSplit } from "./layout";
-import { floatingStorageKey, saveFloatingPanels } from "./floating";
 import {
   loadWorkspaceLayout,
   loadWorkspaceSnapshot,
@@ -15,8 +14,10 @@ import {
 class MemoryStorage implements WorkspaceStorage {
   values = new Map<string, string>();
   failKey: string | null = null;
+  writes: string[] = [];
   getItem(key: string): string | null { return this.values.get(key) ?? null; }
   setItem(key: string, value: string): void {
+    this.writes.push(key);
     if (key === this.failKey) throw new Error("quota exceeded");
     this.values.set(key, value);
   }
@@ -24,15 +25,7 @@ class MemoryStorage implements WorkspaceStorage {
 
 const panelIds = ["editor", "outline", "inspector", "history", "review"];
 
-test("layout persistence is separate by author scope and device class", () => {
-  assert.notEqual(workspaceStorageKey("author:one", "desktop"), workspaceStorageKey("author:one", "mobile"));
-  assert.notEqual(workspaceStorageKey("author:one", "desktop"), workspaceStorageKey("author:two", "desktop"));
-  assert.equal(workspaceStorageKey("author:one", "mobile"), "scriptorium:workspace:v1:author%3Aone:mobile");
-  assert.notEqual(workspaceSnapshotStorageKey("author:one", "desktop"), workspaceSnapshotStorageKey("author:one", "mobile"));
-  assert.notEqual(workspaceSnapshotStorageKey("author:one", "desktop"), workspaceSnapshotStorageKey("author:two", "desktop"));
-});
-
-test("a workspace save commits dock layout and floating geometry in one record", () => {
+test("a workspace save commits dock layout and floating geometry together for one author and device", () => {
   const storage = new MemoryStorage();
   const desktop = createWorkspacePreset("writing", panelIds);
   const floatingLayout = hideWorkspacePanel(desktop, "outline");
@@ -40,34 +33,44 @@ test("a workspace save commits dock layout and floating geometry in one record",
   const snapshot = { layout: floatingLayout, floating };
 
   assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", snapshot), true);
+  assert.equal(storage.writes.length, 1);
+  assert.equal(storage.values.size, 1);
   const reloaded = loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds);
   assert.equal(reloaded.state, "valid");
   assert.deepEqual(reloaded, { ...snapshot, state: "valid" });
 
-  const raw = storage.getItem(workspaceSnapshotStorageKey("author:one", "desktop"));
-  assert.ok(raw);
+  assert.equal(loadWorkspaceSnapshot(storage, "author:two", "desktop", panelIds).state, "missing");
+  assert.equal(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds).state, "missing");
   assert.equal(saveWorkspaceSnapshot(storage, "author:one", "mobile", { layout: desktop, floating: [] }), true);
-  assert.notEqual(storage.getItem(workspaceSnapshotStorageKey("author:one", "mobile")), raw);
-  assert.equal(storage.getItem(workspaceSnapshotStorageKey("author:one", "desktop")), raw);
+  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds), { layout: desktop, floating: [], state: "valid" });
+  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { ...snapshot, state: "valid" });
 });
 
 test("existing split-key layouts restore together and remain intact until an explicit atomic save", () => {
   const storage = new MemoryStorage();
-  const layout = hideWorkspacePanel(createWorkspacePreset("writing", panelIds), "outline");
+  const layout = {
+    version: 1,
+    preset: "custom",
+    root: { type: "leaf", panelId: "editor" },
+    hiddenPanelIds: ["outline", "inspector", "history", "review"],
+  } as const;
   const floating = [{ panelId: "outline", left: 100, top: 120, width: 350, height: 390 }];
-  assert.equal(saveWorkspaceLayout(storage, "author:one", "desktop", layout), true);
-  assert.equal(saveFloatingPanels(storage, "author:one", floating, panelIds, layout.hiddenPanelIds), true);
-  const legacyDockBytes = storage.getItem(workspaceStorageKey("author:one", "desktop"));
-  const legacyFloatingBytes = storage.getItem(floatingStorageKey("author:one"));
+  const legacyDockKey = "scriptorium:workspace:v1:author%3Aone:desktop";
+  const legacyFloatingKey = "scriptorium:workspace:floating:v1:author%3Aone:desktop";
+  const legacyDockBytes = JSON.stringify(layout);
+  const legacyFloatingBytes = JSON.stringify(floating);
+  storage.values.set(legacyDockKey, legacyDockBytes);
+  storage.values.set(legacyFloatingKey, legacyFloatingBytes);
 
-  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { layout, floating, state: "valid" });
-  assert.equal(storage.getItem(workspaceStorageKey("author:one", "desktop")), legacyDockBytes);
-  assert.equal(storage.getItem(floatingStorageKey("author:one")), legacyFloatingBytes);
+  const loaded = loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds);
+  assert.deepEqual(loaded, { layout, floating, state: "valid" });
+  assert.equal(loadWorkspaceSnapshot(storage, "author:two", "desktop", panelIds).state, "missing");
+  assert.deepEqual(storage.writes, []);
 
-  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", { layout, floating }), true);
+  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", loaded), true);
   assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { layout, floating, state: "valid" });
-  assert.equal(storage.getItem(workspaceStorageKey("author:one", "desktop")), legacyDockBytes);
-  assert.equal(storage.getItem(floatingStorageKey("author:one")), legacyFloatingBytes);
+  assert.equal(storage.getItem(legacyDockKey), legacyDockBytes);
+  assert.equal(storage.getItem(legacyFloatingKey), legacyFloatingBytes);
 });
 
 test("a failed workspace record write leaves the previous complete snapshot available after reload", () => {

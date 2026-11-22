@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { continueOAuthLogin, hasSignedOAuthPrompt, oauthConsentContinuationURL, oauthLoginCallbackURL } from "./oauth-login.js";
 
 test("OAuth login requires one opaque signed authorization request", () => {
@@ -39,8 +38,7 @@ test("upstream sign-in errors are surfaced without exposing provider details", a
   }, "?sig=s&exp=1&client_id=c&redirect_uri=%2F&state=s"), /Sign-in could not be started/u);
 });
 
-test("official Better Auth client forwards only the signed authorization query", async () => {
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+test("the configured sign-in client forwards only the signed authorization query", async t => {
   const signed = new URLSearchParams([
     ["client_id", "codexia-web-public"],
     ["redirect_uri", "https://codexia.example.test/desktop"],
@@ -53,22 +51,30 @@ test("official Better Auth client forwards only the signed authorization query",
     ["ba_param", "exp"],
   ]);
   signed.append("untrusted_extra", "must-not-be-forwarded");
-  Object.defineProperty(globalThis, "window", { configurable: true, value: { location: { search: `?${signed}` } } });
-  try {
-    const plugin = oauthProviderClient().fetchPlugins[0]!;
-    const context = {
-      method: "POST",
-      headers: new Headers({ "content-type": "application/json" }),
-      body: JSON.stringify({ providerId: "workspace-oidc" }),
-    };
-    await plugin.hooks.onRequest(context as never);
-    const body = JSON.parse(context.body as string) as { oauth_query: string };
-    const forwarded = new URLSearchParams(body.oauth_query);
-    assert.equal(forwarded.get("sig"), "signed-prompt");
-    assert.equal(forwarded.get("state"), "request-state");
-    assert.equal(forwarded.has("untrusted_extra"), false);
-  } finally {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: new URL(`https://codexia.example.test/oauth/login?${signed}`) },
+  });
+  t.after(() => {
     if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
     else Reflect.deleteProperty(globalThis, "window");
-  }
+  });
+  const requests: Request[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(new Request(new URL(String(input), "https://codexia.example.test"), init));
+    return Response.json({ redirect: false });
+  });
+  const { authClient } = await import("./auth-client.js");
+  await continueOAuthLogin(authClient, `?${signed}`);
+  assert.equal(requests.length, 1);
+  const request = requests[0]!;
+  assert.equal(request.method, "POST");
+  assert.equal(request.url, "https://codexia.example.test/api/auth/sign-in/social");
+  assert.equal(request.credentials, "same-origin");
+  const body = await request.json() as { oauth_query: string };
+  const forwarded = new URLSearchParams(body.oauth_query);
+  assert.equal(forwarded.get("sig"), "signed-prompt");
+  assert.equal(forwarded.get("state"), "request-state");
+  assert.equal(forwarded.has("untrusted_extra"), false);
 });

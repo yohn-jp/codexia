@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
-import { collectGitHubPages } from './release-policy.mjs';
+import { assertVerificationJobs, collectGitHubPages } from './release-policy.mjs';
+import { selectReleaseSource } from './release-source-gate.mjs';
 import { successfulPublicationJobs, verifyExistingBackendRelease } from './verify-existing-backend-release.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from './backend-image-inspection.mjs';
 import { validatePushDeploymentCertificate } from './push-deployment-admission.mjs';
@@ -43,14 +44,21 @@ export function backendReleaseValidationEnvironment(env, run) {
   return { ...env, GITHUB_RUN_ID: String(run.id), GITHUB_RUN_NUMBER: String(run.run_number) };
 }
 
-export function selectPushDeploymentCertificateArtifact(artifacts, run, { sourceSha = run?.head_sha } = {}) {
+function certificateArtifactPattern(run) {
+  return new RegExp(`^codexia-backend-deployment-certificate-([a-f0-9]{40})-run-${run.id}-attempt-${run.run_attempt}$`, 'u');
+}
+
+export function selectPushDeploymentCertificateArtifact(artifacts, run, { sourceSha } = {}) {
   assert.ok(Array.isArray(artifacts), 'Backend publication artifact inventory is invalid');
   assert.ok(positive(run?.id) && positive(run?.run_attempt) && sha.test(run?.head_sha ?? ''), 'Backend publication identity is invalid');
-  assert.match(sourceSha ?? '', sha, 'Backend publication artifact source SHA is invalid');
-  const name = `codexia-backend-deployment-certificate-${sourceSha}-run-${run.id}-attempt-${run.run_attempt}`;
-  const matches = artifacts.filter(artifact => artifact?.name === name);
+  const pattern = certificateArtifactPattern(run);
+  const matches = artifacts.filter(artifact => typeof artifact?.name === 'string' && pattern.test(artifact.name));
   assert.equal(matches.length, 1, 'Expected one deployment certificate artifact for this publication run and attempt');
   const artifact = matches[0];
+  if (sourceSha !== undefined) {
+    assert.match(sourceSha, sha, 'Backend publication artifact source SHA is invalid');
+    assert.equal(pattern.exec(artifact.name)[1], sourceSha, 'Deployment certificate artifact source SHA mismatch');
+  }
   assert.equal(artifact.expired, false, 'Deployment certificate artifact is expired');
   assert.equal(String(artifact.workflow_run?.id), String(run.id), 'Deployment certificate artifact run mismatch');
   assert.equal(artifact.workflow_run?.head_sha, run.head_sha, 'Deployment certificate artifact workflow head mismatch');
@@ -90,7 +98,8 @@ export function createHandoffDeploymentOutputs({ fullImage, producerSha, fullCer
   assert.ok(positive(certificate.identity.apiEpoch), 'Certified Full backend API epoch is invalid');
   const encodedCertificate = Buffer.from(JSON.stringify(certificate)).toString('base64');
   assert.ok(encodedCertificate.length <= JOB_OUTPUT_LIMIT, 'Verified Full deployment certificate exceeds the job output limit');
-  return Object.freeze({ fullImage, producerSha, fullApiEpoch: String(certificate.identity.apiEpoch), fullCertificate: encodedCertificate });
+  return Object.freeze({ fullImage, producerSha, verifiedMainSha: certificate.verifiedMainSha,
+    fullApiEpoch: String(certificate.identity.apiEpoch), fullCertificate: encodedCertificate });
 }
 
 async function githubJson(resource, token, fetchImpl = fetch) {
@@ -114,6 +123,33 @@ async function verifyVerifyRun(runId, certificate, token, fetchImpl) {
   assert.equal(run.head_sha, certificate.verifiedMainSha, 'Certificate Verify source SHA mismatch');
   assert.equal(run.id, certificate.verifyRun.id, 'Certificate Verify run ID mismatch');
   assert.equal(run.run_attempt, certificate.verifyRun.attempt, 'Certificate Verify run attempt mismatch');
+  const jobs = await collectGitHubPages((page, perPage) =>
+    githubJson(`actions/runs/${runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs');
+  assertVerificationJobs(jobs);
+}
+
+function publisherSkippedRelease(publisher) {
+  assert.equal(publisher.status, 'completed', 'Backend publication job is incomplete');
+  if (publisher.conclusion === 'skipped') return true;
+  assert.equal(publisher.conclusion, 'success', 'Backend publication job failed');
+  const steps = publisher.steps ?? [];
+  assert.ok(Array.isArray(steps), 'Backend publication step inventory is invalid');
+  const freshness = steps.filter(step => step?.name === 'Require complete exact-source main verification');
+  assert.ok(freshness.length === 1 && freshness[0].status === 'completed' && freshness[0].conclusion === 'success',
+    'Missing or unsuccessful backend publication freshness gate');
+
+  const publication = [
+    steps.filter(step => step?.name === 'Publish commit-addressed image'),
+    steps.filter(step => step?.name === 'Record independent backend release'),
+    steps.filter(step => step?.name === 'Create certified Core and Full push handoff'),
+    steps.filter(step => typeof step?.name === 'string' && /^Run actions\/upload-artifact@\S+$/u.test(step.name)),
+  ];
+  assert.ok(publication.every(matches => matches.length === 1 && matches[0].status === 'completed'),
+    'Incomplete deployment publication step inventory');
+  if (publication.every(([step]) => step.conclusion === 'skipped')) return true;
+  assert.ok(publication.every(([step]) => step.conclusion === 'success'),
+    'Incomplete deployment publication: publishing, release recording and certificate upload must agree');
+  return false;
 }
 
 async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = fetch }) {
@@ -124,14 +160,20 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
   ]);
   const publishers = jobs.filter(job => job?.name === 'Publish immutable GHCR image');
   assert.equal(publishers.length, 1, 'Expected exactly one backend publication job');
-  if (publishers[0].status === 'completed' && publishers[0].conclusion === 'skipped') {
-    assert.equal(artifacts.filter(artifact => artifact?.name?.startsWith(`codexia-backend-deployment-certificate-${run.head_sha}-run-${run.id}-attempt-`)).length,
+  if (publisherSkippedRelease(publishers[0])) {
+    const pattern = certificateArtifactPattern(run);
+    assert.equal(artifacts.filter(artifact => typeof artifact?.name === 'string' && pattern.test(artifact.name)).length,
       0, 'A skipped publication cannot emit a deployment certificate');
     return { skipped: true, publisherRunId: run.id };
   }
-  assert.equal(publishers[0].status, 'completed', 'Backend publication job is incomplete');
-  assert.equal(publishers[0].conclusion, 'success', 'Backend publication job failed');
   const artifact = selectPushDeploymentCertificateArtifact(artifacts, run);
+  const sourceSha = certificateArtifactPattern(run).exec(artifact.name)[1];
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
+  if (sourceSha !== run.head_sha) {
+    assert.ok(selectReleaseSource('backend', sourceSha, run.head_sha, git, null).affected,
+      'A newer backend change superseded the certified source');
+  }
+  const sourceTree = git('rev-parse', sourceSha + '^{tree}').trim();
   const bytes = await downloadArtifact(artifact, REPOSITORY, token, fetchImpl, { maxArchive: ARTIFACT_MAX_BYTES, downloadTimeoutMs: 30_000 });
   const scratch = await mkdtemp(path.join(env.RUNNER_TEMP || tmpdir(), 'codexia-backend-deploy-handoff-'));
   try {
@@ -139,7 +181,8 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
     assert.deepEqual(files.sort(), ['core.json', 'full.json'], 'Handoff artifact must contain only Core and Full certificates');
     const certificates = await Promise.all(['core.json', 'full.json'].map(async filename =>
       JSON.parse(await readFile(path.join(scratch, filename), 'utf8'))));
-    const [core, full] = validatePushDeploymentCertificatePair(certificates, run.head_sha);
+    const [core, full] = validatePushDeploymentCertificatePair(certificates, sourceSha);
+    assert.equal(core.verifiedMainTree, sourceTree, 'Deployment certificate source tree differs from the certified Git tree');
     const publisherJobsOkay = successfulPublicationJobs(jobs, full.producer.event === 'pull_request', true);
     assert.ok(publisherJobsOkay, 'Backend publication jobs do not prove the certified producer path');
     await verifyVerifyRun(core.verifyRun.id, core, token, fetchImpl);
@@ -158,14 +201,14 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
       GITHUB_SHA: run.head_sha,
       GITHUB_EVENT_NAME: backendWorkflowEvent,
       GITHUB_RUN_ID: String(run.id),
-      CODEXIA_SOURCE_SHA: run.head_sha,
+      CODEXIA_SOURCE_SHA: sourceSha,
       CODEXIA_VERIFY_RUN_ID: String(core.verifyRun.id),
       GH_TOKEN: token,
       ...(selected.producer.event === 'pull_request'
         ? { CODEXIA_BACKEND_PROMOTION_DIR: scratch }
         : { CODEXIA_BACKEND_ARTIFACT_MANIFEST: receiptPath }),
     };
-    await verifyExistingBackendRelease({ env: releaseEnv, args: [full.image, run.head_sha, full.producer.sourceSha,
+    await verifyExistingBackendRelease({ env: releaseEnv, args: [full.image, sourceSha, full.producer.sourceSha,
       full.identity.version, 'full', full.producer.event] });
 
     const compatibility = JSON.parse(await readFile(new URL('../deploy/update-compatibility.json', import.meta.url), 'utf8'));
@@ -229,7 +272,7 @@ export async function verifyBackendPushHandoff(options = {}) {
   if (env.GITHUB_OUTPUT) {
     const outputs = createHandoffDeploymentOutputs(result);
     await appendFile(env.GITHUB_OUTPUT,
-      `full-image=${outputs.fullImage}\nfull-api-epoch=${outputs.fullApiEpoch}\nproducer-sha=${outputs.producerSha}\nfull-certificate=${outputs.fullCertificate}\n`);
+      `full-image=${outputs.fullImage}\nfull-api-epoch=${outputs.fullApiEpoch}\nverified-main-sha=${outputs.verifiedMainSha}\nproducer-sha=${outputs.producerSha}\nfull-certificate=${outputs.fullCertificate}\n`);
   }
   if (env.GITHUB_STEP_SUMMARY) {
     await writeFile(env.GITHUB_STEP_SUMMARY,

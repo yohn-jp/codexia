@@ -6,7 +6,7 @@ import { chromium } from "@playwright/test";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const projectId = "browser-module-fixture";
+const projectId = "semantic-browser-fixture";
 const snapshot = { projectId, projectVersion: 1 };
 const calls = [];
 let activeTask;
@@ -37,13 +37,13 @@ try {
     calls.push({ actionId, input });
     if (actionId === "semantic.search") return {
       ok: true, snapshot,
-      data: { query: input.query, mode: input.mode, model: "Xenova/multilingual-e5-small", modelVersion: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", ...(input.rerank ? { rerankWarning: "semantic_reranker_unavailable" } : {}), results: [
+      data: { query: input.query, mode: input.mode, model: "fixture-embedding", modelVersion: "fixture-v1", ...(input.rerank ? { rerankWarning: "semantic_reranker_unavailable" } : {}), results: [
         { sceneId: "sc-station", sentenceIndex: 0, name: "Station", type: "scene", snippet: "夜遅く駅に着いた。", score: 0.04 },
       ] },
     };
     if (actionId === "semantic.expressions.search") return {
       ok: true, snapshot,
-      data: { query: input.query, mode: "expression", modelVersion: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", results: [
+      data: { query: input.query, mode: "expression", modelVersion: "fixture-v1", results: [
         { sceneId: "sc-station", sentenceIndex: 0, name: "Station", type: "scene", snippet: "夜遅く駅に着いた。", score: 0.91 },
       ] },
     };
@@ -59,11 +59,11 @@ try {
     };
     if (actionId === "semantic.index.status") return {
       ok: true, snapshot,
-      data: { indexAvailable: false, passageCount: 0, indexUpdatedAt: null, modelVersion: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", modelLoaded: false },
+      data: { indexAvailable: false, passageCount: 0, indexUpdatedAt: null, modelVersion: "fixture-v1", modelLoaded: false },
     };
     if (actionId === "semantic.settings.read") return {
       ok: true, snapshot,
-      data: { settings: { schemaVersion: 1, rerankerEnabled: false }, models: { reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx" } } },
+      data: { settings: { schemaVersion: 1, rerankerEnabled: false }, models: { reranker: { id: "fixture-reranker" } } },
     };
     if (actionId === "semantic.settings.update") return {
       ok: true, snapshot,
@@ -86,23 +86,19 @@ try {
   await page.evaluate(async ({ origin, snapshot }) => {
     const { browserModule } = await import(`${origin}/src/browser.ts`);
     const context = {
-      projectId: "semantic-browser-fixture",
+      projectId: snapshot.projectId,
       snapshot,
       signal: new AbortController().signal,
       invoke: (actionId, input) => window.semanticInvoke(actionId, input),
       propose: async () => { throw new Error("The semantic browser must use registered proposal actions"); },
       refresh: async () => {},
     };
-    window.semanticContext = context;
     window.semanticMount = async (id) => {
       window.semanticUnmount = await browserModule.mount(id, document.getElementById("semantic-root"), context);
     };
   }, { origin, snapshot });
 
   await page.evaluate(() => window.semanticMount("semantic.search"));
-  assert.equal(await page.evaluate(() => window.semanticContext.projectId), "semantic-browser-fixture");
-  assert.deepEqual(await page.evaluate(() => window.semanticContext.snapshot), snapshot);
-  await page.waitForTimeout(100);
   await page.getByLabel("検索語").fill("夜遅く 駅");
   await page.getByLabel("上位30件を CPU 再ランキング").check();
   await page.getByRole("button", { name: "検索" }).click();
@@ -136,7 +132,7 @@ try {
 
   await page.evaluate(() => window.semanticMount("semantic.index"));
   await page.getByText(/プロジェクト内容は外部へ送信しません/).waitFor();
-  await page.waitForTimeout(100);
+  await page.getByRole("button", { name: "再ランキング設定案を作成" }).waitFor();
   const rerankSetting = page.getByLabel("CPU 再ランキングを既定で有効にする");
   await rerankSetting.check();
   await page.getByRole("button", { name: "インデックスを再構築" }).click();

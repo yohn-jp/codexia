@@ -66,7 +66,7 @@ function closeForSelection(requestedModules, manifests) {
 
 async function main() {
   const { packageDirectory, profile, requestedModules, port } = parseArgs(process.argv.slice(2));
-  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
+  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
   if (!databaseUrl) throw new Error('Set CODEXIA_TEST_DATABASE_URL to an isolated PostgreSQL database for hosted UI verification');
   const packageManifest = JSON.parse(await readFile(path.join(packageDirectory, 'generated/module-manifests.json'), 'utf8'));
   assert.equal(packageManifest.profile, 'hosted');

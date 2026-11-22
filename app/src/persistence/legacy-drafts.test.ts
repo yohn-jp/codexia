@@ -37,3 +37,15 @@ test("mismatched key identities and unsupported payloads remain unimported", () 
   store.setItem(key, JSON.stringify({ ...record, text: null }));
   assert.deepEqual(listLegacyDrafts(store), []); assert.equal(store.length, 1);
 });
+
+test("historical draft keys retain escaped project and scene identities", () => {
+  const store = storage();
+  const escapedKey = "scriptorium:draft:project%3Aa:scene%2F1";
+  const escapedDraft = { ...record, projectId: "project:a", sceneId: "scene/1" };
+  store.setItem(escapedKey, JSON.stringify(escapedDraft));
+  assert.deepEqual(readLegacyDraft(store, escapedKey)?.draft, escapedDraft);
+  const otherProjectKey = "scriptorium:draft:project%3Ab:scene%2F1";
+  store.setItem(otherProjectKey, JSON.stringify(escapedDraft));
+  assert.equal(readLegacyDraft(store, otherProjectKey), null);
+  assert.equal(store.length, 2);
+});

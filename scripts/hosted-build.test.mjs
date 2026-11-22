@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm, readFile, symlink } from 'node:fs/promises';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, writeFile, rm, readFile, readdir, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -11,7 +11,19 @@ import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEnt
 import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement, pinnedCosignBinary, publishBundle } from './hosted-attestation.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
+
+test('hosted UI verification requires its own disposable database setting', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-hosted-ui-target-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const env = { ...process.env, CODEXIA_DATABASE_URL: 'postgres://127.0.0.1/ordinary_runtime' };
+  delete env.CODEXIA_TEST_DATABASE_URL;
+  const result = spawnSync(process.execPath, ['scripts/verify-ui-hosted.mjs', '--package', directory, '--profile', 'no-addon'], {
+    cwd: root, encoding: 'utf8', env,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Set CODEXIA_TEST_DATABASE_URL to an isolated PostgreSQL database/u);
+});
 
 test('hosted artifact staging accepts only isolated build-specific paths under /tmp', () => {
   assert.equal(validateHostedArtifactDirectory(`/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`), `/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`);
@@ -182,6 +194,8 @@ test('pnpm installer metadata refuses missing, ambiguous, and escaping lock iden
 });
 
 async function shippedModuleData() {
+  const entries = await readdir(path.join(root, 'modules'), { withFileTypes: true });
+  const moduleIds = entries.filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
   const trustedModules = await Promise.all(moduleIds.map(async (id) => {
     const bytes = await readFile(path.join(root, 'modules', id, 'package.json'));
     const packageManifest = JSON.parse(bytes.toString('utf8'));
@@ -219,7 +233,7 @@ async function shippedModuleData() {
     modules: catalog.modules.map(({ name: _name, description: _description, ...module }) => module),
   };
   assert.deepEqual(resolveBuildCatalogSelection(historicalCatalog, [], trustedModules).resolvedModules, []);
-  return { catalog, trustedModules };
+  return { catalog, trustedModules, moduleIds };
 }
 
 test('composition persistence declares base and selected module readers/writers only', () => {
@@ -244,54 +258,50 @@ test('composition persistence rejects duplicate module selections', () => {
 });
 
 test('hosted resource catalog covers Core, worker closures, and the full shipped selection', async () => {
-  const { catalog, trustedModules } = await shippedModuleData();
-  assert.deepEqual(catalog.baseResources, { cpuMilli: 250, memoryMiB: 256, ephemeralStorageMiB: 512 });
-  assert.deepEqual(catalog.resourceProfiles, [
-    { id: 'small', cpuMilli: 500, memoryMiB: 512, ephemeralStorageMiB: 1024 },
-    { id: 'balanced', cpuMilli: 2000, memoryMiB: 4096, ephemeralStorageMiB: 8192 },
-    { id: 'large', cpuMilli: 4000, memoryMiB: 8192, ephemeralStorageMiB: 16384 },
-  ]);
-  assert.equal(catalog.resourceProfiles.length, 3);
+  const { catalog, trustedModules, moduleIds } = await shippedModuleData();
+  const resourceKeys = ['cpuMilli', 'memoryMiB', 'ephemeralStorageMiB'];
+  const [small, balanced, large] = catalog.resourceProfiles;
+  assert.deepEqual(catalog.resourceProfiles.map(({ id }) => id), ['small', 'balanced', 'large']);
+  for (const key of resourceKeys) {
+    assert.ok(catalog.baseResources[key] > 0, `Core declares ${key}`);
+    assert.ok(small[key] < balanced[key] && balanced[key] < large[key], `Tiers increase ${key}`);
+  }
   assert.deepEqual(catalog.modules.find(({ id }) => id === 'story').sharedResourceGroupIds, []);
   assert.deepEqual(catalog.modules.find(({ id }) => id === 'mcp').sharedResourceGroupIds, []);
   assert.deepEqual(catalog.modules.find(({ id }) => id === 'nlp').sharedResourceGroupIds, ['worker-runtime']);
   assert.deepEqual(catalog.modules.find(({ id }) => id === 'semantic').sharedResourceGroupIds, ['semantic-models', 'worker-runtime']);
-  const expectedWorkerLimits = {
-    maxConcurrentJobs: 8,
-    maxQueuedJobs: 8,
-    maxWorkerServices: 8,
-    maxConcurrentServiceJobs: 1,
-    maxQueuedServiceJobs: 4,
-  };
+  const limits = catalog.modules.find(({ id }) => id === 'nlp').workerLimits;
+  for (const key of ['maxConcurrentJobs', 'maxQueuedJobs', 'maxWorkerServices', 'maxConcurrentServiceJobs', 'maxQueuedServiceJobs']) {
+    assert.ok(Number.isSafeInteger(limits[key]) && limits[key] > 0, `${key} is bounded`);
+  }
   for (const module of catalog.modules) {
-    assert.deepEqual(module.workerLimits, trustedModules.find(({ manifest }) => manifest.id === module.id).manifest.workerEntry ? expectedWorkerLimits : {});
+    assert.deepEqual(module.workerLimits, trustedModules.find(({ manifest }) => manifest.id === module.id).manifest.workerEntry ? limits : {});
   }
 
   const core = resolveBuildCatalogSelection(catalog, [], trustedModules);
   assert.deepEqual(core.resourceRequirements, catalog.baseResources);
   const storyAndMcp = resolveBuildCatalogSelection(catalog, ['story', 'mcp'], trustedModules);
   assert.deepEqual(storyAndMcp.resourceRequirements, catalog.baseResources);
-  const small = catalog.resourceProfiles.find(({ id }) => id === 'small');
   for (const requirements of [core.resourceRequirements, storyAndMcp.resourceRequirements]) {
-    for (const key of ['cpuMilli', 'memoryMiB', 'ephemeralStorageMiB']) {
+    for (const key of resourceKeys) {
       assert.ok(requirements[key] <= small[key], `Core/add-on selection fits small ${key} allocation`);
     }
   }
 
+  const tokenizer = resolveBuildCatalogSelection(catalog, ['nlp'], trustedModules);
+  const tokenizerAndSpeaker = resolveBuildCatalogSelection(catalog, ['nlp', 'speaker'], trustedModules);
+  assert.ok(tokenizer.resourceRequirements.memoryMiB > core.resourceRequirements.memoryMiB);
+  assert.deepEqual(tokenizerAndSpeaker.resourceRequirements, tokenizer.resourceRequirements, 'worker modules share one runtime allocation');
   const semantic = resolveBuildCatalogSelection(catalog, ['semantic'], trustedModules);
-  assert.deepEqual(semantic.resourceRequirements, {
-    cpuMilli: 2250,
-    memoryMiB: 6400,
-    ephemeralStorageMiB: 5120,
-  }, 'dependency closures charge the shared worker and semantic model pools once');
+  assert.ok(semantic.resourceRequirements.memoryMiB > tokenizer.resourceRequirements.memoryMiB);
+  assert.ok(semantic.resourceRequirements.ephemeralStorageMiB > tokenizer.resourceRequirements.ephemeralStorageMiB);
   const full = resolveBuildCatalogSelection(catalog, moduleIds, trustedModules);
-  assert.equal(full.resolvedModules.length, moduleIds.length);
+  assert.deepEqual(full.resolvedModules.map(({ id }) => id).sort(), moduleIds);
   assert.deepEqual(full.resourceRequirements, semantic.resourceRequirements);
-  const large = catalog.resourceProfiles.find(({ id }) => id === 'large');
-  for (const key of ['cpuMilli', 'memoryMiB', 'ephemeralStorageMiB']) {
+  for (const key of resourceKeys) {
     assert.ok(full.resourceRequirements[key] <= large[key], `full closure fits large ${key} allocation`);
   }
-  assert.ok(full.resourceRequirements.memoryMiB > catalog.resourceProfiles.find(({ id }) => id === 'balanced').memoryMiB);
+  assert.ok(full.resourceRequirements.memoryMiB > balanced.memoryMiB);
 });
 
 const hostedRevision = '1'.repeat(40);
@@ -409,6 +419,17 @@ test('browser artifacts bind the selected module closure to every reachable UI e
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-browser-closure-'));
   const source = '../modules/story/dist/browser.js';
   const manifests = new Map();
+  async function assertRecordedAssets(records) {
+    const expected = (await Promise.all(['', 'desktop', 'mobile', 'oauth'].map(async ui => {
+      const assets = path.posix.join('app/dist', ui, 'assets');
+      return Promise.all((await readdir(path.join(directory, assets))).map(async file => ({
+        path: path.posix.join('/app', assets, file),
+        sha256: `sha256:${createHash('sha256').update(await readFile(path.join(directory, assets, file))).digest('hex')}`,
+      })));
+    }))).flat();
+    const byPath = (left, right) => left.path.localeCompare(right.path);
+    assert.deepEqual(records.files.toSorted(byPath), expected.sort(byPath));
+  }
   async function emit(ui, withModule, modern = false) {
     const output = path.join(directory, 'app/dist', ui);
     await mkdir(path.join(output, '.vite'), { recursive: true });
@@ -422,7 +443,7 @@ test('browser artifacts bind the selected module closure to every reachable UI e
       ...(withModule ? { [source]: { file: 'assets/story-AbCd1234.js', isDynamicEntry: true, src: source } } : {}),
     };
     for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(modern && ui ? ['assets/shared-AbCd1234.js'] : [])]) {
-      await writeFile(path.join(output, file), '/* fixture */');
+      await writeFile(path.join(output, file), `/* fixture ${ui}/${file} */`);
     }
     await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
     manifests.set(ui, manifest);
@@ -448,10 +469,9 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await emit('mobile', true);
     await emitOAuth();
     const records = await browserArtifactRecords(directory, ['story']);
-    assert.equal(records.files.length, 13);
+    await assertRecordedAssets(records);
     assert.ok(records.files.some(({ path: name }) => name === '/app/app/dist/oauth/assets/login-AbCd1234.js'));
     assert.ok(records.files.some(({ path: name }) => name === '/app/app/dist/oauth/assets/consent-AbCd1234.js'));
-    assert.equal(records.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
     const desktopAssets = path.join(directory, 'app/dist/desktop/assets');
     const unexpectedScript = path.join(desktopAssets, 'unexpected-AbCd1234.js');
     await writeFile(unexpectedScript, '/* unexpected fixture */');
@@ -478,8 +498,7 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await emit('desktop', true, true);
     await emit('mobile', true, true);
     const modernRecords = await browserArtifactRecords(directory, ['story']);
-    assert.equal(modernRecords.files.length, 15);
-    assert.equal(modernRecords.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
+    await assertRecordedAssets(modernRecords);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
 import { captureTaskInputSource, taskInvocation } from './ci-task-inputs.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
@@ -101,29 +103,83 @@ test('a deployment document checked by root tests is included in the task source
   assert.notEqual(changed.source, original.source);
 });
 
-test('one source capture preserves independent task recipes and executed invocations', async t => {
+test('task proof identities distinguish shared Git inputs from actual invocation inputs', async t => {
   const root = await fixture(t);
-  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), runtime };
-  const closureFor = captureTaskInputSource(input);
-  for (const task of ['unit-core', 'unit-app', 'browser-full-ui-v1']) {
-    assert.deepEqual(closureFor(task), captureTaskInputClosure({ ...input, task }));
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const core = capture('unit-core');
+  const app = capture('unit-app');
+  const browser = capture('browser-full-ui-v1');
+
+  // All tasks bind the same immutable source tree; task-specific execution must
+  // still have a different recipe, environment or producer identity.
+  for (const field of ['source', 'tests', 'dependencies', 'toolchain']) {
+    assert.equal(core[field], app[field], field);
+    assert.equal(browser[field], app[field], field);
+    assert.match(core[field], /^[0-9a-f]{64}$/u, field);
   }
-  const configured = closureFor('unit-app');
-  const execution = closureFor('unit-app', { ...taskInvocation('unit-app', runtime.execPath), environmentKeys: ['CUSTOM'] });
-  assert.deepEqual({ ...execution, recipe: configured.recipe }, configured);
-  assert.notEqual(execution.recipe, configured.recipe);
+  assert.notEqual(core.recipe, app.recipe);
+  assert.notEqual(browser.recipe, app.recipe);
+  assert.notEqual(browser.environment, app.environment);
+  assert.notEqual(browser.producers, app.producers);
+
+  const canonical = taskInvocation('unit-app', runtime.execPath);
+  assert.equal(Array.isArray(canonical), false);
+  const misconfigured = capture('unit-app', {
+    ...canonical,
+    arguments: [...canonical.arguments, '--skip-tests'],
+    environmentKeys: [...canonical.environmentKeys, 'ADDED_RUNTIME_INPUT'],
+  });
+  assert.notEqual(misconfigured.recipe, app.recipe, 'Changed execution must not reuse a certified recipe');
+  for (const field of ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'producers']) {
+    assert.equal(misconfigured[field], app[field], field);
+  }
+  assert.throws(() => capture('unit-does-not-exist'), /exactly one verification group/u);
 });
 
-test('task invocations describe only canonical executable work with secret values redacted elsewhere', () => {
-  assert.deepEqual(taskInvocation('unit-core', '/opt/node/bin/node'), {
-    executable: '/opt/node/bin/node', arguments: ['scripts/ci-workspace.mjs', 'unit', 'core'], environmentKeys: [],
-  });
-  assert.deepEqual(taskInvocation('browser-full-ui-v1', '/opt/node/bin/node'), {
-    executable: '/opt/node/bin/node',
-    arguments: ['scripts/run-browser-shard.mjs', '--profile', 'full', '--suite', 'ui-v1', '--prebuilt'],
-    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL', 'CODEXIA_E2E_OUTPUT_DIR',
-      'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR'],
-  });
+test('uncommitted worktree changes cannot influence proof for a pinned Git SHA', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const original = captureTaskInputClosure({ root, sha, task: 'unit-core', runtime });
+  await writeFile(path.join(root, 'packages/core/src/index.ts'), 'local uncommitted source mutation\\n');
+  assert.deepEqual(captureTaskInputClosure({ root, sha, task: 'unit-core', runtime }), original);
+  await git(root, 'add', 'packages/core/src/index.ts');
+  await git(root, 'commit', '-qm', 'commit changed source');
+  const committed = captureTaskInputClosure({ root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime });
+  assert.notEqual(committed.source, original.source, 'Commit content must change source proof');
+  for (const field of ['tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
+    assert.equal(committed[field], original[field], field);
+  }
+});
+
+test('browser input proofs bind the lane image for both browsers in the shared WebKit lane', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const mutatedScripts = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
+  t.after(() => rm(mutatedScripts, { recursive: true, force: true }));
+  for (const file of ['ci-task-inputs.mjs', 'ci-contract.mjs', 'ci-browser-image-digests.mjs']) {
+    await cp(new URL(file, import.meta.url), path.join(mutatedScripts, file));
+  }
+  const digestsFile = path.join(mutatedScripts, 'ci-browser-image-digests.mjs');
+  const digests = await readFile(digestsFile, 'utf8');
+  await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
+  const { captureTaskInputSource: captureWithChangedWebKitImage } = await import(
+    pathToFileURL(path.join(mutatedScripts, 'ci-task-inputs.mjs')).href
+  );
+  const inputs = { root, sha, runtime };
+  const original = captureTaskInputSource(inputs);
+  const changed = captureWithChangedWebKitImage(inputs);
+  for (const profile of ['core', 'full']) {
+    for (const shard of ['ui-v1', 'oauth-web', 'webkit']) {
+      const task = `browser-${profile}-${shard}`;
+      assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed multi-browser image`);
+    }
+    const writing = `browser-${profile}-core`;
+    assert.equal(changed(writing).environment, original(writing).environment, `${writing} uses the unchanged Chromium-only image`);
+  }
+});
+
+test('Passkey browser shard binds the dedicated acceptance environment', () => {
   assert.deepEqual(taskInvocation('browser-core-passkey-bootstrap', '/opt/node/bin/node'), {
     executable: '/opt/node/bin/node',
     arguments: ['scripts/run-browser-shard.mjs', '--profile', 'core', '--suite', 'passkey-bootstrap', '--prebuilt'],

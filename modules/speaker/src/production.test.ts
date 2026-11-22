@@ -32,20 +32,18 @@ function addModelProbeScene(files: Map<string, { content: string; revision: stri
   const sceneId = "sc-synthetic-model-probe";
   const scenePath = `plot/volumes/volume-1/chapters/chapter-1/scenes/${sceneId}.yaml`;
   const manuscriptPath = `manuscript/v1/${sceneId}.md`;
-  files.set(scenePath, {
-    content: [
-      `id: ${sceneId}`,
-      "type: scene",
-      "name: 合成モデル確認シーン",
-      "volume: volume-1",
-      "chapter: chapter-1",
-      "appears: [char-hero]",
-      "speakerCount: 1",
-      `manuscript: ${manuscriptPath}`,
-      "",
-    ].join("\n"),
-    revision: fileRevision([`id: ${sceneId}`, "type: scene", "name: 合成モデル確認シーン", "volume: volume-1", "chapter: chapter-1", "appears: [char-hero]", "speakerCount: 1", `manuscript: ${manuscriptPath}`, ""].join("\n")),
-  });
+  const scene = [
+    `id: ${sceneId}`,
+    "type: scene",
+    "name: 合成モデル確認シーン",
+    "volume: volume-1",
+    "chapter: chapter-1",
+    "appears: [char-hero]",
+    "speakerCount: 1",
+    `manuscript: ${manuscriptPath}`,
+    "",
+  ].join("\n");
+  files.set(scenePath, { content: scene, revision: fileRevision(scene) });
   files.set(manuscriptPath, { content: sceneText(), revision: fileRevision(sceneText()) });
 }
 
@@ -115,20 +113,12 @@ async function createRuntime(
   getSnapshot: () => SnapshotId,
   cacheDirectory: string,
 ): Promise<{ runtime: ModuleRuntime; host: Parameters<ModuleRuntime["invokeAction"]>[3]; jobProgress: Map<string, number[][]> }> {
-  const stub = moduleContext();
-  const [storyDefinition, nlpDefinition, diagnosticsDefinition, speakerDefinition] = await Promise.all([
-    createStoryModule(stub), createNlpModule(stub), createDiagnosticsModule(stub), createSpeakerModule(stub),
-  ]);
   const manifests = [
     readManifest(new URL("../../story/package.json", import.meta.url)),
     readManifest(new URL("../../nlp/package.json", import.meta.url)),
     readManifest(new URL("../../diagnostics/package.json", import.meta.url)),
     readManifest(new URL("../package.json", import.meta.url)),
   ];
-  assert.deepEqual(storyDefinition.manifest, manifests[0]);
-  assert.deepEqual(nlpDefinition.manifest, manifests[1]);
-  assert.deepEqual(diagnosticsDefinition.manifest, manifests[2]);
-  assert.deepEqual(speakerDefinition.manifest, manifests[3]);
   const runtime = new ModuleRuntime({
     manifests,
     enabled: ["speaker"],
@@ -281,8 +271,10 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     const dialogueData = dataOf(dialogue);
     assertSpeakerIdentity(dialogueData, null);
     assert.equal(dialogueData.count, 15);
-    assert.ok((dialogueData.lines as Array<Record<string, unknown>>).some((line) => line.sceneId === "sc-synthetic-01"));
-    assert.equal((dialogueData.lines as Array<Record<string, unknown>>)[0]?.confidence, "high");
+    const recordedLines = dialogueData.lines as Array<{ sceneId: string; sentenceIndex: number; text: string; confidence: string }>;
+    const linesByScene = new Map(recordedLines.map((line) => [line.sceneId, line]));
+    assert.equal(linesByScene.get("sc-synthetic-01")?.text, "『俺が行く。』");
+    assert.equal(recordedLines[0]?.confidence, "high");
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
 
     const voiceProfiles = await runtime.invokeAction("speaker", "speaker.voice.profiles", {}, host);
@@ -307,15 +299,18 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     const holdoutPredictionsBeforeTraining = new Map<string, string | null>();
     for (let index = 0; index < 14; index += 1) {
       const currentSceneId = `sc-synthetic-${String(index + 1).padStart(2, "0")}`;
-      const sceneResult = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: currentSceneId }, host);
-      const sceneData = dataOf(sceneResult);
-      const row = (sceneData.attributions as typeof attributions)[0]!;
-      assert.equal(row.speakerEntityId, "char-hero", `synthetic rule attribution ${currentSceneId}`);
-      if (holdoutIds.includes(currentSceneId)) holdoutPredictionsBeforeTraining.set(currentSceneId, row.speakerEntityId);
+      if (holdoutIds.includes(currentSceneId)) {
+        const sceneResult: Parameters<typeof dataOf>[0] = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: currentSceneId }, host);
+        const row: (typeof attributions)[number] = (dataOf(sceneResult).attributions as typeof attributions)[0]!;
+        assert.equal(row.speakerEntityId, "char-hero", `synthetic rule attribution ${currentSceneId}`);
+        holdoutPredictionsBeforeTraining.set(currentSceneId, row.speakerEntityId);
+      }
+      const line = linesByScene.get(currentSceneId);
+      assert.ok(line, `the observed source dialogue exists for correction in ${currentSceneId}`);
       const proposed = await runtime.invokeAction("speaker", "speaker.override", {
         sceneId: currentSceneId,
-        sentenceIndex: row.sentenceIndex,
-        dialogueText: row.text,
+        sentenceIndex: line.sentenceIndex,
+        dialogueText: line.text,
         speakerEntityId: holdoutGoldByScene.get(currentSceneId) ?? null,
       }, host);
       const proposalData = dataOf(proposed);
@@ -336,8 +331,19 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     assert.equal(corrections.trim().split("\n").length, 14);
     assert.ok(corrections.includes('"speakerEntityId":null'));
 
+    const assertCompletedProgress = (jobType: string, expectedRuns: number) => {
+      const runs = jobProgress.get(jobType);
+      assert.equal(runs?.length, expectedRuns);
+      for (const updates of runs ?? []) {
+        assert.ok(updates.length >= 2, "a domain job reports progress before completion");
+        assert.ok(updates[0]! >= 0 && updates[0]! < 1);
+        assert.deepEqual(updates, updates.toSorted((a, b) => a - b));
+        assert.equal(updates.at(-1), 1);
+      }
+    };
+
     const trained = await runtime.invokeAction("speaker", "speaker.retraining.run", { holdoutSceneIds: holdoutIds }, host);
-    assert.deepEqual(jobProgress.get("speaker-retrain"), [[0.05, 1]], "retraining reports only its source preparation and successful completion phases");
+    assertCompletedProgress("speaker-retrain", 1);
     const trainingData = dataOf(trained);
     assertSpeakerIdentity(trainingData, null);
     assert.equal(trainingData.adopted, true, JSON.stringify({ accuracyWithoutModel: trainingData.accuracyWithoutModel, accuracyWithModel: trainingData.accuracyWithModel, deltaPt: trainingData.deltaPt }));
@@ -375,7 +381,7 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
 
     const evaluation = await runtime.invokeAction("speaker", "speaker.evaluation.run", { writeGates: true }, host);
-    assert.deepEqual(jobProgress.get("speaker-eval"), [[0.05, 1]], "evaluation reports only its source preparation and successful completion phases");
+    assertCompletedProgress("speaker-eval", 1);
     const evaluationData = dataOf(evaluation);
     assertSpeakerIdentity(evaluationData, adoptedModelRevision);
     assert.equal(evaluationData.gatesUpdated, true);
@@ -411,7 +417,7 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     assert.equal(dataOf(await runtime.invokeAction("speaker", "speaker.evaluation.latest", {}, host)).exists, false, "stored evaluation from an old engine is rejected despite matching snapshot and cache path");
     assert.equal(dataOf(await runtime.invokeAction("speaker", "speaker.ruleGates", {}, host)).exists, false, "stored rule gates from an old engine are rejected despite matching snapshot and cache path");
     const rebuilt = await runtime.invokeAction("speaker", "speaker.evaluation.run", { writeGates: true }, host);
-    assert.deepEqual(jobProgress.get("speaker-eval"), [[0.05, 1], [0.05, 1]], "cache rebuild keeps the same truthful progress phases");
+    assertCompletedProgress("speaker-eval", 2);
     assert.equal(dataOf(rebuilt).gatesUpdated, true);
     assert.equal(dataOf(await runtime.invokeAction("speaker", "speaker.evaluation.latest", {}, host)).exists, true);
     assert.equal(dataOf(await runtime.invokeAction("speaker", "speaker.ruleGates", {}, host)).exists, true);

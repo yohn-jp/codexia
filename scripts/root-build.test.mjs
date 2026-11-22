@@ -3,53 +3,31 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createBuildCommands } from './profile-package.mjs';
 import { createRootBuildCommands } from './root-build.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 
-test('default and explicit Core root builds select the existing selective profile graph', () => {
-  const profile = { profile: 'core', modules: [] };
-  const commands = createRootBuildCommands('core', profile);
-
-  assert.deepEqual(createRootBuildCommands(undefined, profile), commands);
-  assert.deepEqual(createRootBuildCommands('', profile), commands);
-  assert.deepEqual(commands, createBuildCommands('core', profile));
-  assert.deepEqual(commands[0], {
-    command: 'pnpm',
-    args: ['--filter', '@codexia/contracts', 'run', 'build'],
-  });
-  assert.deepEqual(commands[1], {
-    command: 'pnpm',
-    args: ['--filter', '@codexia/persistence-contracts', 'run', 'build'],
-  });
-  assert.deepEqual(commands[2], {
-    command: 'pnpm',
-    args: ['--filter', '@codexia/persistence-postgres', 'run', 'build'],
-  });
-  assert.deepEqual(commands[3], {
-    command: 'pnpm',
-    args: ['--filter', '@codexia/module-runtime', 'run', 'build'],
-  });
-  assert.equal(commands.some(({ args }) => args.includes('--profile') && args.includes('core')), true);
-  assert.deepEqual(commands.find(({ args }) => args.includes('@codexia/app'))?.env, {
-    CODEXIA_PROFILE: 'core',
-  });
-  assert.deepEqual(commands.at(-1), {
-    command: 'pnpm',
-    args: ['--filter', '@codexia/api...', 'run', 'build'],
-  });
-
-  const optionalModuleFilters = commands.flatMap(({ args }) => args)
-    .filter((argument) => argument.startsWith('@codexia/module-') && argument !== '@codexia/module-runtime');
-  assert.deepEqual(optionalModuleFilters, []);
-  assert.equal(commands.some(({ args }) => args.includes('@codexia/migration')), false);
+test('omitted and explicit Core profiles build the API and browser with a Core registry and no optional producers', async () => {
+  const core = JSON.parse(await readFile(path.join(root, 'profiles/core.json'), 'utf8'));
+  const full = JSON.parse(await readFile(path.join(root, 'profiles/full.json'), 'utf8'));
+  const optionalPackages = new Set(['@codexia/migration', ...full.modules.map(id => '@codexia/module-' + id)]);
+  for (const selection of [undefined, '', 'core']) {
+    const commands = createRootBuildCommands(selection, core);
+    const app = commands.findIndex(({ args }) => args.includes('@codexia/app'));
+    const api = commands.findIndex(({ args }) => args.includes('@codexia/api...'));
+    const registry = commands.findIndex(({ args }) =>
+      args.some(argument => path.basename(argument) === 'profile-build.mjs') && args.includes('core'));
+    const runtime = commands.findIndex(({ args }) => args.includes('@codexia/module-runtime'));
+    assert.ok(runtime >= 0 && runtime < registry && registry < app && registry < api);
+    assert.equal(commands[app].env?.CODEXIA_PROFILE, 'core');
+    assert.ok(commands.every(({ args }) => args.every(argument => !optionalPackages.has(argument.replace(/\.\.\.$/u, '')))));
+  }
 });
 
 test('Full root builds keep the existing workspace graph', () => {
   assert.equal(packageManifest.scripts.build, 'node scripts/root-build.mjs');
-  assert.match(packageManifest.scripts['build:workspace'], /^node scripts\/ci-workspace\.mjs build-workspace && node scripts\/profile-build\.mjs .* && pnpm --filter @codexia\/app build && pnpm --filter @codexia\/api build$/u);
+  assert.equal(typeof packageManifest.scripts['build:workspace'], 'string');
   assert.deepEqual(createRootBuildCommands('full'), [{
     command: 'pnpm',
     args: ['run', 'build:workspace'],

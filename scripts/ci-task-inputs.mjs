@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
+import { browserRuntimeRequirements } from './ci-browser-image-digests.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
@@ -88,7 +89,7 @@ export function taskInvocation(task, executable = process.execPath) {
   throw new Error(`No canonical invocation for ${task}`);
 }
 
-function taskEnvironment(task, runtime) {
+function taskEnvironment(task, group, runtime) {
   const env = { CI: 'true', NODE_ENV: 'workflow-default', TZ: 'workflow-default',
     LANG: 'runner-default', LC_ALL: 'runner-default' };
   if (task.startsWith('unit-')) Object.assign(env, {
@@ -98,9 +99,7 @@ function taskEnvironment(task, runtime) {
   });
   if (task.startsWith('browser-')) {
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: taskGroup(task).endsWith('-webkit')
-        ? 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579'
-        : 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725' });
+      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: browserRuntimeRequirements(group).imageDigest });
     if (task.endsWith('-passkey-bootstrap')) env.CODEXIA_PASSKEY_ACCEPTANCE = '1';
   }
   for (const [key, value] of Object.entries(taskOverrides(task))) {
@@ -166,7 +165,7 @@ export function captureTaskInputSource({ root, sha, runtime }) {
     const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
       executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
     return {
-      source, tests, dependencies, environment: sha256(taskEnvironment(task, runtime)), toolchain,
+      source, tests, dependencies, environment: sha256(taskEnvironment(task, group, runtime)), toolchain,
       recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
         groupPreparation: 'scripts/ci-workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
       producers: sha256(taskProducerRecipe(task)),

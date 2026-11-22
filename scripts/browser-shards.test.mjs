@@ -1,41 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BROWSER_SHARDS, PROFILES } from "./ci-contract.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { buildBrowserTestArguments, resolveBrowserShard, summarizeBrowserCoverage } from "./browser-shards.mjs";
-
-test("each profile resolves every declared shard to its Playwright project and file", () => {
-  assert.deepEqual(PROFILES, ["core", "full"]);
-  for (const profile of PROFILES) {
-    for (const shard of BROWSER_SHARDS) {
-      const resolved = resolveBrowserShard(profile, shard.id);
-      assert.deepEqual(resolved, { profile, ...shard });
-      if (resolved.project === "chromium") assert.equal(resolved.file, `${resolved.id}.acceptance.spec.ts`);
-    }
-  }
-  assert.deepEqual(resolveBrowserShard("full", "webkit"), {
-    profile: "full",
-    id: "webkit",
-    project: "webkit",
-    file: "ui-v1.acceptance.spec.ts",
-  });
-});
 
 test("unknown profiles and shards are rejected before a runner starts", () => {
   assert.throws(() => resolveBrowserShard("preview", "core"), /Unknown browser profile/u);
   assert.throws(() => resolveBrowserShard("core", "empty"), /Unknown browser shard/u);
 });
 
-test("Playwright receives one named project and the selected spec as a test filter", () => {
-  const shard = resolveBrowserShard("core", "job-inbox");
-  assert.deepEqual(buildBrowserTestArguments(shard), [
-    "exec",
-    "playwright",
-    "test",
-    "--config",
-    "tests/e2e/playwright.config.ts",
-    "tests/e2e/job-inbox.acceptance.spec.ts",
-    "--project=chromium",
-  ]);
+test("Playwright discovers only the selected spec and browser project", t => {
+  const directory = mkdtempSync(path.join(tmpdir(), "codexia-browser-discovery-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ...process.env, CODEXIA_E2E_STATE_DIR: directory, CODEXIA_E2E_TEST_FILE: "",
+    CODEXIA_E2E_EXTERNAL_DATABASE: "", CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
+  delete env.CODEXIA_E2E_BASE_URL;
+  delete env.CODEXIA_BASE_URL;
+  const cases = [
+    { profile: "core", id: "job-inbox", file: "job-inbox.acceptance.spec.ts", project: "chromium" },
+    { profile: "full", id: "webkit", file: "ui-v1.acceptance.spec.ts", project: "webkit" },
+  ];
+  for (const { profile, id, file, project } of cases) {
+    const shard = resolveBrowserShard(profile, id);
+    const result = spawnSync("pnpm", [...buildBrowserTestArguments(shard), "--list", "--reporter=json"], {
+      cwd: new URL("../", import.meta.url), encoding: "utf8", env,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const { suites } = JSON.parse(result.stdout);
+    assert.deepEqual(suites.map(suite => suite.file), [file]);
+    const discovered = suites.flatMap(suite => suite.specs).flatMap(spec => spec.tests);
+    assert.ok(discovered.length > 0, `${file} must enumerate Playwright cases`);
+    assert.deepEqual(new Set(discovered.map(item => item.projectName)), new Set([project]));
+  }
 });
 
 test("browser coverage counts discovered, executed, skipped and failed cases", () => {

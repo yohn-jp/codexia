@@ -143,7 +143,8 @@ test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQ
 
 test("invalid imported references fail without creating a partial work", async () => {
   const projectId = randomUUID() as import("@codexia/persistence-contracts").ProjectId;
-  await persistence.transaction((tx) => tx.createProject({ id: projectId, title: "Source" }));
+  const title = `Invalid archive source ${projectId}`;
+  await persistence.transaction((tx) => tx.createProject({ id: projectId, title }));
   const archive = await exportWorkArchive(persistence, projectId);
   const corrupt = structuredClone(archive);
   corrupt.documents.push({
@@ -152,6 +153,8 @@ test("invalid imported references fail without creating a partial work", async (
   });
   await assert.rejects(importWorkArchive(persistence, corrupt, "owner"), /parent|reference|archive/i);
   assert.equal((await exportWorkArchive(persistence, projectId)).documents.length, 0);
+  const matchingWork = (await persistence.read(reader => reader.listProjects(200))).filter(project => project.title === title);
+  assert.deepEqual(matchingWork.map(project => project.id), [projectId], "a rejected import creates no partial copy");
 });
 
 test("superseded evidence remains in an explicit unresolved archive section", async () => {

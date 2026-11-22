@@ -92,33 +92,27 @@ test("builds source-shaped voice, fingerprint, notes, blank headings, and high-c
     speakerProfiles: { fingerprints: [fingerprint("other-character"), fingerprint("character-a")] },
   });
 
-  assert.deepEqual(result, {
-    entityId: "character-a",
-    name: "A",
-    voiceProfileExcerpt: [
-      "一人称: 私、俺、ぼく、僕、わたし",
-      "口調: 静かな口調",
-      "語尾（登録）: ます",
-      "二人称: あなた / 親しい相手",
-      "語尾例: かな（親しい場面） / 柔らかい語尾",
-      "文体: 丁寧",
-      "状況別プロファイル:",
-      "- [informal / relationship=friend] 語尾=だよ、ね",
-    ].join("\n"),
-    fingerprintSummary: {
-      entityId: "character-a",
-      dialogueCount: 23,
-      topFirstPersons: ["a", "z", "middle"],
-      topEndings: ["だよ", "ですね"],
-      politeRatio: 0.35,
-      avgDialogueLength: 18.6,
-      exclamationRate: 0.1,
-      questionRate: 0.2,
-    },
-    notesExcerpt: "人物概要\n# 未記入\n# 記入済み\n設定メモ\n# 分類のみ空\n# Meta",
-    exampleDialogues: ["high-2", "high-3", "high-4", "high-5", "high-6", "high-7"],
-    blankHeadings: ["未記入", "子の未記入", "分類のみ空"],
-  });
+  assert.equal(result.entityId, "character-a");
+  assert.equal(result.name, "A");
+  const voice = result.voiceProfileExcerpt ?? "";
+  assert.match(voice, /一人称: 私、俺、ぼく、僕、わたし/u);
+  assert.match(voice, /静かな口調/u, "the explicit voice definition wins over the generic pattern");
+  assert.doesNotMatch(voice, /淡々としている|invalid/u);
+  for (const feature of ["ます", "あなた", "親しい相手", "かな", "柔らかい語尾", "丁寧", "relationship=friend", "だよ、ね"]) {
+    assert.ok(voice.includes(feature), `voice context carries ${feature}`);
+  }
+  assert.equal(result.fingerprintSummary?.entityId, "character-a");
+  assert.equal(result.fingerprintSummary?.dialogueCount, 23);
+  assert.deepEqual(result.fingerprintSummary?.topFirstPersons, ["a", "z", "middle"]);
+  assert.deepEqual(result.fingerprintSummary?.topEndings, ["だよ", "ですね"]);
+  assert.equal(result.fingerprintSummary?.politeRatio, 0.35);
+  assert.equal(result.fingerprintSummary?.avgDialogueLength, 18.6);
+  assert.equal(result.fingerprintSummary?.exclamationRate, 0.1);
+  assert.equal(result.fingerprintSummary?.questionRate, 0.2);
+  assert.match(result.notesExcerpt ?? "", /人物概要[\s\S]*未記入[\s\S]*記入済み[\s\S]*設定メモ[\s\S]*分類のみ空[\s\S]*Meta/u);
+  assert.doesNotMatch(result.notesExcerpt ?? "", /参照/u);
+  assert.deepEqual(result.exampleDialogues, ["high-2", "high-3", "high-4", "high-5", "high-6", "high-7"]);
+  assert.deepEqual(result.blankHeadings, ["未記入", "子の未記入", "分類のみ空"]);
 });
 
 test("supports missing public speaker data and rejects data for a different character", () => {

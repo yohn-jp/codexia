@@ -11,7 +11,7 @@ import { buildEpubExport, manuscriptBodyToXhtml } from "./epub.js";
 import { buildPlaintextExport, stripManuscriptMarkup, toNarouDialect } from "./plaintext.js";
 import { composeVerticalPrintText } from "./verticalPrint.js";
 import { createPublishingMigrationProducer } from "./migration.js";
-import { hashShareToken, SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js";
+import { SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js";
 import { createPublishingHttpContributions } from "./http.js";
 import { EPISODES_PATH } from "./episodes.js";
 import { readPublishingProject, readPublishingProjectFromCore, type PublishingProject } from "./project.js";
@@ -19,6 +19,7 @@ import { readPublishingProject, readPublishingProjectFromCore, type PublishingPr
 const BASE_VERSION = 1;
 const NEXT_VERSION = 2;
 const repository = "local-publishing-7";
+const fixtureTokenDigest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
 
 function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): SnapshotId {
   return { projectId: repository, projectVersion, ...(updatedVersion ? { projectVersion: updatedVersion } : {}) };
@@ -324,7 +325,7 @@ test("public scene and volume shares follow a chapter moved to a later volume", 
   const tokens = grants.map((_, index) => "share_" + String(index).repeat(43));
   files.set(SHARE_GRANTS_PATH, grants.map((grant, index) => JSON.stringify({
     version: 1, grantVersion: 2, revocationVersion: grant.revokedAt ? 1 : 0,
-    id: "grant-" + index, tokenHash: hashShareToken(tokens[index]!), label: "fixture",
+    id: "grant-" + index, tokenHash: fixtureTokenDigest(tokens[index]!), label: "fixture",
     createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", ...grant,
   })).join("\n") + "\n");
   const reader = new MemoryReader(files);
@@ -405,18 +406,23 @@ test("EPUB keeps distinct scene bodies reachable from the table of contents and 
   assert.equal(zip.file(/^OEBPS\/scene-.*\.xhtml$/u).length, ids.length);
   const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
   const opf = await zip.file("OEBPS/content.opf")!.async("string");
-  let previousNav = -1;
-  let previousSpine = -1;
-  for (const id of ids) {
-    const href = `scene-${id}.xhtml`;
-    const body = await zip.file("OEBPS/" + href)!.async("string");
-    assert.ok(body.includes(`<p>本文 ${id}</p>`));
-    assert.ok(opf.includes(`<item id="item-${id}" href="${href}"`));
-    const link = nav.indexOf(`<a href="${href}">${id}</a>`);
-    const spine = opf.indexOf(`<itemref idref="item-${id}"/>`);
-    assert.ok(link > previousNav && spine > previousSpine);
-    previousNav = link;
-    previousSpine = spine;
+  const sceneLinks = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/gu)]
+    .filter(([, , title]) => ids.includes(title!));
+  assert.deepEqual(sceneLinks.map(([, , title]) => title), ids);
+  const paths = sceneLinks.map(([, target]) => target!);
+  assert.equal(new Set(paths).size, ids.length, "each TOC entry leads to its own resource");
+
+  const manifest = new Map([...opf.matchAll(/<item\b[^>]+>/gu)].map(([element]) => [
+    /\bid="([^"]+)"/u.exec(element)?.[1],
+    /\bhref="([^"]+)"/u.exec(element)?.[1],
+  ]));
+  const spinePaths = [...opf.matchAll(/<itemref\b[^>]+\bidref="([^"]+)"/gu)]
+    .map(([, reference]) => manifest.get(reference));
+  assert.deepEqual(spinePaths.filter((target) => paths.includes(target ?? "")), paths);
+  for (const [index, location] of paths.entries()) {
+    const resource = zip.file("OEBPS/" + location);
+    assert.ok(resource, `TOC target ${location} exists in the archive`);
+    assert.ok((await resource.async("string")).includes("本文 " + ids[index]));
   }
 });
 
@@ -532,7 +538,7 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
   assert.deepEqual(clearedYaml.episodes[0].futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
 });
 
-test("a share activates only after its PostgreSQL apply and revocation is checked on every public read", async () => {
+test("public read uses only the applied snapshot and rechecks grant revocation", async () => {
   const definition = await createPublishing();
   const proposals: ChangeProposal[] = [];
   const files = fixtureFiles();
@@ -548,7 +554,7 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
   const createOperation = proposals[0]!.operations[0]!;
   const createJson = createOperation.writes[0]!.content!;
   assert.ok(!createJson.includes(token), "raw bearer is never committed");
-  assert.equal(JSON.parse(createJson).tokenHash, hashShareToken(token));
+  assert.equal(JSON.parse(createJson).tokenHash, fixtureTokenDigest(token));
 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
@@ -561,9 +567,7 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
   };
   const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
-  assert.equal(beforePublish.status, 404, "an unpushed checkpoint/proposal is not public");
-
-  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "proposing a share does not apply it");
+  assert.equal(beforePublish.status, 404, "proposing a share does not apply it");
 
   remote = applyOperation(remote, createOperation, NEXT_VERSION);
   const metadataResponse = await publicBase.handle(new Request(url), publicContext(remote));
@@ -581,19 +585,19 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
   const listed = await invokeAction(definition, "publishing.shares.list", {}, actionContext(remote, []));
   const safeList = listed.shares as Array<Record<string, unknown>>;
   assert.ok(!JSON.stringify(safeList).includes(token));
-  assert.ok(!JSON.stringify(safeList).includes(hashShareToken(token)));
+  assert.ok(!JSON.stringify(safeList).includes(fixtureTokenDigest(token)));
 
   const revoked = await invokeAction(definition, "publishing.shares.revoke", { id: String((created.share as Record<string, unknown>).id) }, actionContext(remote, proposals));
   const revokeOperation = proposals.at(-1)!.operations[0]!;
   assert.ok(revoked.proposalId);
-  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "local revocation does not alter the current remote snapshot");
+  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "a proposed revocation does not alter the selected snapshot");
   remote = applyOperation(remote, revokeOperation, 3);
-  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "confirmed remote revocation blocks the next read");
+  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "an applied revocation blocks the next read");
 
   const expiredToken = "share_" + "x".repeat(43);
   const expired: ShareGrant = {
     version: 1, grantVersion: 2, revocationVersion: 0, id: "expired-grant",
-    tokenHash: hashShareToken(expiredToken), scope: { kind: "scene", id: "sc-1" },
+    tokenHash: fixtureTokenDigest(expiredToken), scope: { kind: "scene", id: "sc-1" },
     label: "期限切れ", createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2024-01-02T00:00:00.000Z",
   };
   const expiredReader = new MemoryReader(new Map<string, Buffer | string>([...remote.files, [SHARE_GRANTS_PATH, JSON.stringify(expired) + "\n"]]), remote.snapshot);
@@ -611,10 +615,10 @@ test("project-wide public shares include root scenes in their catalogue and scen
   const rootSceneToken = "share_" + "s".repeat(43);
   files.set(SHARE_GRANTS_PATH, [
     { version: 1, grantVersion: 1, revocationVersion: 0, id: "project-share",
-      tokenHash: hashShareToken(token), scope: "", label: "Project preview",
+      tokenHash: fixtureTokenDigest(token), scope: "", label: "Project preview",
       createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
     { version: 1, grantVersion: 1, revocationVersion: 0, id: "root-scene-share",
-      tokenHash: hashShareToken(rootSceneToken), scope: { kind: "scene", id: "root-scene" }, label: "Root scene preview",
+      tokenHash: fixtureTokenDigest(rootSceneToken), scope: { kind: "scene", id: "root-scene" }, label: "Root scene preview",
       createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
   ].map((grant) => JSON.stringify(grant)).join("\n") + "\n");
   const reader = new MemoryReader(files);
@@ -700,7 +704,7 @@ test("public share refuses a root scene that collides with an existing chapter s
   const token = "share_" + "d".repeat(43);
   files.set(SHARE_GRANTS_PATH, JSON.stringify({
     version: 1, grantVersion: 1, revocationVersion: 0, id: "conflict-share",
-    tokenHash: hashShareToken(token), scope: { kind: "scene", id: "sc-1" }, label: "Collision",
+    tokenHash: fixtureTokenDigest(token), scope: { kind: "scene", id: "sc-1" }, label: "Collision",
     createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z",
   }) + "\n");
   const reader = new MemoryReader(files);

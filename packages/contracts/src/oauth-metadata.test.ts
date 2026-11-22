@@ -1,25 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MCP_OAUTH_SCOPES,
   buildMcpProtectedResourceMetadata,
   createMcpProtectedResourceMetadataResponse,
   protectedResourceMetadataUrl,
 } from "./index.js";
-
-test("standalone MCP protected-resource metadata advertises only bounded MCP scopes", () => {
-  const resource = "https://api.codexia.example/api";
-  const issuer = "https://api.codexia.example/api/auth";
-
-  assert.deepEqual(buildMcpProtectedResourceMetadata({ resource, authorizationServer: issuer }), {
-    resource,
-    authorization_servers: [issuer],
-    scopes_supported: ["mcp:read", "mcp:compute", "mcp:propose"],
-    bearer_methods_supported: ["header"],
-  });
-  assert.deepEqual(MCP_OAUTH_SCOPES, ["mcp:read", "mcp:compute", "mcp:propose"]);
-  assert.equal(MCP_OAUTH_SCOPES.some((scope) => /approve|apply|owner|admin/iu.test(scope)), false);
-});
 
 test("protected-resource metadata URL follows RFC 9728 path construction for an API audience", () => {
   assert.equal(
@@ -32,16 +17,16 @@ test("protected-resource metadata URL follows RFC 9728 path construction for an 
   );
 });
 
-test("metadata response is JSON and does not grant operational authority", async () => {
+test("public metadata publishes only the standalone MCP scope ceiling", async () => {
   const response = createMcpProtectedResourceMetadataResponse({
     resource: "https://api.codexia.example/api",
-    authorizationServer: "https://api.codexia.example/api/auth",
+    authorizationServer: "https://identity.codexia.example/auth",
   });
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /application\/json/u);
   assert.deepEqual(await response.json(), {
     resource: "https://api.codexia.example/api",
-    authorization_servers: ["https://api.codexia.example/api/auth"],
+    authorization_servers: ["https://identity.codexia.example/auth"],
     scopes_supported: ["mcp:read", "mcp:compute", "mcp:propose"],
     bearer_methods_supported: ["header"],
   });

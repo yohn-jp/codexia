@@ -1,8 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { createWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+import { appendManuscript, createWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readPersistenceDrafts, replaceManuscript, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
 
 const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
 type TestPostgresClient = {
@@ -32,6 +32,27 @@ async function persistedMarkdown(page: Page, projectId: string, documentId: stri
   const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
   if (!response.ok()) return "";
   return ((await response.json()) as { revision: { markdown: string } }).revision.markdown;
+}
+async function seedManuscriptRevisions(page: Page, documentPath: string, manuscripts: string[]) {
+  const clientId = "revision-history-fixture";
+  const initial = await page.request.get(documentPath);
+  expect(initial.ok()).toBe(true);
+  let current = (await initial.json() as { revision: { id: string; markdown: string } }).revision;
+  for (const manuscript of manuscripts) {
+    const response = await page.request.patch(documentPath, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": clientId },
+      data: {
+        baseRevisionId: current.id,
+        changes: [{ fromUtf16: 0, toUtf16: current.markdown.length, insert: manuscript }],
+        resultingSha256: createHash("sha256").update(manuscript).digest("hex"),
+        clientId,
+      },
+    });
+    expect(response.status()).toBe(200);
+    current = (await response.json() as { revision: { id: string; markdown: string } }).revision;
+    expect(current.markdown).toBe(manuscript);
+  }
+  return current;
 }
 async function denyWrites(page: Page, enabled: boolean) {
   await page.evaluate((enabled) => {
@@ -156,18 +177,13 @@ test("revision history responses and errors stay bound to the scene that request
   const aCurrent = "Aの現在本文。";
   const bPast = "Bだけにある過去本文。";
   const bCurrent = "Bの現在本文。";
-  await editor(page).fill(aPast);
-  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aPast);
-  await editor(page).fill(aCurrent);
-  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aCurrent);
-  await openManuscriptScene(page, second);
-  await editor(page).fill(bPast);
-  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bPast);
-  await editor(page).fill(bCurrent);
-  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bCurrent);
-  await openManuscriptScene(page, scene);
+  const sceneApi = `/api/v1/persistence/projects/${project.id}/documents`;
+  await seedManuscriptRevisions(page, `${sceneApi}/${scene.id}`, [aPast, aCurrent]);
+  await seedManuscriptRevisions(page, `${sceneApi}/${second.id}`, [bPast, bCurrent]);
+  await page.reload();
+  await expectMarkdown(page, aCurrent);
 
-  const historyUrl = (url: URL) => url.pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}/revisions`;
+  const historyUrl = (url: URL) => url.pathname === `${sceneApi}/${scene.id}/revisions`;
   let releaseHistory!: () => void;
   let markHistoryStarted!: () => void;
   const historyGate = new Promise<void>((resolve) => { releaseHistory = resolve; });
@@ -244,23 +260,7 @@ test("revision history restarts a blocked page after a save on the same scene", 
   test.setTimeout(90_000);
   const { project, scene } = await createWritingFixture(page);
   const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
-  const revisionsResponse = await page.request.get(documentPath);
-  expect(revisionsResponse.ok()).toBe(true);
-  let current = (await revisionsResponse.json() as { revision: { id: string; markdown: string } }).revision;
-  for (let number = 2; number <= 51; number += 1) {
-    const markdown = `Revision ${number}.`;
-    const response = await page.request.patch(documentPath, {
-      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "revision-page-save-test" },
-      data: {
-        baseRevisionId: current.id,
-        changes: [{ fromUtf16: 0, toUtf16: current.markdown.length, insert: markdown }],
-        resultingSha256: createHash("sha256").update(markdown).digest("hex"),
-        clientId: "revision-page-save-test",
-      },
-    });
-    expect(response.status()).toBe(200);
-    current = (await response.json() as { revision: { id: string; markdown: string } }).revision;
-  }
+  const current = await seedManuscriptRevisions(page, documentPath, Array.from({ length: 50 }, (_, index) => `Revision ${index + 2}.`));
   await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
   await expect(editor(page)).toContainText(current.markdown);
   await openRevisionHistory(page);
@@ -288,7 +288,7 @@ test("revision history restarts a blocked page after a save on the same scene", 
   await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
   await pageStarted;
   const savedMarkdown = "A new receipt arrives while history is loading.";
-  await editor(page).fill(savedMarkdown);
+  await replaceManuscript(page, savedMarkdown);
   await expect.poll(async () => persistedMarkdown(page, project.id, scene.id)).toBe(savedMarkdown);
   await expect(page.getByRole("button", { name: "今すぐ保存", exact: true })).toBeDisabled();
   releasePage();
@@ -878,7 +878,7 @@ test("profile-selected workspace panels remain discoverable in the PostgreSQL wo
 
 test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", async ({ page }) => {
   await createWritingFixture(page); await editor(page).evaluate((element) => { element.dataset.originalEditor = "retained"; });
-  await editor(page).fill("保存応答でも選択と同じエディタを保持する。");
+  await replaceManuscript(page, "保存応答でも選択と同じエディタを保持する。");
   await expectServerSaved(page);
   await expect(editor(page)).toHaveAttribute("data-original-editor", "retained");
   await editor(page).press("Control+A");
@@ -889,8 +889,10 @@ test("UX canon keeps the manuscript visible and stable through PostgreSQL save r
 
 test("UX canon puts Japanese prose before optional chrome at every shell width", async ({ page }) => {
   for (const width of [1440, 1024, 390]) {
-    await page.setViewportSize({ width, height: 900 }); await createWritingFixture(page, width < 640 ? "mobile" : "desktop");
-    await editor(page).fill("本文を中心に読める幅と余白を保つ。".repeat(20));
+    await page.setViewportSize({ width, height: 900 });
+    const prose = "本文を中心に読める幅と余白を保つ。".repeat(20);
+    await createWritingFixture(page, width < 640 ? "mobile" : "desktop", undefined, prose);
+    await expectMarkdown(page, prose);
     const box = await editor(page).boundingBox(); expect(box).not.toBeNull(); expect(box!.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
   }
@@ -912,10 +914,13 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
 
 test("UX canon keeps explicit shells usable with long Japanese titles and enlarged text", async ({ page }) => {
   for (const mode of ["desktop", "mobile"] as const) {
-    await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 }); await createWritingFixture(page, mode, "長い日本語の章題".repeat(8));
+    await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
+    const prose = "大きな文字でも読み書きできる。".repeat(10);
+    await createWritingFixture(page, mode, "長い日本語の章題".repeat(8), prose);
+    await expectMarkdown(page, prose);
     const displayMenu = page.locator(".pg-editor-display-menu");
     if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
-    await page.getByLabel("原稿の文字サイズ").fill("24"); await editor(page).fill("大きな文字でも読み書きできる。".repeat(10));
+    await page.getByLabel("原稿の文字サイズ").fill("24");
     await expect(editor(page)).toHaveCSS("font-size", "24px");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
     await expect(page.getByRole("button", { name: "今すぐ保存" })).toBeVisible();
@@ -926,7 +931,7 @@ test("guarded shell switches remember completed choices and keep the manuscript 
   const { project, scene } = await createWritingFixture(page, "desktop");
   const firstDraft = "切替前の現在の原稿を保持する。";
   await page.evaluate(() => localStorage.setItem("scriptorium:ui-mode", "desktop"));
-  await editor(page).fill(firstDraft);
+  await replaceManuscript(page, firstDraft);
   await expectMarkdown(page, firstDraft);
   await expectDeviceDraft(page);
 
@@ -976,16 +981,45 @@ test("guarded shell switches remember completed choices and keep the manuscript 
 });
 
 test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page }) => {
-  await createWritingFixture(page); const requests: string[] = [];
-  page.on("request", (request) => { if (/terms|terminology/u.test(request.url())) requests.push(request.url()); });
-  await editor(page).fill("Lantern Harborの用語を確認する。");
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-  const hiddenCount = requests.length;
-  await page.waitForTimeout(200);
-  expect(requests.length).toBe(hiddenCount);
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  await expect(editor(page)).toContainText("Lantern Harbor");
-  await editor(page).press("End"); await editor(page).press("!"); await expect(editor(page)).toContainText("!");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The terminology resolver is selected by the Full profile.");
+  const { project } = await createWritingFixture(page);
+  const resolverPath = `/api/projects/${project.id}/actions/search.terms.resolve`;
+  const manuscript = "Lantern Harborの用語を確認する。";
+  const targetsManuscript = (request: Request) =>
+    new URL(request.url()).pathname === resolverPath && request.postDataJSON()?.input?.text === manuscript;
+
+  let releaseRequest!: () => void;
+  const heldRequest = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  let blocked = false;
+  await page.route((url) => url.pathname === resolverPath, async (route) => {
+    if (!blocked && targetsManuscript(route.request())) {
+      blocked = true;
+      await heldRequest;
+      // A cancelled request may already have expired at the browser boundary.
+      await route.continue().catch(() => undefined);
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    const started = page.waitForRequest(targetsManuscript);
+    await replaceManuscript(page, manuscript);
+    const runningRequest = await started;
+    const cancelled = page.waitForEvent("requestfailed", (request) => request === runningRequest);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    await cancelled;
+    releaseRequest();
+
+    const resumed = page.waitForResponse((response) => targetsManuscript(response.request()));
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    expect((await resumed).ok()).toBe(true);
+    await expectMarkdown(page, manuscript);
+    await editor(page).press("End");
+    await editor(page).press("!");
+    await expectMarkdown(page, manuscript + "!");
+  } finally {
+    releaseRequest();
+  }
 });
 
 test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page }) => {
@@ -1086,7 +1120,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
 });
 
 test("journal writes do not spam live save status while a server receipt remains exact", async ({ page }) => {
-  const { scene } = await createWritingFixture(page, "mobile");
+  const { project, scene } = await createWritingFixture(page, "mobile", undefined, "");
   const details = await openProtectionDetails(page);
   await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
@@ -1100,8 +1134,8 @@ test("journal writes do not spam live save status while a server receipt remains
     })
       .observe(summary, { subtree: true, childList: true, characterData: true });
   });
-  await editor(page).fill("");
   await editor(page).pressSequentially("abcdefgh", { delay: 140 });
+  await expectMarkdown(page, "abcdefgh");
   await expectDeviceDraft(page);
   const summary = page.locator(".pg-save-state summary");
   await expect(summary).toHaveText("このブラウザーに下書きあり");
@@ -1112,6 +1146,7 @@ test("journal writes do not spam live save status while a server receipt remains
   const changes = await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? []);
   expect(changes.length).toBeLessThanOrEqual(3);
   expect(changes).not.toContain("このブラウザーに下書きあり");
+  expect(await persistedMarkdown(page, project.id, scene.id)).toBe("abcdefgh");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   await expect(details.locator("summary")).toHaveText("作品に保存済み");
 });
@@ -1135,10 +1170,11 @@ test("save details keep the confirmed work version separate from later device in
   });
 
   try {
-    await editor(page).fill(initial + firstAddition);
+    await expectMarkdown(page, initial);
+    await appendManuscript(page, firstAddition);
     await expectMarkdown(page, initial + firstAddition);
     await expect.poll(() => requests).toBe(1);
-    await editor(page).fill(initial + firstAddition + secondAddition);
+    await appendManuscript(page, secondAddition);
     await expectMarkdown(page, initial + firstAddition + secondAddition);
     await expect.poll(async () => (await readPersistenceDrafts(page))
       .find((draft) => draft.documentId === scene.id)?.markdown).toBe(initial + firstAddition + secondAddition);

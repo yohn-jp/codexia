@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS, UNIT_TARGETS, TYPECHECK_TARGETS, TEST_TYPECHECK_SCOPES, BROWSER_SHARDS, PROFILES, NATIVE_SELECTIONS, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
+import { browserRuntimeRequirements, PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
+import { createVerificationPlan } from './ci-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
-test('the certified twenty-job inventory includes the Passkey browser checks and one supplemental model call', () => {
-  assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
-  assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
-  assert.equal(VERIFICATION_TASKS.length, 65);
+test('the certified graph covers every declared obligation within the twenty-job cap', () => {
+  assert.ok(REQUIRED_VERIFICATION_JOBS.length <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
@@ -105,8 +107,10 @@ test('browser groups depend on profile producers; independent groups cannot canc
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  const mcrDigest = 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579';
-  const chromiumDigest = 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725';
+  const { webkit: mcrDigest, chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
+  assert.match(mcrDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(chromiumDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.notEqual(mcrDigest, chromiumDigest, 'Single-browser and multi-browser images must remain distinct');
   assert.equal(browser.container.image, [
     "${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@",
     mcrDigest,
@@ -125,19 +129,6 @@ test('browser groups retain immutable runtime and restore the exact producer bef
     "${{ endsWith(matrix.group, '-webkit') && '", mcrDigest,
     "' || '", chromiumDigest, "' }}",
   ].join(''));
-  const runtime = readFileSync(new URL('./verify-browser-runtime.mjs', import.meta.url), 'utf8');
-  assert.match(runtime, /VERIFICATION_GROUPS/);
-  assert.match(runtime, /requiredProjects/);
-  for (const profile of PROFILES) {
-    for (const lane of ['writing', 'reference']) {
-      const tasks = VERIFICATION_GROUPS[`browser-${profile}-${lane}`];
-      assert.ok(tasks.length > 0);
-      assert.ok(tasks.every(task => BROWSER_SHARDS.some(shard => task === `browser-${profile}-${shard.id}` && shard.project === 'chromium')));
-    }
-    const mixed = VERIFICATION_GROUPS[`browser-${profile}-webkit`];
-    assert.ok(mixed.includes(`browser-${profile}-webkit`));
-    assert.ok(mixed.includes(`browser-${profile}-ui-v1`));
-  }
   const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('playwright-failure-'));
   assert.ok(diagnostics);
   assert.equal(diagnostics.if, 'always()');
@@ -164,9 +155,70 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
   assert.ok(producer);
   assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
-  assert.match(runner, /assertProfileReceipt/);
   assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
+});
+
+test('browser runtime requirements distinguish Chromium and mixed browser lanes', () => {
+  for (const profile of PROFILES) {
+    for (const lane of ['writing', 'reference']) {
+      const requirements = browserRuntimeRequirements(`browser-${profile}-${lane}`);
+      assert.deepEqual(requirements.projects, new Set(['chromium']));
+      assert.equal(requirements.imageDigest, PLAYWRIGHT_IMAGE_DIGESTS.chromium);
+    }
+    const mixed = browserRuntimeRequirements(`browser-${profile}-webkit`);
+    assert.deepEqual(mixed.projects, new Set(['chromium', 'webkit']));
+    assert.equal(mixed.imageDigest, PLAYWRIGHT_IMAGE_DIGESTS.webkit);
+    assert.ok(VERIFICATION_GROUPS[`browser-${profile}-webkit`].includes(`browser-${profile}-ui-v1`));
+  }
+  assert.throws(() => browserRuntimeRequirements('browser-preview-writing'), /Unknown CI browser group/u);
+});
+
+test('browser consumers report blocked tasks without launching a child on missing or foreign producer proof', t => {
+  const cwd = fileURLToPath(new URL('../', import.meta.url));
+  const sha = execFileSync('git', ['-c', `safe.directory=${cwd}`, 'rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  const plan = createVerificationPlan({ files: null, event: 'workflow_dispatch', sha });
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-browser-producer-proof-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const planFile = path.join(directory, 'plan.json');
+  const receiptFile = path.join(directory, 'profile.json');
+  writeFileSync(planFile, JSON.stringify(plan));
+  writeFileSync(receiptFile, JSON.stringify({ profile: 'core', sourceSha: '0'.repeat(40) }));
+
+  for (const [restore, failure] of [
+    ['failure', /Profile build\/restore prerequisite failed/u],
+    ['success', /Profile receipt source mismatch/u],
+  ]) {
+    const reportDirectory = path.join(directory, restore);
+    const result = spawnSync(process.execPath, ['scripts/ci-group.mjs', 'browser-core-writing'], {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CODEXIA_CI_PLAN_PATH: planFile,
+        CODEXIA_CI_REPORT_DIR: reportDirectory,
+        CODEXIA_CI_PROFILE_RESTORE: restore,
+        CODEXIA_CI_PROFILE_RECEIPT: receiptFile,
+        CODEXIA_CI_BROWSER_GROUP: 'invalid-test-lane',
+        GITHUB_RUN_ID: '7',
+        GITHUB_RUN_ATTEMPT: '1',
+        GITHUB_JOB: 'browser',
+        GITHUB_WORKFLOW_REF: 'fixture/verify.yml@main',
+        GITHUB_WORKFLOW_SHA: sha,
+        GITHUB_STEP_SUMMARY: '',
+      },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1, result.stderr);
+    const report = JSON.parse(readFileSync(path.join(reportDirectory, 'report.json'), 'utf8'));
+    assert.ok(report.results.some(task => task.task === 'browser-core-core'));
+    assert.deepEqual(report.producerInventory.groupInvocations, []);
+    for (const task of report.results) {
+      assert.equal(task.status, 'blocked', task.task);
+      assert.match(task.error, failure);
+      assert.deepEqual(task.invocations, []);
+    }
+  }
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {
   for (const job of Object.values(workflow.jobs).filter(job => job.uses !== './.github/workflows/full-model-oci-acceptance.yml')) {
@@ -296,4 +348,9 @@ test('release workflow_run dispatch is main-only while PR artifact builds and ma
       "github.event.workflow_run.head_repository.full_name == github.repository",
     ]) assert.ok(admission.if.includes(required), `${filename} must retain source authorization: ${required}`);
   }
+});
+
+test('Passkey bootstrap remains in the canonical browser verification graph', () => {
+  assert.ok(VERIFICATION_TASKS.includes('browser-core-passkey-bootstrap'));
+  assert.ok(Object.values(VERIFICATION_GROUPS).some(tasks => tasks.includes('browser-core-passkey-bootstrap')));
 });

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { validateWebBundle } from "./validate-web-bundle.mjs";
 
 async function fixture(html, bundle = "void 0;") {
@@ -20,13 +23,17 @@ const nativeEnvironment = {
   VITE_CODEXIA_API_AUDIENCE: "https://api.example.test/api",
 };
 
-test("accepts a self-contained relative asset bundle", async () => {
+test("the distribution validator CLI reports a self-contained relative asset bundle", async () => {
   const directory = await fixture('<!doctype html><script type="module" src="./assets/app.js"></script>');
-  try { assert.deepEqual(await validateWebBundle(directory), { references: 1 }); }
-  finally { await rm(directory, { recursive: true, force: true }); }
+  try {
+    const script = fileURLToPath(new URL("./validate-web-bundle.mjs", import.meta.url));
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, [script, directory]);
+    assert.deepEqual(JSON.parse(stdout), { references: 1 });
+    assert.equal(stderr, "");
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("rejects absolute or remote assets", async () => {
+test("rejects an absolute bundle path outside the Mobile web-mode exception", async () => {
   const directory = await fixture('<!doctype html><script src="/mobile/assets/app.js"></script>');
   try { await assert.rejects(validateWebBundle(directory), /relative path/u); }
   finally { await rm(directory, { recursive: true, force: true }); }
