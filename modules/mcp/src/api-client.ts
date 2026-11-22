@@ -9,8 +9,6 @@ import type {
 export interface McpActionClient {
   readonly projectId?: string;
   /** Available on the standalone owner bearer transport; an in-process MCP session is project-bound. */
-  listProjects?(signal?: AbortSignal): Promise<ProjectInfo[]>;
-  /** Bounded owner project discovery; older transports may expose only listProjects. */
   listProjectPage?(limit: number, cursor?: string, signal?: AbortSignal): Promise<ProjectInfoPage>;
   listActions(signal?: AbortSignal): Promise<ActionDescriptor[]>;
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
@@ -142,33 +140,16 @@ export class ApiClient implements McpActionClient {
     return this.requestPath(method, this.projectPath(path), body, signal);
   }
 
-  async listProjects(signal?: AbortSignal): Promise<ProjectInfo[]> {
-    const projects = await this.requestPath<unknown>("GET", "/api/projects", undefined, signal);
-    if (
-      !Array.isArray(projects) ||
-      projects.some(
-        (project) =>
-          !isRecord(project) ||
-          typeof project.id !== "string" ||
-          typeof project.title !== "string",
-      )
-    ) {
-      throw new McpApiError(502, "INVALID_RESPONSE", "Project list response is invalid");
-    }
-    return projects as ProjectInfo[];
-  }
-
   async listProjectPage(limit = 200, cursor?: string, signal?: AbortSignal): Promise<ProjectInfoPage> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200 || (cursor !== undefined && (cursor.length < 1 || cursor.length > 512))) {
       throw new McpApiError(400, "INVALID_INPUT", "Project page limit or cursor is invalid");
     }
-    const query = new URLSearchParams({ page: "1", limit: String(limit) });
+    const query = new URLSearchParams({ limit: String(limit) });
     if (cursor !== undefined) query.set("cursor", cursor);
     const value = await this.requestPath<unknown>("GET", `/api/projects?${query}`, undefined, signal);
     const validProjects = (projects: unknown): projects is ProjectInfo[] => Array.isArray(projects) && projects.every(
       (project) => isRecord(project) && typeof project.id === "string" && typeof project.title === "string",
     );
-    if (validProjects(value)) return { projects: value, nextCursor: null };
     if (!isRecord(value) || !validProjects(value.projects) ||
         !(value.nextCursor === null || (typeof value.nextCursor === "string" && value.nextCursor.length >= 1 && value.nextCursor.length <= 512))) {
       throw new McpApiError(502, "INVALID_RESPONSE", "Project page response is invalid");

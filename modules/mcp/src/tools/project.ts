@@ -12,12 +12,9 @@ export function registerProjectTools(server: McpServer, baseClient: McpActionCli
     limit: z.number().int().min(1).max(200).default(200).describe("Maximum projects in this page"),
     cursor: z.string().min(1).max(512).optional().describe("next_cursor from the preceding page"),
   }, guarded(async ({ limit, cursor }) => {
-    if (baseClient.listProjectPage) {
-      const page = await baseClient.listProjectPage(limit, cursor);
-      return outputResult({ projects: page.projects, next_cursor: page.nextCursor });
-    }
-    if (!baseClient.listProjects) return errorResult("PROJECT_SCOPE_BOUND", "Project discovery is available through the standalone owner API client");
-    return outputResult({ projects: await baseClient.listProjects(), next_cursor: null });
+    if (!baseClient.listProjectPage) return errorResult("PROJECT_SCOPE_BOUND", "Project discovery is available through the standalone owner API client");
+    const page = await baseClient.listProjectPage(limit, cursor);
+    return outputResult({ projects: page.projects, next_cursor: page.nextCursor });
   }));
 
   server.tool("discover_actions", "List enabled project actions available through this authenticated MCP session", {

@@ -143,6 +143,7 @@ function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
   const project = { id: "project-1", title: "A Work", version: 1 };
   return {
     listProjects: async () => [project],
+    listProjectsPage: async () => ({ projects: [project], nextCursor: null }),
     createProject: async ({ title }: { title: string }) => ({ id: "project-2", title, version: 1 }),
     status: async () => ({ ...SNAPSHOT, state: "durable" as const }),
     observe: async () => ({ snapshot: SNAPSHOT, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" }),
@@ -799,8 +800,8 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(mcpReader.status, 404, "a read grant must pass auth even if MCP was not packaged");
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
     assert.equal(projects.status, 200);
-    assert.deepEqual(await projects.json(), [native.project]);
-    const projectPage = await fetch(`${apiServer.base}/api/projects?page=1&limit=20`, { headers: readerHeaders });
+    assert.deepEqual(await projects.json(), { projects: [native.project], nextCursor: null });
+    const projectPage = await fetch(`${apiServer.base}/api/projects?limit=20`, { headers: readerHeaders });
     assert.equal(projectPage.status, 200);
     assert.deepEqual(await projectPage.json(), { projects: [native.project], nextCursor: null });
     const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
@@ -2160,9 +2161,9 @@ describe("Codexia HTTP boundary", () => {
     const loginResponse = await fetch(`${apiServer.base}/api/session`, { headers: { Cookie: cookie } });
     assert.equal(loginResponse.status, 200);
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } });
-    assert.deepEqual(await projects.json(), [
-      { id: "project-1", title: "A Work", version: 1 },
-    ]);
+    assert.deepEqual(await projects.json(), {
+      projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null,
+    });
 
     const mutation = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
       method: "PUT",
@@ -2460,7 +2461,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(write.headers.get("access-control-allow-origin"), webOrigin);
     const list = await fetch(api.base + "/api/projects", { headers: browserHeaders(valid) });
     assert.equal(list.status, 200);
-    const projects = await list.json() as { id: string; title: string; version: number }[];
+    const { projects } = await list.json() as { projects: Array<{ id: string; title: string; version: number }> };
     const project = projects.find((item) => item.title === "OAuth owner project");
     assert.ok(project);
 
@@ -2579,13 +2580,16 @@ describe("Codexia HTTP boundary", () => {
       const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), { key: key.privateKey, dsaEncoding: "ieee-p1363" });
       return `${unsigned}.${signature.toString("base64url")}`;
     };
+    const firstAssignedId = "00000000-0000-4000-8000-000000000001";
+    const missingAssignedId = "00000000-0000-4000-8000-000000000003";
+    const unassignedId = "00000000-0000-4000-8000-000000000002";
     let onlineChecks = 0;
     const oauthMcp = {
       issuer, audience, jwksUrl: `${issuer}/jwks`,
       ownerSubject: "owner-subject",
       ownerClientIds: ["codexia-web", "codexia-ios"],
       allowedClientIds: ["codexia-mcp-client"],
-      projectIdsByClient: { "codexia-mcp-client": ["project-1"] },
+      projectIdsByClient: { "codexia-mcp-client": ["project-1", missingAssignedId, firstAssignedId] },
       verifyActiveToken: async () => { onlineChecks += 1; return true; },
       fetch: async (input: string | URL | Request) => {
         assert.equal(String(input), `${issuer}/jwks`);
@@ -2594,8 +2598,11 @@ describe("Codexia HTTP boundary", () => {
     } satisfies Parameters<typeof createOAuthMcpAuthenticator>[0];
     const storeFixture = makeSnapshotStore();
     const assignedProject = { id: "project-1", title: "Assigned MCP project", version: 1 };
-    const unassignedProject = { id: "project-2", title: "Other disposable project", version: 1 };
-    Object.assign(storeFixture.store, { listProjects: async () => [assignedProject, unassignedProject] });
+    const firstAssignedProject = { id: firstAssignedId, title: "Previous MCP project", version: 1, updatedAt: "2026-10-17T00:00:00.000Z" };
+    const unassignedProject = { id: unassignedId, title: "Other disposable project", version: 1 };
+    Object.assign(storeFixture.store, {
+      listProjects: async () => [firstAssignedProject, unassignedProject, assignedProject],
+    });
     const api = await startCustomApi(storeFixture.store, staticDir, {
       usageDirectory: staticDir,
       runtime: actionBoundaryRuntime(staticDir),
@@ -2622,12 +2629,22 @@ describe("Codexia HTTP boundary", () => {
 
     const projects = await send("/api/projects", readToken);
     assert.equal(projects.status, 200);
-    assert.deepEqual((await projects.json() as Array<{ id: string }>).map(({ id }) => id), ["project-1"],
-      "MCP project enumeration returns only this client's configured resource assignment");
-    const pagedProjects = await send("/api/projects?page=1", readToken);
+    const firstPage = await projects.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(firstPage.projects.map(({ id }) => id), [firstAssignedId, "project-1"],
+      "MCP project enumeration returns only existing assigned resources in canonical order");
+    assert.equal(firstPage.nextCursor, null);
+
+    const pagedProjects = await send("/api/projects?limit=1", readToken);
     assert.equal(pagedProjects.status, 200);
-    assert.deepEqual((await pagedProjects.json() as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
-      "paged MCP project enumeration cannot reveal other owner projects");
+    const page = await pagedProjects.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(page.projects.map(({ id }) => id), [firstAssignedId]);
+    assert.ok(typeof page.nextCursor === "string" && page.nextCursor, "scoped projects use the same opaque cursor as owner projects");
+    const tail = await send(`/api/projects?limit=1&cursor=${encodeURIComponent(page.nextCursor)}`, readToken);
+    assert.equal(tail.status, 200);
+    const lastPage = await tail.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(lastPage.projects.map(({ id }) => id), ["project-1"]);
+    assert.equal(lastPage.nextCursor, null, "a later unassigned project must not produce another page");
+
     const nestedProjectList = await send("/api/projects/project-1/actions/core.projects.list", readToken, {
       method: "POST", body: JSON.stringify({ input: {} }),
     });
@@ -2635,10 +2652,10 @@ describe("Codexia HTTP boundary", () => {
     const nestedProjectListResult = await nestedProjectList.json() as ActionResult;
     assert.equal(nestedProjectListResult.ok, true);
     if (nestedProjectListResult.ok) {
-      assert.deepEqual((nestedProjectListResult.data as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
+      assert.deepEqual((nestedProjectListResult.data as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), [firstAssignedId, "project-1"],
         "nested core project enumeration observes the same client assignment");
     }
-    const unassignedProjectRead = await send("/api/projects/project-2/snapshot", readToken);
+    const unassignedProjectRead = await send(`/api/projects/${unassignedId}/snapshot`, readToken);
     assert.equal(unassignedProjectRead.status, 404);
     assert.equal((await unassignedProjectRead.json() as { code: string }).code, "PROJECT_NOT_FOUND");
     for (const path of [
@@ -2847,7 +2864,7 @@ describe("Codexia HTTP boundary", () => {
     const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
 
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: auth });
-    assert.deepEqual(await projects.json(), [{ id: "project-1", title: "A Work", version: 1 }]);
+    assert.deepEqual(await projects.json(), { projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/project-1`, { headers: auth });
     const detailBody = await detail.json() as { project: { id: string; title: string; version: number }; observation: { snapshot: SnapshotId; state: string } };
     assert.equal(detail.status, 200);
@@ -3173,11 +3190,11 @@ describe("Codexia HTTP boundary", () => {
     const native = await nativeProject(t, "Outside project page");
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-page-"));
     tempDirs.push(staticDir);
-    native.store.listProjects = async () => [];
+    native.store.listProjectsPage = async () => ({ projects: [], nextCursor: null });
     const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
     t.after(apiServer.close);
     const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
-    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), []);
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), { projects: [], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/${native.project.id}`, { headers: auth });
     assert.equal(detail.status, 200);
     assert.equal((await detail.json() as { project: { id: string } }).project.id, native.project.id);

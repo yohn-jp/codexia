@@ -19,7 +19,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
-import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
+import type { Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostgresAdditiveSchema, packagedMigrationFingerprint, runPostgresAdditiveMigrations, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
@@ -28,7 +28,7 @@ import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
-import { decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
+import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
 import {
   createHostedAuthorizationPolicy,
   HostedAuthorizationError,
@@ -2059,30 +2059,32 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/projects" && method === "GET") {
-      const pageRequested = query.get("page") === "1" || query.has("cursor");
-      if (query.has("page") && query.get("page") !== "1") throw httpFailure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
-      if (!pageRequested) { sendJson(response, 200, await listProjects(oauthMcpPrincipal?.projectIds)); return; }
       const limit = boundedInt(query.get("limit"), 200, 1, 200);
       let cursor: ProjectPageCursor | undefined;
       try { cursor = decodeProjectPageCursor(query.get("cursor")); }
       catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
-      if (oauthMcpPrincipal) {
-        const available = await listProjects(oauthMcpPrincipal.projectIds);
-        const afterCursor = cursor
-          ? available.filter((project) => project.updatedAt < cursor!.updatedAt ||
-            (project.updatedAt === cursor!.updatedAt && project.id > cursor!.id))
-          : available;
-        const projects = afterCursor.slice(0, limit);
+
+      const assignedIds = oauthMcpPrincipal?.projectIds;
+      const assigned = hosted
+        ? await listProjects(assignedIds)
+        : assignedIds && await options.persistence.read(async (reader) => {
+          const projects: Project[] = [];
+          for (const id of assignedIds) {
+            const project = await reader.getProject(id as ProjectId);
+            if (project?.id === id) projects.push(project);
+          }
+          return projects;
+        });
+      let page: { projects: Project[]; nextCursor: ProjectPageCursor | null };
+      if (assigned) {
+        const eligible = cursor ? assigned.filter((project) => compareProjectPageKeys(project, cursor) > 0) : assigned;
+        eligible.sort(compareProjectPageKeys);
+        const projects = eligible.slice(0, limit);
         const last = projects.at(-1);
-        const nextCursor = afterCursor.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null;
-        sendJson(response, 200, { projects, nextCursor });
-        return;
+        page = { projects, nextCursor: eligible.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null };
+      } else {
+        page = await options.store.listProjectsPage(limit, cursor);
       }
-      if (hosted) {
-        sendJson(response, 200, { projects: await listProjects(), nextCursor: null });
-        return;
-      }
-      const page = await options.store.listProjectsPage(limit, cursor);
       sendJson(response, 200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
       return;
     }

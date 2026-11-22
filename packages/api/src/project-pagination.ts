@@ -2,6 +2,12 @@ import type { ProjectPageCursor, ProjectId } from "@codexia/persistence-contract
 
 const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
+/** Match the descending millisecond update time and ascending UUID PostgreSQL page order. */
+export function compareProjectPageKeys(left: ProjectPageCursor, right: ProjectPageCursor): number {
+  if (left.updatedAt !== right.updatedAt) return left.updatedAt > right.updatedAt ? -1 : 1;
+  return left.id < right.id ? -1 : Number(left.id > right.id);
+}
+
 export function encodeProjectPageCursor(cursor: ProjectPageCursor): string {
   return Buffer.from(JSON.stringify({ updatedAt: cursor.updatedAt, id: cursor.id }), "utf8").toString("base64url");
 }

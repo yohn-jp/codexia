@@ -85,7 +85,6 @@ export function signalAwareClient(client: McpActionClient): McpActionClient {
       return signalAwareClient(client.forProject(projectId));
     },
   };
-  if (client.listProjects) wrapped.listProjects = () => client.listProjects!(signal());
   if (client.listProjectPage) wrapped.listProjectPage = (limit, cursor) => client.listProjectPage!(limit, cursor, signal());
   return wrapped;
 }

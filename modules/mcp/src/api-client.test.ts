@@ -18,9 +18,6 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   const fetcher: typeof fetch = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
-    if (url.endsWith("/api/projects")) {
-      return Response.json([{ id: "project-one", title: "One" }]);
-    }
     if (url.endsWith("/actions")) {
       return Response.json({ actions: [{ id: "core.status", module: "core", effect: "read" }] });
     }
@@ -41,9 +38,6 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   });
 
   assert.deepEqual(await client.listActions(), [{ id: "core.status", module: "core", effect: "read" }]);
-  assert.deepEqual(await client.listProjects(), [
-    { id: "project-one", title: "One" },
-  ]);
   assert.deepEqual(await client.forProject("project-two").listActions(), [
     { id: "core.status", module: "core", effect: "read" },
   ]);
@@ -54,7 +48,6 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   assert.equal(proposal.source, "mcp");
   assert.deepEqual(calls.map((call) => new URL(call.url).pathname), [
     "/api/projects/project-one/actions",
-    "/api/projects",
     "/api/projects/project-two/actions",
     "/api/projects/project-one/actions/core.status",
     "/api/projects/project-one/observation",
@@ -68,7 +61,7 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   assert.equal("source" in body, false);
 });
 
-test("stdio API client follows bounded project pages and accepts the legacy array response", async () => {
+test("stdio API client follows bounded project pages", async () => {
   const calls: string[] = [];
   const cursor = Buffer.from(JSON.stringify({ updatedAt: "2026-11-20T00:00:00.000Z", id: "00000000-0000-4000-8000-000000000001" })).toString("base64url");
   const fetcher: typeof fetch = async (input) => {
@@ -84,12 +77,15 @@ test("stdio API client follows bounded project pages and accepts the legacy arra
   assert.equal(first.nextCursor, cursor);
   const second = await client.listProjectPage(1, first.nextCursor ?? undefined);
   assert.deepEqual(second, { projects: [{ id: "project-two", title: "Two" }], nextCursor: null });
-  assert.equal(new URL(calls[0]!).searchParams.get("page"), "1");
+  assert.equal(new URL(calls[0]!).pathname, "/api/projects");
+  assert.equal(new URL(calls[0]!).searchParams.has("page"), false);
   assert.equal(new URL(calls[0]!).searchParams.get("limit"), "1");
   assert.equal(new URL(calls[1]!).searchParams.get("cursor"), cursor);
+});
 
+test("project discovery rejects a bare array emitted by the host", async () => {
   const legacy = new ApiClient({ baseUrl: "https://codexia.test", token: "test-token", fetch: async () => Response.json([{ id: "project-one", title: "One" }]) });
-  assert.deepEqual(await legacy.listProjectPage(), { projects: [{ id: "project-one", title: "One" }], nextCursor: null });
+  await assert.rejects(legacy.listProjectPage(), { code: "INVALID_RESPONSE", status: 502 });
 });
 
 test("project discovery rejects an empty continuation emitted by the host", async () => {
