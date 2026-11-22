@@ -110,6 +110,7 @@
     "docs/deployment/IAC.md",
     "scripts/component-release-record.mjs",
     "scripts/push-app-lifecycle*.mjs",
-    "scripts/push-auth-lifecycle-oidc.mjs"
+    "scripts/push-auth-lifecycle-oidc.mjs",
+    "scripts/oci-better-auth-fixture.sh"
   ]
 }

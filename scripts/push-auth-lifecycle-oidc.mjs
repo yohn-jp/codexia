@@ -207,8 +207,8 @@ function expectStatus(response, status, step) {
   return response;
 }
 
-function jsonResponse(response, step) {
-  expectStatus(response, 200, step);
+function jsonResponse(response, step, status = 200) {
+  expectStatus(response, status, step);
   try {
     return JSON.parse(response.body);
   } catch {
@@ -378,7 +378,36 @@ async function authorize(webClientId, ownerSubject) {
     claims.iss === apiIssuer && [claims.aud].flat().includes(apiAudience) && claims.client_id === webClientId &&
     (ownerSubject === undefined || claims.sub === ownerSubject), "Owner access token did not match the registration");
   await assertOwnerSession(accessToken);
-  return { accessToken, kid: header.kid };
+  return { accessToken, kid: header.kid, sessionRequest: request };
+}
+
+async function backendSmoke(webClientId, ownerSubject) {
+  requireCondition(typeof ownerSubject === "string" && ownerSubject.length > 0, "The registered owner ID is required");
+  const { accessToken, sessionRequest } = await authorize(webClientId, ownerSubject);
+  const authorization = "Bearer " + accessToken;
+  const createProject = async title => {
+    const project = jsonResponse(await httpsRequest(apiOrigin + "/api/projects", {
+      method: "POST",
+      headers: { authorization, origin: apiOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    }), "Owner project creation", 201);
+    requireCondition(typeof project.id === "string" && project.id.length > 0, "Owner project creation returned no project ID");
+    expectStatus(await httpsRequest(apiOrigin + "/api/projects/" + encodeURIComponent(project.id) + "/snapshot", {
+      headers: { authorization },
+    }), 200, "Owner snapshot read");
+    return project.id;
+  };
+  const legacyProject = await createProject("Legacy snapshot compatibility");
+  const incompatibleProject = await createProject("Legacy snapshot with different projection");
+
+  const signOut = origin => sessionRequest("/api/auth/sign-out", { method: "POST", headers: { origin } });
+  expectStatus(await signOut("https://foreign.invalid"), 403, "Cross-origin sign-out");
+  const active = jsonResponse(await sessionRequest("/api/auth/get-session"), "Session after rejected sign-out");
+  requireCondition(active?.user?.id === ownerSubject, "Cross-origin sign-out removed the owner session");
+  expectStatus(await signOut(apiOrigin), 200, "Same-origin sign-out");
+  const cleared = jsonResponse(await sessionRequest("/api/auth/get-session"), "Session after sign-out");
+  requireCondition(cleared === null, "Same-origin sign-out left an active session");
+  return { legacyProject, incompatibleProject };
 }
 
 async function probe(accessToken) {
@@ -397,12 +426,15 @@ async function main() {
   if (command === "serve") return serve();
   let result;
   if (command === "register") result = await register();
-  else if (command === "authorize") result = await authorize(argument, ownerSubject);
+  else if (command === "authorize") {
+    const { accessToken, kid } = await authorize(argument, ownerSubject);
+    result = { accessToken, kid };
+  } else if (command === "backend-smoke") result = await backendSmoke(argument, ownerSubject);
   else if (command === "probe") {
     const accessToken = argument === "-" ? (await readBody(process.stdin)).toString("utf8").trim() : argument;
     result = await probe(accessToken);
   } else {
-    throw new Error("Expected serve, register, authorize <web-client-id> [owner-subject], or probe <token|->");
+    throw new Error("Expected serve, register, authorize <web-client-id> [owner-subject], backend-smoke <web-client-id> <owner-subject>, or probe <token|->");
   }
   process.stdout.write(JSON.stringify(result) + "\n");
 }
