@@ -190,15 +190,21 @@ function projectionProofKey(version: number): string {
   return `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${version}`;
 }
 const ARTIFACTS = "core.artifacts";
+const RETIRED_PROJECT_SETTINGS_PATH = "meta/project.yaml";
 const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
 const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const pid = (value: string) => value as ProjectId;
 function fail(status: number, code: string, message: string): never { throw new CoreError(status, code, message); }
-function assertCurrentPublishingWrite(operation: ChangeOperation): void {
-  if (operation.writes.some(({ path }) => isPrivatePublishingPath(path))) {
-    fail(409, "publishing_reproposal_required", "Propose this update from the Publishing panel using the current project state");
+function assertCurrentOperationPaths(operation: ChangeOperation): void {
+  for (const { path } of operation.writes) {
+    if (path === RETIRED_PROJECT_SETTINGS_PATH) {
+      fail(409, "project_settings_reproposal_required", "Submit the project settings update using the current project version");
+    }
+    if (isPrivatePublishingPath(path)) {
+      fail(409, "publishing_reproposal_required", "Propose this update from the Publishing panel using the current project state");
+    }
   }
 }
 function safePath(value: string): void { assertProjectPath(value); }
@@ -353,14 +359,12 @@ export class CoreStore implements MutationCoordinator {
     const headKeys = documents.flatMap((document) => document.headRevisionId ? [{ documentId: document.id, revisionId: document.headRevisionId }] : []);
     const headRevisions = await reader.getDocumentHeadRevisions(pid(projectId), headKeys);
     const revisionsByHead = new Map(headRevisions.map((head) => [JSON.stringify([head.documentId, head.revisionId]), head.revision]));
-    const [pathRecords, artifacts, publishing] = await Promise.all([
-      reader.listModuleRecords(pid(projectId), PATHS),
-      reader.listModuleRecords(pid(projectId), ARTIFACTS),
-      Promise.all(PUBLISHING_RECORD_KEYS.map(key => reader.getModuleRecord(pid(projectId), "publishing", key))),
-    ]);
+    const pathRecords = await reader.listModuleRecords(pid(projectId), PATHS);
+    const artifacts = await reader.listModuleRecords(pid(projectId), ARTIFACTS);
     const publishingRecords: NonNullable<Manifest["publishingRecords"]> = {};
-    for (const record of publishing) {
-      if (record && isPublishingRecordKey(record.key)) publishingRecords[record.key] = { value: record.value, version: record.version };
+    for (const key of PUBLISHING_RECORD_KEYS) {
+      const record = await reader.getModuleRecord(pid(projectId), "publishing", key);
+      if (record) publishingRecords[key] = { value: record.value, version: record.version };
     }
     const files: Record<string,StoredFile> = {};
     const add = (key: string, content: string, encoding: "utf8"|"base64" = "utf8", documentId?: string, metadata?: boolean) => {
@@ -369,7 +373,6 @@ export class CoreStore implements MutationCoordinator {
       files[key] = file;
       return file;
     };
-    add("meta/project.yaml", YAML.stringify({title:project.title,...project.settings}));
     const byId = new Map(documents.map((document) => [document.id,document]));
     const mappings = new Map(pathRecords.map((record) => [record.key, record.value]));
     const metadataFor = (document: Document) => storyMetadata(mappings.get(document.id));
@@ -403,7 +406,7 @@ export class CoreStore implements MutationCoordinator {
       }
     }
     for (const record of artifacts) {
-      if (record.value.deleted === true || isPrivatePublishingPath(record.key)) continue;
+      if (record.value.deleted === true || record.key === RETIRED_PROJECT_SETTINGS_PATH || isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
     }
@@ -799,7 +802,7 @@ export class CoreStore implements MutationCoordinator {
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
       for (const operation of proposal.operations) {
-        assertCurrentPublishingWrite(operation);
+        assertCurrentOperationPaths(operation);
         await assertEvidenceRevisions(reader, proposal, operation);
       }
 
@@ -892,24 +895,6 @@ export class CoreStore implements MutationCoordinator {
           fail(422, "invalid_document_changes", "Exact text changes may only target an existing PostgreSQL manuscript");
         }
       }
-      if (write.path === "meta/project.yaml") {
-        if (write.content === null) {
-          fail(422, "invalid_project_metadata", "Project metadata cannot be deleted");
-        }
-        const value = YAML.parse(write.content);
-        if (!value || typeof value !== "object" || Array.isArray(value) || !isJsonValue(value)) {
-          fail(422, "invalid_project_metadata", "Project metadata must be an object");
-        }
-        const { title, ...settings } = value;
-        await tx.updateProject({
-          projectId,
-          expectedVersion: (await tx.getProject(projectId))!.version,
-          title: typeof title === "string" ? title : manifest.project.title,
-          settings,
-        });
-        continue;
-      }
-
       if (metadataWrites.includes(write)) {
         const existingId = paths.get(write.path);
         const existing = existingId ? documents.find((document) => document.id === existingId) : undefined;
@@ -1107,7 +1092,7 @@ export class CoreStore implements MutationCoordinator {
       const replay = approved.map(({ status }) => applicationFor(status)).find((receipt) => receipt !== undefined);
       if (replay) return recordApplication(replay);
 
-      assertCurrentPublishingWrite(operation);
+      assertCurrentOperationPaths(operation);
       if (operation.writes.some(({ path }) => PRESERVATION_ARCHIVE_PATH.test(path))) {
         fail(409, "preservation_archive_read_only", "Module preservation archives are read-only");
       }

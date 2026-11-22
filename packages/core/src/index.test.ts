@@ -375,31 +375,37 @@ test("approved operations cannot change preserved module artifacts, and applied 
   await accept(p.id, operation(snapshot, livePath, "live edit"));
   assert.equal((await readArtifact(livePath))?.value.content, "live edit");
 });
-test("retired Publishing file writes require a new proposal and retain applied receipts", async () => {
-  const p = await project();
-  const { snapshot } = await core.observe(p.id);
-  const path = "meta/scriptorium/modules/publishing/episodes.yaml";
-  const change = operation(snapshot, path, "episodes: []\n");
-  const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [change], source: "author" };
-  await assert.rejects(core.propose(p.id, proposal), { code: "publishing_reproposal_required" });
-  const key = `proposal:${proposal.id}`;
-  const authority = "core.authority.proposals";
-  const approvedOperationIds = [change.id];
-  const legacy = await persistence.transaction(tx => tx.saveModuleRecord({
-    projectId: p.id, moduleId: authority, key, expectedVersion: null,
-    value: { proposal, state: "approved", approvedOperationIds, approvedBy: "author", applications: [], appliedOperationIds: [], stale: false } as unknown as import("@codexia/persistence-contracts").JsonObject,
-  }));
-  await assert.rejects(core.apply(p.id, change), { code: "publishing_reproposal_required" });
-  assert.deepEqual(await persistence.read(reader => reader.getModuleRecord(p.id, authority, key)), legacy);
-  assert.equal(await persistence.read(reader => reader.getModuleRecord(p.id, "core.artifacts", path)), undefined);
-  const receipt = { operationId: change.id, generation: change.generation, projectVersion: snapshot.projectVersion,
-    revisions: [{ path, revision: createHash("sha256").update("episodes: []\n").digest("hex") }] };
-  const applied = await persistence.transaction(tx => tx.saveModuleRecord({
-    projectId: p.id, moduleId: authority, key, expectedVersion: legacy.version,
-    value: { ...legacy.value, state: "applied", applications: [receipt], appliedOperationIds: approvedOperationIds },
-  }));
-  assert.deepEqual(await core.apply(p.id, change), receipt);
-  assert.deepEqual(await persistence.read(reader => reader.getModuleRecord(p.id, authority, key)), applied);
+test("retired settings file writes require a new proposal and retain applied receipts", async t => {
+  const oldSettings = [
+    { path: "meta/scriptorium/modules/publishing/episodes.yaml", content: "episodes: []\n", code: "publishing_reproposal_required" },
+    { path: "meta/project.yaml", content: "title: New project title\n", code: "project_settings_reproposal_required" },
+  ] as const;
+  for (const { path, content, code } of oldSettings) await t.test(path, async () => {
+    const p = await project();
+    const { snapshot } = await core.observe(p.id);
+    const change = operation(snapshot, path, content);
+    const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [change], source: "author" };
+    await assert.rejects(core.propose(p.id, proposal), { code });
+    const key = `proposal:${proposal.id}`;
+    const authority = "core.authority.proposals";
+    const approvedOperationIds = [change.id];
+    const legacy = await persistence.transaction(tx => tx.saveModuleRecord({
+      projectId: p.id, moduleId: authority, key, expectedVersion: null,
+      value: { proposal, state: "approved", approvedOperationIds, approvedBy: "author", applications: [], appliedOperationIds: [], stale: false } as unknown as import("@codexia/persistence-contracts").JsonObject,
+    }));
+    await assert.rejects(core.apply(p.id, change), { code });
+    assert.deepEqual(await persistence.read(reader => reader.getModuleRecord(p.id, authority, key)), legacy);
+    assert.equal(await persistence.read(reader => reader.getModuleRecord(p.id, "core.artifacts", path)), undefined);
+    assert.deepEqual(await persistence.read(reader => reader.getProject(p.id)), p);
+    const receipt = { operationId: change.id, generation: change.generation, projectVersion: snapshot.projectVersion,
+      revisions: [{ path, revision: createHash("sha256").update(content).digest("hex") }] };
+    const applied = await persistence.transaction(tx => tx.saveModuleRecord({
+      projectId: p.id, moduleId: authority, key, expectedVersion: legacy.version,
+      value: { ...legacy.value, state: "applied", applications: [receipt], appliedOperationIds: approvedOperationIds },
+    }));
+    assert.deepEqual(await core.apply(p.id, change), receipt);
+    assert.deepEqual(await persistence.read(reader => reader.getModuleRecord(p.id, authority, key)), applied);
+  });
 });
 
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});

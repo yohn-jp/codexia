@@ -136,6 +136,7 @@ test("project presentation reads the selected project's public title and subtitl
   } });
   const selected = await core.reader(project.id);
   assert.deepEqual(selected.projectPresentation, { title: "Published title", subtitle: "Volume One" });
+  assert.equal(await selected.read("meta/project.yaml"), null);
 
   await persistence.transaction(tx => tx.updateProject({
     projectId: project.id, expectedVersion: project.version,
@@ -143,6 +144,7 @@ test("project presentation reads the selected project's public title and subtitl
   }));
   const current = await core.reader(project.id);
   assert.deepEqual(current.projectPresentation, { title: "New display title" });
+  assert.ok(!(await current.list("")).includes("meta/project.yaml"));
   assert.deepEqual((await core.reader(project.id, selected.snapshot)).projectPresentation,
     { title: "Published title", subtitle: "Volume One" });
   assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
@@ -388,7 +390,7 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
     const project = await createProject();
     const snapshot = {projectId:project.id, projectVersion:project.version};
     const file = (content: string) => ({content,encoding:"utf8",revision:createHash("sha256").update(content).digest("hex")});
-    const files: Record<string, ReturnType<typeof file>> = {
+    const files: Record<string, ReturnType<typeof file>> = compatible ? {} : {
       "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
     };
     const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
@@ -421,6 +423,7 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   const compatibleFiles = await exactFiles(await store.reader(compatible.project.id, compatible.snapshot));
   const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
   const oldFiles = await exactFiles(oldPinned);
+  assert.equal((await oldPinned.read("meta/project.yaml"))?.content, YAML.stringify({ title: incompatible.project.title }));
   await assert.rejects(store.readPublishingSnapshotRecord(incompatible.project.id, incompatible.snapshot, "episodes"),
     { code: "snapshot_unavailable" });
   assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
@@ -441,6 +444,7 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   const current = await store.reader(incompatible.project.id);
   assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
   assert.ok(await current.read(incompatible.knowledgePath));
+  assert.equal(await current.read("meta/project.yaml"), null);
   assert.equal(await (await store.reader(incompatible.project.id,incompatible.snapshot)).read(incompatible.knowledgePath),null);
   assert.deepEqual(await exactFiles(await store.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
   await store.prepareSnapshotReuse(incompatible.project.id);
