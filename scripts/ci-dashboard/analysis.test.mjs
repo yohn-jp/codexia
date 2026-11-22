@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { blockingChain, comparableHistory, nameMatches, observeRun, readVerifyGraph, summarizePR } from './analysis.mjs';
 import { collect, identity, selectRuns } from './collect.mjs';
@@ -215,22 +218,70 @@ test('collector reports runs whose PR association cannot be resolved', async () 
   ]);
 });
 
-test('diagnostic JSON is copied from a single accessible button', () => {
-  const html=readFileSync(new URL('./site/index.html',import.meta.url),'utf8');
-  const client=readFileSync(new URL('./site/dashboard.js',import.meta.url),'utf8');
-  assert.match(html,/id="copy-diagnostics"[^>]*disabled/u);
-  assert.match(html,/id="copy-status" role="status" aria-live="polite"/u);
-  assert.match(client,/navigator\.clipboard\.writeText/u);
-  assert.match(client,/buildDiagnosticExport/u);
-});
+test('bundled dashboard renders measured telemetry and copies source-bound diagnostics', {
+  skip: !process.env.CODEXIA_AUDIT_TOOL_DIR,
+  timeout: 30_000,
+}, async t => {
+  const require = createRequire(join(process.env.CODEXIA_AUDIT_TOOL_DIR, 'package.json'));
+  const { chromium } = require('playwright-core');
+  const output = await mkdtemp(join(tmpdir(), 'codexia-dashboard-test-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  execFileSync(process.execPath, [fileURLToPath(new URL('./collect.mjs', import.meta.url)), output, '--preview']);
 
-test('static shell displays live telemetry and no invented metrics', () => {
-  const html=readFileSync(new URL('./site/index.html',import.meta.url),'utf8');
-  const client=readFileSync(new URL('./site/dashboard.js',import.meta.url),'utf8');
-  assert.match(html,/id="timeline"/u);
-  assert.match(html,/id="history"/u);
-  assert.match(client,/textContent/u);
-  assert.doesNotMatch(html,/8m 42s|dummy|mock data/iu);
+  const browser = await chromium.launch(process.env.CODEXIA_E2E_CHROMIUM
+    ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM, headless: true }
+    : { channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const contentTypes = {
+    'index.html': 'text/html',
+    'dashboard.js': 'text/javascript',
+    'analysis.mjs': 'text/javascript',
+    'collection.mjs': 'text/javascript',
+    'diagnostics.mjs': 'text/javascript',
+    'ci-timing.mjs': 'text/javascript',
+    'ci-contract.mjs': 'text/javascript',
+  };
+  await page.route('http://localhost/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    const name = path.split('/').pop();
+    if (path === '/ci/verify.yml') return route.fulfill({ body: graph, contentType: 'text/plain' });
+    if (!Object.hasOwn(contentTypes, name)) return route.fulfill({ status: 404 });
+    return route.fulfill({ body: await readFile(join(output, path.slice(1))), contentType: contentTypes[name] });
+  });
+  let releaseInventory;
+  const inventoryReady = new Promise(resolve => { releaseInventory = resolve; });
+  await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/actions/runs')) {
+      await inventoryReady;
+      return route.fulfill({ json: { workflow_runs: [{ ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] }] } });
+    }
+    if (path.endsWith('/actions/runs/1/attempts/1/jobs')) return route.fulfill({ json: { jobs } });
+    return route.fulfill({ status: 404 });
+  });
+  const copies = [];
+  await page.exposeFunction('captureClipboard', text => { copies.push(text); });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: window.captureClipboard } });
+  });
+
+  await page.goto('http://localhost/ci/index.html');
+  const copyButton = page.getByRole('button', { name: '診断JSONをコピー' });
+  assert.equal(await copyButton.isDisabled(), true);
+  releaseInventory();
+  const timeline = page.getByRole('region', { name: 'Job timeline' });
+  await timeline.getByText('browser-core-webkit', { exact: false }).first().waitFor();
+  const history = page.getByRole('region', { name: 'PR revision history' });
+  await history.getByRole('button', { name: /#42/u }).waitFor();
+  await copyButton.click();
+  await page.getByRole('status').filter({ hasText: 'PR #42 の診断JSONをコピーしました。' }).waitFor();
+  assert.equal(copies.length, 1);
+  const copied = JSON.parse(copies[0]);
+  assert.equal(copied.origin.pr, 42);
+  assert.equal(copied.origin.executedSha, 'a'.repeat(40));
+  assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
+  assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
 });
 
 test('browser JavaScript syntax is valid without requiring a DOM at test time', () => {
