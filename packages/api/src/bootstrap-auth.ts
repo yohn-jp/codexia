@@ -53,6 +53,18 @@ export function resolvePasskeyBootstrapRpId(
   return production.hostname;
 }
 
+/** Refuse an ambiguous or unapproved first-owner enrollment path. */
+export function assertInitialAuthBootstrapMode(
+  config: Pick<BetterAuthRuntimeConfig, "passkeyBootstrap" | "oidcIssuer">,
+  approvedOidcOwnerSubject: string | undefined,
+): void {
+  const passkey = Boolean(config.passkeyBootstrap);
+  const oidc = Boolean(config.oidcIssuer);
+  if (passkey === oidc || oidc !== Boolean(approvedOidcOwnerSubject)) {
+    throw new Error("First-owner bootstrap requires exactly one approved Passkey or OIDC identity");
+  }
+}
+
 export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, options: BootstrapOptions) {
   const origin = new URL(config.publicOrigin);
   const audience = new URL(config.apiAudience!);
@@ -297,8 +309,8 @@ async function main(): Promise<void> {
   if (recoveryMode && (!staged.ownerSubject || staged.passkeyBootstrap)) {
     throw new Error("Passkey recovery requires the configured existing owner");
   }
-  if (enrollmentMode && !staged.passkeyBootstrap) {
-    throw new Error("Passkey first-owner bootstrap settings are required");
+  if (enrollmentMode) {
+    assertInitialAuthBootstrapMode(staged, process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT);
   }
   const origin = process.env.CODEXIA_AUTH_BOOTSTRAP_ORIGIN!;
   const passkeySetup = Boolean(staged.passkeyBootstrap || recoveryMode);
