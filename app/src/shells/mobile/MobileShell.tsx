@@ -12,6 +12,7 @@ import {
 } from "@ionic/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { ApplicationShellProps, WorkspacePanelRequest } from "../../application/contracts";
+import { IdentityManagementPanel } from "../../settings/IdentityManagementPanel";
 import { Workspace } from "../../workspace/Workspace";
 import { useWritingKeyboardVisibility } from "./useWritingKeyboardVisibility";
 import "@ionic/react/css/core.css";
@@ -488,6 +489,7 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
                   {switchError ? <p className="mobile-shell-switch-error" role="alert">{switchError}</p> : null}
                 </section>
               ) : null}
+              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" /> : null}
               <Workspace
                 scope={workspaceScope}
                 mode="mobile"
@@ -543,6 +545,7 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
                 </IonButton>
                 {switchError ? <p className="mobile-shell-switch-error" role="alert">{switchError}</p> : null}
               </section>
+              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" /> : null}
             </section>
           </div>}
         </IonContent>

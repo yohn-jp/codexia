@@ -1,0 +1,337 @@
+.identity-management {
+  min-width: 0;
+  color: var(--ink);
+}
+
+.identity-management h2,
+.identity-management h3,
+.identity-management h4,
+.identity-management h5 {
+  margin: 0;
+  color: var(--ink);
+  font-family: inherit;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.identity-management h2 { font-size: 1.125rem; }
+.identity-management h3 { font-size: 1rem; }
+.identity-management h4 { font-size: 1rem; }
+.identity-management h5 { font-size: 0.875rem; }
+
+.identity-management p { margin: 0; line-height: 1.55; }
+
+.identity-management__trigger,
+.identity-management__primary,
+.identity-management__secondary,
+.identity-management__danger,
+.identity-management__danger-quiet {
+  min-height: 44px;
+  font: inherit;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.identity-management__trigger {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.4rem;
+  color: var(--accent-strong);
+  background: var(--paper);
+  white-space: nowrap;
+}
+
+.identity-management__primary {
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--accent-strong);
+  border-radius: 0.4rem;
+  color: var(--button-foreground);
+  background: var(--accent);
+}
+
+.identity-management__secondary {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.4rem;
+  color: var(--accent-strong);
+  background: transparent;
+}
+
+.identity-management__danger,
+.identity-management__danger-quiet {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.4rem;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.identity-management__danger {
+  border-color: #8b352e;
+  color: #842a24;
+  background: var(--paper);
+}
+
+.identity-management__trigger:hover:not(:disabled),
+.identity-management__secondary:hover:not(:disabled),
+.identity-management__danger-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.identity-management__primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.identity-management__danger:hover:not(:disabled) {
+  background: #f3e8e4;
+}
+
+.identity-management :is(button, input):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.identity-management :is(button, input):disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.identity-management__unavailable,
+.identity-management--mobile {
+  margin-block-start: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--paper);
+}
+
+.identity-management__unavailable p {
+  margin-block-start: 0.5rem;
+  color: var(--muted);
+}
+
+.identity-management__unavailable-inline {
+  max-width: 19rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.identity-management__content { min-width: 0; }
+
+.identity-management__section {
+  min-width: 0;
+}
+
+.identity-management__section + .identity-management__section {
+  margin-block-start: 1.45rem;
+  padding-block-start: 1.35rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.identity-management__intro,
+.identity-management__hint,
+.identity-management__meta,
+.identity-management__empty,
+.identity-management__current-label {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.identity-management__intro { margin-block: 0.45rem 1rem !important; }
+.identity-management__hint { margin-block-start: 0.5rem !important; }
+.identity-management__empty { margin-block-start: 0.7rem !important; }
+
+.identity-management__add-form,
+.identity-management__inline-form {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.identity-management__add-form {
+  margin-block: 0.9rem 1rem;
+  padding-block-end: 1rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.identity-management__add-form label,
+.identity-management__inline-form label {
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.identity-management__form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.identity-management input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.4rem;
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  font-size: max(1rem, 1em);
+}
+
+.identity-management__form-row input { flex: 1 1 16rem; }
+.identity-management__form-row button { flex: 0 0 auto; }
+
+.identity-management__list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.identity-management__list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+  padding-block: 1rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.identity-management__item-main {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.identity-management__meta { overflow-wrap: anywhere; }
+.identity-management__user-agent { max-width: 54ch; }
+
+.identity-management__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.identity-management__inline-form,
+.identity-management__inline-confirm {
+  grid-column: 1 / -1;
+  margin-block-start: 0.15rem;
+}
+
+.identity-management__inline-confirm {
+  display: grid;
+  gap: 0.65rem;
+  padding-block-start: 0.7rem;
+  border-block-start: 1px solid var(--line);
+}
+
+.identity-management__inline-confirm p { font-weight: 600; }
+.identity-management__current-label { grid-column: 1 / -1; }
+
+.identity-management__error,
+.identity-management__message {
+  margin-block: 0.65rem !important;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.identity-management__error {
+  border-color: #9b554c;
+  color: #762720;
+  background: #f8efec;
+}
+
+.identity-management__message {
+  color: var(--ink);
+  background: var(--surface-subtle);
+}
+
+.identity-management__loading {
+  display: grid;
+  gap: 0.65rem;
+  padding-block: 0.75rem;
+}
+
+.identity-management__loading span {
+  display: block;
+  width: min(100%, 30rem);
+  height: 0.8rem;
+  border-radius: 0.2rem;
+  background: var(--surface-subtle);
+}
+
+.identity-management__loading span:last-child { width: min(72%, 20rem); }
+
+.identity-management__dialog {
+  box-sizing: border-box;
+  width: min(48rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  max-height: min(88dvh, 54rem);
+  padding: 1.4rem clamp(1rem, 3vw, 1.8rem) 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: 0 12px 38px var(--focus-shadow);
+  overscroll-behavior: contain;
+}
+
+.identity-management__dialog::backdrop {
+  overflow: hidden;
+  background: rgb(13 17 16 / 48%);
+  overscroll-behavior: contain;
+}
+
+.identity-management__dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: 1rem;
+  padding-block-end: 0.9rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.identity-management__dialog .identity-management__section + .identity-management__section {
+  margin-block-start: 1.25rem;
+  padding-block-start: 1.15rem;
+}
+
+@media (max-width: 640px) {
+  .identity-management--desktop .identity-management__trigger { white-space: normal; }
+  .identity-management__form-row { align-items: stretch; flex-direction: column; }
+  .identity-management__form-row button { width: 100%; }
+  .identity-management__list-item { grid-template-columns: minmax(0, 1fr); }
+  .identity-management__actions { grid-column: 1; }
+  .identity-management__actions > button { flex: 1 1 auto; }
+  .identity-management__dialog { width: calc(100vw - 1rem); max-width: calc(100vw - 1rem); max-height: 92dvh; padding: 1rem; }
+  .identity-management__dialog-header { align-items: flex-start; }
+}
+
+:root[data-zp-theme="dark"] .identity-management__danger,
+:root[data-zp-theme="dark"] .identity-management__error {
+  border-color: #b56e65;
+  color: #f4d4cf;
+  background: #382422;
+}
+
+:root[data-zp-theme="dark"] .identity-management__danger:hover:not(:disabled) {
+  background: #4a2e2a;
+}
+
+:root[data-zp-theme="paper"] .identity-management__danger,
+:root[data-zp-theme="paper"] .identity-management__error {
+  border-color: #9b554c;
+  color: #762720;
+  background: #f8efec;
+}
