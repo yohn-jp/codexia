@@ -145,7 +145,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await page.waitForURL((url) => url.pathname === "/oauth/login" && Boolean(url.searchParams.get("sig")));
     const signedSearch = new URL(page.url()).search;
     try {
-      await page.getByRole("button", { name: "登録済みアカウントで続ける" }).click({ timeout: 8000 });
+      await page.getByRole("button", { name: "IDプロバイダーでサインイン" }).click({ timeout: 8000 });
     } catch (error) {
       console.error("OAuth login page rendered:", await page.locator("body").innerText());
       throw error;
