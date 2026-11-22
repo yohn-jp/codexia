@@ -249,6 +249,16 @@ async function loadEntities(context: ModuleActionContext): Promise<StoryEntity[]
   return raw as StoryEntity[];
 }
 
+async function loadSceneEntities(context: ModuleActionContext): Promise<StoryEntity[]> {
+  const raw = await invokeData(context, "story.entities.list", { type: "scene" });
+  if (!Array.isArray(raw)) throw new TypeError("Story scene list is not an array");
+  for (const entity of raw) {
+    assertStoryEntity(entity);
+    if (entity.type !== "scene") throw new TypeError("Story returned a non-scene in its scene list");
+  }
+  return raw as StoryEntity[];
+}
+
 function resolveCandidates(scene: StoryEntity, appears: StoryEntity[] | undefined, entities: StoryEntity[], text: string): StoryEntity[] {
   const appearing = (appears ?? []).filter((entity) => entity.type === "character");
   if (appearing.length > 0) return appearing;
@@ -501,8 +511,7 @@ async function runPipelineAction(
 }
 
 async function loadCorpusScenes(context: ModuleActionContext): Promise<{ entities: StoryEntity[]; scenes: PreparedScene[] }> {
-  const entities = await loadEntities(context);
-  const sceneEntities = entities.filter((entity) => entity.type === "scene");
+  const [entities, sceneEntities] = await Promise.all([loadEntities(context), loadSceneEntities(context)]);
   if (sceneEntities.length > MAX_SCENES) throw Object.assign(new Error(`Work has more than ${MAX_SCENES} scenes; speaker corpus scan is bounded`), { code: "corpus_too_large" });
   const scenes: PreparedScene[] = [];
   for (const scene of sceneEntities) {
@@ -975,8 +984,8 @@ function displayStylometricWarning(value: RecordValue): RecordValue {
 function makeActions(moduleContext: ModuleContext): ModuleAction[] {
   return [
     action("speaker.scenes.list", "read", schema(objectSchema), async (_input, context) => {
-      const entities = await loadEntities(context);
-      return { scenes: entities.filter((entity) => entity.type === "scene").map(({ id, name, raw, filePath }) => ({ id, name: name ?? id, filePath, volume: raw.volume, chapter: raw.chapter })) };
+      const scenes = await loadSceneEntities(context);
+      return { scenes: scenes.map(({ id, name, raw, filePath }) => ({ id, name: name ?? id, filePath, volume: raw.volume, chapter: raw.chapter })) };
     }),
     action("speaker.dialogue.list", "compute", schema(parseDialogueInput), async (input, context) => speakerDialogueList(input as ReturnType<typeof parseDialogueInput>, context, moduleContext)),
     action("speaker.voice.profiles", "compute", schema(objectSchema), async (input, context) => speakerVoiceProfiles(input, context, moduleContext)),
