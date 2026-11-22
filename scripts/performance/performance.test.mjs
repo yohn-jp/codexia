@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, readdir, writeFile, symlink, lstat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdtemp, rm, open, readFile, readdir, writeFile, symlink, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -27,6 +28,15 @@ test('verified artifact reads use a regular file descriptor and reject symlink p
 });
 test('result writers claim new files exclusively and save uses private collision-safe temporary files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'performance-safe-output-'));
+  async function readPrivateResult(file) {
+    const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const attributes = await handle.stat();
+      assert.ok(attributes.isFile());
+      assert.equal(attributes.mode & 0o777, 0o600);
+      return JSON.parse(await handle.readFile('utf8'));
+    } finally { await handle.close(); }
+  }
   try {
     const result = join(root, 'result.json');
     const attempts = [{ status: 'first' }, { status: 'second' }];
@@ -36,16 +46,15 @@ test('result writers claim new files exclusively and save uses private collision
     assert.equal(winners.length, 1);
     assert.equal(losers.length, 1);
     assert.equal(losers[0].reason.code, 'EEXIST');
-    assert.deepEqual(JSON.parse(await readFile(result, 'utf8')), winners[0]);
-    assert.equal((await lstat(result)).mode & 0o777, 0o600);
+    assert.deepEqual(await readPrivateResult(result), winners[0]);
     await assert.rejects(writeNewJsonResult(result, { status: 'overwritten' }), { code: 'EEXIST' });
-    assert.deepEqual(JSON.parse(await readFile(result, 'utf8')), winners[0]);
+    assert.deepEqual(await readPrivateResult(result), winners[0]);
 
     const updated = join(root, 'progress.json');
     await save(updated, { status: 'running' });
-    assert.equal((await lstat(updated)).mode & 0o777, 0o600);
+    assert.deepEqual(await readPrivateResult(updated), { status: 'running' });
     await save(updated, { status: 'complete' });
-    assert.deepEqual(JSON.parse(await readFile(updated, 'utf8')), { status: 'complete' });
+    assert.deepEqual(await readPrivateResult(updated), { status: 'complete' });
     assert.deepEqual((await readdir(root)).sort(), ['progress.json', 'result.json']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
