@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
-import { HIERARCHY_REORDER_SOURCE, PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
@@ -119,12 +119,14 @@ export type ReorderHierarchyInput =
   | { kind: "chapter"; volumeId: string; orderedIds: string[] }
   | { kind: "scene"; volumeId: string; chapterId: string; orderedIds: string[] };
 
-export interface ProposeHierarchyReorderOptions {
+export interface ProposeHierarchyOptions {
   projectVersion: number;
   actorId: string;
   idempotencyKey: string;
   origin?: "author" | "external-agent";
 }
+
+export type ProposeHierarchyReorderOptions = ProposeHierarchyOptions;
 
 export type ProposeManuscriptRestoreInput = Pick<RestoreDocumentRevisionCommand, "documentId" | "baseRevisionId" | "sourceRevisionId">;
 
@@ -1164,6 +1166,79 @@ export class CoreStore implements MutationCoordinator {
     built.operation.readDocumentSets=[...readDocumentSets.values()];
     return built;
   }
+  async proposeHierarchyDelete(project: string, input: HierarchyTarget, options: ProposeHierarchyOptions): Promise<ChangeSetResult> {
+    const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;
+    if (!Number.isSafeInteger(projectVersion) || projectVersion < 1 || !actorId.trim() || !idempotencyKey.trim()) {
+      fail(400, "invalid_hierarchy_operation", "A project version, actor and idempotency key are required");
+    }
+    const projectId = pid(project);
+    const requestDigest = hash(canonicalJson({ actorId, origin, input }));
+    return this.persistence.transaction(async tx => {
+      await tx.assertProjectVersion(projectId);
+      const existing = await tx.getChangeSetByIdempotencyKey(projectId, idempotencyKey);
+      if (existing) {
+        if (existing.authorId !== actorId || existing.provenance.source !== HIERARCHY_DELETE_SOURCE ||
+            existing.provenance.details.requestDigest !== requestDigest) {
+          throw new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
+            resource: "idempotency_key", id: idempotencyKey,
+          });
+        }
+        return { changeSet: existing, replayed: true };
+      }
+      await tx.assertProjectVersion(projectId, projectVersion);
+      const documents = await tx.listDocuments(projectId, undefined, 1000);
+      if (documents.length === 1000) fail(413, "snapshot_too_large", "Project snapshot exceeds the supported document bound");
+      const mappings = new Map((await tx.listModuleRecords(projectId, PATHS)).map(record => [record.key, record.value]));
+      const resolve = (id: string): Document => {
+        const matches = documents.filter(document =>
+          document.id === id || storyDocumentId(document, storyMetadata(mappings.get(document.id))) === id);
+        if (!matches.length) fail(404, "scene_not_found", "Document not found");
+        if (matches.length !== 1) fail(422, "invalid_hierarchy_target", "Hierarchy identity is ambiguous");
+        return matches[0]!;
+      };
+      const target = resolve(input.id);
+      if (target.kind !== input.kind) fail(422, "invalid_hierarchy_target", "Hierarchy kind mismatch");
+      const volume = input.kind === "volume" ? undefined : resolve(input.volumeId);
+      const chapter = input.kind === "scene" ? resolve(input.chapterId) : undefined;
+      const parentId = chapter?.id ?? volume?.id ?? null;
+      if ((volume && volume.kind !== "volume") ||
+          (chapter && (chapter.kind !== "chapter" || chapter.parentId !== volume?.id)) ||
+          target.parentId !== parentId) {
+        fail(409, "hierarchy_parent_changed", "The hierarchy item no longer belongs to the requested parent");
+      }
+
+      const children = new Map<DocumentId | null, Document[]>();
+      for (const document of documents) {
+        const siblings = children.get(document.parentId);
+        if (siblings) siblings.push(document);
+        else children.set(document.parentId, [document]);
+      }
+      const subtree = [target];
+      const selected = new Set([target.id]);
+      for (let index = 0; index < subtree.length; index++) {
+        for (const child of children.get(subtree[index]!.id) ?? []) {
+          if (selected.has(child.id)) continue;
+          selected.add(child.id);
+          subtree.push(child);
+        }
+      }
+      subtree.reverse();
+      const siblingIds = (children.get(parentId) ?? []).filter(document => document.kind === input.kind)
+        .map(document => document.id).sort();
+      return tx.createChangeSet({
+        projectId, authorId: actorId, idempotencyKey,
+        operations: subtree.map(document => ({ type: "document.delete", command: {
+          projectId, documentId: document.id, expectedVersion: document.version,
+        } })),
+        readSet: subtree.map(document => ({ resource: "document", id: document.id, expectedVersion: document.version })),
+        writeSet: subtree.map(document => ({ resource: "document", id: document.id })),
+        provenance: { source: HIERARCHY_DELETE_SOURCE, actorId, details: {
+          kind: input.kind, parentId, volumeId: volume?.id ?? null, siblingIds, projectVersion, origin, requestDigest,
+        } },
+      });
+    });
+  }
+
   async proposeHierarchyReorder(project: string, input: ReorderHierarchyInput, options: ProposeHierarchyReorderOptions): Promise<ChangeSetResult> {
     const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;
     if (!Number.isSafeInteger(projectVersion) || projectVersion < 1 || !actorId.trim() || !idempotencyKey.trim()) {

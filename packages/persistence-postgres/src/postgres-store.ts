@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { nextOrderKey } from "@codexia/contracts";
 import {
+  HIERARCHY_DELETE_SOURCE,
   HIERARCHY_REORDER_SOURCE,
   PersistenceError,
   type Assertion,
@@ -1690,7 +1691,8 @@ class PostgresTransaction implements PersistenceTransaction {
       return { changeSet: mapChangeSet(existing), replayed: true };
     }
     let readSet = command.readSet;
-    if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE) {
+    if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE ||
+        command.provenance.source === HIERARCHY_DELETE_SOURCE) {
       const sourceVersion = command.provenance.details.projectVersion;
       if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
@@ -1922,12 +1924,6 @@ class PostgresTransaction implements PersistenceTransaction {
 
   private async assertHierarchyReorderScope(changeSet: ChangeSet): Promise<void> {
     const { projectId, operations, readSet, provenance } = changeSet;
-    const { kind, parentId, volumeId } = provenance.details;
-    if (!((kind === "volume" && parentId === null && volumeId === null) ||
-          (kind === "chapter" && typeof parentId === "string" && parentId === volumeId) ||
-          (kind === "scene" && typeof parentId === "string" && typeof volumeId === "string"))) {
-      throw validationError("A hierarchy reorder requires a canonical sibling scope");
-    }
     const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
     const expected = operations.map(operation => {
       if (operation.type !== "document.update" || operation.command.parentId !== undefined || operation.command.title !== undefined ||
@@ -1936,6 +1932,49 @@ class PostgresTransaction implements PersistenceTransaction {
       }
       return operation.command.documentId;
     }).sort();
+    await this.assertHierarchySiblingScope(projectId, provenance.details, expected);
+  }
+
+  private async assertHierarchyDeleteScope(changeSet: ChangeSet): Promise<void> {
+    const { projectId, operations, readSet, provenance } = changeSet;
+    const { siblingIds } = provenance.details;
+    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
+    const selected = operations.map(operation => {
+      if (operation.type !== "document.delete" || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
+        throw validationError("A hierarchy deletion must contain versioned document deletions only");
+      }
+      return operation.command.documentId;
+    });
+    const targetId = selected.at(-1);
+    if (!targetId || !Array.isArray(siblingIds) || !siblingIds.every(id => typeof id === "string") ||
+        !siblingIds.includes(targetId) || new Set(selected).size !== selected.length) {
+      throw validationError("A hierarchy deletion requires a canonical subtree and sibling set");
+    }
+    await this.assertHierarchySiblingScope(projectId, provenance.details, siblingIds);
+    const current = await this.query(
+      `WITH RECURSIVE subtree AS (
+        SELECT id FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL
+        UNION
+        SELECT child.id FROM document child JOIN subtree parent ON child.parent_id = parent.id
+          WHERE child.project_id = $1 AND child.deleted_at IS NULL
+      ) SELECT id FROM subtree`,
+      [projectId, targetId],
+    );
+    const expected = new Set<string>(selected);
+    if (current.rows.length !== expected.size || current.rows.some(row => !expected.has(asString(row.id)))) {
+      throw new PersistenceError("conflict", "The hierarchy subtree changed since it was read", {
+        resource: "hierarchy_subtree", id: targetId,
+      });
+    }
+  }
+
+  private async assertHierarchySiblingScope(projectId: ProjectId, details: JsonObject, expected: readonly string[]): Promise<void> {
+    const { kind, parentId, volumeId } = details;
+    if (!((kind === "volume" && parentId === null && volumeId === null) ||
+          (kind === "chapter" && typeof parentId === "string" && parentId === volumeId) ||
+          (kind === "scene" && typeof parentId === "string" && typeof volumeId === "string"))) {
+      throw validationError("A hierarchy change requires a canonical sibling scope");
+    }
     const scopeConflict = () => new PersistenceError("conflict", "The hierarchy sibling set changed since it was read", {
       resource: "hierarchy_siblings", id: parentId ?? projectId,
     });
@@ -2089,6 +2128,7 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.operations.some(operation => operation.type === "knowledge.merge"),
     );
     if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
+    if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
     await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
     const results: ChangeSetOperationResult[] = [];
     for (const operation of changeSet.operations) results.push(await this.applyOperation(operation, changeSet.approvedBy));

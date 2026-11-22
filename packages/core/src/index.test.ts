@@ -1100,7 +1100,7 @@ test("existing duplicate logical IDs keep their first-match reads", async () => 
   assert.equal((await core.readScene(p.id, "legacy-duplicate")).text, "First legacy body");
 });
 
-test("deleted hierarchy paths stay reserved while revisions and evidence remain addressable", async () => {
+test("native hierarchy deletion preserves revisions, evidence, reservations and replay receipts", async () => {
   const p = await hierarchy();
   const scene = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "scene")!;
   const revisionId = scene.headRevisionId!;
@@ -1112,10 +1112,31 @@ test("deleted hierarchy paths stay reserved while revisions and evidence remain 
     status: "confirmed", expectedVersion: null,
   }));
   const volume = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "volume")!;
-  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "v1" });
-  await accept(p.id, removal.operation);
+  const propose = async () => core.proposeHierarchyDelete(p.id, { kind: "volume", id: "v1" }, {
+    projectVersion: (await core.observe(p.id)).snapshot.projectVersion,
+    actorId: "author", idempotencyKey: "remove-volume",
+  });
+  const { changeSet } = await propose();
+  assert.equal(changeSet.operations.length, 3);
+  assert.equal((await persistence.read(reader => reader.listDocuments(p.id))).length, 3);
+  const apply = (expectedVersion: number) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: p.id, changeSetId: changeSet.id, expectedVersion,
+  }));
+  await assert.rejects(apply(changeSet.version), { code: "invalid_change_set_state" });
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: p.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+  }));
+  const { snapshot } = await core.observe(p.id);
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: p.id, expectedVersion: snapshot.projectVersion, title: "Unrelated project edit",
+  }));
+  const applied = await apply(approved.version);
+  assert.deepEqual(applied.results.map(result => "kind" in result && result.kind), ["scene", "chapter", "volume"]);
+  assert.deepEqual(await apply(approved.version), { ...applied, replayed: true });
+  assert.deepEqual(await propose(), { changeSet: applied.changeSet, replayed: true });
 
   assert.equal(await persistence.read((reader) => reader.getDocument(p.id, volume.id)), undefined);
+  assert.deepEqual(await persistence.read(reader => reader.listDocuments(p.id)), []);
   assert.equal((await persistence.read((reader) => reader.getRevision(p.id, scene.id, revisionId)))?.markdown, "Text 😀\n");
   assert.ok((await persistence.read((reader) => reader.listEvidenceDocumentIds(p.id))).includes(scene.id));
   assert.equal((await persistence.read((reader) => reader.getEvidenceAnchor(p.id, evidenceId)))?.documentId, scene.id);
@@ -1123,6 +1144,45 @@ test("deleted hierarchy paths stay reserved while revisions and evidence remain 
     core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "v1", title: "Recreated volume" }),
     (error: unknown) => error instanceof CoreError && error.code === "hierarchy_path_reserved",
   );
+});
+
+test("native hierarchy deletion rejects changed membership and ancestor moves atomically", async t => {
+  for (const change of ["sibling added", "descendant added", "ancestor moved"] as const) {
+    await t.test(change, async () => {
+      const p = await hierarchy();
+      const documents = await persistence.read(reader => reader.listDocuments(p.id));
+      const volume = documents.find(document => document.kind === "volume")!;
+      const chapter = documents.find(document => document.kind === "chapter")!;
+      const target = change === "ancestor moved"
+        ? { kind: "scene", id: "s1", volumeId: "v1", chapterId: "c1" } as const
+        : { kind: "chapter", id: "c1", volumeId: "v1" } as const;
+      const { snapshot } = await core.observe(p.id);
+      const { changeSet } = await core.proposeHierarchyDelete(p.id, target, {
+        projectVersion: snapshot.projectVersion, actorId: "author", idempotencyKey: randomUUID(),
+      });
+      const approved = await persistence.transaction(tx => tx.approveChangeSet({
+        projectId: p.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+      }));
+      await persistence.transaction(async tx => {
+        const result = await tx.createDocument({
+          projectId: p.id,
+          ...(change === "sibling added" ? { kind: "chapter", parentId: volume.id } :
+            change === "descendant added" ? { kind: "scene", parentId: chapter.id } : { kind: "volume" }),
+          title: "Intervening document", orderKey: "999", markdown: "", authorId: "author", idempotencyKey: randomUUID(),
+        });
+        if (change === "ancestor moved") await tx.updateDocument({
+          projectId: p.id, documentId: chapter.id, parentId: result.document.id, expectedVersion: chapter.version,
+        });
+      });
+      const current = await persistence.read(reader => reader.listDocuments(p.id));
+      await assert.rejects(persistence.transaction(tx => tx.applyChangeSet({
+        projectId: p.id, changeSetId: approved.id, expectedVersion: approved.version,
+      })), (error: unknown) => error instanceof PersistenceError && error.code === "conflict" &&
+        error.details?.resource === (change === "descendant added" ? "hierarchy_subtree" : "hierarchy_siblings"));
+      assert.deepEqual(await persistence.read(reader => reader.listDocuments(p.id)), current);
+      assert.equal(await persistence.read(reader => reader.getChangeSetReceipt(p.id, changeSet.id)), undefined);
+    });
+  }
 });
 
 test("a path deleted after proposal approval is rejected before recreating its retained document row", async () => {

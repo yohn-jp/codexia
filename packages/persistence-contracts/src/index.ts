@@ -401,6 +401,7 @@ export interface ChangeSetProvenance {
 }
 
 export const HIERARCHY_REORDER_SOURCE = "native-hierarchy-reorder";
+export const HIERARCHY_DELETE_SOURCE = "native-hierarchy-delete";
 
 export type ChangeSetOperation =
   | { type: "document.update"; command: UpdateDocumentCommand }
