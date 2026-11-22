@@ -251,7 +251,12 @@ test('a successful freshness gate that skipped every publication step emits no d
     },
   });
   const skipped = publicationSteps('skipped');
-  assert.deepEqual(await invoke(skipped), { skipped: true, publisherRunId: 100 });
+  const previousCertificate = { ...artifact({ ...run, run_attempt: 1 }), id: 204 };
+  const priorBuildArchive = { id: 205, name: `codexia-backend-image-${head}-core-attempt-1` };
+  assert.deepEqual(await invoke(skipped, [previousCertificate, priorBuildArchive]), {
+    skipped: true,
+    publisherRunId: 100,
+  });
   assert.equal(await readFile(output, 'utf8'), '');
   await assert.rejects(invoke(skipped, [artifact(run)]), /cannot emit a deployment certificate/u);
   await assert.rejects(invoke(skipped.map(step => step.name === 'Publish commit-addressed image'
