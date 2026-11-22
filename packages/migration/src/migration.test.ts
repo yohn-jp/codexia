@@ -78,6 +78,7 @@ test("legacy inspection defaults to all built-in modules and preserves an explic
     id: "module-fixture",
     async inspect({ enabledModules, legacyProjectMappings }) {
       observed.push([...enabledModules]);
+      assert.ok(legacyProjectMappings, "the selected migration mapping reaches the producer");
       mappingCopies.push(legacyProjectMappings);
       return { entries: [], operations: [], recovery: [] };
     },
