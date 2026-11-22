@@ -120,8 +120,8 @@ export interface NativeStoryDocument {
   orderKey: string;
   metadataPath: string;
   metadataRevision: string;
-  /** Exact UTF-8 content of metadataPath at metadataRevision, when provided by the reader. */
-  metadataContent?: string;
+  /** Exact UTF-8 content of metadataPath at metadataRevision. */
+  metadataContent: string;
   documentOrder: number;
   metadata: Record<string, unknown>;
 }

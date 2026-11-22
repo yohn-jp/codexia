@@ -28,6 +28,7 @@ A module `SnapshotId` contains `projectId` and `projectVersion`. The Core materi
 [Backend read model](BACKEND-READ-MODEL.md) specifies snapshot reuse, bounded set-oriented persistence reads, internal indexes, resource envelopes and performance acceptance without changing this authority.
 
 The module file-shaped reader is a projection over PostgreSQL records. Stable manuscript, hierarchy and `meta/scriptorium/modules/<module-id>/` paths are domain identifiers, not checkout locations. They preserve existing module formats and unknown data without introducing another authority. Search indexes, model artifacts and caches remain reconstructible derivatives keyed by source revision and model/schema identity.
+Story reads hierarchy identity and order from the typed projection of the same pinned snapshot.
 
 ## Mutation and recovery
 

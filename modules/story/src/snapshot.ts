@@ -192,12 +192,12 @@ async function readFiles(
     const values = await Promise.all(batch.map(async (filePath) => {
       const document = nativeByPath.get(filePath);
       // Existing proposals still use the exact projected bytes and revision.
-      const value = document?.metadataContent === undefined ? await reader.read(filePath) : {
+      const value = document ? {
         content: document.metadataContent,
         revision: document.metadataRevision,
         documentKind: document.kind,
         documentOrder: document.documentOrder,
-      };
+      } : await reader.read(filePath);
       return [filePath, value] as const;
     }));
     for (const [filePath, value] of values) {
