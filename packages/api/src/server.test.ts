@@ -453,6 +453,41 @@ async function startCustomApi(
   return { server, base, close };
 }
 
+function oauthTestAdmission(projectId: string) {
+  const issuer = "https://auth.codexia.test/api/auth";
+  const audience = "https://auth.codexia.test/api";
+  const ownerSubject = "owner";
+  const webClientId = "codexia-web";
+  const mcpClientId = "codexia-mcp";
+  const keys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const jwk = { ...keys.publicKey.export({ format: "jwk" }), kid: "codexia-fixture-key", alg: "ES256", use: "sig" };
+  const active = new Set<string>();
+  const verifier = {
+    issuer, audience, ownerSubject, jwksUrl: issuer + "/jwks",
+    fetch: async () => Response.json({ keys: [jwk] }),
+    verifyActiveToken: async (token: string) => active.has(token),
+  };
+  const options = {
+    // These API contracts exercise bearer verification and do not call the OAuth provider routes.
+    betterAuth: { issuer, audience } as NonNullable<ApiServerOptions["betterAuth"]>,
+    oauthOwner: { ...verifier, requiredScopes: ["codexia:api"], allowedClientIds: [webClientId] },
+    oauthMcp: { ...verifier, allowedClientIds: [mcpClientId], ownerClientIds: [webClientId], projectIdsByClient: { [mcpClientId]: [projectId] } },
+  };
+  function headers(clientId: string, scope: string) {
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = encode({ alg: "ES256", typ: "at+jwt", kid: jwk.kid }) + "." + encode({
+      iss: issuer, aud: audience, sub: ownerSubject, client_id: clientId, azp: clientId,
+      iat: now, exp: now + 300, jti: randomUUID(), scope,
+    });
+    const signature = signJwt("sha256", Buffer.from(unsigned), { key: keys.privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    const token = unsigned + "." + signature;
+    active.add(token);
+    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  }
+  return { options, owner: headers(webClientId, "codexia:api"), mcp: headers(mcpClientId, "mcp:read mcp:propose") };
+}
+
 function hostedTestPolicy(): HostedAuthorizationPolicy {
   const principals = new Map<string, HostedPrincipal>([
     ["read-grant", {
@@ -4103,7 +4138,8 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-native-action-cache-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
-  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  const auth = oauthTestAdmission(native.project.id);
+  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...auth.options });
   t.after(standalone.close);
   const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir), undefined, native.persistence, native.project.id);
   t.after(hosted.close);
@@ -4111,7 +4147,7 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   const nodeId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId;
   const projectVersion = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const payload = { projectVersion, idempotencyKey: "action-real", operations: [{ type: "knowledge.node.save", command: { projectId, id: nodeId, type: "person", name: "Native action", attributes: {}, status: "confirmed", expectedVersion: null } }] };
-  const headers = { Authorization: "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json" };
+  const headers = auth.mcp;
   const actionPath = "/api/projects/" + projectId + "/actions/";
   const response = await fetch(standalone.base + actionPath + "core.knowledge.propose", { method: "POST", headers, body: JSON.stringify({ input: payload }) });
   const result = await response.json() as ActionResult;
@@ -4122,9 +4158,10 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.equal(proposed.provenance.details.origin, "external-agent");
   assert.equal(await native.persistence.read(reader => reader.getKnowledgeNode(projectId, nodeId)), undefined);
   const approvalPath = "/api/v1/persistence/projects/" + projectId + "/changesets/" + proposed.id;
-  assert.equal((await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers, body: JSON.stringify({ expectedVersion: proposed.version }) })).status, 403);
-  const owner = await login(standalone.base);
-  const ownerHeaders = { Cookie: owner.cookie, Origin: standalone.base, "Content-Type": "application/json" };
+  const deniedApproval = await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers, body: JSON.stringify({ expectedVersion: proposed.version }) });
+  assert.equal(deniedApproval.status, 403);
+  assert.equal((await deniedApproval.json() as { code: string }).code, "OAUTH_MCP_PERSISTENCE_DENIED");
+  const ownerHeaders = auth.owner;
   const approval = await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: proposed.version }) });
   assert.equal(approval.status, 200, await approval.text());
   const applied = await fetch(standalone.base + approvalPath + "/apply", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: proposed.version + 1 }) });
@@ -4151,7 +4188,8 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   const native = await nativeProject(t, "Native hierarchy reorder");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-reorder-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
-  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  const auth = oauthTestAdmission(native.project.id);
+  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...auth.options });
   t.after(instance.close);
   const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
   t.after(hosted.close);
@@ -4163,8 +4201,7 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
     return [await seed("First", "1"), await seed("Second", "2")];
   });
   const snapshot = (await native.store.observe(projectId)).snapshot;
-  const owner = await login(instance.base);
-  const authorHeaders = { Cookie: owner.cookie, Origin: instance.base, "Content-Type": "application/json" };
+  const authorHeaders = auth.owner;
   const bearerHeaders = { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" };
   const actionPath = `/api/projects/${projectId}/actions/core.hierarchy.reorder`;
   const nativePath = `/api/v1/persistence/projects/${projectId}`;
@@ -4197,7 +4234,7 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
 
   const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
   const unauthorized = await post(actionPath, { input: { ...input, idempotencyKey: randomUUID() }, snapshot }, bearerHeaders);
-  assert.equal(unauthorized.status, 404);
+  assert.equal(unauthorized.status, 401);
   const postHosted = (path: string, body: unknown, grant: string) => fetch(hosted.base + path, {
     method: "POST", headers: { Authorization: `Bearer ${grant}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
@@ -4236,7 +4273,8 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   const native = await nativeProject(t, "Core proposal action replay");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
-  const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  const auth = oauthTestAdmission(native.project.id);
+  const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...auth.options });
   t.after(apiServer.close);
   const projectId = native.project.id;
 
@@ -4253,8 +4291,7 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   await seedHierarchy({ kind: "scene", id: "s1", title: "Scene 1", volumeId: "v1", chapterId: "c1", manuscriptBody: "Original text" });
   await seedHierarchy({ kind: "scene", id: "s2", title: "Scene 2", volumeId: "v1", chapterId: "c1", manuscriptBody: "Second text" });
 
-  const owner = await login(apiServer.base);
-  const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+  const headers = auth.owner;
   const invoke = async (actionId: string, input: unknown, snapshot: SnapshotId): Promise<ActionResult> => {
     const response = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${actionId}`, {
       method: "POST", headers, body: JSON.stringify({ input, snapshot }),
