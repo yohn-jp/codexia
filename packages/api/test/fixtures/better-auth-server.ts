@@ -70,7 +70,7 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
     new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) &&
     (new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName) ||
-      /^codexia_perf_[a-z0-9_-]+$/u.test(databaseName));
+      /^codexia_perf_[a-z0-9_-]+$/u.test(databaseName) || /^codexia_e2e_compat_[a-z0-9_]+$/u.test(databaseName));
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
       (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
     throw new Error("Better Auth fixture requires an explicitly opted-in disposable loopback auth database or uniquely named disposable CI database");

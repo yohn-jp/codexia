@@ -16,9 +16,12 @@ export function buildAuthorBrowserAssets(
   server: Pick<BetterAuthFixture, "apiOrigin" | "issuer" | "webClientId" | "audience">,
   profile: string,
   assets: string,
+  frontendSource?: string,
 ): void {
-  const build = spawnSync(process.execPath, ["app/scripts/build-views.mjs"], {
-    cwd: root,
+  const command = frontendSource ? "pnpm" : process.execPath;
+  const args = frontendSource ? ["build:frontend"] : ["app/scripts/build-views.mjs"];
+  const build = spawnSync(command, args, {
+    cwd: frontendSource ?? root,
     encoding: "utf8",
     env: {
       ...process.env,
@@ -37,10 +40,11 @@ export function buildAuthorBrowserAssets(
   if (build.status !== 0) throw new Error(`Author browser fixture build failed:\n${build.stdout}\n${build.stderr}`);
 }
 
-export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort }: {
+export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort, frontendSource }: {
   databaseUrl: string;
   profile: string;
   apiPort?: number;
+  frontendSource?: string;
 }): Promise<BetterAuthFixture> {
   const stateDirectory = await mkdtemp(join(tmpdir(), "codexia-author-browser-"));
   let server: BetterAuthFixture | undefined;
@@ -49,7 +53,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort 
     finally { await rm(stateDirectory, { recursive: true, force: true }); }
   };
   try {
-    const assets = join(stateDirectory, "assets");
+    const assets = frontendSource ? join(frontendSource, "app/dist") : join(stateDirectory, "assets");
     server = await startBetterAuthFixture({
       databaseUrl,
       staticDirectory: assets,
@@ -57,7 +61,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort 
       usePostgresPersistence: true,
       appProfile: await browserServerProfile(profile, join(stateDirectory, "module-cache")),
     });
-    buildAuthorBrowserAssets(server, profile, assets);
+    buildAuthorBrowserAssets(server, profile, assets, frontendSource);
     return { ...server, close };
   } catch (error) {
     await close();

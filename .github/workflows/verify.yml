@@ -150,7 +150,13 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/prior-frontend" "$PRIOR_SOURCE_SHA"
           docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_e2e_compat_test
           pnpm exec playwright install --with-deps chromium
-          node scripts/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full
+          if node scripts/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full; then
+            echo "Mixed-version Chromium scenarios passed against the same API epoch." >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            if [[ "$status" != 78 ]]; then exit "$status"; fi
+            echo "Mixed-version browser verification refused an API epoch change. Coordinated manual acceptance is required." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan

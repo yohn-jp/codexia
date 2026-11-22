@@ -12,7 +12,8 @@ export const test = base.extend<{
   authorServer: [async ({}, use) => {
     const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
     if (!databaseUrl) throw new Error("The browser acceptance shard needs a disposable PostgreSQL database");
-    const server = await startAuthorBrowserFixture({ databaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core" });
+    const frontendSource = process.env.CODEXIA_E2E_COMPAT_FRONTEND_SOURCE;
+    const server = await startAuthorBrowserFixture({ databaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", frontendSource });
     try { await use(server); }
     finally { await server.close(); }
   }, { scope: "worker", timeout: 90_000 }],
