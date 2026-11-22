@@ -870,12 +870,15 @@ export function createServer(options: ApiServerOptions): Server {
           !["volume", "chapter", "scene"].includes(value.target.kind) || typeof value.target.id !== "string") {
         throw new Error("A volume, chapter, or scene target is required for hierarchy deletion");
       }
-      const proposalId = optionalProposalId(value);
-      if (value.target.kind === "volume") return { target: { kind: value.target.kind, id: value.target.id }, ...(proposalId ? { proposalId } : {}) };
+      const { idempotencyKey } = value;
+      if ("proposalId" in value || typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200) {
+        throw new Error("A native hierarchy deletion requires an idempotencyKey of 1 to 200 characters");
+      }
+      if (value.target.kind === "volume") return { target: { kind: value.target.kind, id: value.target.id }, idempotencyKey };
       if (typeof value.target.volumeId !== "string") throw new Error("volumeId is required for chapter or scene deletion");
-      if (value.target.kind === "chapter") return { target: { kind: value.target.kind, id: value.target.id, volumeId: value.target.volumeId }, ...(proposalId ? { proposalId } : {}) };
+      if (value.target.kind === "chapter") return { target: { kind: value.target.kind, id: value.target.id, volumeId: value.target.volumeId }, idempotencyKey };
       if (typeof value.target.chapterId !== "string") throw new Error("chapterId is required for scene deletion");
-      return { target: { kind: value.target.kind, id: value.target.id, volumeId: value.target.volumeId, chapterId: value.target.chapterId }, ...(proposalId ? { proposalId } : {}) };
+      return { target: { kind: value.target.kind, id: value.target.id, volumeId: value.target.volumeId, chapterId: value.target.chapterId }, idempotencyKey };
     } };
     const hierarchyReorderInput: ValueSchema = { parse(value: unknown) {
       if (!isRecord(value) || typeof value.kind !== "string" || !["volume", "chapter", "scene"].includes(value.kind) ||
@@ -1029,6 +1032,10 @@ export function createServer(options: ApiServerOptions): Server {
       },
     });
     const nativeProposals = resolveNativeProposalActor === undefined ? [] : [
+      nativeCoreProposal<{ target: HierarchyTarget }>("core.hierarchy.delete", hierarchyDeleteInput,
+        ({ target }, { snapshot, ...options }) => coreStore.proposeHierarchyDelete(projectId, target, {
+          ...options, projectVersion: snapshot.projectVersion,
+        }), resolveNativeProposalActor),
       nativeCoreProposal<ReorderHierarchyInput>("core.hierarchy.reorder", hierarchyReorderInput,
         (input, { snapshot, ...options }) => coreStore.proposeHierarchyReorder(projectId, input, {
           ...options, projectVersion: snapshot.projectVersion,
@@ -1044,8 +1051,6 @@ export function createServer(options: ApiServerOptions): Server {
           context.reader.snapshot,
           existingProposal !== null && snapshotKey(existingProposal.snapshot) === snapshotKey(context.reader.snapshot),
         )) },
-      { module: "core", action: makeProposal("core.hierarchy.delete", hierarchyDeleteInput, (context, input) =>
-        options.store.buildDeleteHierarchyOperation(projectId, (input as { target: HierarchyTarget }).target, context.reader.snapshot)) },
       ...nativeProposals.map(action => ({ module: "core" as const, action })),
       { module: "core", action: make("core.status", emptyInput, async () => options.store.status(projectId)) },
       { module: "core", action: make("core.history", emptyInput, async (context) => options.store.history(projectId, context.reader.snapshot)) },

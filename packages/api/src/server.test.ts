@@ -4169,7 +4169,7 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   assert.equal(appliedResult.data.changeSet.status, "applied");
 });
 
-it("replays built-in Core proposal actions with their original operation IDs through authenticated PostgreSQL HTTP", async (t) => {
+it("replays Core hierarchy creation and native deletion through authenticated PostgreSQL HTTP", async (t) => {
   const native = await nativeProject(t, "Core proposal action replay");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
@@ -4185,12 +4185,12 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   }));
 
   const headers = client.ownerHeaders();
-  const invoke = async (actionId: string, input: unknown, snapshot: SnapshotId): Promise<ActionResult> => {
+  const invoke = async <Data = unknown>(actionId: string, input: unknown, snapshot: SnapshotId, credentials = headers): Promise<ActionResult<Data>> => {
     const response = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${actionId}`, {
-      method: "POST", headers, body: JSON.stringify({ input, snapshot }),
+      method: "POST", headers: credentials, body: JSON.stringify({ input, snapshot }),
     });
     assert.equal(response.status, 200);
-    return await response.json() as ActionResult;
+    return await response.json() as ActionResult<Data>;
   };
   const concurrentInput = { kind: "volume", id: "parallel-volume", title: "Parallel volume", proposalId: randomUUID() };
   const concurrentSnapshot = (await native.store.observe(projectId)).snapshot;
@@ -4261,19 +4261,62 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   if (!staleCreate.ok) assert.equal(staleCreate.error.code, "proposal_identity_conflict");
   await approveApplyAndReplay("core.hierarchy.create", createInput, createSnapshot, created);
 
-  const assertSharedBuilderReplay = async (actionId: string, input: Record<string, unknown>) => {
-    const snapshot = (await native.store.observe(projectId)).snapshot;
-    const first = await invoke(actionId, input, snapshot);
-    const firstProposal = proposalOf(first);
-    const retry = await invoke(actionId, input, snapshot);
-    assert.deepEqual(retry, first, `${actionId} returns the same proposal on retry`);
-    assert.deepEqual(proposalOf(retry), firstProposal);
-    await approveApplyAndReplay(actionId, input, snapshot, first);
-  };
+  const readDocuments = () => native.persistence.read(reader => reader.listDocuments(projectId));
+  const committed = (await readDocuments()).find(document => document.title === createInput.title);
+  assert.ok(committed, "the newly created volume must exist before testing deletion");
+  const deleteSnapshot = (await native.store.observe(projectId)).snapshot;
+  const deleteInput = { target: { kind: "volume", id: committed.id }, idempotencyKey: randomUUID() };
+  const external = client.mcpHeaders();
+  const deleteAction = "core.hierarchy.delete";
+  const proposeDeletion = (input = deleteInput) => invoke<ChangeSetResult>(deleteAction, input, deleteSnapshot, external);
 
-  await assertSharedBuilderReplay("core.hierarchy.delete", {
-    target: { kind: "volume", id: "retry-volume" }, proposalId: randomUUID(),
+  const rejectedAlias = await invoke(deleteAction, { ...deleteInput, proposalId: randomUUID() }, deleteSnapshot, external);
+  assert.ok(!rejectedAlias.ok && rejectedAlias.error.code === "invalid_action_input", JSON.stringify(rejectedAlias));
+  const denied = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${deleteAction}`, {
+    method: "POST", headers: client.mcpHeaders("mcp:read"), body: JSON.stringify({ input: deleteInput, snapshot: deleteSnapshot }),
   });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json() as { code: string }).code, "OAUTH_MCP_SCOPE_REQUIRED");
+
+  const proposed = await proposeDeletion();
+  assert.ok(proposed.ok, JSON.stringify(proposed));
+  assert.deepEqual(proposed.snapshot, deleteSnapshot);
+  const { changeSet, replayed } = proposed.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  const retry = await proposeDeletion();
+  assert.ok(retry.ok && retry.data.replayed);
+  assert.deepEqual(retry.data.changeSet, changeSet);
+
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const review = await fetch(apiServer.base + nativePath + "/review-feed", { headers });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+  const postDecision = (decision: "approve" | "apply", expectedVersion: number, credentials = headers) => {
+    const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
+    return fetch(`${apiServer.base}${changeSetPath}/${decision}`, {
+      method: "POST", headers: credentials, body: JSON.stringify({ expectedVersion }),
+    });
+  };
+  assert.equal((await postDecision("approve", changeSet.version, external)).status, 403);
+  assert.equal((await postDecision("apply", changeSet.version)).status, 409);
+  const approval = await postDecision("approve", changeSet.version);
+  assert.equal(approval.status, 200, await approval.text());
+  assert.ok((await readDocuments()).some(document => document.id === committed.id));
+  const apply = async () => {
+    const response = await postDecision("apply", changeSet.version + 1);
+    assert.equal(response.status, 200);
+    return await response.json() as ChangeSetApplicationResult;
+  };
+  const receipt = await apply();
+  assert.equal(receipt.changeSet.status, "applied");
+  assert.ok(!(await readDocuments()).some(document => document.id === committed.id));
+  assert.deepEqual(await apply(), { ...receipt, replayed: true });
+  const afterApply = await proposeDeletion();
+  assert.ok(afterApply.ok && afterApply.data.replayed);
+  assert.deepEqual(afterApply.data.changeSet, receipt.changeSet);
 });
 
 it("restores a manuscript revision only through an approved native ChangeSet and replays its receipt", async (t) => {
