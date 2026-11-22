@@ -227,7 +227,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
-function storageMessage(error: unknown, operation: string): JournalError {
+function storageMessage(error: unknown, _operation: string): JournalError {
   const name = error instanceof DOMException ? error.name : "";
   if (name === "QuotaExceededError") {
     return new JournalError("ブラウザーの保存領域がいっぱいです。入力はこのタブに残っていますが、復旧用の記録を作れていません。空き容量を確保し、下書きを再保護してください。", error);

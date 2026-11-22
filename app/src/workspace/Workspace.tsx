@@ -212,6 +212,7 @@ function describeNode(node: WorkspaceNode, catalog: ReadonlyMap<string, Workspac
 function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount, onActivate, onHide, onDrop, onResize, onFloat, onMaximize, maximizedPanelId, presetRevision }: TreeViewProps): ReactNode {
   const resizeGestureRef = useRef(false);
   const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const stackTabsRef = useRef<HTMLDivElement | null>(null);
   const presetLayoutRef = useRef<Record<string, number>>({});
   if (node.type === "split") {
     presetLayoutRef.current = Object.fromEntries(node.children.map((_, index) => [
@@ -222,6 +223,16 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
   useLayoutEffect(() => {
     if (presetRevision > 0) groupRef.current?.setLayout(presetLayoutRef.current);
   }, [presetRevision]);
+  useLayoutEffect(() => {
+    if (node.type !== "stack") return;
+    const tabs = stackTabsRef.current;
+    const selected = tabs?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!tabs || !selected) return;
+    const viewport = tabs.getBoundingClientRect();
+    const tab = selected.getBoundingClientRect();
+    if (tab.left < viewport.left) tabs.scrollLeft -= viewport.left - tab.left;
+    else if (tab.right > viewport.right) tabs.scrollLeft += tab.right - viewport.right;
+  }, [node.type === "stack" ? node.activePanelId : null]);
 
   if (node.type === "leaf") {
     return <PanelFrame panelId={node.panelId} panel={catalog.get(node.panelId)} mode={mode} layoutEditing={layoutEditing} canHide={visibleCount > 1} onHide={onHide} onDrop={onDrop} onFloat={onFloat} onMaximize={onMaximize} maximized={maximizedPanelId === node.panelId} />;
@@ -229,7 +240,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
   if (node.type === "stack") {
     return (
       <div className="st-workspace-stack">
-        <div className="st-workspace-tabs" role="tablist" aria-label="パネル">
+        <div className="st-workspace-tabs" role="tablist" aria-label="パネル" ref={stackTabsRef}>
           {node.children.map((child) => {
             const panel = catalog.get(child.panelId);
             const title = panel?.title ?? child.panelId;

@@ -1288,6 +1288,12 @@ test("full profile exposes optional lexical search and terminology without chang
   await page.keyboard.press("Enter");
   const termsPanel = page.locator('[data-workspace-panel="module:search.terms"]');
   await expect(termsPanel).toBeVisible();
+  const selectedResearchTab = page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "用語辞典", exact: true });
+  await expect.poll(() => selectedResearchTab.evaluate((element) => {
+    const tab = element.getBoundingClientRect();
+    const parent = element.parentElement!.getBoundingClientRect();
+    return tab.left >= parent.left - 1 && tab.right <= parent.right + 1;
+  })).toBe(true);
   await closePanelMenu(page);
   await expect(termsPanel).toContainText("Lantern Harbor");
   await expect(termsPanel).toContainText("Beacon Quay");
