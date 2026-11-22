@@ -29,7 +29,8 @@ test('PR paths and completed-Verify release impact retain component build inputs
   ));
   const releaseScope = JSON.parse(readFileSync(new URL('../deploy/release-impact-paths.json', import.meta.url), 'utf8'));
   for (const [index, component] of ['frontend','backend'].entries()) {
-    assert.deepEqual(releases[index].on.pull_request.paths, releaseScope[component], component + ' release path drift');
+    const prOnly = component === 'backend' ? releaseScope.backendPullRequestOnly : [];
+    assert.deepEqual(releases[index].on.pull_request.paths, [...releaseScope[component], ...prOnly], component + ' PR path drift');
   }
   const changes = [
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { matchesGlob } from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { publicError } from './push-app-lifecycle.mjs';
@@ -39,6 +40,20 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
     'the disposable fixture must verify the host Docker builder before use');
 });
 
+test('every lifecycle PR path also produces an exact-source backend artifact', () => {
+  const backendPaths = backendWorkflow.on.pull_request.paths;
+  for (const pattern of new Set(workflow.on.pull_request.paths)) {
+    if (pattern.startsWith('!')) {
+      assert.ok(backendPaths.includes(pattern), pattern);
+      continue;
+    }
+    // A broader producer filter is acceptable if it covers the whole consumer pattern.
+    assert.ok(backendPaths.includes(pattern) || backendPaths.some(path =>
+      path.endsWith('/**') ? pattern.startsWith(path.slice(0, -2)) :
+        !pattern.includes('*') && matchesGlob(pattern, path)), pattern);
+  }
+});
+
 test('runtime verification uses a separate proof stage and shares the production transaction implementation', () => {
   const accepted = site.tasks.find(task => task.name === 'Allow the disposable app lifecycle fixture stage');
   assert.ok(accepted);
@@ -75,6 +90,14 @@ test('runtime verification uses a separate proof stage and shares the production
   assert.ok(fixture.some(task => /verification evidence/u.test(task.name ?? '')));
   assert.ok(parse(readFileSync(new URL('../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'))
     .some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
+});
+
+test('rollback proof requires a candidate startup or readiness failure and a restored writer', () => {
+  const script = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
+  const rollback = script.slice(script.indexOf('before_failure='), script.indexOf('set_state failed_candidate_rollback PASS'));
+  assert.match(rollback, /grep -Eq .*Deployment transaction failed during candidate API \(?startup\|readiness/u);
+  assert.match(rollback, /rootless test ! -e .*deploy-transaction\.json/u);
+  assert.match(script, /key==='failed-candidate-rollback'&&apiContainer===previous\.apiContainer/u);
 });
 
 test('image selection binds the PR Full artifact and fails closed without a compatible verified release', () => {

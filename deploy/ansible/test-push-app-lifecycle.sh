@@ -134,6 +134,7 @@ rootless_podman() { rootless /usr/bin/podman "$@"; }
 rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
+  local log_name=${4:-deploy-$key-$RANDOM}
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -147,7 +148,7 @@ codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
-  run_playbook "$tmp/deploy-vars.yml" "deploy-$key-$RANDOM"
+  run_playbook "$tmp/deploy-vars.yml" "$log_name"
 }
 observe_runtime() {
   local key=$1
@@ -197,6 +198,7 @@ if(previous){
 }
 if(key==='same-digest-reapply'&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
 if(key==='compatible-update'&&(quadletSha===previous.quadletSha||releaseSha===previous.releaseSha))throw new Error('Compatible image update did not update the Quadlet and release record');
+if(key==='failed-candidate-rollback'&&apiContainer===previous.apiContainer)throw new Error('Failed candidate rollback did not recreate the previous API writer');
 if(key==='failed-candidate-rollback'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Failed candidate rollback did not restore the prior Quadlet and release record');
 if(key==='interrupted-recovery'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Interrupted transaction recovery did not preserve the previous Quadlet and release record');
 observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,
@@ -646,7 +648,15 @@ rootless rm -f "$failed_digest_file"
 failed_image="ghcr.io/yohn-jp/codexia-backend@$failed_digest"
 node "$repo_root/scripts/push-app-lifecycle.mjs" record-failed "$failed_image"
 before_failure=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
-if run_deploy failed false; then echo 'Deliberately failing candidate unexpectedly deployed' >&2; exit 1; fi
+if run_deploy failed false '' deploy-failed-candidate; then
+  echo 'Deliberately failing candidate unexpectedly deployed' >&2
+  exit 1
+fi
+if ! grep -Eq 'Deployment transaction failed during candidate API (startup|readiness)' "$tmp/deploy-failed-candidate.log"; then
+  echo 'Deliberately failing candidate did not reach API startup or readiness' >&2
+  exit 1
+fi
+rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 observe_runtime failed-candidate-rollback
 [[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'

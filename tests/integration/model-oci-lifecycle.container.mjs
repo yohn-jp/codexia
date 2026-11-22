@@ -899,16 +899,7 @@ try {
   else if (mode === "replacement-probe") await replacementProbe();
   else throw new Error("unknown P13 container mode");
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  const safeMessage = [AUTH_TOKEN, process.env.CODEXIA_DATABASE_URL, PROJECT_ID]
-    .filter(Boolean)
-    .reduce((value, secret) => value.replaceAll(secret, "[redacted]"), message)
-    .slice(0, 4_000);
-  const safeCode = typeof error?.code === "string" && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? error.code : undefined;
-  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({
-    status: "failed",
-    error: { name: error instanceof Error ? error.name.slice(0, 80) : "Error", code: safeCode, message: safeMessage },
-  }) + "\\n", { mode: 0o600 }).catch(() => {});
+  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({ status: "failed" }) + "\\n", { mode: 0o600 }).catch(() => {});
   console.error("P13 OCI acceptance failed: " + (error instanceof Error ? error.message : String(error)));
   process.exitCode = 1;
 }

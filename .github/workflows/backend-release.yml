@@ -7,7 +7,6 @@ on:
       - .dockerignore
       - Dockerfile.backend.dockerignore
       - deploy/backend/**
-      - deploy/postgres/**
       - packages/**
       - modules/**
       - '!modules/story/src/browser.tsx'
@@ -51,18 +50,20 @@ on:
       - pnpm-workspace.yaml
       - tsconfig.base.json
       - .github/workflows/backend-release.yml
-      - .github/workflows/push-app-lifecycle.yml
-      - deploy/ansible/**
-      - deploy/backup/**
-      - deploy/quadlet/**
-      - docs/deployment/PUSH-DEPLOYMENT.md
-      - docs/deployment/IAC.md
-      - scripts/push-app-lifecycle*.mjs
       - deploy/release-impact-paths.json
       - scripts/release-impact.mjs
       - scripts/release-impact.test.mjs
       - scripts/release-source-gate.mjs
       - scripts/release-source-gate.test.mjs
+      - .github/workflows/push-app-lifecycle.yml
+      - deploy/ansible/**
+      - deploy/backup/**
+      - deploy/postgres/**
+      - deploy/quadlet/**
+      - docs/deployment/PUSH-DEPLOYMENT.md
+      - docs/deployment/IAC.md
+      - scripts/component-release-record.mjs
+      - scripts/push-app-lifecycle*.mjs
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]

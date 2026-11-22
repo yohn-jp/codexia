@@ -199,7 +199,7 @@ async function certifiedCompatibleCandidate(head) {
       const observed = imageIdentity(fullCertificate.image, { expectedImage: true });
       assert.deepEqual(observed.identity, fullCertificate.identity, 'Published compatible image identity differs from its certificate');
       return { image: fullCertificate.image, identity: observed.identity, imageId: observed.imageId,
-        sourceSha: observed.identity.sourceSha, certificate: fullCertificate, releaseTag: release.tag_name,
+        sourceSha: observed.identity.sourceSha, releaseTag: release.tag_name,
         publicationRunId: publicationRun.id, certificateArtifactId: certificateArtifact.id,
         certificateArtifactDigest: certificateArtifact.digest };
     } catch (error) { failures.push(`${release.tag_name}: ${publicError(error)}`); }
