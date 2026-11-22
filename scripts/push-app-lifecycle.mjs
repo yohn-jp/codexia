@@ -41,8 +41,11 @@ function rootlessPodman(args, options = {}) {
     `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus`, '/usr/bin/podman', ...args],
   { encoding: 'utf8', timeout, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
-function publicError(error) {
-  const value = error instanceof Error ? error.message : 'Lifecycle evidence preparation failed';
+export function publicError(error) {
+  const message = error instanceof Error ? error.message : 'Lifecycle evidence preparation failed';
+  const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString('utf8').trim() :
+    typeof error?.stderr === 'string' ? error.stderr.trim() : '';
+  const value = [message, stderr].filter(Boolean).join('\n');
   return value.replace(/(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})/gu, '[REDACTED]')
     .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/giu, 'Bearer [REDACTED]').slice(0, 1200);
 }

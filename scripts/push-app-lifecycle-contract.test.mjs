@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
+import { publicError } from './push-app-lifecycle.mjs';
 
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
@@ -9,6 +10,16 @@ const workflow = parse(readFileSync(new URL('../.github/workflows/push-app-lifec
 const backendWorkflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
 const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const deploy = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+
+test('includes bounded command stderr in sanitized lifecycle failure evidence', () => {
+  const error = Object.assign(new Error('Command failed: podman push'), {
+    stderr: Buffer.from(`registry refused request\ntoken=ghp_${'a'.repeat(24)}\n`),
+  });
+  const detail = publicError(error);
+  assert.match(detail, /registry refused request/u);
+  assert.match(detail, /token=\[REDACTED\]/u);
+  assert.doesNotMatch(detail, /ghp_[a-z]+/u);
+});
 
 test('app lifecycle CI is isolated, path limited, manually runnable, and has no production credentials', () => {
   assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
