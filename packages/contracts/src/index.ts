@@ -98,6 +98,8 @@ export interface ProjectObservation {
 }
 export interface SnapshotReader {
   snapshot: SnapshotId;
+  /** Typed projection of canonical PostgreSQL Story documents for native readers. */
+  nativeStoryDocuments?: readonly NativeStoryDocument[];
   /** Canonical PostgreSQL kind for projected metadata and body files, even when the bytes omit it. */
   read(path: string, encoding?: "utf8" | "base64"): Promise<{
     content: string;
@@ -109,6 +111,17 @@ export interface SnapshotReader {
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
+}
+/** Immutable Story metadata projection bound to the enclosing SnapshotReader snapshot. */
+export interface NativeStoryDocument {
+  id: string;
+  kind: string;
+  title: string;
+  orderKey: string;
+  metadataPath: string;
+  metadataRevision: string;
+  documentOrder: number;
+  metadata: Record<string, unknown>;
 }
 /** Snapshot-scoped file reads for optional consumers such as local search indexes. */
 export interface DocumentSource {
