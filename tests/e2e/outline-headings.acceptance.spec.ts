@@ -44,8 +44,14 @@ function observeWrites(page: Page, projectId: string): string[] {
   return writes;
 }
 
+async function flushDeferredHeadingEffects(page: Page): Promise<void> {
+  // Advance the browser clock so a deferred position report or autosave would be observable.
+  await page.clock.runFor(5_000);
+}
+
 test("desktop outline keyboard navigation reaches the second duplicate heading without writes", async ({ page }) => {
   expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  await page.clock.install();
   const markdown = duplicateHeadingManuscript();
   const storedMarkdown = markdown.replaceAll("\n", "\r\n");
   const fixture = await createWritingFixture(page, "desktop", `Outline headings ${crypto.randomUUID()}`, storedMarkdown);
@@ -61,11 +67,11 @@ test("desktop outline keyboard navigation reaches the second duplicate heading w
   await page.keyboard.press("Enter");
 
   await expectSelectedDuplicatePosition(page, markdown);
-  await page.waitForTimeout(2_200);
+  await flushDeferredHeadingEffects(page);
   expect(writes).toEqual([]);
   await page.getByRole("button", { name: "読む", exact: true }).click();
   await expect(page.getByRole("button", { name: "編集へ戻る", exact: true })).toBeVisible();
-  await page.waitForTimeout(2_200);
+  await flushDeferredHeadingEffects(page);
   const after = await page.request.get(path);
   expect(after.ok()).toBe(true);
   expect((await after.json()).revision).toMatchObject({ id: revisionId, markdown: storedMarkdown });
@@ -109,6 +115,7 @@ test.describe("mobile touch outline heading navigation", () => {
 
   test("touch selection reaches the second duplicate heading without writes", async ({ page }) => {
     expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+    await page.clock.install();
     const markdown = duplicateHeadingManuscript();
     const fixture = await createWritingFixture(page, "mobile", `Outline headings ${crypto.randomUUID()}`, markdown);
     const writes = observeWrites(page, fixture.project.id);
@@ -120,7 +127,7 @@ test.describe("mobile touch outline heading navigation", () => {
     await expect(page.locator("ion-modal.mobile-shell-reference-modal")).not.toBeVisible();
 
     await expectSelectedDuplicatePosition(page, markdown);
-    await page.waitForTimeout(2_200);
+    await flushDeferredHeadingEffects(page);
     expect(writes).toEqual([]);
   });
 });
