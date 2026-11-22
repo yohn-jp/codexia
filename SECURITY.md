@@ -8,9 +8,9 @@ Report suspected vulnerabilities through private GitHub Security Advisories. Do 
 
 ## Deployment boundary
 
-Standalone mode requires a unique `CODEXIA_AUTH_TOKEN` of at least 32 characters and a private `CODEXIA_DATABASE_URL`. The browser exchanges the token for an HttpOnly, SameSite=Strict session cookie; session state lives in server memory. Every authenticated session can access all PostgreSQL projects served by that instance. Restarting the server requires signing in again.
+Standalone mode uses the embedded Better Auth OAuth provider with an enrolled owner, registered clients, and private PostgreSQL connections for application and authentication data. Authoring clients sign in with a Passkey or a configured OIDC provider, then obtain short-lived API access tokens through Authorization Code with PKCE. The API verifies the token and its scope, performs online introspection, and checks the configured owner and resource authorization. Provision secrets and enroll the owner through the [protected Better Auth procedure](deploy/ansible/AUTH-RUNTIME.md).
 
-Hosted mode rejects the standalone token and uses the mounted runtime assignment, signed access grants and `CODEXIA_HOSTED_PROJECT_ID`. API reads and writes enforce the assigned project. Runtime-control requests use a separate signed credential. The browser never receives database or runtime-control credentials, and the API does not contact a repository credential broker.
+Hosted mode uses a mounted runtime assignment, signed access grants and `CODEXIA_HOSTED_PROJECT_ID`. API reads and writes enforce the assigned project. Runtime-control requests use a separate signed credential. The browser never receives database or runtime-control credentials, and the API does not contact a repository credential broker.
 
 The default local listener is localhost. The OCI image listens on all container interfaces; bind its published port to localhost or place it behind a trusted HTTPS reverse proxy. Set `CODEXIA_TRUST_PROXY=1` only when that proxy controls and replaces `X-Forwarded-Proto`; this enables Secure cookies for externally HTTPS requests. Mutating API requests require a matching Origin. Never expose the instance through plain HTTP on an untrusted network.
 

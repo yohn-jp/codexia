@@ -10,25 +10,16 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 
 ## Run locally
 
-Requires Node.js and pnpm versions satisfying [`package.json`](package.json), and a running PostgreSQL server.
+Use the [local UI preview](docs/verification/UI-PREVIEW.md) to try Desktop and Mobile. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
 
 ```sh
-# Run once as a local PostgreSQL administrator (adjust the admin connection if needed).
-# Choose a private password and enter it when createuser prompts.
-createuser --pwprompt codexia
-createdb --owner=codexia codexia
-
-# Use the same database owner for schema migration and application startup.
-# Replace PASSWORD with the URL-encoded password chosen above.
-export CODEXIA_DATABASE_URL='postgres://codexia:PASSWORD@127.0.0.1:5432/codexia'
-export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
 pnpm install --frozen-lockfile
-pnpm build
-pnpm --filter @codexia/persistence-postgres migrate
-pnpm start
+pnpm ui:preview --no-capture
 ```
 
-Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Configuration names are in [.env.example](.env.example); environment files are not automatically loaded. Startup requires a reachable PostgreSQL database. Apply checked migrations explicitly, or set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply migrations. No Git fallback exists.
+Open `http://127.0.0.1:4173/desktop/` or `http://127.0.0.1:4173/mobile/` and choose OAuth sign-in with the local preview identity provider. Stopping the preview removes its database.
+
+For a persistent standalone installation, follow [Better Auth provisioning and owner enrollment](deploy/ansible/AUTH-RUNTIME.md) and [protected first activation](docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation). The API requires migrated PostgreSQL storage and an enrolled owner with registered OAuth clients. [.env.example](.env.example) lists runtime settings. The process reads its environment directly.
 
 Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).
 
@@ -38,7 +29,7 @@ Writing, Research, and Review presets assemble independent Editor, Outline, Insp
 
 Search/Terminology is optional: it indexes snapshot revisions, using PostgreSQL project/document revisions, and supports lexical, exact, prefix, and scoped queries. The term dictionary is changed through reviewable proposals. Automatic term links are temporary editor/reading decorations and never insert links into Markdown; use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel. Search can explicitly request existing NLP or Semantic capabilities; ordinary search does not load models. Core-only builds retain authoring without this plugin.
 
-To build and run the Full composition, use `CODEXIA_PROFILE=full pnpm build` and `CODEXIA_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
+For a local preview of the Full composition, pass `--profile full` to `pnpm ui:preview`. Full includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent. Local writing and review remain available without a model provider.
 
 ## Hosted MCP access
 
@@ -48,15 +39,10 @@ A stopped Hosted instance is served by Praetorium's Instance Access fallback: th
 
 ## Single OCI image
 
-The API requires a PostgreSQL database URL. The OCI verification script starts an isolated PostgreSQL sidecar automatically; standalone operators configure their own database and apply migrations before authoring.
+The API requires a PostgreSQL database URL. The [OCI verification script](docs/verification/OCI.md) starts isolated PostgreSQL and Better Auth fixtures. For a persistent deployment, provision the auth database role, enroll the owner, register clients and [activate the reviewed image](docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation).
 
 ```sh
 podman build --format oci --build-arg PROFILE=core -t codexia:local .
-podman run --rm -p 127.0.0.1:3000:3000 \
-  --env CODEXIA_AUTH_TOKEN --env CODEXIA_DATABASE_URL \
-  --mount type=volume,src=scriptorium-data,dst=/data \
-  --mount type=volume,src=scriptorium-history,dst=/history \
-  codexia:local
 ```
 
 Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from PostgreSQL manuscript records. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.

@@ -18,7 +18,7 @@ node scripts/profile-package.mjs --profile core --out /tmp/codexia-core
 node scripts/profile-package.mjs --profile full --out /tmp/codexia-full
 ```
 
-Run either standalone image with `CODEXIA_AUTH_TOKEN` of at least 32 characters and `CODEXIA_DATABASE_URL` pointing to a migrated PostgreSQL database. PostgreSQL stores all authoring state. Mount `/data` for derived module caches and `/history` for private usage/job history. These standalone settings do not apply to Hosted mode.
+For a standalone image, configure `CODEXIA_DATABASE_URL` against migrated PostgreSQL and follow [Better Auth provisioning and enrollment](../deploy/ansible/AUTH-RUNTIME.md) and [protected activation](deployment/PUSH-DEPLOYMENT.md#first-application-activation). Mount `/data` for derived module caches and `/history` for private usage and job history. Hosted uses the assignment and grants described below.
 
 ## Runtime Base and Build Kit
 

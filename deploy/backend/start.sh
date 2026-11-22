@@ -15,17 +15,6 @@ read_secret_file() {
   printf '%s' "$secret_value"
 }
 
-if [ "${CODEXIA_AUTH_MODE:-}" = better-auth ]; then
-  if [ -n "${CODEXIA_AUTH_TOKEN_FILE:-}" ] || [ -n "${CODEXIA_AUTH_TOKEN:-}" ]; then
-    echo "Better Auth rejects legacy static-token credentials" >&2
-    exit 1
-  fi
-elif [ -n "${CODEXIA_AUTH_TOKEN_FILE:-}" ]; then
-  CODEXIA_AUTH_TOKEN=$(read_secret_file "$CODEXIA_AUTH_TOKEN_FILE")
-  export CODEXIA_AUTH_TOKEN
-  unset CODEXIA_AUTH_TOKEN_FILE
-fi
-
 if [ -n "${CODEXIA_DATABASE_PASSWORD_FILE:-}" ]; then
   database_password=$(read_secret_file "$CODEXIA_DATABASE_PASSWORD_FILE")
   database_user=${CODEXIA_DATABASE_USER:-codexia}

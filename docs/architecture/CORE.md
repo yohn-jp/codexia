@@ -4,9 +4,9 @@ PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodi
 
 ## Ownership and dependency direction
 
-The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines standalone OAuth admission and object-level authorization. The Fastify API supports Better Auth as an explicit alternative to token mode. [Push deployment](../deployment/PUSH-DEPLOYMENT.md) describes first activation in token mode and the approved transition to Better Auth.
+The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines standalone Better Auth OAuth admission and object-level authorization. [Push deployment](../deployment/PUSH-DEPLOYMENT.md) describes owner enrollment and approved activation.
 
-Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Dedicated standalone deployments may verify Cloudflare Access browser identity directly; the configured single author retains the same owner scope. Explicit MCP bearer credentials retain their restricted authority and cannot acquire browser author privileges from an Access assertion. Local standalone token sessions and Hosted grants remain separate modes. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
+Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Cloudflare Access can restrict entry to the static UI. Standalone author identity comes from Better Auth, and restricted MCP OAuth clients use scoped project assignments. Hosted uses its own verified grants. Core coordinates module snapshots and approved mutations through Persistence, and the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |
 | --- | --- |
