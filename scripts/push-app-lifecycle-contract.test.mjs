@@ -49,8 +49,14 @@ test('runtime verification uses a separate proof stage and shares the production
     task['ansible.builtin.include_tasks']?.file === 'deploy-lifecycle-fixture.yml'));
   assert.ok(deploy.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
   assert.ok(deploy[0]['ansible.builtin.assert'].that.includes('not (codexia_lifecycle_fixture | default(false) | bool)'));
+  const transaction = parse(readFileSync(new URL('../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'));
+  const prepare = parse(readFileSync(new URL('../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
+  assert.equal(transaction[0]['ansible.builtin.include_tasks'], 'deploy-prepare.yml');
+  assert.ok(prepare.some(task => task.name === 'Install the interrupted deployment recovery helper'));
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
+  assert.equal(fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-prepare.yml'),
+    fixture.findIndex(task => task.name === 'Recover interrupted disposable deployment before examining the active API') - 1);
   assert.ok(fixture.some(task => /verification evidence/u.test(task.name ?? '')));
   assert.ok(parse(readFileSync(new URL('../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'))
     .some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));

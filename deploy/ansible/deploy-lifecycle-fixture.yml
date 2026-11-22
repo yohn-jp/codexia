@@ -52,6 +52,9 @@
   vars:
     codexia_lifecycle_verification: "{{ codexia_lifecycle_verification_source.content | b64decode | from_json }}"
 
+- name: Prepare shared push deployment state and helpers
+  ansible.builtin.include_tasks: deploy-prepare.yml
+
 - name: Recover interrupted disposable deployment before examining the active API
   ansible.builtin.command:
     argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
