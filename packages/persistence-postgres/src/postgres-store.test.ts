@@ -1175,8 +1175,12 @@ test("startup project inventory uses bounded stable keyset pages", async () => {
   });
 });
 
-test("project page preserves deterministic keyset order across more than 200 projects", async () => {
-  const rows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `pagination-${index}` }));
+test("project page preserves deterministic keyset order across more than 200 projects", async (t) => {
+  const prefix = `pagination-${randomUUID()}-`;
+  const rows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `${prefix}${index}` }));
+  t.after(async () => {
+    await directPool.query("DELETE FROM project WHERE id = ANY($1::uuid[])", [rows.map((row) => row.id)]);
+  });
   await directPool.query(`INSERT INTO project(id,title) SELECT id,title FROM jsonb_to_recordset($1::jsonb) AS row(id uuid,title text)`, [JSON.stringify(rows)]);
   const collected: string[] = [];
   let after: ProjectPageCursor | undefined;
@@ -1187,7 +1191,7 @@ test("project page preserves deterministic keyset order across more than 200 pro
       return reader.listProjectPage(101, after);
     });
     assert.ok(page.length <= 101);
-    collected.push(...page.filter((project) => project.title.startsWith("pagination-")).map((project) => project.id));
+    collected.push(...page.filter((project) => project.title.startsWith(prefix)).map((project) => project.id));
     pages++;
     if (page.length < 101) break;
     const last = page.at(-1)!;

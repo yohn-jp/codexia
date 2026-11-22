@@ -249,6 +249,22 @@ test("the canonical full plaintext export includes project root scenes once in s
   assert.match(await rootOnlyZip.file("OEBPS/scene-only.xhtml")!.async("string"), /ONLY ROOT BODY/u);
 });
 
+test("plaintext export and public reader preserve manuscript horizontal rules", async () => {
+  const files = fixtureFiles();
+  const first = "---\r\n普通の回想\r\n---\r\n後半。";
+  const second = "---\n続く本文。";
+  files.set("manuscript/vol-1/ch-1/sc-1.md", first);
+  files.set("manuscript/vol-1/ch-1/sc-2.md", second);
+  const reader = new MemoryReader(files);
+  const publishing = await createPublishing();
+  const result = await invokeAction(publishing, "publishing.export.plaintext", { scope: "all" }, actionContext(reader, []));
+  const text = Buffer.from(String(result.contentBase64), "base64").toString("utf8");
+  assert.ok(text.includes(first));
+  assert.ok(text.includes(second));
+  const shared = await readPublishingProject(reader);
+  assert.deepEqual(shared.volumes[0]?.chapters[0]?.scenes.map(({ body }) => body), [first, second]);
+});
+
 test("the publishing tree exposes titled root scenes without leaking notes or reading manuscript bodies", async () => {
   const files = fixtureFiles();
   files.set("plot/volumes/root/chapters/root/scenes/root.yaml", "kind: scene\nid: root\ntitle: 夜の駅\nmanuscript: documents/root.md\n");

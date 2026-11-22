@@ -1,4 +1,5 @@
 import YAML from "yaml";
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import type { Document } from "@codexia/persistence-contracts";
 
 export interface SnapshotIndexFile {
@@ -30,26 +31,7 @@ export interface SnapshotIndex {
 const WHITESPACE = /\s/u;
 
 export function manuscriptBody(content: string): string {
-  const opening = /^---[ \t]*\r?\n/.exec(content);
-  if (!opening) return content;
-
-  const delimiter = /^---[ \t]*\r?$/gm;
-  delimiter.lastIndex = opening[0].length;
-  const closing = delimiter.exec(content);
-  if (!closing) return content;
-
-  let metadata: unknown;
-  try {
-    metadata = YAML.parse(content.slice(opening[0].length, closing.index));
-  } catch {
-    return content;
-  }
-  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) return content;
-
-  let bodyStart = closing.index + closing[0].length;
-  if (content.startsWith("\r\n", bodyStart)) bodyStart += 2;
-  else if (content.startsWith("\n", bodyStart)) bodyStart += 1;
-  return content.slice(bodyStart);
+  return splitManuscriptMarkdown(content).body;
 }
 
 function countNonWhitespaceCodePoints(content: string): number {

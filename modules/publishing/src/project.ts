@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import { assertProjectPath, type ModuleActionContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
@@ -101,26 +102,6 @@ async function readYaml(reader: SnapshotReader, path: string): Promise<Record<st
   return file.documentKind ? { ...result, kind: file.documentKind } : result;
 }
 
-function manuscriptBody(document: string, filePath: string): string {
-  const opening = /^---[ \t]*\r?\n/.exec(document);
-  if (!opening) return document;
-  const delimiter = /^---[ \t]*\r?$/gm;
-  delimiter.lastIndex = opening[0].length;
-  const closing = delimiter.exec(document);
-  if (!closing) throw new Error("Unclosed Markdown frontmatter in " + filePath);
-  const frontmatter = document.slice(opening[0].length, closing.index);
-  try {
-    const parsed = YAML.parse(frontmatter);
-    if (parsed !== null && !record(parsed)) throw new Error("Frontmatter must be a mapping");
-  } catch {
-    throw new Error("Invalid Markdown frontmatter in " + filePath);
-  }
-  let start = closing.index + closing[0].length;
-  if (document.startsWith("\r\n", start)) start += 2;
-  else if (document.startsWith("\n", start)) start += 1;
-  return document.slice(start);
-}
-
 function manuscriptPath(sceneFile: string, data: Record<string, unknown>, sceneId: string): string {
   const match = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/[^/]+\.yaml$/.exec(sceneFile);
   const path = typeof data.manuscript === "string"
@@ -216,7 +197,7 @@ export async function readPublishingProjectFromCore(
     const order = nodeOrder(sceneData);
     sceneMetadata.set(id, {
       title: nodeTitle(sceneData, id),
-      body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+      body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
       path: bodyPath,
       rootScene: sceneData.kind === "scene" && !Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter"),
       ...(order === undefined ? {} : { order }),
@@ -321,7 +302,7 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
       rootScenes.push({
         id,
         title: nodeTitle(sceneData, id),
-        body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+        body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
         path: bodyPath,
         volumeId: "",
         chapterId: "",
@@ -337,7 +318,7 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     chapter.scenes.push({
       id,
       title: nodeTitle(sceneData, id),
-      body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+      body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "",
       path: bodyPath,
       volumeId: chapterVolumeIds.get(chapter) ?? "",
       chapterId: chapter.id,

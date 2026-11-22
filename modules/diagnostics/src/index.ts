@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import { createHash, randomUUID } from "node:crypto";
 import { assertProjectPath, MAX_JOB_INPUT_BYTES, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { NlpTokenizerCapability, MorphologyAnalysis } from "@codexia/module-nlp";
@@ -423,11 +424,6 @@ function extractGoalConflictText(data: RecordValue): string | undefined {
   return parts.length ? parts.join("。") : undefined;
 }
 
-function extractFrontMatter(content: string): { frontMatter: string; body: string } {
-  const match = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(content);
-  return match ? { frontMatter: match[0], body: content.slice(match[0].length) } : { frontMatter: "", body: content };
-}
-
 function canonicalRevisionValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalRevisionValue);
   if (value && typeof value === "object") {
@@ -596,10 +592,11 @@ async function checkPlotSemanticsAction(value: unknown, context: ModuleActionCon
     const manuscriptPath = scene.data.manuscript;
     if (typeof manuscriptPath !== "string") throw Object.assign(new Error(`Scene has no manuscript body: ${input.sceneId}`), { code: "not_found" });
     assertProjectPath(manuscriptPath);
-    if (!manuscriptPath.startsWith("manuscript/") || !manuscriptPath.endsWith(".md")) throw Object.assign(new Error("Scene manuscript path is invalid"), { code: "invalid_path" });
+    if (!isSupportedManuscriptPath(manuscriptPath)) throw Object.assign(new Error("Scene manuscript path is invalid"), { code: "invalid_path" });
     const file = await context.reader.read(manuscriptPath);
     if (!file) throw Object.assign(new Error(`Scene manuscript not found: ${input.sceneId}`), { code: "not_found" });
-    text = extractFrontMatter(file.content).body.trim();
+    if (!isCanonicalSceneBodyDocument(manuscriptPath, file)) throw Object.assign(new Error("Scene manuscript path does not identify a canonical scene body"), { code: "invalid_path" });
+    text = splitManuscriptMarkdown(file.content).body.trim();
   }
   return withTokenizer(moduleContext, context.signal, async (tokenizer) => {
     const [goal, body, plotLexicon] = await Promise.all([
@@ -660,11 +657,11 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       }
       if (file.content.length > MAX_TEXT_LENGTH + 100_000) throw new TypeError("Manuscript exceeds the lint size limit");
       const config = await loadLintRulesConfig(context.reader);
-      const { frontMatter, body } = extractFrontMatter(file.content);
+      const { prefix, body } = splitManuscriptMarkdown(file.content);
       const warnings = evaluateLintRules(body, config.rules);
       const transformed = transformText(body, config.rules);
       if (transformed === body) return { ok: true, snapshot: context.reader.snapshot, data: { path, warnings, fixed: false, body } };
-      const updated = frontMatter + transformed;
+      const updated = prefix + transformed;
       const proposedOperationId = operationId ?? randomUUID();
       const proposal = await context.propose([operation(context, path, file.revision, updated, proposedOperationId)], [{
         id: randomUUID(), snapshot: context.reader.snapshot, module: "diagnostics", kind: "lint_fix",
@@ -694,7 +691,7 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       if (!manuscript) throw Object.assign(new Error(`Scene manuscript not found: ${sceneId}`), { code: "not_found" });
       if (file.content.length > MAX_TEXT_LENGTH + 100_000) throw Object.assign(new Error("Manuscript exceeds the formatting size limit"), { code: "too_large" });
 
-      const { frontMatter, body } = extractFrontMatter(file.content);
+      const { prefix, body } = splitManuscriptMarkdown(file.content);
       const sourceText = manuscript.body ?? body.trim();
       if (sourceText.length > 100_000) throw Object.assign(new Error("Manuscript exceeds the formatting input limit"), { code: "too_large" });
       const formattedText = formatManuscript(sourceText);
@@ -707,7 +704,7 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
         text: sourceText,
         formattedText,
       });
-      const updated = frontMatter + formattedText;
+      const updated = prefix + formattedText;
       let proposal: ChangeProposal | null = null;
       if (source.proposal && registerProposal) {
         const coreProposal = await context.propose([operation(context, path, file.revision, updated, source.proposal.operations[0].id)], [{

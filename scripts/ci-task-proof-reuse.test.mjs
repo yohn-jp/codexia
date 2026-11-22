@@ -1,15 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
 import { taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
+import { main as planProofReuse } from './reuse-ci-task-input-proof.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const candidateSha = 'b'.repeat(40);
 const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
   cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' };
 const dimensions = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
+
+test('unavailable current workflow identity writes the full plan and preserves the PR diff', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'codexia-proof-plan-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const planPath = path.join(dir, 'plan.json');
+  const selected = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha });
+  t.mock.property(process, 'argv', ['node', 'reuse-ci-task-input-proof.mjs', 'plan']);
+  t.mock.property(process, 'env', { CODEXIA_CI_PLAN_PATH: planPath, GH_TOKEN: 'fixture', GITHUB_REPOSITORY: 'unit/fixture', GITHUB_RUN_ID: '1' });
+  for (const [name, fetch] of [
+    ['timeout', async () => { throw new DOMException('Request timed out', 'TimeoutError'); }],
+    ['HTTP failure', async () => new Response(null, { status: 503 })],
+    ['invalid JSON', async () => new Response('not JSON')],
+  ]) {
+    await t.test(name, async t => {
+      t.mock.method(globalThis, 'fetch', fetch);
+      await writeFile(planPath, JSON.stringify(selected));
+      await planProofReuse();
+      assert.deepEqual(JSON.parse(await readFile(planPath, 'utf8')), createVerificationPlan({ ...selected, forceFull: true }));
+    });
+  }
+});
 
 function mainEvidence({ latestConclusion = 'success' } = {}) {
   const plan = createVerificationPlan({ files: null, event: 'push', sha: sourceSha });

@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./manuscript": {
+      "types": "./dist/manuscript.d.ts",
+      "import": "./dist/manuscript.js"
     }
   },
   "scripts": {
@@ -18,5 +22,8 @@
   },
   "files": [
     "dist"
-  ]
+  ],
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
 }

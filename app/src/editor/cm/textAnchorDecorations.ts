@@ -1,3 +1,4 @@
+import { editorOffsetReader, sourceEdit, sourceOffsetReader } from "../sourceText";
 import { Annotation, StateEffect } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
 import { emptyDocumentEvidence, trackTextChanges, type DocumentEvidenceState, type TextAnchor, type TextChange } from "../evidence";
@@ -17,12 +18,21 @@ export function textAnchorDecorationsExtension(
   revisionRef: RevisionRef,
   onChangeRef: StateCallbackRef,
   navigateRef: NavigateRef,
+  sourceRef: { current: string },
 ) {
   const plugin = ViewPlugin.fromClass(class {
     decorations = Decoration.none;
+    private source = sourceRef.current;
+    private editorOffset: ReturnType<typeof editorOffsetReader> | undefined;
+
+    private setSource(text: string) {
+      if (this.source === text) return;
+      this.source = text;
+      this.editorOffset = undefined;
+    }
 
     constructor(private readonly view: EditorView) {
-      this.state = evidenceRef.current ?? emptyDocumentEvidence(view.state.doc.toString(), revisionRef.current);
+      this.state = evidenceRef.current ?? emptyDocumentEvidence(this.source, revisionRef.current);
       this.decorations = this.toDecorations(this.state, view);
     }
 
@@ -33,16 +43,23 @@ export function textAnchorDecorationsExtension(
       for (const transaction of update.transactions) {
         for (const effect of transaction.effects) {
           if (effect.is(setDocumentEvidence)) {
+            this.setSource(sourceRef.current);
             this.state = effect.value;
             changed = true;
           }
         }
-        if (!transaction.docChanged || transaction.annotation(externalDocumentSync)) continue;
+        if (!transaction.docChanged) continue;
+        if (transaction.annotation(externalDocumentSync)) {
+          this.setSource(sourceRef.current);
+          continue;
+        }
         const changes: TextChange[] = [];
         transaction.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
           changes.push({ from, to, insert: inserted.toString() });
         });
-        this.state = trackTextChanges(this.state, transaction.startState.doc.toString(), transaction.newDoc.toString(), changes);
+        const edit = sourceEdit(this.source, transaction.newDoc.toString(), changes);
+        this.state = trackTextChanges(this.state, this.source, edit.markdown, edit.changes);
+        this.setSource(edit.markdown);
         changed = true;
       }
       this.decorations = this.toDecorations(this.state, update.view);
@@ -50,10 +67,13 @@ export function textAnchorDecorationsExtension(
     }
 
     private toDecorations(state: DocumentEvidenceState, view: EditorView) {
-      if (!state.positionsTrusted) return Decoration.none;
+      if (!state.positionsTrusted || !state.anchors.length) return Decoration.none;
+      const offset = this.editorOffset ??= editorOffsetReader(this.source);
       const ranges = state.anchors.flatMap((anchor) => {
+        const from = offset(anchor.from);
+        const to = offset(anchor.to);
         if (anchor.status === "orphaned" || anchor.status === "revision_conflict"
-          || anchor.from < 0 || anchor.to <= anchor.from || anchor.to > view.state.doc.length) return [];
+          || from === null || to === null || to <= from || to > view.state.doc.length) return [];
         const statusText = anchor.status === "current" ? "確認済み"
           : anchor.status === "proposed" ? "未確定"
             : "再確認が必要";
@@ -76,7 +96,7 @@ export function textAnchorDecorationsExtension(
         return [Decoration.mark({
           class: `cm-text-anchor cm-text-anchor-${anchor.status}`,
           attributes,
-        }).range(anchor.from, anchor.to)];
+        }).range(from, to)];
       });
       return Decoration.set(ranges, true);
     }
@@ -94,10 +114,13 @@ export function textAnchorDecorationsExtension(
         const pluginInstance = view.plugin(plugin);
         const anchors = pluginInstance?.evidence.anchors ?? [];
         const selection = view.state.selection.main;
+        const offset = sourceOffsetReader(sourceRef.current);
+        const from = offset(selection.from);
+        const to = offset(selection.to);
         const anchor = anchors.find((item) => item.status === "current" && item.target?.targetPath
           && (selection.empty
-            ? item.from <= selection.head && selection.head < item.to
-            : item.from <= selection.from && item.to >= selection.to));
+            ? item.from <= from && from < item.to
+            : item.from <= from && item.to >= to));
         if (!anchor?.target?.targetPath || !navigateRef.current) return false;
         navigateRef.current(anchor.target.targetPath, anchor.target.id);
         return true;

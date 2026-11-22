@@ -1,4 +1,7 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
+
 export interface MarkdownHeading {
+  /** UTF-16 position in CodeMirror, where each line break occupies one unit. */
   offset: number;
   line: number;
   level: number;
@@ -11,21 +14,18 @@ interface SourceLine {
 }
 
 export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
-  const lines = sourceLines(markdown);
+  const editorText = markdown.replace(/\r\n?/gu, "\n");
+  const lines = sourceLines(editorText);
   const headings: MarkdownHeading[] = [];
-  // A leading Markdown horizontal rule is not sufficient to identify YAML
-  // frontmatter. Only skip a closed, mapping-shaped metadata block.
-  const closingFrontmatterLine = lines[0]?.content === "---"
-    ? lines.findIndex((line, index) => index > 0 && (line.content === "---" || line.content === "..."))
-    : -1;
-  const hasMapping = closingFrontmatterLine > 0 && lines.slice(1, closingFrontmatterLine)
-    .some((line) => /^[^#\s][^:]*:[ \t]*(?:.*)$/u.test(line.content));
-  const frontmatterEndLine = hasMapping ? closingFrontmatterLine : -1;
+  const frontmatterEnd = splitManuscriptMarkdown(editorText, { allowYamlDocumentEnd: true }).prefix.length;
+  let paragraphLine: SourceLine | undefined;
   let fence: { marker: string; length: number } | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
-    if (index <= frontmatterEndLine) continue;
+    const preceding = paragraphLine;
+    paragraphLine = undefined;
+    if (line.from < frontmatterEnd) continue;
 
     const openingFence = /^ {0,3}(`{3,}|~{3,})/u.exec(line.content)?.[1];
     if (fence) {
@@ -51,31 +51,31 @@ export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
     }
 
     const setext = /^ {0,3}(=+|-+)[ \t]*$/u.exec(line.content);
-    const preceding = lines[index - 1];
-    if (!setext || !preceding || !preceding.content.trim() || /^(?: {4}|\t)/u.test(preceding.content) ||
-        /^ {0,3}#{1,6}(?:[ \t]+|$)/u.test(preceding.content)) continue;
-    headings.push({
-      offset: preceding.from + (preceding.content.length - preceding.content.trimStart().length),
-      line: index,
-      level: setext[1]![0] === "=" ? 1 : 2,
-      title: preceding.content.trim(),
-    });
+    if (setext && preceding) {
+      headings.push({
+        offset: preceding.from + (preceding.content.length - preceding.content.trimStart().length),
+        line: index,
+        level: setext[1]![0] === "=" ? 1 : 2,
+        title: preceding.content.trim(),
+      });
+      continue;
+    }
+
+    const thematicBreak = /^ {0,3}([*_-])(?:[ \t]*\1){2,}[ \t]*$/u.test(line.content);
+    const container = /^ {0,3}(?:>|(?:[*+-]|\d{1,9}[.)])(?:[ \t]|$))/u.test(line.content);
+    if (line.content.trim() && !thematicBreak && !container) paragraphLine = line;
   }
 
   return headings;
 }
 
 function sourceLines(markdown: string): SourceLine[] {
-  const lines: SourceLine[] = [];
   let from = 0;
-  while (from < markdown.length) {
-    let end = from;
-    while (end < markdown.length && markdown[end] !== "\n" && markdown[end] !== "\r") end += 1;
-    lines.push({ from, content: markdown.slice(from, end) });
-    if (end === markdown.length) break;
-    from = end + (markdown[end] === "\r" && markdown[end + 1] === "\n" ? 2 : 1);
-  }
-  return lines;
+  return markdown.split("\n").map((content) => {
+    const line = { from, content };
+    from += content.length + 1;
+    return line;
+  });
 }
 
 function cleanAtxTitle(title: string): string {

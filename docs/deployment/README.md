@@ -20,7 +20,7 @@ Static response headers are defined in `edge/frontend/static/_headers`. Script e
 
 ## Authentication, API URL, and CORS
 
-This section documents the **current same-origin standalone deployment**. The embedded Better Auth provider and Web/iOS OAuth target is specified in [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md) and [iOS client](IOS-CLIENT.md); these are not live routing or authentication instructions until implemented and accepted.
+Standalone deployments start in token mode. To activate the embedded Better Auth provider on a healthy token deployment, follow the staged procedure in [Push deployment](PUSH-DEPLOYMENT.md). The [API authorization contract](../architecture/API-AUTHN-AUTHZ.md) and [iOS client guide](IOS-CLIENT.md) describe how Web and native clients use that provider.
 
 Cloudflare Access applies an explicit identity allowlist to the application hostname. The Tunnel origin also requires the Access application audience. Access is the outer identity gate; the Codexia API keeps its authorization boundary. Dedicated deployments may opt into browser SSO without an additional token prompt.
 
@@ -45,7 +45,7 @@ Deploy the compatible static UI and immutable API image, then enable the VM sett
 
 The current UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and no CORS allowlist is configured by default. The OAuth transition supports optional cross-origin Web calls only when an operator configures exact HTTPS origins in `CODEXIA_CORS_ALLOWED_ORIGINS`; those calls are bearer-only, omit browser credentials, and cannot carry cookies. This setting does not change Cloudflare routes or enable a separate API hostname. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
 
-### OAuth public Web client (prepared, not deployed)
+### OAuth public Web client
 
 The Web client uses the embedded Better Auth OAuth Provider. Its authorization-server issuer is `${CODEXIA_PUBLIC_ORIGIN}/api/auth`; confirm its published metadata at `/.well-known/oauth-authorization-server/api/auth`. The provider exposes `/api/auth/oauth2/authorize` and `/api/auth/oauth2/token`. The upstream OIDC provider authenticates the person through Better Auth; the browser never treats its ID token as an API credential. Register the exact Desktop and Mobile callbacks on one public Web client with Authorization Code + PKCE S256 and token endpoint auth method `none`. Bind the approved API resource to that client and request `resource` with `openid codexia:api`.
 
