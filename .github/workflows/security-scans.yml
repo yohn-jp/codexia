@@ -70,3 +70,12 @@ jobs:
         with:
           sarif_file: ${{ runner.temp }}/gitleaks.sarif
           category: gitleaks-history
+      - name: Summarize redacted historical findings
+        if: always()
+        shell: bash
+        env:
+          GITLEAKS_SARIF: ${{ runner.temp }}/gitleaks.sarif
+        run: |
+          if [[ -f "$GITLEAKS_SARIF" ]]; then
+            jq -r '.runs[].results[]? | [.ruleId, (.locations[0].physicalLocation.artifactLocation.uri // "unknown"), (.locations[0].physicalLocation.region.startLine // 0)] | @tsv' "$GITLEAKS_SARIF"
+          fi
