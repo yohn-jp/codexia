@@ -141,13 +141,15 @@ exit_code="$("$engine" wait "$container_name")"
 "$engine" logs "$container_name" 2>&1 | grep -Fq 'Codexia shutdown complete'
 echo "Backend OCI checks passed: health/readiness, auth boundary, no UI assets, nonroot UID, writable persistence, and graceful shutdown."
 
-# The smoke writer is stopped. Provision an independent reader password and
-# reproduce both legacy states on this disposable database only.
+# The smoke writer is stopped. Provision the reader and reproduce the two old
+# snapshot states plus a live legacy grant on a project without any snapshot.
 preflight_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
+publishing_project="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
 printf '%s' "$preflight_password" > "$secret_directory/preflight-password"
 chmod 0444 "$secret_directory/preflight-password"
 "$engine" exec -i "$database_container" psql -X -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
-  -v legacy="$legacy_project" -v incompatible="$incompatible_project" -v preflight_password="$preflight_password" <<'SQL'
+  -v legacy="$legacy_project" -v incompatible="$incompatible_project" -v publishing="$publishing_project" \
+  -v preflight_password="$preflight_password" <<'SQL'
 CREATE ROLE codexia_preflight LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'preflight_password';
 ALTER ROLE codexia_preflight SET default_transaction_read_only = on;
 ALTER ROLE codexia_auth_runtime IN DATABASE codexia_verify SET default_transaction_read_only = on;
@@ -157,6 +159,10 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO codexia_preflight;
 DELETE FROM module_record WHERE project_id IN (:'legacy', :'incompatible') AND module_id='core.authority.snapshots' AND key LIKE 'proof:projection:%';
 UPDATE module_record SET value=jsonb_set(value,'{files}',(value->'files') - 'meta/scriptorium/knowledge-context/v1.json')
  WHERE project_id=:'incompatible' AND module_id='core.authority.snapshots' AND key LIKE 'snapshot:%';
+INSERT INTO project(id, title) VALUES (:'publishing', 'Publishing without a saved snapshot');
+INSERT INTO module_record(project_id, module_id, key, value) VALUES (:'publishing', 'core.artifacts',
+ 'meta/scriptorium/modules/publishing/share-grants.jsonl',
+ jsonb_build_object('content', '{"id":"fixture-grant","tokenHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","scope":"ch-first","label":"Historical share","createdAt":"2025-01-01T00:00:00.000Z","expiresAt":"2099-01-01T00:00:00.000Z","grantVersion":3,"revocationVersion":1}'));
 SQL
 db_state() {
   "$engine" exec "$database_container" psql -X -A -t -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
@@ -210,11 +216,13 @@ for attempt in $(seq 1 60); do
 done
 [[ "$("$engine" inspect --format '{{.State.Running}} {{.State.ExitCode}}' "$preflight_container")" == 'false 1' ]]
 refusal="$("$engine" logs "$preflight_container" 2>&1)"
-[[ "$refusal" == *SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED* && "$refusal" == *"$legacy_project"* && "$refusal" == *"$incompatible_project"* ]]
+[[ "$refusal" == *SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED* && "$refusal" == *"$legacy_project"* &&
+   "$refusal" == *"$incompatible_project"* && "$refusal" == *"$publishing_project"* ]]
 "$engine" rm --volumes "$preflight_container" >/dev/null
 check_status=0
 check_result="$(snapshot_maintenance codexia_preflight "$preflight_password" --check)" || check_status=$?
-[[ "$check_status" == 2 && "$check_result" == *'"status":"maintenance_required"'* && "$check_result" == *"$legacy_project"* && "$check_result" == *"$incompatible_project"* ]]
+[[ "$check_status" == 2 && "$check_result" == *'"status":"maintenance_required"'* && "$check_result" == *"$legacy_project"* &&
+   "$check_result" == *"$incompatible_project"* && "$check_result" == *"\"pendingPublishingProjectIds\":[\"$publishing_project\"]"* ]]
 if snapshot_maintenance codexia_preflight "$preflight_password" --apply >"$secret_directory/preflight-apply.log" 2>&1; then
   echo 'Read-only PostgreSQL role unexpectedly applied the projection transition.' >&2
   exit 1
@@ -222,11 +230,19 @@ fi
 grep -Fxq 'Snapshot projection maintenance requires the writable PostgreSQL role' "$secret_directory/preflight-apply.log"
 [[ "$(db_state)" == "$before_preflight" ]] || { echo "Read-only preflight changed PostgreSQL state." >&2; exit 1; }
 
-snapshot_maintenance codexia "$database_password" --apply --project "$legacy_project" | grep -Fxq '{"status":"ready","projectsProcessed":1}'
+snapshot_maintenance codexia "$database_password" --apply --project "$publishing_project" | grep -Fxq '{"status":"ready","projectsProcessed":0,"publishingRowsMigrated":1}'
+"$engine" exec -i "$database_container" psql -X -A -t -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
+  -v publishing="$publishing_project" <<'SQL' | grep -Fxq 'fixture-grant|chapter|ch-first|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|3|1|2099-01-01T00:00:00.000Z'
+SELECT grant_data->>'id', grant_data#>>'{scope,kind}', grant_data#>>'{scope,id}', grant_data->>'tokenHash',
+       grant_data->>'grantVersion', grant_data->>'revocationVersion', grant_data->>'expiresAt'
+FROM module_record CROSS JOIN LATERAL jsonb_array_elements(value->'grants') grant_data
+WHERE project_id=:'publishing' AND module_id='publishing' AND key='share-grants';
+SQL
+snapshot_maintenance codexia "$database_password" --apply --project "$legacy_project" | grep -Fxq '{"status":"ready","projectsProcessed":1,"publishingRowsMigrated":0}'
 check_status=0
 check_result="$(snapshot_maintenance codexia_preflight "$preflight_password" --check)" || check_status=$?
 [[ "$check_status" == 2 && "$check_result" == *"$incompatible_project"* && "$check_result" != *"$legacy_project"* ]]
-snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":1}'
+snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":1,"publishingRowsMigrated":0}'
 after_maintenance="$(db_state)"
 state_version() { awk -F'|' -v id="$1" '$1 == id && NF == 2 { print $2 }'; }
 legacy_version="$(state_version "$legacy_project" <<<"$before_preflight")"
@@ -234,8 +250,8 @@ incompatible_version="$(state_version "$incompatible_project" <<<"$before_prefli
 [[ "$(state_version "$legacy_project" <<<"$after_maintenance")" == "$legacy_version" ]]
 [[ "$(state_version "$incompatible_project" <<<"$after_maintenance")" == "$((incompatible_version + 1))" ]]
 [[ "$(grep -F '|core.authority.snapshots|snapshot:' <<<"$after_maintenance")" == "$(grep -F '|core.authority.snapshots|snapshot:' <<<"$before_preflight")" ]]
-snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":0}'
-snapshot_maintenance codexia_preflight "$preflight_password" --check | grep -Fxq '{"status":"ready","pendingProjectIds":[]}'
+snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":0,"publishingRowsMigrated":0}'
+snapshot_maintenance codexia_preflight "$preflight_password" --check | grep -Fxq '{"status":"ready","pendingProjectIds":[],"pendingPublishingProjectIds":[]}'
 [[ "$(db_state)" == "$after_maintenance" ]]
 unset preflight_password
 
@@ -251,4 +267,4 @@ wait_for_snapshot_readiness "$container_name"
 [[ "$(db_state)" == "$after_maintenance" ]]
 "$engine" kill --signal TERM "$container_name" >/dev/null
 [[ "$("$engine" wait "$container_name")" == 0 ]]
-echo "Explicit Snapshot maintenance verified: startup refusal, read-only check, one-way transition, pinned state retention, and reader/writer restarts."
+echo "Explicit Snapshot and Publishing maintenance verified: startup refusal, read-only check, grant conversion, pinned state retention, and reader/writer restarts."
