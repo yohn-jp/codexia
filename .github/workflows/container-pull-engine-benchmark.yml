@@ -114,3 +114,39 @@ jobs:
           echo "jobs.container trial ${{ matrix.trial }} ready" >> "$GITHUB_STEP_SUMMARY"
           echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
           printf 'BENCHMARK engine=jobs.container trial=%s runner_image=%s\n' '${{ matrix.trial }}' "${ImageVersion:-unknown}"
+
+  paired-pull:
+    name: Same-runner Docker vs Podman / ${{ matrix.order }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        order: [docker-first, podman-first]
+    env:
+      IMAGE: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+    steps:
+      - name: Compare engines on one host with reversed order
+        shell: bash
+        env:
+          ORDER: ${{ matrix.order }}
+        run: |
+          set -euo pipefail
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq podman
+          fi
+          echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$ORDER" == docker-first ]]; then engines=(docker podman); else engines=(podman docker); fi
+          for engine in "${engines[@]}"; do
+            "$engine" image rm "$IMAGE" >/dev/null 2>&1 || true
+            start=$(date +%s%N)
+            "$engine" pull "$IMAGE"
+            pulled=$(date +%s%N)
+            "$engine" run --rm --entrypoint /bin/sh "$IMAGE" -c 'test -d /ms-playwright'
+            finished=$(date +%s%N)
+            pull_ms=$(( (pulled-start)/1000000 ))
+            startup_ms=$(( (finished-pulled)/1000000 ))
+            printf 'PAIRED engine=%s order=%s pull_ms=%s startup_ms=%s runner_image=%s\n' "$engine" "$ORDER" "$pull_ms" "$startup_ms" "${ImageVersion:-unknown}"
+            echo "- $engine ($ORDER): pull ${pull_ms} ms, startup ${startup_ms} ms" >> "$GITHUB_STEP_SUMMARY"
+          done
