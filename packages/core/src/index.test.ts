@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import YAML from "yaml";
 import { before, after, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import { PersistenceError } from "@codexia/persistence-contracts";
+import { PersistenceError, type ChangeSet, type ProjectId } from "@codexia/persistence-contracts";
 import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
 import { CoreError, CoreStore } from "./index.js";
 const connectionString=process.env.CODEXIA_TEST_DATABASE_URL;
@@ -14,6 +14,21 @@ async function project(){return core.createProject({title:`Core ${randomUUID()}`
 async function accept(projectId:string,operation:ChangeOperation,snapshot?:SnapshotId){const proposal:ChangeProposal={id:randomUUID(),snapshot:snapshot??{projectId,projectVersion:operation.baseProjectVersion},source:"author",operations:[operation]};await core.propose(projectId,proposal);await core.approve(projectId,{proposalId:proposal.id,operationIds:[operation.id],authorScope:"author"});return core.apply(projectId,operation);}
 async function approve(projectId:string,built:{operation:ChangeOperation;snapshot:SnapshotId}){const proposal:ChangeProposal={id:randomUUID(),snapshot:built.snapshot,source:"author",operations:[built.operation]};await core.propose(projectId,proposal);await core.approve(projectId,{proposalId:proposal.id,operationIds:[built.operation.id],authorScope:"author"});return proposal;}
 async function hierarchy(){const p=await project();for(const input of [{kind:"volume",id:"v1",title:"Volume"},{kind:"chapter",id:"c1",title:"Chapter",volumeId:"v1"},{kind:"scene",id:"s1",title:"Scene",volumeId:"v1",chapterId:"c1",manuscriptBody:"Text 😀\n"}] as const){const built=await core.buildCreateHierarchyOperation(p.id,input);await accept(p.id,built.operation,built.snapshot);}return p;}
+const proposeReorder = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyReorder"]>[1]) => {
+  const { snapshot } = await core.observe(projectId);
+  return core.proposeHierarchyReorder(projectId, input, {
+    projectVersion: snapshot.projectVersion, actorId: "author", idempotencyKey: randomUUID(),
+  });
+};
+const approveReorder = async (projectId: ProjectId, input: Parameters<CoreStore["proposeHierarchyReorder"]>[1]) => {
+  const { changeSet } = await proposeReorder(projectId, input);
+  return persistence.transaction(tx => tx.approveChangeSet({
+    projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+  }));
+};
+const applyReorder = (changeSet: ChangeSet) => persistence.transaction(tx => tx.applyChangeSet({
+  projectId: changeSet.projectId, changeSetId: changeSet.id, expectedVersion: changeSet.version,
+}));
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
 function isHierarchyConflict(error: unknown): boolean {
   return error instanceof CoreError && ["hierarchy_parent_changed", "revision_conflict", "scope_conflict"].includes(error.code);
@@ -30,7 +45,7 @@ test("native hierarchy reorder keeps manuscript revisions and applies once after
   }));
   const { snapshot } = await core.observe(p.id);
   const options = { projectVersion: snapshot.projectVersion, actorId: "proposer", idempotencyKey: randomUUID(), origin: "external-agent" } as const;
-  const ordered = { kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: [second.id, "s1"] } as const;
+  const ordered = { kind: "scene" as const, volumeId: "v1", chapterId: "c1", orderedIds: [second.id, "s1"] };
   await assert.rejects(() => core.proposeHierarchyReorder(p.id, { ...ordered, orderedIds: [original.id, "s1"] }, options), { code: "invalid_hierarchy_order" });
   const propose = () => core.proposeHierarchyReorder(p.id, ordered, options);
   const { changeSet: proposal, replayed } = await propose();
@@ -240,12 +255,26 @@ test("stale proposal cannot overwrite a newer canonical body",async()=>{const p=
 test("disjoint operations approved together can apply in sequence",async()=>{const p=await project(),reader=await core.reader(p.id),a=operation(reader.snapshot,"bible/a.yaml","A"),b=operation(reader.snapshot,"bible/b.yaml","B"),proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[a,b],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[a.id,b.id],authorScope:"owner"});await core.apply(p.id,a);await core.apply(p.id,b);assert.equal((await (await core.reader(p.id)).read("bible/b.yaml"))?.content,"B");});
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
-test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("recursive deletion after native reorder preserves manuscript revision history", async () => {
+  const p = await hierarchy();
+  const second = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1", manuscriptBody: "Second",
+  });
+  await accept(p.id, second.operation);
+  await applyReorder(await approveReorder(p.id, { kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"] }));
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s2", "s1"]);
+  const documents = await persistence.read(reader => reader.listDocuments(p.id));
+  const scene = documents.find(document => document.title === "Scene")!;
+  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "v1" });
+  await accept(p.id, removal.operation);
+  assert.equal((await core.tree(p.id)).volumes.length, 0);
+  assert.equal((await persistence.read(reader => reader.getRevision(p.id, scene.id, scene.headRevisionId!)))?.markdown, "Text 😀\n");
+});
 test("scene reorder rejects a chapter that belongs to a different volume", async () => {
   const p = await hierarchy();
   const otherVolume = await core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "v2", title: "Other volume" });
   await accept(p.id, otherVolume.operation);
-  await assert.rejects(core.buildReorderHierarchyOperation(p.id, {
+  await assert.rejects(proposeReorder(p.id, {
     kind: "scene", volumeId: "v2", chapterId: "c1", orderedIds: ["s1"],
   }), (error: unknown) => error instanceof CoreError && error.code === "invalid_hierarchy_parent");
   assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s1"]);
@@ -275,8 +304,7 @@ test("PostgreSQL append keys preserve creation order across digit boundaries and
   assert.equal(before.find(document => document.kind === "chapter" && document.title === "Chapter 10")?.orderKey, "0000000010");
   assert.equal(before.find(document => document.kind === "scene" && document.title === "Scene 10")?.orderKey, "0000000010");
 
-  const reorder = await core.buildReorderHierarchyOperation(p.id, { kind: "volume", orderedIds: [...volumeIds].reverse() });
-  await accept(p.id, reorder.operation);
+  await applyReorder(await approveReorder(p.id, { kind: "volume", orderedIds: [...volumeIds].reverse() }));
   const beforeAppend = await persistence.read(reader => reader.listDocuments(p.id));
   const oldVolumeKeys = new Map(beforeAppend.filter(document => document.kind === "volume").map(document => [document.title, document.orderKey]));
   await create({ kind: "volume", id: "volume-11", title: "Volume 11" });
@@ -306,10 +334,10 @@ test("reordering a moved scene preserves its authoritative PostgreSQL parent", a
     expectedVersion: scene.version,
   }));
 
-  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+  const reorder = await approveReorder(p.id, {
     kind: "scene", volumeId: "v1", chapterId: "c2", orderedIds: ["s1", "s2"],
   });
-  await accept(p.id, reorder.operation);
+  await applyReorder(reorder);
   const after = await persistence.read(reader => reader.getDocument(p.id, scene.id));
   assert.equal(after?.parentId, chapter.id);
   assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters.find(item => item.id === "c2")?.scenes.map(item => item.id), ["s1", "s2"]);
@@ -419,21 +447,15 @@ test("approved reorder rejects a changed sibling set atomically", async () => {
     kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
   });
   await accept(p.id, second.operation);
-  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+  const reorder = await approveReorder(p.id, {
     kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
   });
-  const proposal: ChangeProposal = {
-    id: randomUUID(), snapshot: reorder.snapshot, source: "author", operations: [reorder.operation],
-  };
-  await core.propose(p.id, proposal);
-  await core.approve(p.id, { proposalId: proposal.id, operationIds: [reorder.operation.id], authorScope: "owner" });
-
   const third = await core.buildCreateHierarchyOperation(p.id, {
     kind: "scene", id: "s3", title: "Third", volumeId: "v1", chapterId: "c1",
   });
   await accept(p.id, third.operation);
   const before = await persistence.read(reader => reader.listDocuments(p.id));
-  await assert.rejects(core.apply(p.id, reorder.operation), /sibling set changed/);
+  await assert.rejects(applyReorder(reorder), /sibling set changed/);
   const after = await persistence.read(reader => reader.listDocuments(p.id));
   assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
     before.map(document => [document.id, document.parentId, document.orderKey]));
@@ -458,15 +480,9 @@ test("approved reorder detects a sibling moved in from another compatibility pat
   });
   await accept(p.id, third.operation);
 
-  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+  const reorder = await approveReorder(p.id, {
     kind: "scene", volumeId: "v1", chapterId: "c2", orderedIds: ["s4", "s2"],
   });
-  const proposal: ChangeProposal = {
-    id: randomUUID(), snapshot: reorder.snapshot, source: "author", operations: [reorder.operation],
-  };
-  await core.propose(p.id, proposal);
-  await core.approve(p.id, { proposalId: proposal.id, operationIds: [reorder.operation.id], authorScope: "owner" });
-
   const documents = await persistence.read(reader => reader.listDocuments(p.id));
   const moved = documents.find(document => document.kind === "scene" && document.title === "Third")!;
   const destination = documents.find(document => document.kind === "chapter" && document.title === "Second chapter")!;
@@ -478,48 +494,60 @@ test("approved reorder detects a sibling moved in from another compatibility pat
   assert.ok(await (await core.reader(p.id)).read(staleParentPath));
 
   const before = await persistence.read(reader => reader.listDocuments(p.id));
-  await assert.rejects(core.apply(p.id, reorder.operation), /sibling set changed/);
+  await assert.rejects(applyReorder(reorder), /sibling set changed/);
   const after = await persistence.read(reader => reader.listDocuments(p.id));
   assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
     before.map(document => [document.id, document.parentId, document.orderKey]));
 });
 
-test("legacy approved reorders apply only while their exact base version is current", async () => {
-  const currentProject = await hierarchy();
-  const currentSecond = await core.buildCreateHierarchyOperation(currentProject.id, {
-    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
-  });
-  await accept(currentProject.id, currentSecond.operation);
-  const currentReorder = await core.buildReorderHierarchyOperation(currentProject.id, {
-    kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
-  });
-  delete currentReorder.operation.readDocumentSets;
-  await accept(currentProject.id, currentReorder.operation);
-  assert.deepEqual((await core.tree(currentProject.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s2", "s1"]);
-
-  const staleProject = await hierarchy();
-  const staleSecond = await core.buildCreateHierarchyOperation(staleProject.id, {
-    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
-  });
-  await accept(staleProject.id, staleSecond.operation);
-  const staleReorder = await core.buildReorderHierarchyOperation(staleProject.id, {
-    kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
-  });
-  delete staleReorder.operation.readDocumentSets;
-  const proposal: ChangeProposal = {
-    id: randomUUID(), snapshot: staleReorder.snapshot, source: "author", operations: [staleReorder.operation],
-  };
-  await core.propose(staleProject.id, proposal);
-  await core.approve(staleProject.id, { proposalId: proposal.id, operationIds: [staleReorder.operation.id], authorScope: "owner" });
-  const third = await core.buildCreateHierarchyOperation(staleProject.id, {
-    kind: "scene", id: "s3", title: "Third", volumeId: "v1", chapterId: "c1",
-  });
-  await accept(staleProject.id, third.operation);
-  const before = await persistence.read(reader => reader.listDocuments(staleProject.id));
-  await assert.rejects(core.apply(staleProject.id, staleReorder.operation), /legacy hierarchy reorder/);
-  const after = await persistence.read(reader => reader.listDocuments(staleProject.id));
-  assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
-    before.map(document => [document.id, document.parentId, document.orderKey]));
+test("legacy reorders without sibling preconditions require a new proposal and preserve prior receipts", async t => {
+  for (const state of ["current", "stale", "applied"] as const) {
+    await t.test(state, async () => {
+      const p = await hierarchy();
+      const reader = await core.reader(p.id);
+      const path = "plot/volumes/v1/chapters/c1/scenes/s1.yaml";
+      const file = await reader.read(path);
+      assert.ok(file);
+      const reorder: ChangeOperation = {
+        ...operation(reader.snapshot, path, 'id: s1\ntitle: Scene\norder: "0000000000"\n', file.revision),
+        effect: "structure", message: "Reorder hierarchy",
+      };
+      const proposal = await approve(p.id, { operation: reorder, snapshot: reader.snapshot });
+      const authority = "core.authority.proposals";
+      const key = `proposal:${proposal.id}`;
+      const readRecord = () => persistence.read(source => source.getModuleRecord(p.id, authority, key));
+      const readDocuments = () => persistence.read(source => source.listDocuments(p.id));
+      if (state === "stale") {
+        await persistence.transaction(tx => tx.updateProject({
+          projectId: p.id, expectedVersion: reader.snapshot.projectVersion, title: "Later project title",
+        }));
+      }
+      if (state === "applied") {
+        const record = await readRecord();
+        assert.ok(record);
+        const receipt = {
+          operationId: reorder.id, generation: reorder.generation, projectVersion: reader.snapshot.projectVersion + 1,
+          revisions: [{ path, revision: createHash("sha256").update(reorder.writes[0]!.content!).digest("hex") }],
+        };
+        await persistence.transaction(tx => tx.saveModuleRecord({
+          projectId: p.id, moduleId: authority, key, expectedVersion: record.version,
+          value: { ...record.value, state: "applied", appliedOperationIds: [reorder.id], applications: [receipt] },
+        }));
+        const beforeReplay = await readRecord();
+        const before = await readDocuments();
+        assert.deepEqual((await core.getProposal(p.id, proposal.id))?.applications, [receipt]);
+        assert.deepEqual(await core.apply(p.id, reorder), receipt);
+        assert.deepEqual(await readRecord(), beforeReplay);
+        assert.deepEqual(await readDocuments(), before);
+        return;
+      }
+      const before = await readDocuments();
+      const record = await readRecord();
+      await assert.rejects(core.apply(p.id, reorder), { status: 409, code: "hierarchy_reproposal_required" });
+      assert.deepEqual(await readDocuments(), before);
+      assert.deepEqual(await readRecord(), record);
+    });
+  }
 });
 test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
 test("Core restore preserves confirmed evidence for identical text and reviews changed quotes", async () => {

@@ -157,7 +157,6 @@ test("hierarchy and restore builders read each resolved manifest only once", asy
     for (const build of [
       () => store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot),
       () => store.buildDeleteHierarchyOperation(project.id, { kind: "volume", id: volume.document.id }, snapshot),
-      () => store.buildReorderHierarchyOperation(project.id, { kind: "volume", orderedIds: [volume.document.id] }, snapshot),
       () => store.buildRestoreOperation(project.id, document.id, document.headRevisionId!, snapshot),
     ]) {
       const before = tracked.counts.manifestReads!;

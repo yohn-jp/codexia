@@ -1024,6 +1024,15 @@ export class CoreStore implements MutationCoordinator {
       const replay = approved.map(({ status }) => applicationFor(status)).find((receipt) => receipt !== undefined);
       if (replay) return recordApplication(replay);
 
+      // These persisted reorders lack a sibling-membership precondition.
+      if (!operation.readDocumentSets?.length && operation.effect === "structure" &&
+          operation.message === "Reorder hierarchy" && operation.writes.length > 0 && operation.writes.every(({ path }) =>
+            /^plot\/volumes\/[^/]+\/volume\.yaml$/.test(path) ||
+            /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/.test(path) ||
+            /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/.test(path))) {
+        fail(409, "hierarchy_reproposal_required", "Submit a new hierarchy reorder using the current sibling order");
+      }
+
       const state = first.status;
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
@@ -1048,16 +1057,6 @@ export class CoreStore implements MutationCoordinator {
           fail(409, "scope_conflict", `The ${set.kind} sibling set changed`);
         }
       }
-      const legacyHierarchyReorder = !operation.readDocumentSets?.length &&
-        operation.effect === "structure" && operation.message === "Reorder hierarchy" &&
-        operation.writes.length > 0 && operation.writes.every(({ path }) =>
-          /^plot\/volumes\/[^/]+\/volume\.yaml$/.test(path) ||
-          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/.test(path) ||
-          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/.test(path));
-      if (legacyHierarchyReorder && manifest.snapshot.projectVersion !== operation.baseProjectVersion) {
-        fail(409, "scope_conflict", "A legacy hierarchy reorder cannot be applied after project content changed");
-      }
-
       const authorId = state.approvedByOperationId?.[operation.id]
         ?? (state as ProposalStatus & { approvedBy?: string }).approvedBy;
       if (!authorId) fail(409, "approval_actor_missing", "Approved operation has no durable author identity");
@@ -1142,22 +1141,6 @@ export class CoreStore implements MutationCoordinator {
       if(document.kind==="chapter")addSet(document.id,"scene");
     }
     built.operation.readDocumentSets=[...readDocumentSets.values()];
-    return built;
-  }
-  async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene"){
-      const volume=this.findDocument(manifest,input.volumeId,index);
-      parent=this.findDocument(manifest,input.chapterId,index);
-      if(volume.kind!=="volume"||parent.kind!=="chapter"||parent.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The selected chapter does not belong to the selected volume");
-    }
-    const siblings=(index.documentsByParentId.get(parent?.id??null)??[]).filter((document)=>document.kind===input.kind);const expected=siblings.map((document)=>this.logicalId(index,document)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
-    const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});
-    const built=this.buildOperation(manifest.snapshot,writes,"structure","Reorder hierarchy");
-    built.operation.readDocumentSets=[{
-      kind: input.kind,
-      parentId: parent?.id ?? null,
-      documentIds: siblings.map((document) => document.id).sort(),
-    }];
     return built;
   }
   async proposeHierarchyReorder(project: string, input: ReorderHierarchyInput, options: ProposeHierarchyReorderOptions): Promise<ChangeSetResult> {
