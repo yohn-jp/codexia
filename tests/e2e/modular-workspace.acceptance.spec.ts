@@ -1278,19 +1278,26 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await editorPanel.getByRole("button", { name: "原稿を元に戻す" }).click();
   await expect(editorPanel).not.toHaveClass(/is-maximized/);
 
+  const floatingPlacement = () => floating.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      left: Number.parseFloat(style.left),
+      top: Number.parseFloat(style.top),
+      width: Number.parseFloat(style.width),
+      height: Number.parseFloat(style.height),
+    };
+  });
+  const beforeReload = await floatingPlacement();
+  expect(beforeReload.width).toBeGreaterThan(0);
+  expect(beforeReload.height).toBeGreaterThan(0);
   await workspaceToolbar(page).getByRole("button", { name: "配置を保存", exact: true }).click();
   const stored = await workspaceStorage(page, "desktop");
   expect(stored.raw).not.toBeNull();
   const savedRecord = JSON.parse(stored.raw!) as WorkspaceSnapshotRecord;
-  expect(savedRecord.floating).toHaveLength(1);
-  expect(savedRecord.floating[0]).toMatchObject({ panelId: "outline", width: 350, height: 410 });
-  const savedGeometry = savedRecord.floating[0]!;
+  expect(savedRecord.floating).toMatchObject([{ panelId: "outline", ...beforeReload }]);
   await page.reload();
-  await expect(page.locator('[data-floating-panel="outline"]')).toBeVisible();
-  expect(await page.locator('[data-floating-panel="outline"]').evaluate((element) => {
-    const style = (element as HTMLElement).style;
-    return { left: Number.parseInt(style.left, 10), top: Number.parseInt(style.top, 10), width: Number.parseInt(style.width, 10), height: Number.parseInt(style.height, 10) };
-  })).toEqual({ left: savedGeometry.left, top: savedGeometry.top, width: savedGeometry.width, height: savedGeometry.height });
+  await expect(floating).toBeVisible();
+  await expect.poll(floatingPlacement).toEqual(beforeReload);
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
 
   await page.locator('[data-floating-panel="outline"]')

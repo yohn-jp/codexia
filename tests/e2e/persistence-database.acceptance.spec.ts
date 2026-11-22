@@ -1140,12 +1140,6 @@ async function holdNextDocumentDelete(page: Page, projectId: string, documentId:
   };
 }
 
-function applyEditorChanges(base: string, changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>): string {
-  return [...changes]
-    .sort((left, right) => right.fromUtf16 - left.fromUtf16)
-    .reduce((text, change) => text.slice(0, change.fromUtf16) + change.insert + text.slice(change.toUtf16), base);
-}
-
 function waitForDocumentSaveResponse(page: Page, projectId: string, documentId: string, markdown: string) {
   const expectedHash = createHash("sha256").update(markdown).digest("hex");
   const expectedPath = `/api/v1/persistence/projects/${projectId}/documents/${documentId}`;
@@ -1201,7 +1195,7 @@ for (const { mode, width, forceAppendFallback = false } of [
     if (mode === "desktop") await moveEditorIntoDesktopStack(page);
 
     const editor = manuscriptEditor(page);
-    const appended = "X";
+    const inserted = "X";
     const heldSave = await holdNextDocumentSave(page, project.id, scene.id);
     const changePanel = async (showEditor: boolean): Promise<void> => {
       if (mode === "mobile") {
@@ -1225,14 +1219,32 @@ for (const { mode, width, forceAppendFallback = false } of [
       const initialRevision = await storedDocumentMarkdown(page, project.id, scene.id);
       expect(initialRevision.markdown).toBe(original);
       await editor.click();
-      await editor.pressSequentially(appended);
+      const caret = await editor.evaluate((element) => {
+        const selection = element.ownerDocument.getSelection();
+        const focus = selection?.focusNode;
+        const line = (focus instanceof Element ? focus : focus?.parentElement)?.closest(".cm-line");
+        if (!selection?.isCollapsed || !focus || !line?.textContent || !element.contains(line)) {
+          throw new Error("Click must place a single caret within a rendered manuscript line");
+        }
+        const prefix = document.createRange();
+        prefix.selectNodeContents(line);
+        prefix.setEnd(focus, selection.focusOffset);
+        return { text: line.textContent, prefixLength: prefix.toString().length };
+      });
+      // Infer the expected position from the browser caret and the input fixture,
+      // independently of the save command built by the editor.
+      const lineStart = original.indexOf(caret.text);
+      expect(lineStart).toBeGreaterThanOrEqual(0);
+      const offset = lineStart + caret.prefixLength;
+      const beforeCaret = original.slice(0, offset);
+      const afterCaret = original.slice(offset);
+      const editedMarkdown = beforeCaret + inserted + afterCaret;
+      await editor.pressSequentially(inserted);
       await expectDeviceDraft(page);
       await heldSave.requestReached;
       const saveBody = await heldSave.requestBody as { changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
-      expect(saveBody.changes.map((change) => change.insert).join("")).toBe(appended);
-      const editedMarkdown = applyEditorChanges(original, saveBody.changes);
+      expect(saveBody.changes).toEqual([{ fromUtf16: offset, toUtf16: offset, insert: inserted }]);
       expect(createHash("sha256").update(editedMarkdown).digest("hex")).toBe(saveBody.resultingSha256);
-      expect(editedMarkdown).not.toBe(original);
 
       const scroller = page.locator(".cm-scroller");
       const scrollTop = await scroller.evaluate((element) => {
@@ -1284,9 +1296,7 @@ for (const { mode, width, forceAppendFallback = false } of [
       await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(editedMarkdown);
       const redone = await storedDocumentMarkdown(page, project.id, scene.id);
       expect(redone.revisionId).not.toBe(undone.revisionId);
-      expect(saveBody.changes).toHaveLength(1);
-      const caretPosition = saveBody.changes[0]!.fromUtf16 + appended.length;
-      const nextEdit = editedMarkdown.slice(0, caretPosition) + "……" + editedMarkdown.slice(caretPosition);
+      const nextEdit = `${beforeCaret}${inserted}……${afterCaret}`;
       const displayMenu = page.locator(".pg-editor-display-menu");
       if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
       const symbolMenu = page.locator(".pg-editor-symbol-menu");
@@ -1295,7 +1305,7 @@ for (const { mode, width, forceAppendFallback = false } of [
       expect((await symbolResponse).ok()).toBe(true);
       await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(nextEdit);
       await expect(editor).toBeFocused();
-      const typedEdit = nextEdit.slice(0, caretPosition + "……".length) + "y" + nextEdit.slice(caretPosition + "……".length);
+      const typedEdit = `${beforeCaret}${inserted}……y${afterCaret}`;
       const typingResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, { timeout: 15_000 });
       await page.keyboard.press("y");
       const typedSave = await typingResponse;
