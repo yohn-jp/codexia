@@ -373,6 +373,7 @@ test("Story hierarchy and reader disclosures follow PostgreSQL ordering on each 
       async createWorkerService() { throw new Error("Unexpected Story worker request"); },
     };
     const actions = createStoryActions(moduleContext);
+    assert.ok(!actions.some((action) => action.id === "story.entities.reorder"), "hierarchy reorder is owned by Core");
     async function invoke(actionId, input, reader) {
       const action = actions.find((item) => item.id === actionId);
       assert.ok(action, `Story action is missing: ${actionId}`);
@@ -383,17 +384,7 @@ test("Story hierarchy and reader disclosures follow PostgreSQL ordering on each 
         async listActions() { return []; },
         async linkedReader() { throw new Error("Unexpected linked project read"); },
         signal: new AbortController().signal,
-        async propose(operations, evidence, proposalId) {
-          const proposal = {
-            id: proposalId ?? randomUUID(),
-            snapshot: reader.snapshot,
-            operations,
-            source: "module",
-            ...(evidence ? { evidence } : {}),
-          };
-          await core.propose(project.id, proposal);
-          return proposal;
-        },
+        async propose() { throw new Error("Story hierarchy and reader actions are read-only"); },
         async runJob() { throw new Error("Unexpected Story job"); },
       };
       const result = await action.invoke(input, context);
@@ -454,16 +445,20 @@ test("Story hierarchy and reader disclosures follow PostgreSQL ordering on each 
     const reorderedIds = initial.tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
       .chapters.find(({ chapter }) => chapter.id === logicalIds.chapterSelected)
       .scenes.map((scene) => scene.id).reverse();
-    const reordered = await invoke("story.entities.reorder", {
-      type: "scene",
-      parentId: logicalIds.chapterSelected,
+    const { snapshot, operation } = await core.buildReorderHierarchyOperation(project.id, {
+      kind: "scene",
+      volumeId: logicalIds.volumeLong,
+      chapterId: logicalIds.chapterSelected,
       orderedIds: reorderedIds,
-      base_revision: (await invoke("story.volumes.tree", {}, initialReader)).data.revision,
-      operation_id: "story-order-authority-reorder",
-    }, initialReader);
-    assert.equal(reordered.proposals?.length, 1);
-    const proposal = reordered.proposals[0];
-    const operation = proposal.operations[0];
+    }, initialReader.snapshot);
+    assert.deepEqual(snapshot, initialReader.snapshot);
+    const proposal = await core.propose(project.id, {
+      id: randomUUID(),
+      snapshot,
+      operations: [operation],
+      source: "author",
+    });
+    assert.deepEqual((await core.observe(project.id)).snapshot, initialReader.snapshot);
     await core.approve(project.id, {
       proposalId: proposal.id,
       operationIds: [operation.id],

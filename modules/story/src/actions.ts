@@ -1288,31 +1288,6 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       await context.propose([operation]);
       return { ...scene, raw: update.raw, revision: sourceEntityRevision({ ...scene, raw: update.raw }) };
     }),
-    action("story.entities.reorder", propose, fieldSchema(["type", "parentId", "orderedIds"]), async (input, context) => {
-      if (input.type !== "chapter" && input.type !== "scene") throw new TypeError("type must be chapter or scene");
-      const parentId = stringValue(input.parentId, "parentId");
-      if (!Array.isArray(input.orderedIds) || !input.orderedIds.every((id) => typeof id === "string")) throw new TypeError("orderedIds must be a string array");
-      const story = await readStorySnapshot(context.reader);
-      assertSourceRevision(input, contentRevision(getVolumeTree(story).data));
-      const parentField = input.type === "chapter" ? "volume" : "chapter";
-      const siblings = [...story.entities.values()].filter((entity) => entity.type === input.type && entity.raw[parentField] === parentId);
-      const orderedIds = input.orderedIds as string[];
-      if (orderedIds.length !== siblings.length || new Set(orderedIds).size !== orderedIds.length || orderedIds.some((id) => !siblings.some((entity) => entity.id === id))) throw new TypeError("orderedIds must include every sibling exactly once");
-      const writes: ProposedWrite[] = [];
-      const reads: FileRevision[] = [];
-      for (let index = 0; index < orderedIds.length; index++) {
-        const entity = story.entities.get(orderedIds[index]!)!;
-        const revision = story.revisions.get(entity.filePath);
-        if (!revision) throw new TypeError(`Entity file is missing: ${entity.filePath}`);
-        const raw = { ...entity.raw, order: index + 1 };
-        reads.push({ path: entity.filePath, revision });
-        writes.push({ path: entity.filePath, revision, content: yamlContent(raw) });
-      }
-      if (writes.length === 0) return { ok: true, changedPaths: [] };
-      const operation = buildOperation({ reader: context.reader, operationId: requestedOperationId(input), reads, writes, message: `Reorder Story ${input.type} siblings`, effect: "structure" });
-      await context.propose([operation]);
-      return { ok: true, changedPaths: writes.map((write) => write.path) };
-    }),
     action("story.entities.backlinks", read, fieldSchema(["id"], ["id"]), async (input, context) => getBacklinks({ ...await readStorySnapshot(context.reader), toId: stringValue(input.id, "id") }).data),
     action("story.entities.appearances", read, fieldSchema(["id"], ["id"]), async (input, context) => getEntityAppearances({ ...await readStorySnapshot(context.reader), entityId: stringValue(input.id, "id") }).data),
     action("story.entities.voice-patterns", read, fieldSchema(["id"], ["id"]), async (input, context) => {

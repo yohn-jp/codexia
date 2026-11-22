@@ -27,6 +27,9 @@ type SceneContext = {
   manuscriptBody?: string;
 };
 type VolumeTree = Array<{ volume: Entity; chapters: Array<{ chapter: Entity; scenes: Entity[] }> }>;
+type ReorderTarget =
+  | { kind: "chapter"; volumeId: string }
+  | { kind: "scene"; volumeId: string; chapterId: string };
 type ThreadLifecycleResult = {
   snapshots: Array<{
     threadId: string;
@@ -192,14 +195,12 @@ function useAction(context: BrowserModuleContext) {
 function StoryNavigator({ context }: { context: BrowserModuleContext }) {
   const { invoke, busy, status, setMessage } = useAction(context);
   const [tree, setTree] = useState<VolumeTree>([]);
-  const [treeRevision, setTreeRevision] = useState("");
   const [sceneId, setSceneId] = useState("");
   const [scene, setScene] = useState<SceneContext | null>(null);
   const [metadata, setMetadata] = useState<Record<string, string>>({});
   const refresh = async () => {
-    const result = await invoke<{ tree: VolumeTree; revision: string }>("story.volumes.tree", {});
+    const result = await invoke<{ tree: VolumeTree }>("story.volumes.tree", {});
     setTree(result.tree);
-    setTreeRevision(result.revision);
   };
   useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const selectScene = async (id: string) => {
@@ -229,14 +230,15 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
       setMessage(`Proposed metadata update for ${scene.scene.id}.`);
     } catch { /* The panel displays the machine error. */ }
   };
-  const moveSibling = async (type: "chapter" | "scene", parentId: string, siblings: Entity[], index: number, delta: -1 | 1) => {
+  const moveSibling = async (target: ReorderTarget, siblings: Entity[], index: number, delta: -1 | 1) => {
     const nextIndex = index + delta;
     if (nextIndex < 0 || nextIndex >= siblings.length) return;
     const orderedIds = siblings.map((item) => item.id);
     [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex]!, orderedIds[index]!];
     try {
-      await invoke("story.entities.reorder", { type, parentId, orderedIds, base_revision: treeRevision, operation_id: operationId() });
-      setMessage(`Proposed ${type} order change. The outline updates after the proposal is accepted and applied.`);
+      // The host remounts this panel when the snapshot changes and pins both actions to its snapshot.
+      await invoke("core.hierarchy.reorder", { ...target, orderedIds, proposalId: globalThis.crypto.randomUUID() });
+      setMessage(`Proposed ${target.kind} order change. The outline updates after the proposal is accepted and applied.`);
     } catch { /* The panel displays the machine error. */ }
   };
   return <section style={panelStyle} aria-label="Story navigator">
@@ -246,13 +248,13 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
       <h3>{volume.name ?? String(volume.raw.title ?? volume.id)}</h3>
       {chapters.map(({ chapter, scenes }, chapterIndex) => <div key={chapter.id}>
         <div style={rowStyle}><h4>{chapter.name ?? String(chapter.raw.title ?? chapter.id)}</h4>
-          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === 0} aria-label={`Move chapter ${chapter.id} up`} onClick={() => void moveSibling("chapter", volume.id, chapters.map((item) => item.chapter), chapterIndex, -1)}>Move up</button>
-          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === chapters.length - 1} aria-label={`Move chapter ${chapter.id} down`} onClick={() => void moveSibling("chapter", volume.id, chapters.map((item) => item.chapter), chapterIndex, 1)}>Move down</button>
+          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === 0} aria-label={`Move chapter ${chapter.id} up`} onClick={() => void moveSibling({ kind: "chapter", volumeId: volume.id }, chapters.map((item) => item.chapter), chapterIndex, -1)}>Move up</button>
+          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === chapters.length - 1} aria-label={`Move chapter ${chapter.id} down`} onClick={() => void moveSibling({ kind: "chapter", volumeId: volume.id }, chapters.map((item) => item.chapter), chapterIndex, 1)}>Move down</button>
         </div>
         <ol>{scenes.map((item, sceneIndex) => <li key={item.id}>
           <button type="button" aria-pressed={sceneId === item.id} onClick={() => void selectScene(item.id)}>{item.name ?? String(item.raw.title ?? item.id)}</button>
-          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === 0} aria-label={`Move scene ${item.id} up`} onClick={() => void moveSibling("scene", chapter.id, scenes, sceneIndex, -1)}>↑</button>
-          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === scenes.length - 1} aria-label={`Move scene ${item.id} down`} onClick={() => void moveSibling("scene", chapter.id, scenes, sceneIndex, 1)}>↓</button>
+          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === 0} aria-label={`Move scene ${item.id} up`} onClick={() => void moveSibling({ kind: "scene", volumeId: volume.id, chapterId: chapter.id }, scenes, sceneIndex, -1)}>↑</button>
+          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === scenes.length - 1} aria-label={`Move scene ${item.id} down`} onClick={() => void moveSibling({ kind: "scene", volumeId: volume.id, chapterId: chapter.id }, scenes, sceneIndex, 1)}>↓</button>
         </li>)}</ol>
       </div>)}
     </section>)}
