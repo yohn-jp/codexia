@@ -2,7 +2,7 @@ import { EventStreams } from "./event-streams.js";
 import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
-import { resolveStandaloneAuthMode } from "./auth-mode.js";
+import { resolveBetterAuthOidcSettings, resolveStandaloneAuthMode } from "./auth-mode.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
@@ -2681,6 +2681,11 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     mcpProjectAssignments: readCodexiaEnvironment("OAUTH_MCP_PROJECT_ASSIGNMENTS"),
     apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
   };
+  const betterAuthOidcSettings = resolveBetterAuthOidcSettings({
+    oidcIssuer: betterAuthValues.oidcIssuer,
+    oidcClientId: betterAuthValues.oidcClientId,
+    oidcClientSecret: betterAuthValues.oidcClientSecret,
+  });
   const betterAuthConfigured = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
@@ -2689,13 +2694,12 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   ].some((value) => value !== undefined);
   const authMode = resolveStandaloneAuthMode(readCodexiaEnvironment("AUTH_MODE"), betterAuthConfigured);
   const requiredBetterAuthValues = [
-    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
-    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
     betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds,
   ];
   if (authMode === "better-auth" && requiredBetterAuthValues.some((value) => !value)) {
-    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
+    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
   if (authMode === "better-auth" && [oauthValues.issuer, oauthValues.audience, oauthValues.jwksUrl].some((value) => value !== undefined)) {
     throw new Error("Better Auth mode cannot be combined with legacy standalone OAuth settings");
@@ -2708,9 +2712,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     betterAuth = createBetterAuthRuntime({
       databaseUrl: betterAuthValues.databaseUrl!,
       publicOrigin: betterAuthValues.publicOrigin!,
-      oidcIssuer: betterAuthValues.oidcIssuer!,
-      oidcClientId: betterAuthValues.oidcClientId!,
-      oidcClientSecret: betterAuthValues.oidcClientSecret!,
+      ...betterAuthOidcSettings,
       authSecret: betterAuthValues.authSecret!,
       oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
       oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
