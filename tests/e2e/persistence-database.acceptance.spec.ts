@@ -1565,7 +1565,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
 
-  const editor = page.getByRole("textbox", { name: "本文", exact: true });
+  const editor = manuscriptEditor(page);
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expectServerSaved(page);
@@ -1639,7 +1639,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const otherDocument = otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
-  const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
+  const otherEditor = manuscriptEditor(otherPage);
   await expect(otherEditor).toBeVisible();
   await expect(otherEditor).not.toContainText(firstDraft);
 
@@ -1669,7 +1669,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   await expect(otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") })).toBeVisible();
   await otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") }).click();
-  const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
+  const recoveredEditor = manuscriptEditor(otherPage);
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expectServerSaved(otherPage);
   await otherPage.close();

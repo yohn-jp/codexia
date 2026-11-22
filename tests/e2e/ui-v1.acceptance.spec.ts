@@ -714,7 +714,7 @@ test("desktop mode switch stays visible and operable at 320 CSS pixels", async (
   expect(pointerBox).not.toBeNull();
   await page.mouse.click(pointerBox!.x + pointerBox!.width / 2, pointerBox!.y + pointerBox!.height / 2);
   await expect(page).toHaveURL(/\/mobile\//u);
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+  await expect(editor(page)).toContainText("最初の本文。");
 
   await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
   for (let attempt = 0; attempt < 24; attempt += 1) {
@@ -733,7 +733,7 @@ test("desktop mode switch stays visible and operable at 320 CSS pixels", async (
   expect(focusState.right).toBeLessThanOrEqual(320);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/mobile\//u);
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+  await expect(editor(page)).toContainText("最初の本文。");
 });
 
 test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
@@ -897,11 +897,16 @@ test("UX canon puts Japanese prose before optional chrome at every shell width",
 });
 
 test("UX canon preserves focus and recovery when journal storage fails and returns", async ({ page }) => {
-  const { scene } = await createWritingFixture(page); await denyWrites(page, true);
+  const { project, scene } = await createWritingFixture(page); await denyWrites(page, true);
   const text = "保存領域が戻るまで失わない原稿。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
   await denyWrites(page, false); await editor(page).press("End"); await editor(page).press("!");
-  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || (await page.locator(".pg-save-state summary").textContent()) === "作品に保存済み").toBeTruthy();
+  const expectedMarkdown = text + "!";
+  await expect.poll(async () => {
+    const drafts = await readPersistenceDrafts(page);
+    if (drafts.some(draft => draft.documentId === scene.id && draft.markdown === expectedMarkdown)) return true;
+    return await persistedMarkdown(page, project.id, scene.id) === expectedMarkdown;
+  }).toBe(true);
   await expect(editor(page)).toContainText(text);
 });
 

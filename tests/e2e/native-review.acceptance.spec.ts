@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createWritingFixture, expectDeviceDraft } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, manuscriptEditor } from "./postgres-fixture";
 
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
@@ -88,7 +88,7 @@ for (const mode of ["desktop", "mobile"] as const) {
       if (route.request().method() === "PATCH") await route.abort();
       else await route.continue();
     });
-    const editor = page.getByRole("textbox", { name: "本文", exact: true });
+    const editor = manuscriptEditor(page);
     const draft = "提案レビュー中も保持する未保存の原稿😀";
     await editor.fill(draft);
     await expectDeviceDraft(page);

@@ -1,97 +1,62 @@
-import { expect, test, type Page } from "@playwright/test";
-import { spawn } from "node:child_process";
+import { expect, test as base, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { createServer } from "node:net";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { authToken, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
 const INITIAL_SCENE_TWO = "# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n";
 
-async function startMobileTransitionFixture(): Promise<{ url: string; stop(): Promise<void> }> {
-  const configuredPort = process.env.CODEXIA_MOBILE_TRANSITION_PORT;
-  const port = configuredPort ? Number.parseInt(configuredPort, 10) : await findAvailablePort();
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("Mobile transition fixture port must be valid");
-  const url = `http://127.0.0.1:${port}`;
-  const server = spawn(resolve("app/node_modules/.bin/vite"), [
-    resolve("tests/e2e/mobile-transition-fixture"),
-    "--config", resolve("tests/e2e/mobile-transition-fixture/vite.config.mjs"),
-    "--host", "127.0.0.1", "--port", String(port), "--strictPort",
-  ], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  server.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  server.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-
-  try {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 30_000) {
-      if (server.exitCode !== null) throw new Error(`Mobile transition Vite fixture exited early: ${output}`);
-      try {
-        const response = await fetch(url);
-        if (response.ok) {
-          return {
-            url,
-            async stop() {
-              if (server.exitCode !== null) return;
-              const exited = new Promise<void>((resolveExit) => server.once("exit", () => resolveExit()));
-              server.kill("SIGTERM");
-              await Promise.race([exited, new Promise<void>((resolveExit) => setTimeout(resolveExit, 5_000))]);
-            },
-          };
-        }
-      } catch {
-        // The Vite server is still starting.
-      }
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+// Only the Vite server is shared. Each test still gets its own browser context and journal.
+const test = base.extend<{}, { transitionURL: string }>({
+  transitionURL: [async ({}, use) => {
+    const configuredPort = process.env.CODEXIA_MOBILE_TRANSITION_PORT;
+    const port = configuredPort ? Number(configuredPort) : 0;
+    if (configuredPort && (!Number.isInteger(port) || port < 1 || port > 65_535)) {
+      throw new Error("Mobile transition fixture port must be valid");
     }
-    throw new Error(`Timed out waiting for the mobile transition Vite fixture: ${output}`);
-  } catch (error) {
-    server.kill("SIGTERM");
-    throw error;
-  }
-}
+    const requireFromApp = createRequire(resolve("app/package.json"));
+    const { createServer } = await import(pathToFileURL(requireFromApp.resolve("vite")).href);
+    const server = await createServer({
+      configFile: resolve("tests/e2e/mobile-transition-fixture/vite.config.mjs"),
+      server: { host: "127.0.0.1", port, strictPort: true, hmr: false },
+    });
+    try {
+      await server.listen();
+      const address = server.httpServer?.address();
+      if (!address || typeof address === "string") throw new Error("Vite did not expose a TCP listener");
+      await use(`http://127.0.0.1:${address.port}`);
+    } finally {
+      await server.close();
+    }
+  }, { scope: "worker" }],
+});
 
-async function findAvailablePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolveListen, reject) => {
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", resolveListen);
-  });
-  const address = probe.address();
-  if (!address || typeof address === "string") throw new Error("Could not allocate a mobile transition fixture port.");
-  const { port } = address;
-  await new Promise<void>((resolveClose, reject) => probe.close((error) => error ? reject(error) : resolveClose()));
-  return port;
-}
-
-async function openMobileTransitionFixture(page: Page): Promise<{
-  server: { url: string; stop(): Promise<void> };
+async function openMobileTransitionFixture(page: Page, url: string): Promise<{
   navigation: ReturnType<Page["getByRole"]>;
   editor: ReturnType<Page["getByTestId"]>;
 }> {
-  const fixture = await startMobileTransitionFixture();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(fixture.url);
+  await page.goto(url);
   const navigation = page.getByRole("navigation", { name: "モバイル画面" });
   const editor = page.getByTestId("fixture-editor");
   await expect(navigation).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__mobileTransitionFixture?.journalReady ?? false)).toBe(true);
   await expect(page.locator('[data-workspace-panel="editor"]')).toBeVisible();
-  return { server: fixture, navigation, editor };
+  return { navigation, editor };
 }
 
-async function openDesktopTabsFixture(page: Page): Promise<{
-  server: { url: string; stop(): Promise<void> };
+async function openDesktopTabsFixture(page: Page, url: string): Promise<{
   tabs: ReturnType<Page["getByRole"]>;
 }> {
-  const fixture = await startMobileTransitionFixture();
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`${fixture.url}/desktop-tabs`);
+  await page.goto(`${url}/desktop-tabs`);
   const tabs = page.getByRole("tablist", { name: "パネル" });
   await expect(tabs).toBeVisible();
   await expect(tabs.getByRole("tab")).toHaveCount(2);
-  return { server: fixture, tabs };
+  return { tabs };
 }
 
 type DesktopTabsFixtureWindow = Window & {
@@ -115,78 +80,68 @@ async function desktopTabsGuardCalls(page: Page): Promise<number> {
   return page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.guardCalls ?? -1);
 }
 
-test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page }) => {
-  const fixture = await openDesktopTabsFixture(page);
-  try {
-    const { tabs } = fixture;
-    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
-    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
-    const panel = page.getByRole("tabpanel");
+test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page, transitionURL }) => {
+  const { tabs } = await openDesktopTabsFixture(page, transitionURL);
+  const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+  const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+  const panel = page.getByRole("tabpanel");
 
-    await expect(inspector).toHaveAttribute("aria-selected", "true");
-    await expect(inspector).toHaveJSProperty("tabIndex", 0);
-    await expect(outline).toHaveJSProperty("tabIndex", -1);
-    await expect(tabs.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
-    await expect(tabs.locator("[aria-controls]")).toHaveCount(0);
-    await expect(panel).toHaveAttribute("aria-labelledby", await inspector.getAttribute("id") ?? "");
-    await expect.poll(() => panel.evaluate((element) => {
-      const tab = element.ownerDocument.getElementById(element.getAttribute("aria-labelledby") ?? "");
-      return tab?.getAttribute("role") === "tab" && tab.getAttribute("aria-selected") === "true";
-    })).toBe(true);
+  await expect(inspector).toHaveAttribute("aria-selected", "true");
+  await expect(inspector).toHaveJSProperty("tabIndex", 0);
+  await expect(outline).toHaveJSProperty("tabIndex", -1);
+  await expect(tabs.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
+  await expect(tabs.locator("[aria-controls]")).toHaveCount(0);
+  await expect(panel).toHaveAttribute("aria-labelledby", await inspector.getAttribute("id") ?? "");
+  await expect.poll(() => panel.evaluate((element) => {
+    const tab = element.ownerDocument.getElementById(element.getAttribute("aria-labelledby") ?? "");
+    return tab?.getAttribute("role") === "tab" && tab.getAttribute("aria-selected") === "true";
+  })).toBe(true);
 
-    await inspector.focus();
-    await page.keyboard.press("Tab");
-    await expect(panel).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
-    await expect(inspector).toBeFocused();
+  await inspector.focus();
+  await page.keyboard.press("Tab");
+  await expect(panel).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(inspector).toBeFocused();
 
-    await page.keyboard.press("ArrowRight");
-    await expect(outline).toHaveAttribute("aria-selected", "true");
-    await expect(outline).toHaveJSProperty("tabIndex", 0);
-    await expect(outline).toBeFocused();
-    await expect(page.getByTestId("fixture-outline")).toBeVisible();
-    await expect(page.getByTestId("fixture-inspector")).toHaveCount(0);
+  await page.keyboard.press("ArrowRight");
+  await expect(outline).toHaveAttribute("aria-selected", "true");
+  await expect(outline).toHaveJSProperty("tabIndex", 0);
+  await expect(outline).toBeFocused();
+  await expect(page.getByTestId("fixture-outline")).toBeVisible();
+  await expect(page.getByTestId("fixture-inspector")).toHaveCount(0);
 
-    await page.keyboard.press("End");
-    await expect(inspector).toHaveAttribute("aria-selected", "true");
-    await expect(inspector).toBeFocused();
-    await page.keyboard.press("Home");
-    await expect(outline).toHaveAttribute("aria-selected", "true");
-    await expect(outline).toBeFocused();
-  } finally {
-    await fixture.server.stop();
-  }
+  await page.keyboard.press("End");
+  await expect(inspector).toHaveAttribute("aria-selected", "true");
+  await expect(inspector).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(outline).toHaveAttribute("aria-selected", "true");
+  await expect(outline).toBeFocused();
 });
 
-test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page }) => {
-  const fixture = await openDesktopTabsFixture(page);
-  try {
-    const { tabs } = fixture;
-    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
-    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page, transitionURL }) => {
+  const { tabs } = await openDesktopTabsFixture(page, transitionURL);
+  const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+  const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
 
-    await armDesktopTabsGuard(page, [false]);
-    await inspector.focus();
-    await page.keyboard.press("ArrowLeft");
-    await expect(inspector).toHaveAttribute("aria-selected", "true");
-    await expect(inspector).toBeFocused();
-    await expect(outline).toHaveJSProperty("tabIndex", -1);
-    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+  await armDesktopTabsGuard(page, [false]);
+  await inspector.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(inspector).toHaveAttribute("aria-selected", "true");
+  await expect(inspector).toBeFocused();
+  await expect(outline).toHaveJSProperty("tabIndex", -1);
+  await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
 
-    await armDesktopTabsGuard(page, ["delayed"]);
-    await page.keyboard.press("ArrowLeft");
-    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
-    const obsoleteTabId = await outline.getAttribute("id");
-    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.changeScope("new-scope"));
-    await expect(page.getByTestId("desktop-tabs-scope")).toHaveText("new-scope");
-    await expect(tabs).toHaveCount(0);
-    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.releaseGuard());
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await expect(page.getByRole("tablist", { name: "パネル" })).toHaveCount(0);
-    expect(await page.evaluate(() => document.activeElement?.id ?? "")).not.toBe(obsoleteTabId);
-  } finally {
-    await fixture.server.stop();
-  }
+  await armDesktopTabsGuard(page, ["delayed"]);
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+  const obsoleteTabId = await outline.getAttribute("id");
+  await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.changeScope("new-scope"));
+  await expect(page.getByTestId("desktop-tabs-scope")).toHaveText("new-scope");
+  await expect(tabs).toHaveCount(0);
+  await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.releaseGuard());
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByRole("tablist", { name: "パネル" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.activeElement?.id ?? "")).not.toBe(obsoleteTabId);
 });
 
 async function armMobileTransitionFixture(page: Page, outcomes: Array<boolean | "delayed">): Promise<void> {
@@ -212,117 +167,102 @@ async function mobileTransitionMetrics(page: Page): Promise<{
   return metrics;
 }
 
-test("mobile route navigation commits the URL, panel and focus as one guarded transition", async ({ page }) => {
-  const fixture = await openMobileTransitionFixture(page);
-  try {
-    const { navigation, editor } = fixture;
-    await editor.focus();
-    await expect(editor).toBeFocused();
-    await armMobileTransitionFixture(page, [true, false]);
+test("mobile route navigation commits the URL, panel and focus as one guarded transition", async ({ page, transitionURL }) => {
+  const { navigation, editor } = await openMobileTransitionFixture(page, transitionURL);
+  await editor.focus();
+  await expect(editor).toBeFocused();
+  await armMobileTransitionFixture(page, [true, false]);
 
-    await navigation.getByRole("button", { name: "作品", exact: true }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("library");
-    await expect(page.locator(".mobile-shell-workspace-view")).toHaveAttribute("data-active-view", "library");
-    const metrics = await mobileTransitionMetrics(page);
-    console.log(`mobile transition fixture metrics ${JSON.stringify(metrics)}`);
+  await navigation.getByRole("button", { name: "作品", exact: true }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("library");
+  await expect(page.locator(".mobile-shell-workspace-view")).toHaveAttribute("data-active-view", "library");
+  const metrics = await mobileTransitionMetrics(page);
+  console.log(`mobile transition fixture metrics ${JSON.stringify(metrics)}`);
 
-    await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
-    await expect(editor).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
-      .toBe("outline");
-    const focusedPanel = page.locator('[data-workspace-panel="outline"]');
-    await expect(focusedPanel).toBeFocused();
-    const focusRing = await focusedPanel.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineOffset: style.outlineOffset };
-    });
-    expect(focusRing).toEqual({ outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
-    expect(metrics).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 1 });
-  } finally {
-    await fixture.server.stop();
-  }
+  await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
+  await expect(editor).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
+    .toBe("outline");
+  const focusedPanel = page.locator('[data-workspace-panel="outline"]');
+  await expect(focusedPanel).toBeFocused();
+  const focusRing = await focusedPanel.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineOffset: style.outlineOffset };
+  });
+  expect(focusRing).toEqual({ outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
+  expect(metrics).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 1 });
 });
 
-test("mobile denials retain the current route and panel, and app back is guarded with the target panel", async ({ page }) => {
-  const fixture = await openMobileTransitionFixture(page);
-  try {
-    const { navigation, editor } = fixture;
-    const editorPanel = page.locator('[data-workspace-panel="editor"]');
-    const outlinePanel = page.locator('[data-workspace-panel="outline"]');
-    await editor.focus();
-    await armMobileTransitionFixture(page, [false]);
-    await navigation.getByRole("button", { name: "作品", exact: true }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    await expect(editorPanel).toBeVisible();
-    await expect(navigation.getByRole("button", { name: "作品", exact: true })).toBeFocused();
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
+test("mobile denials retain the current route and panel, and app back is guarded with the target panel", async ({ page, transitionURL }) => {
+  const { navigation, editor } = await openMobileTransitionFixture(page, transitionURL);
+  const editorPanel = page.locator('[data-workspace-panel="editor"]');
+  const outlinePanel = page.locator('[data-workspace-panel="outline"]');
+  await editor.focus();
+  await armMobileTransitionFixture(page, [false]);
+  await navigation.getByRole("button", { name: "作品", exact: true }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("writing");
+  await expect(editorPanel).toBeVisible();
+  await expect(navigation.getByRole("button", { name: "作品", exact: true })).toBeFocused();
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
 
-    await armMobileTransitionFixture(page, [true]);
-    await navigation.getByRole("button", { name: "作品", exact: true }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("library");
-    await expect(outlinePanel).toBeVisible();
-    const historyLength = await page.evaluate(() => history.length);
+  await armMobileTransitionFixture(page, [true]);
+  await navigation.getByRole("button", { name: "作品", exact: true }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("library");
+  await expect(outlinePanel).toBeVisible();
+  const historyLength = await page.evaluate(() => history.length);
 
-    await armMobileTransitionFixture(page, [true]);
-    await page.getByRole("button", { name: "前の画面に戻る" }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    await expect(editorPanel).toBeVisible();
-    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
-      .toBe("editor");
-    expect(await page.evaluate(() => history.length)).toBe(historyLength);
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
+  await armMobileTransitionFixture(page, [true]);
+  await page.getByRole("button", { name: "前の画面に戻る" }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("writing");
+  await expect(editorPanel).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
+    .toBe("editor");
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
 
-    await armMobileTransitionFixture(page, [true]);
-    await page.getByRole("button", { name: "設定を開く" }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("settings");
-    const panelTabs = page.getByRole("tablist", { name: "パネル" });
-    await panelTabs.getByRole("tab", { name: "Outline", exact: true }).click();
-    await expect(outlinePanel).toBeVisible();
-    const sameViewHistoryLength = await page.evaluate(() => history.length);
-    await armMobileTransitionFixture(page, [true]);
-    await navigation.getByRole("button", { name: "書く", exact: true }).click();
-    await expect(editorPanel).toBeVisible();
-    await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    expect(await page.evaluate(() => history.length)).toBe(sameViewHistoryLength + 1);
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
-  } finally {
-    await fixture.server.stop();
-  }
+  await armMobileTransitionFixture(page, [true]);
+  await page.getByRole("button", { name: "設定を開く" }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("settings");
+  const panelTabs = page.getByRole("tablist", { name: "パネル" });
+  await panelTabs.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(outlinePanel).toBeVisible();
+  const sameViewHistoryLength = await page.evaluate(() => history.length);
+  await armMobileTransitionFixture(page, [true]);
+  await navigation.getByRole("button", { name: "書く", exact: true }).click();
+  await expect(editorPanel).toBeVisible();
+  await expect(page.getByTestId("fixture-route")).toHaveText("writing");
+  expect(await page.evaluate(() => history.length)).toBe(sameViewHistoryLength + 1);
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
 });
 
-test("mobile browser back and forward synchronize guarded routes and workspace panels", async ({ page }) => {
-  const fixture = await openMobileTransitionFixture(page);
-  try {
-    const { navigation } = fixture;
-    const editorPanel = page.locator('[data-workspace-panel="editor"]');
-    const outlinePanel = page.locator('[data-workspace-panel="outline"]');
-    await armMobileTransitionFixture(page, [true]);
-    await navigation.getByRole("button", { name: "作品", exact: true }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("library");
-    await expect(outlinePanel).toBeVisible();
+test("mobile browser back and forward synchronize guarded routes and workspace panels", async ({ page, transitionURL }) => {
+  const { navigation } = await openMobileTransitionFixture(page, transitionURL);
+  const editorPanel = page.locator('[data-workspace-panel="editor"]');
+  const outlinePanel = page.locator('[data-workspace-panel="outline"]');
+  await armMobileTransitionFixture(page, [true]);
+  await navigation.getByRole("button", { name: "作品", exact: true }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("library");
+  await expect(outlinePanel).toBeVisible();
 
-    await armMobileTransitionFixture(page, [true]);
-    await page.goBack();
-    await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    await expect(editorPanel).toBeVisible();
-    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
-      .toBe("editor");
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
+  await armMobileTransitionFixture(page, [true]);
+  await page.goBack();
+  await expect(page.getByTestId("fixture-route")).toHaveText("writing");
+  await expect(editorPanel).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
+    .toBe("editor");
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
 
-    await armMobileTransitionFixture(page, [true]);
-    await page.goForward();
-    await expect(page.getByTestId("fixture-route")).toHaveText("library");
-    await expect(outlinePanel).toBeVisible();
+  await armMobileTransitionFixture(page, [true]);
+  await page.goForward();
+  await expect(page.getByTestId("fixture-route")).toHaveText("library");
+  await expect(outlinePanel).toBeVisible();
 
-    await armMobileTransitionFixture(page, [false, true]);
-    await page.goBack();
-    await expect(page.getByTestId("fixture-route")).toHaveText("library");
-    await expect(outlinePanel).toBeVisible();
-    await expect(editorPanel).toHaveCount(0);
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
-  } finally {
-    await fixture.server.stop();
-  }
+  await armMobileTransitionFixture(page, [false, true]);
+  await page.goBack();
+  await expect(page.getByTestId("fixture-route")).toHaveText("library");
+  await expect(outlinePanel).toBeVisible();
+  await expect(editorPanel).toHaveCount(0);
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
 });
 
 test("a newer browser history selection supersedes a pending guarded popstate", async ({ page }) => {
@@ -386,69 +326,59 @@ test("a newer browser history selection supersedes a pending guarded popstate", 
   await expect(page.getByRole("heading", { name: second.document.title, exact: true })).toBeVisible();
 });
 
-test("mobile late panel requests are fenced by route and author-scope changes", async ({ page }) => {
-  const fixture = await openMobileTransitionFixture(page);
-  try {
-    const { navigation, editor } = fixture;
-    const editorPanel = page.locator('[data-workspace-panel="editor"]');
-    await editor.focus();
-    await armMobileTransitionFixture(page, ["delayed", true]);
-    await navigation.getByRole("button", { name: "作品", exact: true }).click();
-    await expect.poll(() => page.evaluate(() => window.__mobileTransitionFixture?.release !== undefined)).toBe(true);
-    await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    await expect(editorPanel).toBeVisible();
-    await expect(editor).toBeAttached();
+test("mobile late panel requests are fenced by route and author-scope changes", async ({ page, transitionURL }) => {
+  const { navigation, editor } = await openMobileTransitionFixture(page, transitionURL);
+  const editorPanel = page.locator('[data-workspace-panel="editor"]');
+  await editor.focus();
+  await armMobileTransitionFixture(page, ["delayed", true]);
+  await navigation.getByRole("button", { name: "作品", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__mobileTransitionFixture?.release !== undefined)).toBe(true);
+  await expect(page.getByTestId("fixture-route")).toHaveText("writing");
+  await expect(editorPanel).toBeVisible();
+  await expect(editor).toBeAttached();
 
-    await page.evaluate(() => window.__mobileTransitionFixture?.changeRoute("tools"));
-    await expect(page.getByTestId("fixture-route")).toHaveText("tools");
-    await page.evaluate(() => window.__mobileTransitionFixture?.changeScope("fixture-author-next"));
-    await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
-    await page.evaluate(() => window.__mobileTransitionFixture?.releaseGuard());
+  await page.evaluate(() => window.__mobileTransitionFixture?.changeRoute("tools"));
+  await expect(page.getByTestId("fixture-route")).toHaveText("tools");
+  await page.evaluate(() => window.__mobileTransitionFixture?.changeScope("fixture-author-next"));
+  await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
+  await page.evaluate(() => window.__mobileTransitionFixture?.releaseGuard());
 
-    await expect(page.getByTestId("fixture-route")).toHaveText("tools");
-    await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
-    await expect.poll(async () => (await mobileTransitionMetrics(page)).guardCalls).toBe(2);
-    await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
-    await expect(editorPanel).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
-      .toBe("review");
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
-  } finally {
-    await fixture.server.stop();
-  }
+  await expect(page.getByTestId("fixture-route")).toHaveText("tools");
+  await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
+  await expect.poll(async () => (await mobileTransitionMetrics(page)).guardCalls).toBe(2);
+  await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
+  await expect(editorPanel).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
+    .toBe("review");
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
 });
 
-test("mobile same-view panel requests cannot suppress a newer route and scope selection", async ({ page }) => {
-  const fixture = await openMobileTransitionFixture(page);
-  try {
-    const { navigation } = fixture;
-    const editorPanel = page.locator('[data-workspace-panel="editor"]');
-    await page.getByRole("button", { name: "設定を開く" }).click();
-    await expect(page.getByTestId("fixture-route")).toHaveText("settings");
-    await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "Outline", exact: true }).click();
-    await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
+test("mobile same-view panel requests cannot suppress a newer route and scope selection", async ({ page, transitionURL }) => {
+  const { navigation } = await openMobileTransitionFixture(page, transitionURL);
+  const editorPanel = page.locator('[data-workspace-panel="editor"]');
+  await page.getByRole("button", { name: "設定を開く" }).click();
+  await expect(page.getByTestId("fixture-route")).toHaveText("settings");
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
 
-    await armMobileTransitionFixture(page, ["delayed"]);
-    await navigation.getByRole("button", { name: "書く", exact: true }).click();
-    await expect.poll(() => page.evaluate(() => window.__mobileTransitionFixture?.release !== undefined)).toBe(true);
+  await armMobileTransitionFixture(page, ["delayed"]);
+  await navigation.getByRole("button", { name: "書く", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__mobileTransitionFixture?.release !== undefined)).toBe(true);
 
-    await page.evaluate(() => window.__mobileTransitionFixture?.changeRoute("tools"));
-    await expect(page.getByTestId("fixture-route")).toHaveText("tools");
-    await page.evaluate(() => window.__mobileTransitionFixture?.changeScope("fixture-author-next"));
-    await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
-    await page.evaluate(() => window.__mobileTransitionFixture?.releaseGuard());
+  await page.evaluate(() => window.__mobileTransitionFixture?.changeRoute("tools"));
+  await expect(page.getByTestId("fixture-route")).toHaveText("tools");
+  await page.evaluate(() => window.__mobileTransitionFixture?.changeScope("fixture-author-next"));
+  await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
+  await page.evaluate(() => window.__mobileTransitionFixture?.releaseGuard());
 
-    await expect(page.getByTestId("fixture-route")).toHaveText("tools");
-    await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
-    await expect.poll(async () => (await mobileTransitionMetrics(page)).guardCalls).toBe(2);
-    await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
-    await expect(editorPanel).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
-      .toBe("review");
-    expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
-  } finally {
-    await fixture.server.stop();
-  }
+  await expect(page.getByTestId("fixture-route")).toHaveText("tools");
+  await expect(page.getByTestId("fixture-scope")).toHaveText("fixture-author-next");
+  await expect.poll(async () => (await mobileTransitionMetrics(page)).guardCalls).toBe(2);
+  await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
+  await expect(editorPanel).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
+    .toBe("review");
+  expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
 });
 
 interface DraftRecord {
@@ -575,12 +505,12 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   fixture.scene = scene!;
   await expect(page.getByRole("heading", { name: scene!.document.title, exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toBeVisible();
+  await expect(manuscriptEditor(page)).toBeVisible();
   // Mobile mounts only the active panel; its project select is not present on
   // the writing tab. Verify the displayed canonical project in both shells.
   if (mode === "desktop") await expect(page.getByLabel("作品", { exact: true })).toHaveValue(fixture.project.id);
   await expect(page.locator(".pg-editor-heading .eyebrow")).toContainText(fixture.project.title);
-  await expect.poll(async () => page.getByRole("textbox", { name: "本文", exact: true }).locator(".cm-line")
+  await expect.poll(async () => manuscriptEditor(page).locator(".cm-line")
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
     .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
   await expectNoUnsavedDeviceChanges(page);
@@ -1569,7 +1499,7 @@ test("desktop activity stays selected on denied navigation and narrow appearance
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page, "desktop");
   await openFixtureScene(page, "desktop");
-  const editor = page.getByRole("textbox", { name: "本文", exact: true });
+  const editor = manuscriptEditor(page);
   await editor.click();
   const navigation = page.getByRole("toolbar", { name: "ワークスペース配置" });
   const writing = navigation.getByRole("button", { name: "執筆", exact: true });

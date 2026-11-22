@@ -190,17 +190,37 @@ test('does not fall back to an older successful main run when the latest exact-b
   }), /Latest exact-base main run failed/);
 });
 
-test('resolves an omitted task only when its exact-base main report has a trusted execution closure', async () => {
+test('coverage and omitted tasks share one exact-base evidence read per resolution', async t => {
   const evidence = mainEvidence();
-  const current = { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
-    head_sha: candidateSha, repository: { id: 9 } };
-  const receipts = await resolveExactMainTaskProofs({ plan: createVerificationPlan({ files: ['docs/README.md'],
-    event: 'pull_request', sha: candidateSha, base: sourceSha }), current, repository: 'yohn-jp/codexia', token: 'test-token',
-  tasks: ['unit-contracts', 'typecheck-foundations'], request: mockRequest(evidence),
-  readArtifact: async (artifact, filename) => filename === 'ci-plan.json' ? evidence.plan : evidence.reports.get(artifact.name) });
+  const request = t.mock.fn(mockRequest(evidence));
+  const readArtifact = t.mock.fn(async (artifact, filename) =>
+    filename === 'ci-plan.json' ? evidence.plan : evidence.reports.get(artifact.name));
+  const options = {
+    plan: createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha }),
+    current: { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request', head_sha: candidateSha, repository: { id: 9 } },
+    repository: 'yohn-jp/codexia', token: 'test-token', tasks: ['unit-contracts', 'typecheck-foundations'], request, readArtifact,
+  };
+  const receipts = await resolveExactMainTaskProofs(options);
   assert.equal(receipts.coverage.task, 'coverage');
   assert.equal(receipts['unit-contracts'].task, 'unit-contracts');
   assert.equal(receipts['unit-contracts'].workflowJob, 'unit');
   assert.equal(receipts['unit-contracts'].artifactName, 'ci-evidence-unit-core');
   assert.equal(receipts['typecheck-foundations'].artifactName, 'ci-evidence-types-sources');
+  const endpoints = request.mock.calls.map(call => call.arguments[0]);
+  assert.equal(new Set(endpoints).size, endpoints.length, 'Each inventory page is requested once');
+  assert.deepEqual(readArtifact.mock.calls.map(call => call.arguments[0].id).sort((a, b) => a - b),
+    evidence.artifacts.map(artifact => artifact.id).sort((a, b) => a - b));
+
+  const discardProof = (group, task) => {
+    const report = evidence.reports.get('ci-evidence-' + group);
+    delete report.results.find(item => item.task === task).inputProof;
+    delete report.producerInventory.taskInvocations.find(item => item.task === task).inputProof;
+  };
+  discardProof('types-tests', 'coverage');
+  const next = await resolveExactMainTaskProofs(options);
+  assert.equal(next.coverage, undefined, 'Selected coverage executes when its own proof is unavailable');
+  assert.deepEqual(next['unit-contracts'], receipts['unit-contracts']);
+  await assert.rejects(resolveExactMainCoverageProof(options), /proof/i);
+  discardProof('unit-core', 'unit-contracts');
+  await assert.rejects(resolveExactMainTaskProofs(options), /proof/i);
 });
