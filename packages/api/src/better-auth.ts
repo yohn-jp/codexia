@@ -239,7 +239,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
           accountSubject({ tokens }) {
             // Better Auth verifies the signature, audience, expiry, and nonce before calling this resolver.
             const claims = tokens.idToken && decodeJwt(tokens.idToken);
-            if (!claims || claims.iss !== oidcIssuer || claims.sub !== bootstrap.ownerOidcSubject) {
+            if (!claims || claims.iss !== config.oidcIssuer || claims.sub !== bootstrap.ownerOidcSubject) {
               throw new Error("OIDC identity is outside the approved bootstrap account");
             }
             return claims.sub;

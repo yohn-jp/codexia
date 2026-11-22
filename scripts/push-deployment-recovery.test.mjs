@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -202,14 +203,19 @@ test('recovery refuses a release record that disagrees with its prior Quadlet', 
   }
 });
 
-test('recovery retains the prior Better Auth mode and settings identity', () => {
+function betterAuthRecoveryFixture() {
   const target = fixture();
-  const settingsSha256 = 'c'.repeat(64);
+  const settings = 'CODEXIA_PUBLIC_ORIGIN=https://codexia.example.test\n';
+  const settingsSha256 = createHash('sha256').update(settings).digest('hex');
+  const settingsDirectory = path.join(target.root, '.config', 'codexia-auth');
+  mkdirSync(settingsDirectory, { recursive: true });
+  const settingsFile = path.join(settingsDirectory, 'runtime-' + settingsSha256 + '.env');
+  writeFileSync(settingsFile, settings, { mode: 0o600 });
   const previousUnit = [
     `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}`,
     'Environment=CODEXIA_AUTH_MODE=better-auth',
     `Environment=CODEXIA_AUTH_SETTINGS_SHA256=${settingsSha256}`,
-    'EnvironmentFile=/home/codexia/.config/codexia-auth/runtime.env',
+    'EnvironmentFile=' + settingsFile,
     '',
   ].join('\n');
   writeFileSync(path.join(target.stateDir, 'rollback-api.container'), previousUnit);
@@ -218,6 +224,11 @@ test('recovery retains the prior Better Auth mode and settings identity', () => 
     authMode: 'better-auth',
     authSettingsSha256: settingsSha256,
   }) + '\n');
+  return { target, previousUnit, settingsSha256, settingsFile };
+}
+
+test('recovery retains the prior Better Auth mode and settings identity', () => {
+  const { target, previousUnit, settingsSha256 } = betterAuthRecoveryFixture();
   try {
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
@@ -227,6 +238,20 @@ test('recovery retains the prior Better Auth mode and settings identity', () => 
       authMode: 'better-auth',
       authSettingsSha256: settingsSha256,
     });
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('recovery rejects changed Better Auth settings before stopping services', () => {
+  const { target, settingsFile } = betterAuthRecoveryFixture();
+  try {
+    writeFileSync(settingsFile, 'CODEXIA_PUBLIC_ORIGIN=https://other.example.test\n');
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid deployment transaction or prior release snapshot/u);
+    assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
+    assert.equal(existsSync(target.logFile), false);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
