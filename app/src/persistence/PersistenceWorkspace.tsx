@@ -7,6 +7,8 @@ import { useRecentActivityResume } from "../resume/useRecentActivityResume";
 import { formatHandoffHint, loadWritingResume, loadReadingPage, mergeContinueCandidates } from "../resume/continueCandidates";
 import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } from "@codexia/contracts";
 import { availableModulePanels } from "../application/AvailableModulePanels";
+import { PersistenceSaveConflictJournalError, runPersistenceSaveProtocol, type PersistenceSaveRequest } from "../application/persistence-save-protocol";
+import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, resolvePersistenceSaveSuccess, type ActiveDocument as PersistenceActiveDocument } from "../application/persistence-save-state";
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
@@ -38,27 +40,12 @@ import { RevisionDifference } from "./RevisionDifference";
 import { DocumentOutlineTree, type OutlineTreeDocument } from "./DocumentOutlineTree";
 import { extractMarkdownHeadings } from "./markdownOutline";
 
+type ActiveDocument = PersistenceActiveDocument<DocumentEvidenceState>;
+
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
   documentId: string;
   positionConfirmed: boolean;
-}
-
-interface ActiveDocument {
-  document: PersistenceDocument;
-  revision: DocumentRevision;
-  baseRevisionId: string;
-  baseMarkdown: string;
-  markdown: string;
-  textChanges?: PersistenceDraftTextChanges;
-  generation: number;
-  dirty: boolean;
-  recovery: "pending" | "stored" | "failed" | "other-tab";
-  save: "idle" | "saving" | "saved" | "failed";
-  error: string;
-  remoteConflict: DocumentRevision | null;
-  evidence: DocumentEvidenceState;
-  evidenceLoadKey: number;
 }
 
 type ContinuePosition = ({ kind: "writing" } & ManuscriptPosition) | { kind: "reading"; pageIndex: number };
@@ -262,17 +249,7 @@ function outlineAncestors(items: readonly OutlineDocument[], id: string, ancesto
   return null;
 }
 
-interface PendingSave {
-  projectId: string;
-  documentId: string;
-  baseRevisionId: string;
-  baseMarkdown: string;
-  markdown: string;
-  changes: TextChange[];
-  generation: number;
-  idempotencyKey: string;
-  clientId: string;
-}
+interface PendingSave extends PersistenceSaveRequest {}
 
 /** Presentation only: revision, journal and the pending save remain authoritative. */
 function saveProtectionLabel(active: ActiveDocument, pendingSave: boolean): string {
@@ -1306,40 +1283,17 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     const inScope = (value: ActiveDocument | null): boolean => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
     if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
     try {
-      const bound = await currentJournal.bindPersistenceDraftSave(pending.projectId, pending.documentId, authorScope, {
-        baseRevisionId: pending.baseRevisionId,
-        baseMarkdown: pending.baseMarkdown,
-        markdown: pending.markdown,
-        changes: pending.changes,
-        generation: pending.generation,
-        idempotencyKey: pending.idempotencyKey,
-        clientId: pending.clientId,
+      const protocol = await runPersistenceSaveProtocol({
+        authorScope,
+        pending,
+        reconcileReplay: Boolean(existingPending),
+        journal: currentJournal,
+        save: editorAdapter.save ?? (async () => undefined),
+        readHead: (projectId, documentId, signal) => api.persistenceDocument(projectId, documentId, signal),
+        signal: controller.signal,
       });
-      if (!bound) throw new Error("送信する保存操作をIndexedDB回復Journalへ確定できませんでした。");
-      const result = await editorAdapter.save?.({
-        projectId: pending.projectId,
-        documentId: pending.documentId,
-        revisionId: pending.baseRevisionId,
-        markdown: pending.baseMarkdown,
-      }, {
-        baseMarkdown: pending.baseMarkdown,
-        markdown: pending.markdown,
-        changes: pending.changes,
-        idempotencyKey: pending.idempotencyKey,
-        clientId: pending.clientId,
-      }, controller.signal);
-      if (!result || result.markdown !== pending.markdown || !result.document || !result.revision || result.document.projectId !== pending.projectId || result.document.id !== pending.documentId || result.revision.projectId !== pending.projectId || result.revision.documentId !== pending.documentId || result.document.headRevisionId !== result.revision.id) {
-        throw new Error("PostgreSQLの保存結果を確認できませんでした。");
-      }
+      const { acknowledgedDocument, acknowledgedRevision, replayWasSuperseded, acknowledgement, remainingDraft: remaining } = protocol;
       if (controller.signal.aborted) return;
-      const replayHead = existingPending ? await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal) : undefined;
-      if (existingPending && (!replayHead || !replayHead.revision || replayHead.document.projectId !== pending.projectId || replayHead.document.id !== pending.documentId || replayHead.document.headRevisionId !== replayHead.revision.id)) {
-        throw new Error("再送した保存操作の最新Revisionを確認できませんでした。回復下書きは保持しています。");
-      }
-      const replayWasSuperseded = Boolean(replayHead?.revision && replayHead.revision.id !== result.revision.id);
-      const acknowledgedDocument = replayHead?.document ?? result.document;
-      const acknowledgedRevision = replayHead?.revision ?? result.revision;
-      const acknowledgement = await currentJournal.acknowledgePersistenceDraftSave(pending.projectId, pending.documentId, authorScope, pending, result.revision.id, !replayWasSuperseded);
       const removed = acknowledgement.acknowledged && !acknowledgement.draft;
       if (removed) {
         const ownershipKey = JSON.stringify([pending.projectId, pending.documentId]);
@@ -1348,49 +1302,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           ownedDraftsRef.current.delete(ownershipKey);
         }
       }
-      const remaining = acknowledgement.acknowledged ? acknowledgement.draft : await currentJournal.getPersistenceDraft(pending.projectId, pending.documentId, authorScope);
       pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
-      if (replayWasSuperseded) {
-        if (latest && inScope(latest) && replayHead?.revision) {
-          const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
-          if (!acknowledgement.acknowledged) {
-            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, recovery: "failed", save: "failed", error: "保存済みRevisionの照合を回復Journalへ反映できませんでした。下書きを保持して再確認してください。", remoteConflict: replayHead.revision });
-          } else if (!hasNewerText) {
-            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, textChanges: undefined, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
-          } else {
-            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, dirty: true, recovery: remaining ? "stored" : "pending", save: "failed", error: "保存操作の後にPostgreSQL上のRevisionが更新されました。回復Draftを保持し、比較してから適用してください。", remoteConflict: replayHead.revision });
-          }
-        } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
+      if (replayWasSuperseded && (!latest || !inScope(latest))) {
+        if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
           setResumeEpoch((value) => value + 1);
         }
         return;
       }
       if (latest && inScope(latest)) {
-        const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
-        const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation + 1 && remaining.markdown === latest.markdown && remaining.baseRevisionId === result.revision.id && remaining.baseMarkdown === pending.markdown;
-        const otherTab = Boolean(remaining && !ownNewerDraft);
-        if (otherTab) {
-          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, textChanges: undefined, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
-          return;
-        }
-        publishEditor({
-          ...latest,
-          document: acknowledgedDocument,
-          revision: acknowledgedRevision,
-          baseRevisionId: acknowledgedRevision.id,
-          baseMarkdown: pending.markdown,
-          textChanges: hasNewerText && latest.textChanges?.afterSaveKey === pending.idempotencyKey
-            ? { changes: latest.textChanges.changes } : undefined,
-          dirty: hasNewerText,
-          // A newer draft may already exist under the old base Revision at this generation.
-          // Advance the generation so IndexedDB can persist the rebased record before retrying.
-          generation: hasNewerText ? latest.generation + 1 : latest.generation,
-          recovery: hasNewerText ? "pending" : "stored",
-          save: hasNewerText ? "idle" : "saved",
-          error: "",
-          remoteConflict: null,
+        const decision = resolvePersistenceSaveSuccess({
+          current: latest, pending, acknowledgedDocument, acknowledgedRevision, replayWasSuperseded,
+          journalAcknowledged: acknowledgement.acknowledged, remainingDraft: remaining,
         });
+        if (decision.kind === "publish") publishEditor(decision.active);
       } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
         setResumeEpoch((value) => value + 1);
       } else if (latest?.dirty) {
@@ -1398,24 +1323,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       }
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 409) {
-        try {
-          await currentJournal.clearPersistenceDraftSave(pending.projectId, pending.documentId, authorScope, pending);
-        } catch (journalError) {
-          const latest = activeRef.current;
-          if (latest && inScope(latest)) publishEditor({ ...latest, recovery: "failed", save: "failed", error: journalError instanceof Error ? journalError.message : "確定的な保存競合を回復Journalへ反映できませんでした。" });
-          return;
-        }
+      if (error instanceof PersistenceSaveConflictJournalError) {
+        const latest = activeRef.current;
+        if (latest && inScope(latest)) publishEditor({ ...latest, recovery: "failed", save: "failed", error: error.message });
+      } else if (error instanceof ApiError && error.status === 409) {
         pendingSaveRef.current.delete(pendingKey);
         try {
           const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
           const latest = activeRef.current;
           if (latest && inScope(latest)) {
-            publishEditor({ ...latest, remoteConflict: currentRead.revision ?? null, save: "failed", error: currentRead.revision ? "PostgreSQL上のRevisionが先に更新されました。下書きはIndexedDBに残しています。" : "競合した最新Revisionを確認できません。下書きは保持しています。" });
+            publishEditor(resolvePersistenceSaveConflict(latest, currentRead.revision ?? null));
           }
         } catch (readError) {
           const latest = activeRef.current;
-          if (latest && inScope(latest)) publishEditor({ ...latest, save: "failed", error: readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした。" });
+          if (latest && inScope(latest)) publishEditor(resolvePersistenceConflictReadFailure(latest, readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした."));
         }
       } else {
         const latest = activeRef.current;
