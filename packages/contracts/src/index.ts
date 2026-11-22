@@ -260,7 +260,7 @@ export interface DomainJobDescriptor { type: string }
 export interface ActionDescriptor { id: string; module: ModuleId | "core"; effect: "read" | "propose" | "compute"; job?: DomainJobDescriptor }
 export type ModuleRecordJsonValue = null | string | number | boolean | ModuleRecordJsonValue[] | ModuleRecordJsonObject;
 export type ModuleRecordJsonObject = { [key: string]: ModuleRecordJsonValue };
-export { NLP_FEATURE_SETTINGS_KEY, parseNlpFeatureSettings, type NlpFeatureSettings } from "./nlp-feature-settings.js";
+export { NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, type NlpFeatureSettings } from "./nlp-feature-settings.js";
 export interface OwnModuleRecord { value: ModuleRecordJsonObject; version: number }
 export interface OwnModuleRecordProposal {
   key: string;

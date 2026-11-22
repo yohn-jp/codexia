@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { NLP_FEATURE_SETTINGS_KEY } from "@codexia/contracts";
 import type { SnapshotReader } from "@codexia/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -189,6 +190,60 @@ test("Publishing reads approved native records at the selected version without e
   await assert.rejects(core.proposePublishingSnapshotRecord(project.id, current.snapshot, {
     ...input, idempotencyKey: randomUUID(),
   }, "author"), { code: "conflict" });
+});
+
+test("NLP settings pin the configured record and preserve external proposal origin through author approval", async () => {
+  const project = await createProject();
+  const key = NLP_FEATURE_SETTINGS_KEY;
+  const legacyPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "core.artifacts", key: legacyPath,
+    value: { content: '{"externalEnabled":{"other":true}}', encoding: "utf8" }, expectedVersion: null,
+  }));
+  const old = await core.reader(project.id);
+  assert.equal(await old.read(legacyPath), null);
+  assert.equal(await core.readNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot), undefined);
+  const input = {
+    key, value: { externalEnabled: { entityExtraction: true }, preservedSetting: "author choice" },
+    expectedVersion: null, idempotencyKey: randomUUID(),
+  };
+  const proposer = "verified-mcp-user";
+  await assert.rejects(core.proposeNlpFeatureSettingsSnapshotRecord(
+    project.id, old.snapshot, { ...input, key: "unexpected" }, proposer, "external-agent",
+  ), { code: "invalid_nlp_feature_settings" });
+  const reference = await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot, input, proposer, "external-agent");
+  const competing = await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot, {
+    ...input, value: { externalEnabled: {} }, idempotencyKey: randomUUID(),
+  }, "another-author");
+  const changesetId = reference.id as import("@codexia/persistence-contracts").ChangeSetId;
+  const competingId = competing.id as typeof changesetId;
+  const stored = await persistence.read(reader => reader.getChangeSet(project.id, changesetId));
+  assert.ok(stored);
+  assert.equal(stored.authorId, proposer);
+  assert.equal(stored.provenance.details.origin, "external-agent");
+  assert.equal(await persistence.read(reader => reader.getModuleRecord(project.id, "nlp", key)), undefined);
+  const apply = (id: typeof changesetId, version: number) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: project.id, changeSetId: id, expectedVersion: version,
+  }));
+  await assert.rejects(apply(changesetId, stored.version), { code: "invalid_change_set_state" });
+  const reviewer = "reviewing-author";
+  const approve = (id: typeof changesetId) => persistence.transaction(tx => tx.approveChangeSet({
+    projectId: project.id, changeSetId: id, expectedVersion: stored.version, approvedBy: reviewer,
+  }));
+  const approved = await approve(changesetId);
+  const competingApproval = await approve(competingId);
+  const applied = await apply(changesetId, approved.version);
+  assert.equal(applied.changeSet.approvedBy, reviewer);
+  await assert.rejects(apply(competingId, competingApproval.version), { code: "conflict" });
+  const current = await core.reader(project.id);
+  assert.ok(!(await current.list("")).includes(legacyPath));
+  assert.deepEqual(await core.readNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot), { value: input.value, version: 1 });
+  assert.equal(await core.readNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot), undefined);
+  assert.deepEqual(await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot, input, proposer, "external-agent"),
+    reference);
+  await assert.rejects(core.proposeNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot, input, proposer, "author"),
+    { code: "idempotency_conflict" });
+  assert.deepEqual(await apply(changesetId, approved.version), { ...applied, replayed: true });
 });
 
 test("native hierarchy creation rejects an older project version without materializing a snapshot", async () => {
@@ -398,7 +453,8 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
       "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
       [knowledgePath]: file(legacyKnowledge),
     };
-    const currentFacets = compatible ? { publishingRecords: {}, knowledge: makeKnowledgeProjection(snapshot, emptyKnowledge) } : {};
+    const currentFacets = compatible ? { publishingRecords: {}, nlpFeatureSettings: null,
+      knowledge: makeKnowledgeProjection(snapshot, emptyKnowledge) } : {};
     await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...currentFacets} as unknown as JsonObject,expectedVersion:null}));
     return {project,snapshot,knowledgePath,legacyKnowledge};
   }
@@ -429,6 +485,8 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   const oldFiles = await exactFiles(oldPinned);
   assert.equal((await oldPinned.read("meta/project.yaml"))?.content, YAML.stringify({ title: incompatible.project.title }));
   await assert.rejects(store.readPublishingSnapshotRecord(incompatible.project.id, incompatible.snapshot, "episodes"),
+    { code: "snapshot_unavailable" });
+  await assert.rejects(store.readNlpFeatureSettingsSnapshotRecord(incompatible.project.id, incompatible.snapshot),
     { code: "snapshot_unavailable" });
   assert.equal(oldPinned.knowledge, undefined);
   assert.equal((await oldPinned.read(incompatible.knowledgePath))?.content, incompatible.legacyKnowledge);

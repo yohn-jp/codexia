@@ -1,6 +1,7 @@
 import type { ModuleRecordJsonObject } from "./index.js";
 
 export const NLP_FEATURE_SETTINGS_KEY = "feature-settings";
+export const NLP_LEGACY_FEATURE_SETTINGS_PATH = "meta/scriptorium/modules/nlp/feature-settings.json";
 
 export type NlpFeatureSettings = ModuleRecordJsonObject & { externalEnabled: ModuleRecordJsonObject };
 

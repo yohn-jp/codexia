@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { makeKnowledgeProjection, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
-import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
+import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, NLP_FEATURE_SETTINGS_CHANGESET_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, manuscriptCharacterCount, type SnapshotIndex } from "./snapshot-index.js";
@@ -178,6 +178,7 @@ type Manifest = {
   documents: Document[];
   project: Project;
   publishingRecords?: Partial<Record<(typeof PUBLISHING_RECORD_KEYS)[number], OwnModuleRecord>>;
+  nlpFeatureSettings?: OwnModuleRecord | null;
   knowledge?: SnapshotKnowledgeProjection;
 };
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
@@ -206,6 +207,9 @@ function assertCurrentOperationPaths(operation: ChangeOperation): void {
     }
     if (isPrivatePublishingPath(path)) {
       fail(409, "publishing_reproposal_required", "Propose this update from the Publishing panel using the current project state");
+    }
+    if (path === NLP_LEGACY_FEATURE_SETTINGS_PATH) {
+      fail(409, "nlp_feature_settings_reproposal_required", "Propose the NLP settings update using the current project snapshot");
     }
   }
 }
@@ -383,6 +387,8 @@ export class CoreStore implements MutationCoordinator {
       const record = await reader.getModuleRecord(pid(projectId), "publishing", key);
       if (record) publishingRecords[key] = { value: record.value, version: record.version };
     }
+    const nlpRecord = await reader.getModuleRecord(pid(projectId), "nlp", NLP_FEATURE_SETTINGS_KEY);
+    const nlpFeatureSettings = nlpRecord ? { value: nlpRecord.value, version: nlpRecord.version } : null;
     const files: Record<string,StoredFile> = {};
     const add = (key: string, content: string, {
       encoding = "utf8", documentId, metadata, revision = hash(Buffer.from(content, encoding)),
@@ -428,14 +434,15 @@ export class CoreStore implements MutationCoordinator {
     }
     for (const record of artifacts) {
       if (record.value.deleted === true || record.key === RETIRED_PROJECT_SETTINGS_PATH ||
-          record.key === RETIRED_KNOWLEDGE_CONTEXT_PATH || isPrivatePublishingPath(record.key)) continue;
+          record.key === RETIRED_KNOWLEDGE_CONTEXT_PATH || record.key === NLP_LEGACY_FEATURE_SETTINGS_PATH ||
+          isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key, record.value.content, { encoding: record.value.encoding === "base64" ? "base64" : "utf8" });
     }
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
     const snapshot = { projectId, projectVersion: project.version };
     const knowledge = makeKnowledgeProjection(snapshot, await projectKnowledgeContext(reader, pid(projectId), documents, documentMappings));
-    return { snapshot, files, documents, project, publishingRecords, knowledge };
+    return { snapshot, files, documents, project, publishingRecords, knowledge, nlpFeatureSettings };
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
     if (pinned && pinned.projectId !== projectId) fail(409,"snapshot_scope_mismatch","Snapshot belongs to another project");
@@ -596,26 +603,53 @@ export class CoreStore implements MutationCoordinator {
   async proposePublishingSnapshotRecord(
     projectId: string, snapshot: SnapshotId, input: OwnModuleRecordProposal, actorId: string,
   ): Promise<NativeChangeSetReference> {
+    return this.proposeSnapshotModuleRecord(projectId, snapshot, input, actorId, "publishing");
+  }
+
+  async readNlpFeatureSettingsSnapshotRecord(projectId: string, snapshot: SnapshotId): Promise<OwnModuleRecord | undefined> {
+    const { nlpFeatureSettings } = await this.manifest(projectId, snapshot);
+    if (nlpFeatureSettings === undefined) fail(409, "snapshot_unavailable", "Select a current snapshot for NLP feature settings");
+    return structuredClone(nlpFeatureSettings ?? undefined);
+  }
+
+  async proposeNlpFeatureSettingsSnapshotRecord(
+    projectId: string, snapshot: SnapshotId, input: OwnModuleRecordProposal, actorId: string,
+    origin: "author" | "external-agent" = "author",
+  ): Promise<NativeChangeSetReference> {
+    return this.proposeSnapshotModuleRecord(projectId, snapshot, input, actorId, "nlp", origin);
+  }
+
+  private async proposeSnapshotModuleRecord(
+    projectId: string, snapshot: SnapshotId, input: OwnModuleRecordProposal, actorId: string,
+    moduleId: "publishing" | "nlp", origin?: "author" | "external-agent",
+  ): Promise<NativeChangeSetReference> {
     const { key, value, expectedVersion, idempotencyKey } = input;
     if (snapshot.projectId !== projectId) fail(409, "snapshot_scope_mismatch", "Snapshot belongs to another project");
-    if (!isPublishingRecordKey(key) || !isJsonValue(value) || value === null || typeof value !== "object" || Array.isArray(value) ||
+    const publishing = moduleId === "publishing";
+    const source = publishing ? PUBLISHING_CHANGESET_SOURCE : NLP_FEATURE_SETTINGS_CHANGESET_SOURCE;
+    const errorCode = publishing ? "invalid_publishing_record" : "invalid_nlp_feature_settings";
+    const label = publishing ? "Publishing record" : "NLP feature settings";
+    if (!(publishing ? isPublishingRecordKey(key) : key === NLP_FEATURE_SETTINGS_KEY) ||
+        !isJsonValue(value) || value === null || typeof value !== "object" || Array.isArray(value) ||
         (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) ||
         !idempotencyKey.trim() || idempotencyKey.length > 200 || !actorId.trim()) {
-      fail(400, "invalid_publishing_record", "Publishing record, version, idempotency key and author are required");
+      fail(400, errorCode, `${label}, version, idempotency key and author are required`);
     }
     let record: JsonObject;
     try {
-      record = key === PUBLISHING_EPISODES_KEY ? parsePublishingEpisodesRecord(value) : parsePublishingShareGrantIndex(value);
+      if (!publishing) record = parseNlpFeatureSettings(value);
+      else record = key === PUBLISHING_EPISODES_KEY ? parsePublishingEpisodesRecord(value) : parsePublishingShareGrantIndex(value);
     } catch {
-      fail(400, "invalid_publishing_record", "The Publishing record does not match its canonical format");
+      fail(400, errorCode, `${label} does not match its canonical format`);
     }
-    const recordId = JSON.stringify(["publishing", key]);
-    const requestDigest = hash(canonicalJson({ actorId, key, value: record, expectedVersion }));
+    const recordId = JSON.stringify([moduleId, key]);
+    const actorOrigin: JsonObject = origin === undefined ? {} : { origin };
+    const requestDigest = hash(canonicalJson({ actorId, key, value: record, expectedVersion, ...actorOrigin }));
     return this.persistence.transaction(async tx => {
       await tx.assertProjectVersion(pid(projectId));
       const existing = await tx.getChangeSetByIdempotencyKey(pid(projectId), idempotencyKey);
       if (existing) {
-        if (existing.authorId !== actorId || existing.provenance.source !== PUBLISHING_CHANGESET_SOURCE ||
+        if (existing.authorId !== actorId || existing.provenance.source !== source ||
             existing.provenance.details.requestDigest !== requestDigest) {
           throw new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
             resource: "idempotency_key", id: idempotencyKey,
@@ -626,12 +660,12 @@ export class CoreStore implements MutationCoordinator {
       const { changeSet } = await tx.createChangeSet({
         projectId: pid(projectId), authorId: actorId, idempotencyKey,
         operations: [{ type: "module.record.save", command: {
-          projectId: pid(projectId), moduleId: "publishing", key, value: record, expectedVersion,
+          projectId: pid(projectId), moduleId, key, value: record, expectedVersion,
         } }],
         readSet: [{ resource: "module_record", id: recordId, expectedVersion }],
         writeSet: [{ resource: "module_record", id: recordId }],
-        provenance: { source: PUBLISHING_CHANGESET_SOURCE, actorId, details: {
-          projectVersion: snapshot.projectVersion, requestDigest,
+        provenance: { source, actorId, details: {
+          projectVersion: snapshot.projectVersion, requestDigest, ...actorOrigin,
         } },
       });
       return { id: changeSet.id, projectId: changeSet.projectId };

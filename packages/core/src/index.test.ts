@@ -439,6 +439,8 @@ test("retired settings file writes require a new proposal and retain applied rec
   const oldSettings = [
     { path: "meta/scriptorium/modules/publishing/episodes.yaml", content: "episodes: []\n", code: "publishing_reproposal_required" },
     { path: "meta/project.yaml", content: "title: New project title\n", code: "project_settings_reproposal_required" },
+    { path: "meta/scriptorium/modules/nlp/feature-settings.json", content: '{"externalEnabled":{}}',
+      code: "nlp_feature_settings_reproposal_required" },
   ] as const;
   for (const { path, content, code } of oldSettings) await t.test(path, async () => {
     const p = await project();

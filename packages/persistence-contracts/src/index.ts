@@ -405,6 +405,7 @@ export const HIERARCHY_DELETE_SOURCE = "native-hierarchy-delete";
 export const HIERARCHY_CREATE_SOURCE = "native-hierarchy-create";
 export const CORE_DOCUMENT_PATHS = "core.document-paths";
 export const PUBLISHING_CHANGESET_SOURCE = "publishing.native";
+export const NLP_FEATURE_SETTINGS_CHANGESET_SOURCE = "nlp.feature-settings.native";
 
 interface HierarchyParentReference {
   readonly documentId: DocumentId;
