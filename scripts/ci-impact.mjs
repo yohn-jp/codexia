@@ -98,7 +98,10 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/verify-base-tunnel-container.yml',
   'deploy/backup/backup.sh',
   'deploy/cloudflare/identity-probes.json',
+  'deploy/cloudflare/public-protocol-paths.json',
+  'deploy/cloudflare/terraform/.terraform.lock.hcl',
   'deploy/cloudflare/terraform/.gitignore',
+  'deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md',
   'deploy/cloudflare/terraform/main.tf',
   'deploy/cloudflare/terraform/terraform.tfvars.example',
   'deploy/cloudflare/terraform/variables.tf',
@@ -137,6 +140,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verify-backend-push-handoff.mjs',
   'scripts/verify-backend-push-handoff.test.mjs',
   'scripts/verify-deployment-config.mjs',
+  'scripts/verify-public-oauth-edge.mjs',
+  'scripts/verify-public-oauth-edge.test.mjs',
   'scripts/verify-frontend-compatibility.mjs',
   'scripts/verify-frontend-compatibility.test.mjs',
 ]);
@@ -159,6 +164,11 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     }
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
+    if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
+        file === 'packages/api/scripts/run-passkey-acceptance.mjs') {
+      add('unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap');
+      continue;
+    }
     if (isNonExecutableDocumentation(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));

@@ -200,6 +200,26 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.equal(typeof token.access_token, "string");
 
     const accessToken = token.access_token as string;
+    const consentListUrl = `${baseAuth}/oauth2/get-consents`;
+    assert.equal((await apiRequest(consentListUrl)).status, 401);
+    assert.equal((await apiRequest(consentListUrl, { headers: { authorization: `Bearer ${accessToken}` } })).status, 401);
+    assert.equal((await apiRequest(consentListUrl, { headers: { cookie: cookieHeader(), origin: "https://untrusted.example" } })).status, 403);
+    const consentList = await apiRequest(consentListUrl, { headers: { cookie: cookieHeader() } });
+    assert.equal(consentList.status, 200);
+    assert.equal(consentList.headers.get("cache-control"), "no-store");
+    const listedGrants = await consentList.json() as Array<{ id: string; clientId: string; scopes: string[]; createdAt: string; updatedAt: string }>;
+    const listedGrant = listedGrants.find((grant) => grant.clientId === fixture.webClientId);
+    assert.ok(listedGrant?.id);
+    assert.deepEqual(Object.keys(listedGrant).sort(), ["clientId", "createdAt", "id", "scopes", "updatedAt"]);
+    assert.deepEqual(listedGrant.scopes, ["openid", "codexia:api", "offline_access"]);
+    for (const endpoint of ["update-consent", "delete-consent"]) {
+      const mutation = await apiRequest(`${baseAuth}/oauth2/${endpoint}`, {
+        method: "POST",
+        headers: { cookie: cookieHeader(), origin, "content-type": "application/json" },
+        body: JSON.stringify({ id: listedGrant.id, update: { scopes: [] } }),
+      });
+      assert.equal(mutation.status, 404);
+    }
     const header = JSON.parse(Buffer.from(accessToken.split(".")[0]!, "base64url").toString("utf8")) as { typ: string; alg: string };
     const claims = JSON.parse(Buffer.from(accessToken.split(".")[1]!, "base64url").toString("utf8")) as Record<string, unknown>;
     assert.equal(header.typ, "at+jwt");

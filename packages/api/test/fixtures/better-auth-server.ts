@@ -62,7 +62,7 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
   const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
     new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) &&
-    new Set(["codexia_auth_test", "codexia_web_oauth_test"]).has(databaseName);
+    new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName);
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
       (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
     throw new Error("Better Auth fixture requires an explicitly opted-in disposable loopback auth database or uniquely named disposable CI database");
@@ -267,7 +267,6 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       profile: "core",
       store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
       persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
-      authToken: "codexia-test-api-token-with-32-characters",
       staticDir: options.staticDirectory ?? process.cwd(),
       usageDirectory: usageDirectory!,
       betterAuth: runtime!,
@@ -306,6 +305,9 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       method: "POST", redirect: "manual",
       headers: { origin: bootstrapOrigin, cookie: cookie.header(), ...headers },
     });
+    if ((await postBootstrap("/api/auth/passkey/verify-registration")).status !== 404) {
+      throw new Error("OIDC-only bootstrap exposed a Passkey ceremony on its temporary hostname");
+    }
     if ((await postBootstrap("/register")).status !== 401) throw new Error("Bootstrap accepted a request without an IdP session");
     if ((await postBootstrap("/login", { origin: apiOrigin })).status !== 403) throw new Error("Bootstrap accepted a foreign origin");
     async function signIntoBootstrap(): Promise<void> {

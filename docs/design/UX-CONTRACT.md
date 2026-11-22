@@ -126,6 +126,15 @@ panelを閉じても原稿は破棄されない。未導入／無効moduleのpan
 
 外部Assistant等へ原稿を送る操作は、送信先、対象範囲、目的を確認でき、既存の明示同意を満たす。provider未設定・未同意でもlocal執筆を妨げない。UI刷新はuntrusted plugin、marketplace、別のwriter、外部送信の既定有効化を許可しない。
 
+
+### 認証・セキュリティ設定
+
+認証の仕様正本は [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md#accepted-target-passkey-first-authentication-and-identity-management) に従う。Desktop／Mobile共通の操作語彙として、Passkeyの登録・確認・名称変更・削除、連携OIDC、セッション・OAuth同意、管理者のOIDC設定を明確に分ける。Passkeyログインを基本とし、外部OIDC未設定でも利用できる。追加認証のために原稿のローカル下書きを消してはならない。
+
+認証状態は「未登録」「利用可能」「検証中」「失敗」「再認証が必要」「回復が必要」を区別する。未検証のOIDC設定を利用可能と表示しない。Client Secretと回復用grantは再表示・永続ブラウザー保存せず、最後の利用可能な本人認証手段を削除させない。セキュリティ操作はサーバーでowner確認、fresh reauthentication、CSRF対策を強制し、非ownerはUIを迂回しても変更できない。
+
+Desktopでは設定から作業位置へ復帰でき、Mobileではsafe area、画面幅320 CSS px相当、スクリーンリーダー、keyboard/focusを保つ。OS認証ダイアログのキャンセル／未対応やリダイレクト後の状態不明を失敗・成功と混同しない。製品のトーンとコントロールは [app design system](../../app/DESIGN.md) に従い、スクリーンショットやプロトタイプは仕様の代替としない。
+
 ## 7. Desktop／Mobileと操作の連続性
 
 ### S-11 — DesktopとMobileは異なる操作面で同じ原稿を扱う

@@ -49,7 +49,8 @@ function taskOverrides(task) {
   if (task.startsWith('oci-')) return { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice('oci-'.length),
     CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice('oci-'.length)}` };
   if (task.startsWith('browser-')) {
-    return { CODEXIA_E2E_ADMIN_DATABASE_URL: '<disposable-postgres-admin-url>',
+    return { ...(task.endsWith('-passkey-bootstrap') ? { CODEXIA_PASSKEY_ACCEPTANCE: '1' } : {}),
+      CODEXIA_E2E_ADMIN_DATABASE_URL: '<disposable-postgres-admin-url>',
       CODEXIA_E2E_DATABASE_URL: '<disposable-postgres-database-url>', CODEXIA_E2E_PORT: '<isolated-port>',
       CODEXIA_E2E_STATE_DIR: '<isolated-state-dir>', CODEXIA_E2E_OUTPUT_DIR: path.resolve('tests/e2e/test-results', task),
       CODEXIA_E2E_PROJECT_TITLE: '<disposable-fixture-title>', CODEXIA_CI_REPORT_DIR: '<task-report-dir>' };
@@ -99,6 +100,7 @@ function taskEnvironment(task, group, runtime) {
   if (task.startsWith('browser-')) {
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: browserRuntimeRequirements(group).imageDigest });
+    if (task.endsWith('-passkey-bootstrap')) env.CODEXIA_PASSKEY_ACCEPTANCE = '1';
   }
   for (const [key, value] of Object.entries(taskOverrides(task))) {
     env[key] = key === 'CODEXIA_E2E_OUTPUT_DIR' ? `tests/e2e/test-results/${task}` : value;

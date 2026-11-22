@@ -1,0 +1,68 @@
+:root {
+  color-scheme: light;
+  font-family: var(--manuscript-sans);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--page-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --page-bg: #f2eee7;
+  --ink: #27231e;
+  --muted: #6d675e;
+  --paper: #fffefa;
+  --line: #d7cfc2;
+  --accent: #70452f;
+  --accent-strong: #4d2d20;
+  --button-foreground: #fffefa;
+  --focus-ring: #70452f;
+  --input-border: #8d8375;
+  --focus-shadow: #34271816;
+  --manuscript-sans: "Hiragino Sans", "Yu Gothic", Meiryo, "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
+}
+
+:root[data-zp-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: #12161c;
+  --ink: #e9eef3;
+  --muted: #93a0ae;
+  --paper: #0e1116;
+  --line: #242c36;
+  --accent: #7daf9f;
+  --accent-strong: #6bd4c3;
+  --button-foreground: #08120f;
+  --focus-ring: #7daf9f;
+  --input-border: #687583;
+  --focus-shadow: #0000008c;
+}
+
+:root[data-zp-theme="paper"] {
+  color-scheme: light;
+  --page-bg: #f2ebd9;
+  --ink: #2b2926;
+  --muted: #605b53;
+  --paper: #f7f1e6;
+  --line: #c9bfae;
+  --accent: #3d3429;
+  --accent-strong: #524737;
+  --button-foreground: #ffffff;
+  --focus-ring: #3d3429;
+  --input-border: #817462;
+  --focus-shadow: #3d342924;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+#root { display: flow-root; }
+body { min-height: 100vh; color: var(--ink); background: var(--page-bg); }
+button { min-height: 2.75rem; padding: 0.55rem 0.9rem; border: 1px solid var(--input-border); border-radius: 0.4rem; color: var(--button-foreground); background: var(--accent); cursor: pointer; font: inherit; }
+button:hover:not(:disabled) { background: var(--accent-strong); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+button:focus-visible, a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+a { color: var(--accent-strong); }
+.loading { margin: 3rem auto; color: var(--muted); text-align: center; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 0.84rem; overflow-wrap: anywhere; }
+.pg-entry { min-height: 100vh; display: grid; place-items: center; padding: clamp(1rem, 4vw, 4rem); }
+.pg-login { width: min(100%, 30rem); display: grid; gap: 0.8rem; padding: clamp(1.2rem, 4vw, 2rem); border: 1px solid var(--line); border-radius: 0.8rem; background: var(--paper); box-shadow: 0 1rem 3rem var(--focus-shadow); }
+.pg-login h1 { margin: 0; }
+.pg-login p { margin: 0.2rem 0; color: var(--muted); }
+.pg-login a { color: var(--accent-strong); }

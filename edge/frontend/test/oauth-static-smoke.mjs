@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn, spawnSync} from 'node:child_process';
-import {copyFile, mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {setTimeout as delay} from 'node:timers/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -45,6 +45,35 @@ try {
   });
   if(build.error)throw build.error;
   if(build.status!==0)throw new Error(`OAuth static fixture build exited with status ${String(build.status)}`);
+  const oauthRoot=join(fixtureDist,'oauth');
+  const oauthManifest=JSON.parse(await readFile(join(oauthRoot,'.vite/manifest.json'),'utf8'));
+  const oauthFiles=new Set();
+  const visitManifestEntry=(key,visited=new Set())=>{
+    if(visited.has(key))return;
+    visited.add(key);
+    const entry=oauthManifest[key];
+    assert.ok(entry,`OAuth manifest is missing ${key}`);
+    if(typeof entry.file==='string')oauthFiles.add(entry.file);
+    for(const file of [...(entry.css??[]),...(entry.assets??[])])oauthFiles.add(file);
+    for(const dependency of [...(entry.imports??[]),...(entry.dynamicImports??[])])visitManifestEntry(dependency,visited);
+  };
+  for(const key of ['oauth-login.html','oauth-consent.html','style.css'])visitManifestEntry(key);
+  assert.ok(oauthFiles.size>=5,'OAuth manifest must contain both entries, their shared runtime, one stylesheet, and the favicon');
+  for(const file of oauthFiles){
+    assert.match(file,/^assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css|svg)$/u,file);
+  }
+  for(const htmlName of ['oauth-login.html','oauth-consent.html']){
+    const html=await readFile(join(oauthRoot,htmlName),'utf8');
+    const references=[...html.matchAll(/\b(?:src|href)=["']([^"']+)["']/gu)].map(match=>match[1]);
+    assert.ok(references.length>=3,`${htmlName} must reference its script, stylesheet, and icon`);
+    assert.ok(references.every(reference=>reference.startsWith('/oauth/assets/')),
+      `${htmlName} must load only dedicated same-origin OAuth assets`);
+    assert.ok(!references.some(reference=>reference.startsWith('/assets/')),
+      `${htmlName} must not load the generic application asset prefix`);
+  }
+  const redirects=await readFile(join(workspaceRoot,'edge/frontend/static/_redirects'),'utf8');
+  assert.ok(redirects.split('\n').includes('/oauth/login /oauth/oauth-login.html 200'));
+  assert.ok(redirects.split('\n').includes('/oauth/consent /oauth/oauth-consent.html 200'));
   for(const name of ['_headers','_redirects'])await copyFile(join(workspaceRoot,'edge/frontend/static',name),join(fixtureDist,name));
   await mkdir(join(fixtureDist,'desktop'),{recursive:true});
   await copyFile(join(workspaceRoot,'app/dist/desktop/update-identity.json'),join(fixtureDist,'desktop/update-identity.json'));
@@ -67,6 +96,8 @@ try {
     await delay(500);
   }
   assert.ok(ready,'OAuth static Worker did not become ready');
+  assert.equal((await fetch(`${fixtureOrigin}/oauth/login/`)).status,404,'only the exact OAuth login path should rewrite');
+  assert.equal((await fetch(`${fixtureOrigin}/oauth/consent/`)).status,404,'only the exact OAuth consent path should rewrite');
 
   const systemChromium=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   browser=await chromium.launch({headless:true,...(systemChromium?{executablePath:systemChromium,args:['--no-sandbox']}: {})});
@@ -114,7 +145,41 @@ try {
       assert.deepEqual(errors,[],`${shell} browser exceptions`);
     }finally{await page.close();}
   }
-  console.log('OAuth settings from distribution-shaped static assets start public-client authorization with both registered shell redirects');
+  for(const oauthPage of [
+    {path:'/oauth/login?sig=opaque&exp=9999999999&client_id=fixture&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&state=opaque',heading:'Codexiaへサインイン'},
+    {path:'/oauth/consent?request=opaque',heading:'Codexia APIの利用を確認'},
+  ]){
+    const page=await browser.newPage();
+    const errors=[];
+    const assetResponses=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    page.on('response',response=>{
+      const request=response.request();
+      const url=new URL(request.url());
+      if(url.origin===fixtureOrigin&&['script','stylesheet','image','font'].includes(request.resourceType())){
+        assetResponses.push({path:url.pathname,status:response.status(),cacheControl:response.headers()['cache-control']});
+      }
+    });
+    await page.route('**/api/auth/**',route=>route.fulfill({
+      status:401,
+      contentType:'application/json',
+      body:JSON.stringify({error:'Sign in required',code:'UNAUTHORIZED'}),
+    }));
+    try{
+      const response=await page.goto(`${fixtureOrigin}${oauthPage.path}`,{waitUntil:'domcontentloaded'});
+      assert.equal(response?.status(),200,`${oauthPage.path} should rewrite to its dedicated HTML`);
+      assert.equal(response?.headers()['cache-control'],'no-store',`${oauthPage.path} should not cache its OAuth query`);
+      await page.getByRole('heading',{name:oauthPage.heading,exact:true}).waitFor({timeout:20000});
+      await page.waitForFunction(()=>Boolean(document.querySelector('link[rel="stylesheet"]')?.sheet));
+      assert.ok(assetResponses.length>=3,`${oauthPage.path} should load JS, CSS, and favicon assets`);
+      assert.ok(assetResponses.every(({path})=>path.startsWith('/oauth/assets/')),
+        `${oauthPage.path} requested an asset outside /oauth/assets/: ${assetResponses.map(({path})=>path).join(', ')}`);
+      assert.ok(assetResponses.every(({status,cacheControl})=>status===200&&cacheControl==='public, max-age=31536000, immutable'),
+        `${oauthPage.path} should serve every fingerprinted asset successfully with immutable caching`);
+      assert.deepEqual(errors,[],`${oauthPage.path} browser exceptions`);
+    }finally{await page.close();}
+  }
+  console.log('Dedicated OAuth entries stay under their own asset prefix while Desktop/Mobile OAuth remains functional');
 }finally{
   if(browser)await browser.close();
   if(server&&server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill('SIGTERM');});

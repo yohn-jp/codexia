@@ -322,6 +322,33 @@ test('Better Auth activation is explicit, validates staged state, and retains mo
   assert.match(candidate['ansible.builtin.copy'].content, /codexia-api\.better-auth\.container\.example/u);
   assert.match(candidate['ansible.builtin.copy'].content, /AUTH_SETTINGS_DIGEST_PLACEHOLDER/u);
   assert.match(candidate['ansible.builtin.copy'].dest, /codexia_candidate_unit_filename/u);
+  assert.match(candidate['ansible.builtin.copy'].content, /codexia_auth_runtime_oidc_configured \| default\(false\)/u,
+    'token-mode Quadlet rendering must not depend on facts created only for Better Auth');
+  const settingsGuard = transactionTasks.find(task => task.name ===
+    'Require complete public Better Auth settings without secret material in the environment file');
+  const oidcRules = settingsGuard['ansible.builtin.assert'].that.filter(rule => rule.includes('CODEXIA_OIDC_'));
+  assert.ok(oidcRules.some(rule => rule.includes("regex_findall('(?m)^CODEXIA_OIDC_ISSUER=')")));
+  assert.ok(oidcRules.some(rule => rule.includes("regex_findall('(?m)^CODEXIA_OIDC_CLIENT_ID=')")));
+
+  const validateOidcTuple = text => {
+    const lines = text.split(/\r?\n/u);
+    const issuerRows = lines.filter(line => line.startsWith('CODEXIA_OIDC_ISSUER='));
+    const clientRows = lines.filter(line => line.startsWith('CODEXIA_OIDC_CLIENT_ID='));
+    const validIssuer = issuerRows.filter(line => /^CODEXIA_OIDC_ISSUER=https:\/\/[^\s]+$/u.test(line));
+    const validClient = clientRows.filter(line => /^CODEXIA_OIDC_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$/u.test(line));
+    return issuerRows.length === clientRows.length && issuerRows.length <= 1 &&
+      validIssuer.length === issuerRows.length && validClient.length === clientRows.length;
+  };
+  assert.equal(validateOidcTuple('CODEXIA_PUBLIC_ORIGIN=https://codexia.example'), true, 'OIDC-free Passkey mode is valid');
+  assert.equal(validateOidcTuple('CODEXIA_OIDC_ISSUER=https://idp.example'), false, 'partial OIDC tuple is rejected');
+  assert.equal(validateOidcTuple('CODEXIA_OIDC_ISSUER=http://idp.example\nCODEXIA_OIDC_CLIENT_ID=codexia'), false,
+    'malformed issuer cannot be treated as an absent tuple');
+  assert.equal(validateOidcTuple('CODEXIA_OIDC_ISSUER=https://idp.example\nCODEXIA_OIDC_CLIENT_ID=bad client'), false,
+    'malformed client ID cannot be treated as an absent tuple');
+  assert.equal(validateOidcTuple('CODEXIA_OIDC_ISSUER=https://idp.example\nCODEXIA_OIDC_CLIENT_ID=codexia'), true,
+    'complete OIDC compatibility tuple remains valid');
+  assert.equal(validateOidcTuple('CODEXIA_OIDC_ISSUER=https://idp.example\nCODEXIA_OIDC_ISSUER=https://idp.example\nCODEXIA_OIDC_CLIENT_ID=codexia\nCODEXIA_OIDC_CLIENT_ID=codexia'), false,
+    'duplicate OIDC values are rejected');
 
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
@@ -379,6 +406,35 @@ test('the disposable entry point defaults to token and shares the same auth tran
   const noOp = shell.slice(shell.indexOf('cmp -s -- "$candidate_unit" "$active_unit"'), shell.indexOf('echo "UNCHANGED'));
   assert.match(noOp, /run_auth_cli \/app\/node_modules\/@codexia\/api\/dist\/verify-auth-clients\.js/u);
   assert.doesNotMatch(noOp, /migrate-auth|backup-locked|systemctl --user stop/u);
+});
+
+test('the isolated registration launcher admits only complete OIDC or Passkey bootstrap tuples', () => {
+  const launcher = readFileSync(new URL('../deploy/ansible/bootstrap-auth-registration.sh', import.meta.url), 'utf8');
+  const validTuple = launcher.match(/^\s*!\s*\{\s*(\[\[[\s\S]*?\]\]\s*\|\|\s*\[\[[\s\S]*?\]\])\s*;\s*\}; then$/m);
+  assert.ok(validTuple, 'the launcher must reject the valid-tuple predicate, not reject valid settings');
+  const check = (runtimeOidc, bootstrapSubject, passkeyFields) => spawnSync('bash', ['-euc',
+    `runtime_oidc=${runtimeOidc}; bootstrap_subject=${bootstrapSubject}; passkey_fields=${passkeyFields}; if { ${validTuple[1]}; }; then exit 0; else exit 1; fi`,
+  ], { encoding: 'utf8' });
+  for (const tuple of [['true', 'true', 0], ['false', 'false', 3]]) {
+    assert.equal(check(...tuple).status, 0, `valid registration tuple was rejected: ${tuple.join('/')}`);
+  }
+  for (const tuple of [['true', 'false', 0], ['false', 'false', 2], ['true', 'true', 3]]) {
+    assert.equal(check(...tuple).status, 1, `invalid registration tuple was accepted: ${tuple.join('/')}`);
+  }
+});
+
+test('the recovery launcher audits sanitized counts without sending its one-use grant to the host journal', () => {
+  const launcher = readFileSync(new URL('../deploy/ansible/grant-passkey-owner-recovery.sh', import.meta.url), 'utf8');
+  const projection = launcher.match(/jq -ce '([^']+)'/u)?.[1];
+  assert.ok(projection, 'the launcher must project a dedicated host audit event');
+  assert.match(projection, /event:"passkey-owner-recovery"/u);
+  assert.match(projection, /ownerId|owner_id/u);
+  assert.match(projection, /sessionsRevoked/u);
+  assert.match(projection, /accessGrantsRevoked/u);
+  assert.match(projection, /refreshGrantsRevoked/u);
+  assert.doesNotMatch(projection, /recoveryToken|\.token|token:/u, 'the journal projection must omit the one-use grant');
+  assert.match(launcher, /logger --tag codexia-passkey-recovery/u);
+  assert.match(launcher, /durably recorded in PostgreSQL/u);
 });
 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {

@@ -437,7 +437,8 @@ async function startCustomApi(
   staticDir: string,
   options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
 ) {
-  const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
+  const server = createServer({ store, ...(options.betterAuth ? {} : { authToken: ACCESS_TOKEN }),
+    staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
@@ -1318,6 +1319,16 @@ describe("Codexia HTTP boundary", () => {
     await mkdir(resolve(staticDir, "assets"));
     await writeFile(resolve(staticDir, "assets", "main-a1b2.js"), "compiled lazy chunk");
     await symlink(resolve(staticDir, "server.test.js"), resolve(staticDir, "assets", "leak-a1b2.js"));
+    await mkdir(resolve(staticDir, "oauth", "assets"), { recursive: true });
+    await writeFile(resolve(staticDir, "oauth", "oauth-login.html"),
+      '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>OAuth sign in</h1><link rel="stylesheet" href="/oauth/assets/styles-AbCd1234.css"><script type="module" src="/oauth/assets/login-AbCd1234.js"></script>');
+    await writeFile(resolve(staticDir, "oauth", "oauth-consent.html"),
+      '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>OAuth consent</h1><link rel="stylesheet" href="/oauth/assets/styles-AbCd1234.css"><script type="module" src="/oauth/assets/consent-example-entry.js"></script>');
+    await writeFile(resolve(staticDir, "oauth", "assets", "login-AbCd1234.js"), "OAuth login bundle");
+    await writeFile(resolve(staticDir, "oauth", "assets", "consent-example-entry.js"), "OAuth consent bundle");
+    await writeFile(resolve(staticDir, "oauth", "assets", "styles-AbCd1234.css"), "OAuth-only styles");
+    await writeFile(resolve(staticDir, "oauth", "assets", "icon-GhIj9012.svg"), "<svg></svg>");
+    await symlink(resolve(staticDir, "server.test.js"), resolve(staticDir, "oauth", "assets", "leak-KlMn3456.js"));
     for (const ui of ["desktop", "mobile"]) {
       await mkdir(resolve(staticDir, ui, "assets"), { recursive: true });
       await writeFile(resolve(staticDir, ui, "index.html"), `<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>${ui}</h1>`);
@@ -1361,18 +1372,61 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
     assert.ok(shell.headers.get("content-security-policy")?.includes("style-src-attr 'unsafe-inline'"));
     assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
-    for (const path of ["/oauth/login?oauth_query=opaque", "/oauth/consent?oauth_query=opaque"]) {
+    for (const [path, heading, entry] of [
+      ["/oauth/login?oauth_query=opaque", "OAuth sign in", "login-AbCd1234.js"],
+      ["/oauth/consent?oauth_query=opaque", "OAuth consent", "consent-example-entry.js"],
+    ] as const) {
       const oauthShell = await fetch(`${apiServer.base}${path}`);
-      assert.equal(oauthShell.status, 200, `${path} must return the same-origin OAuth client shell`);
+      assert.equal(oauthShell.status, 200, `${path} must return its dedicated OAuth entry`);
       assert.match(oauthShell.headers.get("content-type") ?? "", /text\/html/u);
-      assert.match(await oauthShell.text(), /Codexia/u);
+      const oauthHtml = await oauthShell.text();
+      assert.ok(oauthHtml.includes(`<h1>${heading}</h1>`));
+      assert.ok(oauthHtml.includes(`/oauth/assets/${entry}`));
+      assert.ok(oauthHtml.includes("/oauth/assets/styles-AbCd1234.css"));
+      assert.ok(!oauthHtml.includes('src="/assets/'));
+      assert.ok(!oauthHtml.includes('href="/assets/'));
+      const nonce = /name="codexia-style-nonce" content="([^"]+)"/u.exec(oauthHtml)?.[1];
+      assert.ok(nonce && nonce !== "__CODEXIA_STYLE_NONCE__");
+      assert.ok(oauthShell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
     }
-    for (const path of ["/oauth/login?oauth_query=opaque", "/oauth/consent?oauth_query=opaque"]) {
-      const oauthShell = await fetch(`${apiServer.base}${path}`);
-      assert.equal(oauthShell.status, 200, `${path} must return the same-origin OAuth client shell`);
-      assert.match(oauthShell.headers.get("content-type") ?? "", /text\/html/u);
-      assert.match(await oauthShell.text(), /Codexia/u);
-    }
+    assert.equal((await fetch(`${apiServer.base}/oauth/login/`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/oauth/consent/`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/oauth/oauth-login.html`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/oauth/unknown`)).status, 404);
+    const oauthLoginAsset = await fetch(`${apiServer.base}/oauth/assets/login-AbCd1234.js`);
+    assert.equal(await oauthLoginAsset.text(), "OAuth login bundle");
+    assert.equal(oauthLoginAsset.headers.get("cache-control"), "public, max-age=31536000, immutable");
+    assert.equal((await fetch(`${apiServer.base}/oauth/assets/main-a1b2.js`)).status, 404,
+      "the dedicated prefix must not expose the generic application asset directory");
+    const oauthConsentAsset = await fetch(`${apiServer.base}/oauth/assets/consent-example-entry.js`);
+    assert.equal(await oauthConsentAsset.text(), "OAuth consent bundle");
+    const oauthStyles = await fetch(`${apiServer.base}/oauth/assets/styles-AbCd1234.css`);
+    assert.equal(await oauthStyles.text(), "OAuth-only styles");
+    const oauthIcon = await fetch(`${apiServer.base}/oauth/assets/icon-GhIj9012.svg`);
+    assert.equal(await oauthIcon.text(), "<svg></svg>");
+    assert.equal(oauthIcon.headers.get("cache-control"), "public, max-age=31536000, immutable");
+    const oauthMissingAsset = await fetch(`${apiServer.base}/oauth/assets/missing.js`);
+    assert.equal(oauthMissingAsset.status, 404);
+    assert.equal((await oauthMissingAsset.json() as { code: string }).code, "NOT_FOUND");
+    const oauthSymlinkAsset = await fetch(`${apiServer.base}/oauth/assets/leak-KlMn3456.js`);
+    assert.equal(oauthSymlinkAsset.status, 404);
+    assert.equal((await oauthSymlinkAsset.json() as { code: string }).code, "NOT_FOUND");
+    const oauthAssetsDirectory = resolve(staticDir, "oauth", "assets");
+    const internalOAuthAssetsDirectory = resolve(staticDir, "oauth", "internal-assets");
+    await rename(oauthAssetsDirectory, internalOAuthAssetsDirectory);
+    await symlink(internalOAuthAssetsDirectory, oauthAssetsDirectory, "dir");
+    const oauthAssetsDirectoryAlias = await fetch(`${apiServer.base}/oauth/assets/login-AbCd1234.js`);
+    assert.equal(oauthAssetsDirectoryAlias.status, 404);
+    assert.equal((await oauthAssetsDirectoryAlias.json() as { code: string }).code, "NOT_FOUND");
+    await rm(oauthAssetsDirectory);
+    await rename(internalOAuthAssetsDirectory, oauthAssetsDirectory);
+    const oauthDirectory = resolve(staticDir, "oauth");
+    const internalOAuthDirectory = resolve(staticDir, "oauth-internal");
+    await rename(oauthDirectory, internalOAuthDirectory);
+    await symlink(internalOAuthDirectory, oauthDirectory, "dir");
+    const oauthDirectoryAlias = await fetch(`${apiServer.base}/oauth/login`);
+    assert.equal(oauthDirectoryAlias.status, 404);
+    assert.equal((await oauthDirectoryAlias.json() as { code: string }).code, "NOT_FOUND");
     const nextShell = await fetch(`${apiServer.base}/`);
     assert.notEqual(nextShell.headers.get("content-security-policy"), shell.headers.get("content-security-policy"));
     const publicProjectId = randomUUID();

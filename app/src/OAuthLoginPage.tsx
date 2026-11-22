@@ -1,19 +1,51 @@
 import { useEffect, useState } from "react";
 import { authClient } from "./auth-client";
-import { continueOAuthLogin, hasSignedOAuthPrompt, oauthConsentContinuationURL } from "./oauth-login";
+import {
+  continueOAuthLogin,
+  continuePasskeyLogin,
+  fetchAuthMethodAvailability,
+  hasSignedOAuthPrompt,
+  oauthConsentContinuationURL,
+  type AuthMethodAvailability,
+} from "./oauth-login";
 
 export function OAuthLoginPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [methods, setMethods] = useState<AuthMethodAvailability | null>(null);
+  const [methodsFailed, setMethodsFailed] = useState(false);
   const session = authClient.useSession();
   const validPrompt = hasSignedOAuthPrompt(window.location.search);
+
+  useEffect(() => {
+    let active = true;
+    void fetchAuthMethodAvailability().then((availability) => {
+      if (active) setMethods(availability);
+    }).catch(() => {
+      if (active) setMethodsFailed(true);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!session.data || !validPrompt) return;
     window.location.replace(oauthConsentContinuationURL(window.location.search));
   }, [session.data, validPrompt]);
 
-  async function signIn(): Promise<void> {
+  async function signInWithPasskey(): Promise<void> {
+    if (busy || !validPrompt) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await continuePasskeyLogin(authClient, window.location.search);
+      window.location.replace(oauthConsentContinuationURL(window.location.search));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Passkeyでサインインできませんでした。");
+      setBusy(false);
+    }
+  }
+
+  async function signInWithProvider(): Promise<void> {
     if (busy || !validPrompt) return;
     setBusy(true);
     setMessage("");
@@ -33,13 +65,19 @@ export function OAuthLoginPage() {
         ? <p>サインイン後、要求されたCodexia APIアクセスの確認へ進みます。</p>
         : <p role="alert">認証リクエストを確認できません。Codexiaからサインインをやり直してください。</p>}
       {message && <p role="alert">{message}</p>}
+      {methodsFailed && <p role="alert">サインイン方法を読み込めません。ページを再読み込みしてください。</p>}
       {session.isPending
         ? <p role="status">サインイン状態を確認しています…</p>
         : session.data
           ? <p role="status">認証後のアクセス確認へ進んでいます…</p>
-          : <button type="button" disabled={busy || !validPrompt} onClick={() => void signIn()}>
-            {busy ? "認証を開始しています…" : "登録済みアカウントで続ける"}
-          </button>}
+          : methods && <>
+            <button type="button" disabled={busy || !validPrompt} onClick={() => void signInWithPasskey()}>
+              {busy ? "認証を開始しています…" : "Passkeyでサインイン"}
+            </button>
+            {methods.upstreamOidc && <button type="button" disabled={busy || !validPrompt} onClick={() => void signInWithProvider()}>
+              IDプロバイダーでサインイン
+            </button>}
+          </>}
       <a href="/">画面選択へ戻る</a>
     </section>
   </main>;

@@ -114,7 +114,18 @@ try {
       if (!finiteRequests.size && performance.now() - lastFiniteEvent >= 500) return;
       await page.waitForTimeout(100);
     }
-    throw new Error('Finite PostgreSQL API requests did not settle');
+    const categorize = (pathname) => pathname.startsWith('/api/v1/persistence/') ? 'persistence'
+      : pathname.startsWith('/api/auth/') ? 'auth'
+      : pathname.startsWith('/api/jobs') ? 'jobs'
+      : pathname.startsWith('/api/') ? 'other-api'
+      : 'asset';
+    const outstanding = [...finiteRequests].map(request => categorize(new URL(request.url()).pathname));
+    const recent = report.requests.slice(-12).map(({ path, streaming }) => ({
+      category: categorize(path), streaming,
+    }));
+    throw new Error(`Finite PostgreSQL API requests did not settle (pending=${outstanding.length},
+      pendingCategories=${JSON.stringify(outstanding)}, quietForMs=${Math.round(performance.now() - lastFiniteEvent)},
+      recentCategories=${JSON.stringify(recent)})`);
   }
   const base = `http://127.0.0.1:${ready.port}`;
   cdp = await context.newCDPSession(page);
