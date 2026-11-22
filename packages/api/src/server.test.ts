@@ -9,7 +9,7 @@ import { afterEach, describe, it } from "node:test";
 import { fromNodeHeaders } from "better-auth/node";
 import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import type { ChangeSetResult, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
+import type { ChangeSetApplicationResult, ChangeSetResult, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
 import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
@@ -484,7 +484,7 @@ function createSignedRequestFixture() {
     publicJwks: { keys: [jwk] },
     isActive: async (token: string) => active.has(token),
     ownerHeaders: () => requestHeaders(TEST_WEB_CLIENT, "codexia:api"),
-    mcpHeaders: () => requestHeaders(TEST_MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
+    mcpHeaders: (scope = "mcp:read mcp:compute mcp:propose") => requestHeaders(TEST_MCP_CLIENT, scope),
   };
 }
 
@@ -4178,19 +4178,11 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
   t.after(apiServer.close);
   const projectId = native.project.id;
+  const staleSnapshot = (await native.store.reader(projectId)).snapshot;
 
-  const seedHierarchy = async (input: Parameters<typeof native.store.buildCreateHierarchyOperation>[1]) => {
-    const built = await native.store.buildCreateHierarchyOperation(projectId, input);
-    const proposal = await native.store.propose(projectId, {
-      id: randomUUID(), snapshot: built.snapshot, operations: [built.operation], source: "author",
-    });
-    await native.store.approve(projectId, { proposalId: proposal.id, operationIds: [built.operation.id], authorScope: "owner" });
-    await native.store.apply(projectId, built.operation);
-  };
-  await seedHierarchy({ kind: "volume", id: "v1", title: "Volume 1" });
-  await seedHierarchy({ kind: "chapter", id: "c1", title: "Chapter 1", volumeId: "v1" });
-  await seedHierarchy({ kind: "scene", id: "s1", title: "Scene 1", volumeId: "v1", chapterId: "c1", manuscriptBody: "Original text" });
-  await seedHierarchy({ kind: "scene", id: "s2", title: "Scene 2", volumeId: "v1", chapterId: "c1", manuscriptBody: "Second text" });
+  await native.persistence.transaction(tx => tx.createDocument({
+    projectId, kind: "volume", title: "Existing volume", orderKey: "1", markdown: "", authorId: "owner", idempotencyKey: randomUUID(),
+  }));
 
   const headers = client.ownerHeaders();
   const invoke = async (actionId: string, input: unknown, snapshot: SnapshotId): Promise<ActionResult> => {
@@ -4264,55 +4256,10 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   const changedCreate = await invoke("core.hierarchy.create", { ...createInput, title: "Different title" }, createSnapshot);
   assert.equal(changedCreate.ok, false);
   if (!changedCreate.ok) assert.equal(changedCreate.error.code, "proposal_identity_conflict");
-  const staleSnapshot = { ...createSnapshot, projectVersion: 1 };
   const staleCreate = await invoke("core.hierarchy.create", createInput, staleSnapshot);
   assert.equal(staleCreate.ok, false);
   if (!staleCreate.ok) assert.equal(staleCreate.error.code, "proposal_identity_conflict");
   await approveApplyAndReplay("core.hierarchy.create", createInput, createSnapshot, created);
-
-  const initialHistory = await native.store.listManuscriptSnapshots(projectId, "s1");
-  const originalRevision = initialHistory.snapshots[0]?.id;
-  assert.ok(originalRevision);
-  const reviseScene = async (content: string) => {
-    const reader = await native.store.reader(projectId);
-    const path = "manuscript/v1/c1/s1.md";
-    const base = await reader.read(path);
-    assert.ok(base);
-    const operation: ChangeOperation = {
-      id: randomUUID(), generation: 0, projectId, baseProjectVersion: reader.snapshot.projectVersion,
-      effect: "manuscript", reads: [{ path, revision: base.revision }],
-      writes: [{ path, revision: base.revision, content }], message: "Change scene text for restore identity test",
-    };
-    const proposal = await native.store.propose(projectId, {
-      id: randomUUID(), snapshot: reader.snapshot, operations: [operation], source: "author",
-    });
-    await native.store.approve(projectId, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "owner" });
-    await native.store.apply(projectId, operation);
-  };
-  await reviseScene("Middle text");
-  const restoredOriginal = await native.store.buildRestoreOperation(projectId, { sceneId: "s1", snapshotId: originalRevision });
-  const originalRestoreProposal = await native.store.propose(projectId, {
-    id: randomUUID(), snapshot: restoredOriginal.snapshot, operations: [restoredOriginal.operation], source: "author",
-  });
-  await native.store.approve(projectId, { proposalId: originalRestoreProposal.id, operationIds: [restoredOriginal.operation.id], authorScope: "owner" });
-  await native.store.apply(projectId, restoredOriginal.operation);
-  const repeatedContentHistory = await native.store.listManuscriptSnapshots(projectId, "s1");
-  const repeatedContentRevision = repeatedContentHistory.snapshots[0]?.id;
-  assert.ok(repeatedContentRevision);
-  assert.notEqual(repeatedContentRevision, originalRevision);
-  const originalText = await native.store.readManuscriptSnapshot(projectId, originalRevision, "s1");
-  const repeatedText = await native.store.readManuscriptSnapshot(projectId, repeatedContentRevision, "s1");
-  assert.equal(originalText.manuscriptSnapshot.body, repeatedText.manuscriptSnapshot.body);
-  const restoreIdentitySnapshot = (await native.store.observe(projectId)).snapshot;
-  const restoreProposalId = randomUUID();
-  const restoreOriginalInput = { sceneId: "s1", snapshotId: originalRevision, proposalId: restoreProposalId };
-  const restoreOriginalResult = await invoke("core.operation.restore", restoreOriginalInput, restoreIdentitySnapshot);
-  assert.ok(restoreOriginalResult.ok, JSON.stringify(restoreOriginalResult));
-  const restoreEquivalentRevision = await invoke("core.operation.restore", {
-    ...restoreOriginalInput, snapshotId: repeatedContentRevision,
-  }, restoreIdentitySnapshot);
-  assert.equal(restoreEquivalentRevision.ok, false);
-  if (!restoreEquivalentRevision.ok) assert.equal(restoreEquivalentRevision.error.code, "proposal_identity_conflict");
 
   const assertSharedBuilderReplay = async (actionId: string, input: Record<string, unknown>) => {
     const snapshot = (await native.store.observe(projectId)).snapshot;
@@ -4327,7 +4274,117 @@ it("replays built-in Core proposal actions with their original operation IDs thr
   await assertSharedBuilderReplay("core.hierarchy.delete", {
     target: { kind: "volume", id: "retry-volume" }, proposalId: randomUUID(),
   });
-  await assertSharedBuilderReplay("core.operation.restore", {
-    sceneId: "s1", snapshotId: repeatedContentRevision, proposalId: randomUUID(),
+});
+
+it("restores a manuscript revision only through an approved native ChangeSet and replays its receipt", async (t) => {
+  const native = await nativeProject(t, "Native manuscript restoration");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-restore-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const projectId = native.project.id;
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings(projectId, client.publicJwks, client.isActive);
+  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+  t.after(instance.close);
+
+  const originalText = "The original manuscript.";
+  const currentText = "The current manuscript.";
+  const { document, revision: original } = await native.persistence.transaction(tx => tx.createDocument({
+    projectId, kind: "scene", title: "The manuscript", orderKey: "1", markdown: originalText, authorId: "owner", idempotencyKey: randomUUID(),
+  }));
+  const replace = async (base: typeof original, markdown: string) => (await native.persistence.transaction(tx => tx.saveDocument({
+    projectId, documentId: document.id, baseRevisionId: base.id,
+    changes: [{ fromUtf16: 0, toUtf16: base.markdown.length, insert: markdown }],
+    resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+    authorId: "owner", clientId: "restore-test", idempotencyKey: randomUUID(),
+  }))).revision;
+  const intermediate = await replace(original, "An intermediate revision.");
+  const repeated = await replace(intermediate, originalText);
+  const earlierSnapshot = (await native.store.reader(projectId)).snapshot;
+  const current = await replace(repeated, currentText);
+  const snapshot = (await native.store.observe(projectId)).snapshot;
+  const author = client.ownerHeaders();
+  const external = client.mcpHeaders();
+  const actionPath = `/api/projects/${projectId}/actions/core.operation.restore`;
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const post = (path: string, body: unknown, headers = author) =>
+    fetch(instance.base + path, { method: "POST", headers, body: JSON.stringify(body) });
+  const input = { documentId: document.id, baseRevisionId: current.id, sourceRevisionId: original.id, idempotencyKey: randomUUID() };
+  const propose = async (payload: unknown, selected: SnapshotId | null = snapshot) => {
+    const response = await post(actionPath, { input: payload, ...(selected ? { snapshot: selected } : {}) }, external);
+    assert.equal(response.status, 200);
+    return await response.json() as ActionResult<ChangeSetResult>;
+  };
+  const readHead = () => native.persistence.read(async reader => {
+    const head = (await reader.getDocument(projectId, document.id))?.headRevisionId;
+    return head && await reader.getRevision(projectId, document.id, head);
+  });
+
+  const readOnly = await post(actionPath, { input, snapshot }, client.mcpHeaders("mcp:read"));
+  assert.equal(readOnly.status, 403);
+  const stale = await propose({ ...input, baseRevisionId: repeated.id, idempotencyKey: randomUUID() });
+  assert.ok(!stale.ok && stale.error.code === "revision_conflict", JSON.stringify(stale));
+
+  const future = await propose(input, earlierSnapshot);
+  assert.ok(!future.ok && future.error.code === "revision_conflict", JSON.stringify(future));
+
+  const result = await propose(input, null);
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.deepEqual(result.snapshot, snapshot);
+  const { changeSet, replayed } = result.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.authorId, "owner");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  const [operation] = changeSet.operations;
+  assert.equal(changeSet.operations.length, 1);
+  assert.ok(operation?.type === "document.restore");
+  assert.equal(operation.command.baseRevisionId, current.id);
+  assert.equal(operation.command.sourceRevisionId, original.id);
+  assert.equal((await readHead())?.markdown, currentText);
+
+  const retry = await propose(input);
+  assert.ok(retry.ok && retry.data.replayed);
+  assert.deepEqual(retry.data.changeSet, changeSet);
+  const equivalent = await propose({ ...input, sourceRevisionId: repeated.id });
+  assert.ok(!equivalent.ok && equivalent.error.code === "idempotency_conflict", JSON.stringify(equivalent));
+  const invalid = await propose({ sceneId: document.id, snapshotId: original.id, proposalId: randomUUID() });
+  assert.ok(!invalid.ok && invalid.error.code === "invalid_action_input", JSON.stringify(invalid));
+
+  const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
+  const review = await fetch(instance.base + nativePath + "/review-feed", { headers: author });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+  const approvalBody = { expectedVersion: changeSet.version };
+  assert.equal((await post(changeSetPath + "/approve", approvalBody, external)).status, 403);
+  assert.equal((await post(changeSetPath + "/apply", approvalBody)).status, 409);
+  assert.equal((await readHead())?.id, current.id);
+
+  const approval = await post(changeSetPath + "/approve", approvalBody);
+  assert.equal(approval.status, 200, await approval.text());
+  assert.equal((await readHead())?.id, current.id);
+  const apply = async () => {
+    const response = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version + 1 });
+    assert.equal(response.status, 200);
+    return await response.json() as ChangeSetApplicationResult;
+  };
+  const receipt = await apply();
+  assert.equal(receipt.replayed, false);
+  assert.equal(receipt.changeSet.status, "applied");
+  const restored = await readHead();
+  assert.ok(restored);
+  assert.equal(restored.markdown, originalText);
+  assert.notEqual(restored.id, original.id);
+  assert.equal(restored.parentRevisionId, current.id);
+  const [restoredResult] = receipt.results;
+  assert.ok(restoredResult && "revision" in restoredResult);
+  assert.equal(restoredResult.revision.id, restored.id);
+  assert.deepEqual(await apply(), { ...receipt, replayed: true });
+  assert.equal((await readHead())?.id, restored.id);
+  const afterApply = await propose(input);
+  assert.ok(afterApply.ok && afterApply.data.replayed);
+  assert.deepEqual(afterApply.data.changeSet, receipt.changeSet);
+  assert.deepEqual(await propose(input, null), {
+    ok: true, snapshot: (await native.store.observe(projectId)).snapshot, data: { changeSet: receipt.changeSet, replayed: true },
   });
 });
