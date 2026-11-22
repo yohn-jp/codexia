@@ -17,7 +17,7 @@ RUN set -eux; \
     else \
       node /tmp/pw-install/node_modules/playwright/cli.js install --with-deps webkit; \
     fi; \
-    BROWSER="$BROWSER" node -e 'const pw = require("/tmp/pw-install/node_modules/playwright"); (async () => { const browser = await pw[process.env.BROWSER].launch({headless:true}); const page = await browser.newPage(); await page.setContent("<title>minimal-playwright-smoke</title>"); if (await page.title() !== "minimal-playwright-smoke") throw new Error("Browser smoke assertion failed"); await browser.close(); })().catch(err => { console.error(err); process.exitCode = 1; });'; \
+    runuser -u node -- env HOME=/home/node BROWSER="$BROWSER" node -e 'const pw = require("/tmp/pw-install/node_modules/playwright"); (async () => { if (process.getuid() === 0) throw new Error("Browser smoke must use the runtime account"); const browser = await pw[process.env.BROWSER].launch({headless:true}); const page = await browser.newPage(); await page.setContent("<title>minimal-playwright-smoke</title>"); if (await page.title() !== "minimal-playwright-smoke") throw new Error("Browser smoke assertion failed"); await browser.close(); })().catch(err => { console.error(err); process.exitCode = 1; });'; \
     rm -rf /tmp/pw-install /root/.npm /root/.cache /var/lib/apt/lists/*
 
 # Browser payload is read-only at runtime; cache/tooling uses the existing node home.

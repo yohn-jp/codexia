@@ -5,7 +5,6 @@ import {
   NLP_APPROX_TOKEN_COUNTER_VERSION,
   NLP_MODEL_ID,
   NLP_MODEL_VERSION,
-  NLP_TOKENIZER_ENGINE_VERSION,
   NLP_MODULE_VERSION,
   type NlpTokenCountBatch,
   type NlpTokenCounterIdentity,
@@ -77,7 +76,7 @@ async function loadCounter(input: TokenCounterWorkerInput): Promise<LoadedCounte
             modelId,
             exact: true,
             engine: "huggingface-transformers",
-            engineVersion: NLP_TOKENIZER_ENGINE_VERSION,
+            engineVersion: transformers.env.version,
           },
           count: (text: string) => tokenizer.encode(text).length,
         } satisfies LoadedCounter;

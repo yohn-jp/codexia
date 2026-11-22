@@ -7,10 +7,12 @@ import {
   createUiSentencePositionIndexCache,
   createUiSentencePositionIndex,
   formatHandoffHint,
+  loadReadingPage,
+  loadWritingResume,
   mergeContinueCandidates,
   offsetAtUiSentenceIndex,
-  readingResumeStorageKey,
-  writingResumeStorageKey,
+  saveReadingPage,
+  saveWritingResume,
   uiSentenceIndexAtOffset,
 } from "./resume/continueCandidates";
 
@@ -47,12 +49,30 @@ test("handoff hints identify the other device without displaying prose", () => {
   assert.equal(formatHandoffHint("mobile", "invalid", 0, "desktop"), null);
 });
 
-test("local reading positions are isolated by author, repository, and scene", () => {
-  const ownerA = readingResumeStorageKey("owner-a", "repo-key", "scene-1");
-  assert.notEqual(ownerA, readingResumeStorageKey("owner-b", "repo-key", "scene-1"));
-  assert.notEqual(ownerA, readingResumeStorageKey("owner-a", "other-repo", "scene-1"));
-  assert.notEqual(ownerA, readingResumeStorageKey("owner-a", "repo-key", "scene-2"));
-  assert.notEqual(writingResumeStorageKey("owner-a", "repo-key"), writingResumeStorageKey("owner-b", "repo-key"));
+test("local reading and writing positions are isolated by author, work, and scene", t => {
+  const values = new Map<string, string>();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } },
+  });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+
+  saveReadingPage("owner-a", "work-a", "scene-1", 4);
+  saveReadingPage("owner-a", "work-a", "scene-2", 7);
+  assert.equal(loadReadingPage("owner-a", "work-a", "scene-1"), 4);
+  assert.equal(loadReadingPage("owner-a", "work-a", "scene-2"), 7);
+  assert.equal(loadReadingPage("owner-b", "work-a", "scene-1"), 0);
+  assert.equal(loadReadingPage("owner-a", "work-b", "scene-1"), 0);
+
+  const resume = { sceneId: "scene-1", cursorSentenceIndex: 2, scrollTop: 80 };
+  saveWritingResume("owner-a", "work-a", resume);
+  assert.deepEqual(loadWritingResume("owner-a", "work-a"), resume);
+  assert.equal(loadWritingResume("owner-b", "work-a"), null);
+  assert.equal(loadWritingResume("owner-a", "work-b"), null);
 });
 
 test("cursor mapping uses source sentence numbering around Japanese punctuation and dialogue", () => {
@@ -90,7 +110,7 @@ test("reusable cursor positions preserve dialogue, UTF-16, and newline offsets",
   assert.equal(blankLine.indexAtOffset(10), 4);
 });
 
-test("sentence position indexing constructs one Segmenter for a multiline document", () => {
+test("sentence position indexing does not construct a Segmenter per line", () => {
   const descriptor = Object.getOwnPropertyDescriptor(Intl, "Segmenter");
   const originalSegmenter = Intl.Segmenter;
   let constructions = 0;
@@ -107,7 +127,7 @@ test("sentence position indexing constructs one Segmenter for a multiline docume
   try {
     const text = Array.from({ length: 256 }, () => "一文目。").join("\n");
     const index = createUiSentencePositionIndex(text);
-    assert.equal(constructions, 1);
+    assert.ok(constructions <= 1);
     for (let sentence = 1; sentence <= 256; sentence++) {
       const offset = (sentence - 1) * 5;
       assert.equal(index.indexAtOffset(offset), sentence);

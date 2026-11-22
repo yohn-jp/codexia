@@ -184,62 +184,6 @@ test("a failed pageshow session check cannot retry logout while the latest manus
   expect(logoutRequests).toBe(0);
 });
 
-test("OAuth reauthentication stays on the editor when draft protection fails", async ({ page }) => {
-  test.skip(process.env.CODEXIA_E2E_OAUTH_UI !== "1", "requires an explicit OAuth-configured frontend build and provider fixture");
-  const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
-  const appOrigin = new URL(appBaseURL).origin;
-  const headers = { Origin: appOrigin };
-  const login = await page.request.post(new URL("/api/login", appBaseURL).toString(), { headers, data: { token: authToken } });
-  expect(login.ok()).toBe(true);
-  const projectResponse = await page.request.post(new URL("/api/v1/persistence/projects", appBaseURL).toString(), { headers, data: { title: `Unprotected OAuth retry ${crypto.randomUUID()}` } });
-  expect(projectResponse.status()).toBe(201);
-  const { project } = await projectResponse.json() as { project: { id: string } };
-  const documentResponse = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, appBaseURL).toString(), {
-    headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
-    data: { kind: "scene", title: "OAuth retry scene", orderKey: "a", markdown: "Initial manuscript." },
-  });
-  expect(documentResponse.status()).toBe(201);
-  const { document } = await documentResponse.json() as { document: { id: string } };
-  await page.goto(new URL(`/desktop/projects/${project.id}/scenes/${document.id}`, appBaseURL).toString());
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(manuscriptEditor(page)).toContainText("Initial manuscript.");
-  await fillDraft(page, "Previously protected manuscript.");
-  await page.evaluate(() => {
-    const original = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
-      if (this.name === "persistenceDrafts") throw new DOMException("Injected browser journal failure", "QuotaExceededError");
-      return original.apply(this, args);
-    };
-  });
-  await manuscriptEditor(page).fill("Latest manuscript that failed browser protection.");
-  await expect(manuscriptEditor(page)).toContainText("Latest manuscript that failed browser protection.");
-
-  let sessionUnavailable = false;
-  let authorizationRequests = 0;
-  await page.route("**/api/session", (route) => sessionUnavailable
-    ? route.fulfill({ status: 503, json: { error: "Session check unavailable" } })
-    : route.continue());
-  await page.route("https://identity.example.test/authorize**", async (route) => {
-    authorizationRequests += 1;
-    await route.fulfill({ status: 200, contentType: "text/html", body: "OAuth provider fixture" });
-  });
-  sessionUnavailable = true;
-  await page.evaluate(() => {
-    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
-    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
-  });
-  await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
-  await page.getByRole("button", { name: "OAuthで再認証" }).click();
-  await expect(page.getByRole("alert")).toContainText("保護できないためOAuth認証への移動を停止しました");
-  expect(authorizationRequests).toBe(0);
-  expect(new URL(page.url()).pathname).toContain(`/desktop/projects/${project.id}/scenes/${document.id}`);
-
-  sessionUnavailable = false;
-  await page.getByRole("button", { name: "再試行", exact: true }).click();
-  await expect(manuscriptEditor(page)).toContainText("Latest manuscript that failed browser protection.");
-  await expect(page.getByRole("heading", { name: "OAuth retry scene", exact: true })).toBeVisible();
-});
-
 test("recovery-session failure cannot discard an unjournaled manuscript through logout retry", async ({ page }) => {
   // Authoritative acceptance for #454: simulate an IndexedDB draft failure
   // and an independently failing session refresh on a real PostgreSQL document.

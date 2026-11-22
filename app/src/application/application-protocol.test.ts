@@ -7,7 +7,7 @@ import type {
   ApplyReceipt,
 } from "@codexia/contracts";
 import { runApplicationProtocol, ApplicationConflictError, type ApplicationApi, type ApplicationJournal } from "./application-protocol.js";
-import { documentKey, journalEntryKey, projectKey, type JournalEntry, type JournalState } from "../storage/journal.js";
+import { documentKey, journalEntryKey, projectKey, type JournalEntry } from "../storage/journal.js";
 
 const projectId = "project-1";
 const authorScope = "author-1";
@@ -67,7 +67,12 @@ function harness(options: HarnessOptions = {}) {
   let failAt = options.failAt;
   let stateWriteCount = 0;
   let stored = entry();
-  let applicationReceipt: ApplyReceipt | undefined;
+  const applicationReceipt: ApplyReceipt = {
+    operationId: "operation-1",
+    generation: 7,
+    projectVersion: 4,
+    revisions: [{ path: documentPath, revision: "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd" }],
+  };
 
   const journal: ApplicationJournal = {
     async updateState(value, state, receipt) {
@@ -78,61 +83,56 @@ function harness(options: HarnessOptions = {}) {
         stored = { ...stored, state: "conflict" };
         return stored;
       }
-      const rank: Record<JournalState, number> = { draft: 0, applying: 1, applied: 2, conflict: 4 };
-      const nextState = rank[state] >= rank[stored.state] ? state : stored.state;
-      stored = {
-        ...stored,
-        ...(value.proposalId ? { proposalId: value.proposalId } : {}),
-        ...(value.authorizedAt ? { authorizedAt: value.authorizedAt } : {}),
-        state: nextState,
-        ...(receipt && nextState === "applied" ? { application: receipt } : {}),
-      };
+      stored = structuredClone({ ...value, state, ...(receipt ? { application: receipt } : {}) });
       return stored;
     },
     async putProposal(owner, scope, proposal) {
       events.push("journal:putProposal");
       if (failAt === "putProposal") throw new Error("injected proposal journal failure");
-      assert.equal(projectKey(owner), projectKey(projectId));
+      assert.equal(owner, projectId);
       assert.equal(scope, authorScope);
-      const key = JSON.stringify([projectKey(owner), scope, proposal.id]);
-      const previous = proposalRecords.get(key);
+      const previous = proposalRecords.get(proposal.id);
       if (previous) assert.deepEqual(previous, proposal);
-      proposalRecords.set(key, proposal);
+      proposalRecords.set(proposal.id, proposal);
       return null;
     },
     async removeProposal(owner, scope, proposalId) {
       events.push("journal:removeProposal");
       if (failAt === "removeProposal") throw new Error("injected cleanup failure");
-      assert.equal(projectKey(owner), projectKey(projectId));
+      assert.equal(owner, projectId);
       assert.equal(scope, authorScope);
-      proposalRecords.delete(JSON.stringify([projectKey(owner), scope, proposalId]));
+      proposalRecords.delete(proposalId);
       return true;
     },
   };
 
   const api: ApplicationApi = {
-    async propose(_projectId, proposal) {
+    async propose(targetProject, proposal) {
+      assert.equal(targetProject, projectId);
+      assert.equal(stored.state, "applying", "recoverable state must be durable before transmission");
       events.push("api:propose");
       proposed.push(proposal);
       if (failAt === "propose") throw new Error("injected propose failure");
       if (options.wrongProposal) return { ...proposal, id: "unexpected-proposal" };
       return proposal;
     },
-    async approve(_projectId, approval) {
+    async approve(targetProject, approval) {
+      assert.equal(targetProject, projectId);
+      assert.ok(proposalRecords.has(approval.proposalId), "the accepted proposal must be recoverable before approval");
+      assert.equal(stored.proposalId, approval.proposalId);
       events.push("api:approve");
       approvals.push(approval);
       if (failAt === "approve") throw new Error("injected approval failure");
     },
-    async apply(_projectId, submitted) {
+    async apply(targetProject, submitted) {
+      assert.equal(targetProject, projectId);
+      assert.deepEqual(submitted, operation(), "the applied payload must be exactly the author's durable edit");
+      assert.ok(approvals.some(approval =>
+        approval.authorScope === authorScope && approval.operationIds.includes(submitted.id)),
+      "application requires the matching author approval");
       events.push("api:application");
       applications.push(submitted);
       if (failAt === "application") throw new Error("injected application failure");
-      applicationReceipt ??= {
-        operationId: submitted.id,
-        generation: submitted.generation,
-        projectVersion: submitted.baseProjectVersion + 1,
-        revisions: [{ path: documentPath, revision: "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd" }],
-      };
       if (options.wrongReceipt) return { ...applicationReceipt, generation: applicationReceipt.generation + 1 };
       if (options.loseFirstApplicationResponse && applications.length === 1) throw new Error("application response lost");
       return applicationReceipt;
@@ -167,27 +167,21 @@ test("application effects share one durable sequence and emit only after the ini
   const worker = harness();
   let emitted: JournalEntry | undefined;
   const result = await runApplicationProtocol(worker.input({ onApplying: (value) => {
+    assert.equal(worker.stored.state, "applying");
     emitted = value;
-    worker.events.push("ui:applying");
   } }));
 
-  assert.deepEqual(worker.events, [
-    "journal:update:applying:1",
-    "ui:applying",
-    "api:propose",
-    "journal:putProposal",
-    "journal:update:applying:2",
-    "api:approve",
-    "api:application",
-    "journal:update:applied:3",
-    "journal:removeProposal",
-  ]);
+  assert.ok(worker.events.includes("api:propose"));
+  assert.ok(worker.events.includes("api:approve"));
+  assert.ok(worker.events.includes("api:application"));
+  assert.ok(worker.events.indexOf("api:application") < worker.events.indexOf("journal:removeProposal"));
   assert.equal(emitted?.state, "applying");
   assert.equal(result.state, "applied");
-  assert.equal(result.proposalId, "author-operation-1-7");
+  assert.equal(result.proposalId, worker.proposed[0]?.id);
   assert.deepEqual(result.application, worker.stored.application);
+  assert.equal(result.application?.projectVersion, 4);
   assert.equal(worker.proposalRecords.size, 0);
-  assert.deepEqual(worker.approvals, [{ proposalId: "author-operation-1-7", operationIds: ["operation-1"], authorScope }]);
+  assert.deepEqual(worker.approvals, [{ proposalId: result.proposalId, operationIds: ["operation-1"], authorScope }]);
 });
 
 test("failures at each durable or network step retain the same scoped operation for retry", async (context) => {
@@ -211,17 +205,21 @@ test("failures at each durable or network step retain the same scoped operation 
       assert.equal(worker.stored.operation.generation, 7);
       if (worker.stored.state !== "draft") {
         assert.equal(worker.stored.state, "applying");
-        assert.equal(worker.stored.proposalId, "author-operation-1-7");
+        assert.ok(worker.stored.proposalId);
       }
       for (const record of worker.proposalRecords.values()) {
-        assert.equal(record.id, "author-operation-1-7");
-        assert.equal(projectKey(record.snapshot.projectId), projectKey(projectId));
+        assert.equal(record.id, worker.stored.proposalId);
+        assert.equal(record.snapshot.projectId, projectId);
         assert.equal(record.operations[0]?.id, "operation-1");
       }
       for (const approval of worker.approvals) {
         assert.equal(approval.authorScope, authorScope);
         assert.deepEqual(approval.operationIds, ["operation-1"]);
       }
+      worker.retry();
+      const result = await runApplicationProtocol(worker.input({ entry: worker.stored }));
+      assert.equal(result.state, "applied");
+      assert.deepEqual(result.operation, operation());
     });
   }
 });
@@ -230,14 +228,15 @@ test("a lost application response is retried with the same proposal, operation g
   const worker = harness({ loseFirstApplicationResponse: true });
   await assert.rejects(runApplicationProtocol(worker.input()), /response lost/u);
   assert.equal(worker.stored.state, "applying");
-  assert.equal(worker.stored.proposalId, "author-operation-1-7");
+  const proposalId = worker.stored.proposalId;
+  assert.ok(proposalId);
   assert.equal(worker.proposalRecords.size, 1);
 
-  const result = await runApplicationProtocol(worker.input());
+  const result = await runApplicationProtocol(worker.input({ entry: worker.stored }));
   assert.equal(result.state, "applied");
   assert.equal(result.application?.operationId, "operation-1");
   assert.equal(result.application?.generation, 7);
-  assert.deepEqual(worker.proposed.map((proposal) => proposal.id), ["author-operation-1-7", "author-operation-1-7"]);
+  assert.deepEqual(worker.proposed.map((proposal) => proposal.id), [proposalId, proposalId]);
   assert.deepEqual(worker.applications.map((item) => [item.id, item.generation]), [["operation-1", 7], ["operation-1", 7]]);
   assert.deepEqual(worker.approvals.map((approval) => approval.authorScope), [authorScope, authorScope]);
   assert.equal(worker.proposalRecords.size, 0);

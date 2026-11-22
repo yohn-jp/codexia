@@ -1,0 +1,232 @@
+path	kind	status	decision	contract	observable_behavior	oracle	counterexample	layer	real_mock_boundary	duplicate_or_retained_proof	execution_cost	action_and_verification	commit_sha	existing_work
+.github/docker/playwright-minimal.Dockerfile	workflow proof or execution	UNASSESSED												-
+.github/docker/playwright-ubuntu-minimal.Dockerfile	workflow proof or execution	UNASSESSED												-
+.github/scripts/playwright-image-benchmark-summary.mjs	workflow proof or execution	UNASSESSED												-
+.github/workflows/ansible-base-secrets.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/ansible-host.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/ansible-performance-ab.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/backend-deployment-handoff.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/backend-handoff-revalidate.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/backend-release.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/browser-arm64-benchmark.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/browser-runtime-benchmark.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/codeql.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/deployment-config.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/frontend-release.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/full-model-oci-acceptance.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/impeccable.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/ios-unsigned-ipa.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/playwright-image-benchmark.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/playwright-image-build.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/playwright-image-variants.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/production-preflight.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/publish-oci.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/push-app-lifecycle.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/push-backup.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/push-host.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/repository-audit.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/security-scans.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/tailscale-connectivity.yml	workflow proof or execution	UNASSESSED												-
+.github/workflows/verify.yml	workflow proof or execution	UNASSESSED												-
+.gitleaks.toml	verification or evidence execution	UNASSESSED												-
+.trivyignore.yaml	verification or evidence execution	UNASSESSED												-
+deploy/ansible/check_postgres_volume.py	deployment proof or harness	UNASSESSED												-
+deploy/ansible/ci-mitogen-playbook.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/deploy-lifecycle-fixture.yml	deployment proof or harness	UNASSESSED												-
+deploy/ansible/host-validate.yml	verification or evidence execution	UNASSESSED												-
+deploy/ansible/restore-drill.yml	verification or evidence execution	UNASSESSED												-
+deploy/ansible/test-auth-runtime-integration.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-base-runtime-integration.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-base-secrets-integration.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-base-secrets.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-host-integration.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-host-validation.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-inspect.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-push-app-lifecycle.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-push-auth-lifecycle.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test-push-host.sh	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test_host_contract.py	deployment proof or harness	UNASSESSED												-
+deploy/ansible/test_postgres_volume_layout.py	deployment proof or harness	UNASSESSED												-
+deploy/ansible/verify-base-db-container.yml	deployment proof or harness	UNASSESSED												-
+deploy/ansible/verify-base-tunnel-container.yml	deployment proof or harness	UNASSESSED												-
+deploy/ansible/verify-deploy-base-runtime.yml	deployment proof or harness	UNASSESSED												-
+deploy/ansible/verify-postgres-roles.sql	deployment proof or harness	UNASSESSED												-
+edge/frontend/test/oauth-static-smoke.mjs	standalone suite	UNASSESSED												-
+edge/frontend/test/static-smoke.mjs	standalone suite	UNASSESSED												-
+edge/frontend/test/worker.test.ts	suite	UNASSESSED												-
+scripts/ansible-ab/benchmark-fixture.yml	measurement probe or harness	UNASSESSED												-
+scripts/ansible-ab/benchmark.py	measurement probe or harness	UNASSESSED												-
+scripts/ansible-ab/ssh-fixture.sh	measurement probe or harness	UNASSESSED												-
+scripts/ansible-ab/time-playbook.sh	measurement probe or harness	UNASSESSED												-
+scripts/audit-runtime-deps.mjs	verification or evidence execution	UNASSESSED												-
+scripts/audit-runtime-deps.test.mjs	suite	UNASSESSED												-
+scripts/audit/delegate.test.mjs	suite	UNASSESSED												-
+scripts/audit/export.test.mjs	suite	UNASSESSED												-
+scripts/audit/packet-format.test.mjs	suite	UNASSESSED												-
+scripts/backend-deployment-handoff-contract.test.mjs	suite	UNASSESSED												-
+scripts/backend-handoff-revalidation.test.mjs	suite	UNASSESSED												-
+scripts/backend-image-inspection.test.mjs	suite	UNASSESSED												-
+scripts/backend-promotion-contract.test.mjs	suite	UNASSESSED												-
+scripts/backend-registry-tag.test.mjs	suite	UNASSESSED												-
+scripts/backend-update-identity.test.mjs	suite	UNASSESSED												-
+scripts/branding/codexia-icon.test.mjs	suite	UNASSESSED												-
+scripts/browser-coverage-reporter.mjs	verification or evidence execution	UNASSESSED												-
+scripts/browser-shards.mjs	verification or evidence execution	UNASSESSED												-
+scripts/browser-shards.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/builtin-module-registration.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/certify-ci.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-artifact-selection.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-artifact-selection.test.mjs	suite	UNASSESSED												-
+scripts/ci-contract.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-contract.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-coverage-inputs.mjs	verification or evidence execution	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-coverage-inputs.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-dashboard/analysis.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-dashboard/analysis.test.mjs	suite	UNASSESSED												-
+scripts/ci-dashboard/collect.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-dashboard/collection.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-dashboard/diagnostics.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-dashboard/diagnostics.test.mjs	suite	UNASSESSED												-
+scripts/ci-evidence.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-evidence.test.mjs	suite	UNASSESSED												-
+scripts/ci-group.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-impact.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-impact.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-native-producer.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-native-producer.test.mjs	suite	UNASSESSED												-
+scripts/ci-parallel.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-parallel.test.mjs	suite	UNASSESSED												-
+scripts/ci-producer-artifact.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-profile-artifact.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-profile-artifact.test.mjs	suite	UNASSESSED												-
+scripts/ci-task-input-proof.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-task-input-proof.test.mjs	suite	UNASSESSED												-
+scripts/ci-task-inputs.mjs	verification or evidence execution	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-task-inputs.test.mjs	suite	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/ci-task-proof-reuse.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-task-proof-reuse.test.mjs	suite	UNASSESSED												-
+scripts/ci-timing.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-timing.test.mjs	suite	UNASSESSED												-
+scripts/ci-workspace.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ci-workspace.test.mjs	suite	UNASSESSED												-
+scripts/component-release-record.test.mjs	suite	UNASSESSED												-
+scripts/component-release-version.test.mjs	suite	UNASSESSED												-
+scripts/download-ci-artifacts.mjs	verification or evidence execution	UNASSESSED												-
+scripts/download-ci-artifacts.test.mjs	suite	UNASSESSED												-
+scripts/frontend-oauth-config.test.mjs	suite	UNASSESSED												-
+scripts/frontend-promotion-contract.test.mjs	suite	UNASSESSED												-
+scripts/frontend-promotion-handoff.test.mjs	suite	UNASSESSED												-
+scripts/graphify-pages/pack.test.mjs	suite	UNASSESSED												-
+scripts/hosted-attestation.mjs	verification or evidence execution	UNASSESSED												-
+scripts/hosted-build.test.mjs	suite	UNASSESSED												-
+scripts/hosted-native-selection.test.mjs	suite	UNASSESSED												-
+scripts/hosted-output.test.mjs	suite	UNASSESSED												-
+scripts/hosted-smoke.mjs	verification or evidence execution	UNASSESSED												-
+scripts/html-document.test.mjs	suite	UNASSESSED												-
+scripts/identity-probe-client.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ios/validate-web-bundle.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ios/validate-web-bundle.test.mjs	suite	UNASSESSED												-
+scripts/measure-ci.mjs	verification or evidence execution	UNASSESSED												-
+scripts/model-postgres-fixture.test.mjs	suite	UNASSESSED												-
+scripts/native-mcp-acceptance.test.mjs	suite	UNASSESSED												-
+scripts/performance/artifacts.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/artifacts.test.mjs	suite	UNASSESSED												-
+scripts/performance/browser-probes.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/browser.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/ci-browser-smoke.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/common.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-derived-run.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-derived.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-durability-probe.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-g5-artifact-hashes.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-g5-asset-closure.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-journal-probe.html	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-journal.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-memory.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-network-server.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-network.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-payload-probe.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-payload-worker.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-read-overhead.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-render-probe.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-render-probe.test.mjs	suite	UNASSESSED												-
+scripts/performance/core64-render.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-resize-manifest.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-resize.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-static.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-status-authority.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-status-store.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-writer-worker.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/core64-writer.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/dataset.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/instrument-node.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/measure-oci-c62.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/oci-c62-podman.sh	measurement probe or harness	UNASSESSED												-
+scripts/performance/performance.test.mjs	suite	UNASSESSED												-
+scripts/performance/podman	measurement probe or harness	UNASSESSED												-
+scripts/performance/run-oci-c62.sh	measurement probe or harness	UNASSESSED												-
+scripts/performance/run.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/server.mjs	measurement probe or harness	UNASSESSED												-
+scripts/performance/summarize.mjs	measurement probe or harness	UNASSESSED												-
+scripts/playwright-image-benchmark-summary.test.mjs	suite	UNASSESSED												-
+scripts/prepare-backend-handoff-revalidation.mjs	verification or evidence execution	UNASSESSED												-
+scripts/profile-build.test.mjs	suite	UNASSESSED												-
+scripts/profile-package.test.mjs	suite	UNASSESSED												-
+scripts/push-app-lifecycle-contract.test.mjs	suite	UNASSESSED												-
+scripts/push-app-lifecycle.mjs	verification or evidence execution	UNASSESSED												-
+scripts/push-auth-lifecycle-oidc.mjs	verification or evidence execution	UNASSESSED												-
+scripts/push-deployment-admission.test.mjs	suite	UNASSESSED												-
+scripts/push-deployment-backup.test.mjs	suite	UNASSESSED												-
+scripts/push-deployment-certificate.test.mjs	suite	UNASSESSED												-
+scripts/push-deployment-contract.test.mjs	suite	UNASSESSED												-
+scripts/push-deployment-documentation.test.mjs	suite	UNASSESSED												-
+scripts/push-deployment-recovery.test.mjs	suite	UNASSESSED												-
+scripts/push-host.test.mjs	suite	UNASSESSED												-
+scripts/read-regular-file.test.mjs	suite	UNASSESSED												-
+scripts/release-impact.test.mjs	suite	UNASSESSED												-
+scripts/release-policy.test.mjs	suite	UNASSESSED												-
+scripts/release-source-gate.mjs	verification or evidence execution	UNASSESSED												-
+scripts/release-source-gate.test.mjs	suite	UNASSESSED												-
+scripts/resolve-backend-promotion.test.mjs	suite	UNASSESSED												-
+scripts/reuse-ci-task-input-proof.mjs	verification or evidence execution	UNASSESSED												-
+scripts/reuse-pr-verification.mjs	verification or evidence execution	UNASSESSED												-
+scripts/reuse-pr-verification.test.mjs	suite	UNASSESSED												-
+scripts/root-build.test.mjs	suite	UNASSESSED												-
+scripts/run-browser-shard.mjs	verification or evidence execution	UNASSESSED												-
+scripts/run-manual-backend-handoff-revalidation.mjs	verification or evidence execution	UNASSESSED												-
+scripts/runtime-package-closure.test.mjs	suite	UNASSESSED												-
+scripts/select-ci-evidence.mjs	verification or evidence execution	UNASSESSED												-
+scripts/select-ci-plan.mjs	verification or evidence execution	UNASSESSED												-
+scripts/typecheck-tests.mjs	verification or evidence execution	UNASSESSED												-
+scripts/ui-preview.test.mjs	suite	UNASSESSED												-
+scripts/verify-backend-artifacts.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-backend-artifacts.test.mjs	suite	UNASSESSED												-
+scripts/verify-backend-image-identity.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-backend-image.sh	verification or evidence execution	UNASSESSED												-
+scripts/verify-backend-promotion-handoff.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-backend-push-handoff.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-backend-push-handoff.test.mjs	suite	UNASSESSED												-
+scripts/verify-browser-runtime.mjs	verification or evidence execution	UNASSESSED												PR #614 @ deb856063409e026a2a8cde06b71fb8c48ee3264
+scripts/verify-commit-source.test.mjs	suite	UNASSESSED												-
+scripts/verify-deployment-config.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-existing-backend-release.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-existing-backend-release.test.mjs	suite	UNASSESSED												-
+scripts/verify-frontend-artifact.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-frontend-artifact.test.mjs	suite	UNASSESSED												-
+scripts/verify-frontend-compatibility.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-frontend-compatibility.test.mjs	suite	UNASSESSED												-
+scripts/verify-frontend-promotion-reader.test.mjs	suite	UNASSESSED												-
+scripts/verify-github.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-hosted-native.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-migration-ledger.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-mixed-version.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-mixed-version.test.mjs	suite	UNASSESSED												-
+scripts/verify-oci-http.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-oci.sh	verification or evidence execution	UNASSESSED												-
+scripts/verify-release-source.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-retained-evidence.test.mjs	suite	UNASSESSED												-
+scripts/verify-ui-hosted.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify-unpublished-image.mjs	verification or evidence execution	UNASSESSED												-
+scripts/verify.mjs	verification or evidence execution	UNASSESSED												-
+tsconfig.safety.json	verification or evidence execution	UNASSESSED												-

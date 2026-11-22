@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, rm, mkdir, symlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInventory, pack, verify } from './artifacts.mjs';
@@ -12,7 +13,10 @@ test('artifact round trip reproduces archives and rejects corrupt archive, gzip 
   const root = await mkdtemp(join(tmpdir(), 'wave0-artifacts-'));
   try {
     const source = join(root, 'source'), index = join(root, 'INDEX.json'); await mkdir(source);
-    const data = Buffer.from('{"synthetic":true}\n'), gzip = gzipSync(data, { level: 6 }); gzip[9] = 255;
+    const data = Buffer.from('{"synthetic":true}\n');
+    // Fixed, previously encoded RFC 1952 fixture for this schema-1 recipe.
+    const gzip = Buffer.from('1f8b08000000000000ffab562aaecc2bc9482dc94c56b22a292a4dade50200301ca01713000000', 'hex');
+    assert.deepEqual(gunzipSync(gzip), data);
     await writeFile(join(source, 'result.json'), data);
     const manifest = { schemaVersion: 1, artifacts: [{ file: 'raw/result.json.gz', sourceFile: 'result.json',
       sourceBytes: data.length, gzipBytes: gzip.length, sha256: hash(data), gzipSha256: hash(gzip), diagnostic: false }] };
@@ -21,6 +25,15 @@ test('artifact round trip reproduces archives and rejects corrupt archive, gzip 
     const a = await pack(index, source, join(root, 'a'), url);
     const b = await pack(join(root, 'a/INDEX.json'), source, join(root, 'b'), url);
     assert.deepEqual(a, b);
+    const firstArchive = join(root, 'a/evidence.tar');
+    const archiveBytes = await readFile(firstArchive);
+    assert.deepEqual(archiveBytes, await readFile(join(root, 'b/evidence.tar')));
+    assert.equal(a.storage.sha256, hash(archiveBytes));
+    assert.equal(a.storage.bytes, archiveBytes.byteLength);
+    assert.deepEqual(execFileSync('tar', ['-tf', firstArchive], { encoding: 'utf8' }).trim().split('\n'),
+      ['raw/', 'raw/result.json.gz']);
+    const extracted = execFileSync('tar', ['-xOf', firstArchive, 'raw/result.json.gz']);
+    assert.deepEqual(gunzipSync(extracted), data);
     assert.equal(await verify(join(root, 'a/INDEX.json'), join(root, 'a')), 1);
     await assert.rejects(pack(index, source, join(root, 'a'), url), { code: 'EEXIST' });
     await writeFile(join(root, 'a/evidence.tar'), 'corrupt');
@@ -58,6 +71,8 @@ test('new archive inventory is explicit, deterministic and rejects unsafe or cha
     const url = 'https://github.com/yohn-jp/codexia/releases/download/test/evidence.tar';
     const output = join(root, 'archive');
     await pack(index, source, output, url);
+    assert.deepEqual(execFileSync('tar', ['-tf', join(output, 'evidence.tar')], { encoding: 'utf8' }).trim().split('\n'),
+      ['raw/', 'raw/dataset.json.gz', 'raw/result.json.gz']);
     assert.equal(await verify(join(output, 'INDEX.json'), output), 2);
     await writeFile(join(source, 'result.json'), 'changed');
     await assert.rejects(pack(index, source, join(root, 'changed'), url), /mismatch: result.json/);

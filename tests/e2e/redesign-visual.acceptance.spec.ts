@@ -6,8 +6,6 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
-const captureDirectory = process.env.CODEXIA_UI_REVIEW_CAPTURE_DIR ?? "evidence/ui-redesign-v2";
-
 const prose = [
   "　港町の朝は、潮の匂いと、まだ眠っている街の静けさから始まる。凪は古い灯台の階段を上りながら、昨夜から胸に残っている小さな違和感を、ひとつずつ確かめていた。",
   "　最上階の窓を開けると、海の向こうに薄い金色の線が見えた。水平線は昨日よりも近い。波間に浮かぶ黒い影は、誰も地図に描かなかった島の輪郭に似ていた。",
@@ -161,7 +159,8 @@ async function openMobileReferenceSheet(page: Page, buttonName: "構成" | "知�
   await expect(page.locator(`#mobile-reference-tab-${panel}`)).toHaveAttribute("aria-selected", "true");
 }
 
-test("renders and exercises the full Quiet Page authoring surfaces", async ({ page }) => {
+test("renders and exercises the full Quiet Page authoring surfaces", async ({ page }, testInfo) => {
+  const captureDirectory = process.env.CODEXIA_UI_REVIEW_CAPTURE_DIR ?? testInfo.outputPath("ui-review");
   await mkdir(captureDirectory, { recursive: true });
   await page.addInitScript(() => {
     const windowWithMetrics = window as Window & {
@@ -437,17 +436,21 @@ test("outline preserves database sibling order and reveals a navigated document"
   const parentId = (await list()).find(document => document.id === firstScene.id)!.parentId!;
   const a = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順A", orderKey: "04", markdown: "同順の原稿A" });
   const b = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順B", orderKey: "04", markdown: "同順の原稿B" });
-  const ties = (await list()).filter(document => document.id === a.id || document.id === b.id);
+  const siblingsBefore = (await list()).filter(document => document.parentId === parentId);
+  const ties = siblingsBefore.filter(document => document.id === a.id || document.id === b.id);
   expect(ties).toHaveLength(2);
-  for (const [index, document] of ties.entries()) {
+  const renamed = new Map([[ties[0]!.id, "ZZZ同順"], [ties[1]!.id, "AAA同順"]]);
+  for (const document of ties) {
     const response = await page.request.patch(`${url}/${document.id}/metadata`, {
       headers: { Origin: new URL(page.url()).origin },
-      data: { expectedVersion: document.version, title: index === 0 ? "ZZZ同順" : "AAA同順" },
+      data: { expectedVersion: document.version, title: renamed.get(document.id) },
     });
     expect(response.ok(), await response.text()).toBe(true);
   }
   const persisted = await list();
-  const expected = persisted.filter(document => document.parentId === parentId).map(document => document.title);
+  expect(persisted.filter(document => document.parentId === parentId).map(document => document.id))
+    .toEqual(siblingsBefore.map(document => document.id));
+  const expected = siblingsBefore.map(document => renamed.get(document.id) ?? document.title);
   const other = persisted.find(document => document.title === "一　青い目録")!;
   await page.reload();
   await expect(manuscriptEditor(page)).toBeVisible();

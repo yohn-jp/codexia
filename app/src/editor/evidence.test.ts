@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EditorState } from "@codemirror/state";
 import { assertEditorEvidenceSnapshot, composeTextChanges, emptyDocumentEvidence, initializeDocumentEvidence, markRevisionConflict, parseMarkdownBlocks, trackTextChanges, type TextAnchor, type TextChange } from "./evidence";
 
 function makeIds() {
@@ -42,11 +43,7 @@ test("sequential CodeMirror changes compose against the saved UTF-16 revision", 
 });
 
 function applyChanges(source: string, changes: readonly TextChange[]): string {
-  let result = source;
-  for (const change of [...changes].reverse()) {
-    result = `${result.slice(0, change.from)}${change.insert}${result.slice(change.to)}`;
-  }
-  return result;
+  return EditorState.create({ doc: source }).update({ changes }).state.doc.toString();
 }
 
 test("insertion before an anchor shifts UTF-16 offsets and keeps its block identity", () => {
@@ -172,7 +169,6 @@ test("revision changes invalidate references and never auto-merge conflicting te
   assert.equal(conflict.anchors[0]!.status, "revision_conflict");
   const localDraft = `未保存。${text}`;
   const afterLocalEdit = trackTextChanges(conflict, text, localDraft, [{ from: 0, to: 0, insert: "未保存。" }], ids);
-  assert.equal(localDraft, "未保存。猫は東京にいる。");
   assert.equal(afterLocalEdit.anchors[0]!.status, "revision_conflict");
   assert.equal(afterLocalEdit.anchors[0]!.from, state.anchors[0]!.from);
 });
@@ -224,10 +220,11 @@ test("Text Anchors without Knowledge links and proposed candidates stay distinct
 test("Markdown source remains byte-for-byte text and offsets use UTF-16 around surrogate pairs", () => {
   const original = "🙂猫\r\n\r\n```md\r\n1\r\n\r\n2\r\n```\r\n";
   const before = parseMarkdownBlocks(original, makeIds());
-  assert.equal(original, "🙂猫\r\n\r\n```md\r\n1\r\n\r\n2\r\n```\r\n");
   assert.equal(before.length, 2);
   assert.equal(before[0]!.kind, "paragraph");
   assert.equal(before[1]!.kind, "code");
+  assert.equal(original.slice(before[0]!.from, before[0]!.to), "🙂猫");
+  assert.equal(original.slice(before[1]!.from, before[1]!.to), "```md\r\n1\r\n\r\n2\r\n```");
   assert.equal(parseMarkdownBlocks("一段。\r\r二段。", makeIds()).length, 2);
 
   const text = "🙂猫";

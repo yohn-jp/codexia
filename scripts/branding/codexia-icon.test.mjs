@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { renderIcon, chooseProfile } = require('./codexia-icon.cjs');
+const { renderIcon } = require('./codexia-icon.cjs');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 for (const [size, expectedBox] of [[16,'16'],[20,'16'],[24,'24'],[32,'32'],[48,'256'],[180,'256'],[1024,'256']]) {
@@ -18,27 +18,34 @@ for (const [size, expectedBox] of [[16,'16'],[20,'16'],[24,'24'],[32,'32'],[48,'
   });
 }
 
-test('24px uses a native authored master instead of fractional 32px projection', () => {
-  const out=renderIcon({size:24,accessible:false});
-  assert.match(out,/M1\.5 13\.5/);
-  assert.doesNotMatch(out,/M2\.1 17\.4/);
-  assert.equal(chooseProfile(24),'compact');
+const paths = svg => [...svg.matchAll(/<path\s+d="([^"]+)"/gu)].map(match => match[1]);
+
+test('24px book and quill geometry fits its authored half-pixel grid', () => {
+  const geometry = paths(renderIcon({ size: 24 }));
+  assert.ok(geometry.length > 1);
+  for (const path of geometry) {
+    const points = [...path.matchAll(/-?\d+(?:\.\d+)?/gu)].map(match => Number(match[0]));
+    assert.ok(points.length > 0);
+    assert.ok(points.every(point => point >= 0 && point <= 24 && Number.isInteger(point * 2)), path);
+  }
+  const compact = paths(renderIcon({ size: 32 }));
+  assert.notDeepEqual(geometry, compact, '24px must have separately authored contours');
 });
 
 test('16px uses a centered spine with no fine decorative layers', () => {
   const out=renderIcon({size:16,accessible:false});
-  assert.match(out,/M8 10 V14\.5/);
-  assert.match(out,/stroke-width="1"/);
+  assert.match(out, /<path d="M8\s+[\d.]+\s+V[\d.]+"[^>]+stroke-width="1"/u);
   assert.doesNotMatch(out,/<linearGradient/);
 });
 
 test('light and monochrome preserve geometry and accessible title', () => {
-  for(const mode of ['dark','light','mono']) {
-    const out=renderIcon({size:24,mode});
+  const variants = ['dark','light','mono'].map(mode => renderIcon({ size: 24, mode }));
+  for (const out of variants) {
     assert.match(out,/role="img" aria-label=/);
     assert.match(out,/<title>[^<]+<\/title>/);
-    assert.match(out,/<path/);
+    assert.deepEqual(paths(out), paths(variants[0]));
   }
+  assert.equal(new Set(variants).size, 3, 'each palette has distinct colors');
 });
 
 test('checked-in favicon matches the canonical JS source byte-for-byte', async () => {

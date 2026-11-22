@@ -9,7 +9,7 @@ import { createModule } from "../dist/index.js";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const projectId = "browser-module-fixture";
+const projectId = "publishing-browser-fixture";
 const snapshot = { projectId, projectVersion: 1 };
 const files = new Map([
   ["meta/project.yaml", "title: 星の図書館\n"],
@@ -50,9 +50,33 @@ class Reader {
 const reader = new Reader();
 const proposals = [];
 const actionContext = {
-  projectId: "publishing-browser-fixture",
+  projectId,
   reader,
-  invoke: async () => ({ ok: false, snapshot, error: { code: "unused", message: "unused", retryable: false } }),
+  async invoke(actionId) {
+    assert.equal(actionId, "core.tree", "publishing reads the pinned Core hierarchy");
+    return {
+      ok: true,
+      snapshot,
+      data: {
+        snapshot,
+        tree: {
+          title: "星の図書館",
+          volumes: [{
+            id: "vol-1",
+            title: "第一巻",
+            chapters: [{
+              id: "ch-1",
+              title: "はじまり",
+              scenes: [
+                { id: "sc-1", title: "夜の駅" },
+                { id: "sc-2", title: "朝の港" },
+              ],
+            }],
+          }],
+        },
+      },
+    };
+  },
   listActions: async () => [],
   linkedReader: async () => reader,
   signal: new AbortController().signal,
@@ -99,7 +123,7 @@ try {
   await page.evaluate(async ({ origin, snapshot }) => {
     const { browserModule } = await import(`${origin}/src/browser.tsx`);
     const context = {
-      projectId: "publishing-browser-fixture",
+      projectId: snapshot.projectId,
       snapshot,
       signal: new AbortController().signal,
       invoke: (actionId, input) => window.publishingInvoke(actionId, input),
@@ -113,11 +137,14 @@ try {
     );
   }, { origin, snapshot });
 
-  const date = page.locator('input[type="date"]');
+  const date = page.getByLabel("公開日", { exact: true });
   await date.waitFor();
   assert.equal(await date.inputValue(), "2025-04-03");
   await date.fill("");
-  await page.getByLabel("夜の駅", { exact: true }).uncheck();
+  const firstScene = page.getByRole("checkbox", { name: "夜の駅", exact: true });
+  await firstScene.waitFor();
+  assert.equal(await firstScene.isChecked(), true, "the existing scene annotation is checked before editing");
+  await firstScene.uncheck();
   await page.getByRole("button", { name: "レビューに保存" }).click();
   await page.getByRole("status").waitFor();
   assert.equal(proposals.length, 1, "the browser submitted one real publishing proposal");

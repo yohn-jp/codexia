@@ -1,17 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
-test("built-in module IDs remain a frozen canonical tuple", () => {
-  assert.deepEqual(BUILTIN_MODULE_IDS, ["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"]);
-  assert.equal(Object.isFrozen(BUILTIN_MODULE_IDS), true);
-});
-
-test("next order keys append after padded, unpadded and reordered text keys", () => {
-  assert.equal(nextOrderKey([]), "0000000001");
-  assert.equal(nextOrderKey(["0000000009"]), "0000000010");
-  assert.equal(nextOrderKey(["9"]), "90", "10 sorts before an unpadded 9 in PostgreSQL text order");
-  assert.equal(nextOrderKey(["0000000001", "0000000000"]), "0000000002");
-  assert.equal(nextOrderKey(["0000000000", "0000000009"]), "0000000010");
+import { assertChangeOperation, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
+test("new decimal order keys sort after padded, unpadded, and reordered siblings", () => {
+  const first = nextOrderKey([]);
+  assert.match(first, /^\d+$/u);
+  for (const existing of [[first], ["0000000009"], ["9"], ["0000000001", "0000000000"], ["0000000000", "0000000009"]]) {
+    const next = nextOrderKey(existing);
+    assert.match(next, /^\d+$/u);
+    for (const key of existing) assert.ok(next > key, `${next} must sort after ${key} as text`);
+    assert.equal(nextOrderKey([...existing].reverse()), next, "sibling enumeration order does not change the new key");
+  }
 });
 
 const operation: ChangeOperation = {
@@ -19,14 +17,36 @@ const operation: ChangeOperation = {
   baseProjectVersion: 11, effect: "manuscript", reads: [],
   writes: [{ path: "manuscripts/一.md", revision: null, content: "日本語" }], message: "Write scene",
 };
-test("recovery payload retains exact operation and snapshot identity", () => {
-  const recovered = JSON.parse(JSON.stringify(operation));
-  assert.doesNotThrow(() => assertChangeOperation(recovered));
-  assert.deepEqual(recovered, operation);
-  const snapshot = { projectId: operation.projectId, projectVersion: operation.baseProjectVersion };
-  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, projectVersion: 12 }));
-  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, projectId: "other" }));
+test("a saved operation retains its exact identity and Unicode write during validation", () => {
+  const recovered: unknown = JSON.parse(`{
+    "id": "offline-save-42",
+    "generation": 7,
+    "projectId": "archive-work",
+    "baseProjectVersion": 15,
+    "effect": "manuscript",
+    "reads": [],
+    "writes": [{"path":"manuscript/序章.md","revision":null,"content":"前文 😀"}],
+    "message": "Recover an earlier save"
+  }`);
+  assertChangeOperation(recovered);
+  assert.deepEqual({
+    id: recovered.id,
+    generation: recovered.generation,
+    projectId: recovered.projectId,
+    baseProjectVersion: recovered.baseProjectVersion,
+  }, { id: "offline-save-42", generation: 7, projectId: "archive-work", baseProjectVersion: 15 });
+  assert.deepEqual(recovered.writes, [{ path: "manuscript/序章.md", revision: null, content: "前文 😀" }]);
+  assert.throws(() => assertChangeOperation({ ...recovered, generation: "7" }), { name: "ContractError" });
+  assert.throws(() => assertChangeOperation({ ...recovered, baseProjectVersion: undefined }), { name: "ContractError" });
 });
+
+test("snapshot keys bind project and version independently", () => {
+  const key = snapshotKey({ projectId: "archive-work", projectVersion: 15 });
+  assert.equal(snapshotKey({ projectVersion: 15, projectId: "archive-work" }), key);
+  assert.notEqual(snapshotKey({ projectId: "archive-work", projectVersion: 16 }), key);
+  assert.notEqual(snapshotKey({ projectId: "another-work", projectVersion: 15 }), key);
+});
+
 test("untrusted recovery rejects traversal, duplicate writes and missing preconditions", () => {
   for (const path of ["../secret", "/absolute", "x/.GIT/config", "x\\y", "x//y"]) {
     assert.throws(() => assertChangeOperation({ ...operation, writes: [{ ...operation.writes[0], path }] }));

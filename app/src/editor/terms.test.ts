@@ -55,12 +55,10 @@ test("resolver spans use UTF-16 positions and malformed or overlapping results a
     { start: 3, end: 4, termId: "past-end", targetPath: "terms/end.md" },
   ];
   assert.deepEqual(validateEditorTermSpans(text, spans), [spans[0]]);
-  assert.equal(text, "🙂猫");
 });
 
 test("reading terms render as accessible links over Ruby text without changing the source", () => {
   const text = "|東京《とうきょう》へ行く";
-  const original = text;
   const html = renderToStaticMarkup(createElement(RubyText, {
     text,
     termSpans: [{ start: 1, end: 3, termId: "tokyo", targetPath: "terms/tokyo.md" }],
@@ -68,5 +66,4 @@ test("reading terms render as accessible links over Ruby text without changing t
   }));
 
   assert.match(html, /<ruby><button[^>]*aria-label="東京、用語を開く"[^>]*>東京<\/button><rt>とうきょう<\/rt><\/ruby>/u);
-  assert.equal(text, original);
 });

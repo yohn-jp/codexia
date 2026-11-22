@@ -76,6 +76,7 @@ user_environment_generator_dir=/run/systemd/user-environment-generators
 user_environment_generator_path="$user_environment_generator_dir/99-codexia-base-xdg-$service_uid-$$"
 user_environment_generator_installed=false
 user_environment_generator_dir_created=false
+db_verifier_bin=
 cleanup() {
   local status=$?
   local cleanup_status=0
@@ -110,6 +111,10 @@ cleanup() {
   if [[ "$user_environment_generator_dir_created" == true ]]; then
     sudo rmdir -- "$user_environment_generator_dir" 2>/dev/null || cleanup_status=1
     user_environment_generator_dir_created=false
+  fi
+  if [[ -n "$db_verifier_bin" ]]; then
+    as_service rm -f -- "$db_verifier_bin/podman" || cleanup_status=1
+    as_service rmdir -- "$db_verifier_bin" || cleanup_status=1
   fi
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
@@ -400,58 +405,39 @@ grep -q 'changed=0' "$tmp/tunnel-unit-recovery.log"
 test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
 test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
 
-# Exercise the database verifier's stale-secret rejection with a mock Podman
-# inspection. The real canonical container has already passed this verifier
-# during both base convergences above.
-mock_bin="$tmp/db-verifier-mock-bin"
-mkdir -m 0700 "$mock_bin"
-cat > "$mock_bin/podman" <<'MOCK_PODMAN'
+# Keep the real container inspection and fault only the selected identity
+# lookup to simulate a credential record replaced since container creation.
+db_verifier_bin=$(as_service mktemp -d "$service_home/.codexia-db-verifier.XXXXXX")
+as_service tee "$db_verifier_bin/podman" >/dev/null <<'MOCK_PODMAN'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == inspect && "${2:-}" == --format && "${4:-}" == codexia-db ]]; then
-  admin_id=current-admin-secret-id
-  app_id=current-app-secret-id
-  case "${CODEXIA_TEST_STALE_DB_SECRET:-}" in
-    admin) admin_id=stale-admin-secret-id ;;
-    app) app_id=stale-app-secret-id ;;
-    *) exit 2 ;;
-  esac
-  cat <<JSON
-{
-  "image": "docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536",
-  "mounts": [
-    {"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true},
-    {"Type":"bind","Source":"/etc/codexia/postgres/010-create-app-role.sh","Destination":"/docker-entrypoint-initdb.d/010-create-app-role.sh","RW":false}
-  ],
-  "networks": {"codexia-data":{}},
-  "ports": null,
-  "environment": ["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"],
-  "secrets": [
-    {"Name":"codexia-postgres-admin-password","ID":"$admin_id"},
-    {"Name":"codexia-postgres-app-password","ID":"$app_id"}
-  ]
-}
-JSON
-elif [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format ]]; then
-  case "${5:-}" in
-    codexia-postgres-admin-password) printf '%s\n' current-admin-secret-id ;;
-    codexia-postgres-app-password) printf '%s\n' current-app-secret-id ;;
-    *) exit 2 ;;
-  esac
-else
-  exit 2
+if [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format &&
+      "${5:-}" == "${CODEXIA_TEST_REPLACED_DB_SECRET:-}" ]]; then
+  current_id=$(/usr/bin/podman "$@")
+  replaced_id=0000000000000000000000000
+  [[ -n "$current_id" && "$current_id" != "$replaced_id" ]]
+  printf '%s\n' "$replaced_id"
+  exit 0
 fi
+exec /usr/bin/podman "$@"
 MOCK_PODMAN
-chmod 0700 "$mock_bin/podman"
-for stale_secret in admin app; do
+as_service chmod 0700 "$db_verifier_bin/podman"
+for stale_secret in codexia-postgres-admin-password codexia-postgres-app-password; do
 cat > "$tmp/verify-db-stale-secrets.yml" <<YAML
 ---
 - hosts: localhost
   connection: local
   gather_facts: false
+  become: true
+  become_user: $service_user
   environment:
-    PATH: "$mock_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    CODEXIA_TEST_STALE_DB_SECRET: "$stale_secret"
+    PATH: "$db_verifier_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    HOME: "$service_home"
+    XDG_CONFIG_HOME: "$service_home/.config"
+    XDG_DATA_HOME: "$service_home/.local/share"
+    XDG_RUNTIME_DIR: "/run/user/$service_uid"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
+    CODEXIA_TEST_REPLACED_DB_SECRET: "$stale_secret"
   tasks:
     - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-base-db-container.yml"
 YAML
@@ -461,17 +447,27 @@ if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/verify-db-stale-s
 fi
 grep -q 'Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration' "$tmp/db-stale-secrets.log"
 done
-rm -rf -- "$mock_bin"
+as_service rm -- "$db_verifier_bin/podman"
+as_service rmdir -- "$db_verifier_bin"
+db_verifier_bin=
 
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia-data)" = 'codexia-data|bridge|true'
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia)" = 'codexia|bridge|false'
 for volume in codexia-postgres codexia-data codexia-history; do
   test "$(podman volume inspect --format '{{.Name}}' "$volume")" = "$volume"
 done
+quadlet_image() {
+  local image
+  image=$(sed -n 's/^Image=//p' "$repo_root/deploy/quadlet/$1")
+  [[ "$image" =~ ^[^[:space:]@]+@sha256:[a-f0-9]{64}$ ]]
+  printf '%s\n' "$image"
+}
+expected_db_image=$(quadlet_image codexia-db.container)
+db_reference_without_digest=${expected_db_image%@*}
+db_reference_without_tag=${db_reference_without_digest%:*}
 actual_db_image=$(podman inspect --format '{{.Config.Image}}' codexia-db)
 case "$actual_db_image" in
-  'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'|\
-  'docker.io/library/postgres@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536') ;;
+  "$expected_db_image"|"$db_reference_without_tag@${expected_db_image##*@}") ;;
   *) printf 'Unexpected PostgreSQL image reference: %s\n' "$actual_db_image" >&2; exit 1 ;;
 esac
 test "$(podman inspect --format '{{json .NetworkSettings.Networks}}' codexia-db | jq -r 'keys | join(",")')" = codexia-data
@@ -482,7 +478,7 @@ podman inspect --format '{{json .Config.Env}}' codexia-db | jq -e 'index("PGDATA
 podman exec codexia-db pg_isready -U codexia -d codexia >/dev/null
 
 # Existing Tunnel adoption checks inspect actual Podman state before any host mutation.
-tunnel_image='docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344'
+tunnel_image=$(quadlet_image codexia-tunnel.container)
 podman pull "$tunnel_image" >/dev/null
 cat > "$tmp/verify-tunnel.yml" <<YAML
 ---

@@ -920,10 +920,9 @@ test("runtime module version mismatch is rejected before the worker starts", asy
   await runtime.shutdown();
 });
 
-test("disabling a module drains its real child process and leaves author data untouched", async () => {
+test("disabling a module drains its real child process and publishes cancellation", async () => {
   const metadata = manifest("speaker", { workerEntry: "worker.mjs" });
   let disposed = 0;
-  const authorData = { correction: "keep this author-owned value" };
   const runtime = new ModuleRuntime({
     manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { speaker: workerEntry },
@@ -970,7 +969,6 @@ test("disabling a module drains its real child process and leaves author data un
   assert.equal(runtime.status("speaker").availability, "disabled");
   assert.equal(runtime.workerSupervisor.activeJobCount, 0);
   assert.equal(disposed, 1);
-  assert.deepEqual(authorData, { correction: "keep this author-owned value" });
   assert.throws(() => process.kill(pid, 0), (error: unknown) => (error as NodeJS.ErrnoException).code === "ESRCH");
   assert.deepEqual(lifecycle.map((event) => event.state), ["queued", "running", "cancelled"]);
   assert.equal(lifecycle.at(-1)?.errorCode, "job_cancelled");

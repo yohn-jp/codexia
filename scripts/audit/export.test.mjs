@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal, reviewScope, PART_COUNT } from './export.mjs';
+import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal } from './export.mjs';
 
 const sha = 'a'.repeat(40);
 test('all branch refs, including slash and HTML characters, are data only', () => {
@@ -79,7 +79,9 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     writeFileSync(join(repo, '.env'), 'PRIVATE_TEST_VALUE=must-not-be-packed\n');
     writeFileSync(join(repo, '.repomixignore'), 'source.ts\n');
     writeFileSync(join(repo, 'repomix.config.ts'), 'throw new Error("branch config executed");\n');
-    symlinkSync('/etc/passwd', join(repo, 'link'));
+    const outside = join(root, 'outside.txt');
+    writeFileSync(outside, 'synthetic outside content');
+    symlinkSync(outside, join(repo, 'link'));
     git('add', '-A'); git('commit', '-qm', 'fixture');
     const first = git('rev-parse', 'HEAD');
     writeFileSync(join(repo, 'source.ts'), 'export const value = 2;\n');
@@ -123,17 +125,33 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
 });
 
 test('nine responsibility groups preserve every whole file deterministically', () => {
-  const paths = ['docs/CORE.md','app/src/a.ts','packages/core/a.ts','packages/api/a.ts','packages/persistence-postgres/a.ts','modules/story/a.ts','modules/mcp/a.ts','deploy/a.yml','scripts/a.mjs','tests/a.ts','pnpm-lock.yaml'];
-  const files = Object.fromEntries(paths.map((p,i)=>[p,'x'.repeat(1000+i)]));
+  // One fixture layout per review audience from the repository audit contract in README.md.
+  const scopes = {
+    '01-architecture': ['docs/CORE.md'],
+    '02-frontend': ['app/src/a.ts'],
+    '03-core-contracts': ['packages/core/a.ts'],
+    '04-api': ['packages/api/a.ts'],
+    '05-persistence': ['packages/persistence-postgres/a.ts'],
+    '06-authoring-modules': ['modules/story/a.ts'],
+    '07-platform-modules': ['modules/mcp/a.ts'],
+    '08-infrastructure-ci': ['deploy/a.yml'],
+    '09-verification-tooling': ['pnpm-lock.yaml', 'scripts/a.mjs', 'tests/a.ts'],
+  };
+  const files = Object.fromEntries(Object.values(scopes).flat().map((p,i)=>[p,'x'.repeat(1000+i)]));
   const parts = splitFiles(files, sha);
-  assert.equal(parts.length, PART_COUNT);
+  assert.deepEqual(parts.map(part => part.scope), Object.keys(scopes));
   assert.deepEqual(parts, splitFiles(Object.fromEntries(Object.entries(files).reverse()), sha));
   const restored = Object.create(null);
-  for (const part of parts) for (const entry of JSON.parse(part.content).entries) {
-    assert.equal(reviewScope(entry.path), part.scope);
-    assert.equal(entry.offset, 0);
-    assert.equal(Object.hasOwn(restored, entry.path), false);
-    restored[entry.path] = entry.content;
+  for (const part of parts) {
+    const packet = JSON.parse(part.content);
+    assert.equal(packet.sourceSha, sha);
+    assert.equal(packet.scope, part.scope);
+    assert.deepEqual(packet.entries.map(entry => entry.path), scopes[part.scope]);
+    for (const entry of packet.entries) {
+      assert.equal(entry.offset, 0);
+      assert.equal(Object.hasOwn(restored, entry.path), false);
+      restored[entry.path] = entry.content;
+    }
   }
   assert.deepEqual({...restored}, files);
 });
@@ -158,7 +176,9 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    browser = await chromium.launch(process.env.CODEXIA_E2E_CHROMIUM
+      ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM, headless: true }
+      : { channel: 'chrome', headless: true });
     const page = await browser.newPage({ acceptDownloads: true });
     const url = 'http://127.0.0.1:' + server.address().port + '/';
     await page.goto(url);

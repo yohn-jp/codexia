@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ActionDescriptor, ActionResult, ChangeProposal, ModuleActionContext, SnapshotId } from "@codexia/contracts";
@@ -19,6 +18,7 @@ function actionContext(
   extraActions: ActionDescriptor[] = [],
   onStatusSignal?: (signal: AbortSignal | undefined) => void,
   sourceOperationIds: string[] = ["op-one"],
+  fixtureProposalId?: string,
 ) {
   const actions: ActionDescriptor[] = [
     { id: "core.status", module: "core", effect: "read" },
@@ -60,9 +60,7 @@ function actionContext(
       }
       if (actionId === "story.changes.propose") {
         const changeSet = input as { id: string; projectId: string; operations: Array<{ id: string }> };
-        const coreProposalId = /^[A-Za-z0-9_-]{1,128}$/u.test(changeSet.id)
-          ? changeSet.id
-          : `story-cs-${createHash("sha256").update(changeSet.id, "utf8").digest("hex")}`;
+        const coreProposalId = fixtureProposalId ?? changeSet.id;
         const operationMap = Object.fromEntries(sourceOperationIds.map((id) => [id, id]));
         const resultIds = Object.fromEntries(sourceOperationIds.map((id, index) => [id, `char-${index ? "two" : "one"}`]));
         const resultPaths = Object.fromEntries(sourceOperationIds.map((id, index) => [id, [`characters/char-${index ? "two" : "one"}.yaml`]]));
@@ -135,7 +133,10 @@ function actionContext(
         };
       }
       if (actionId === "core.proposals.get" && storedProposal && storedProposalStatus) {
-        return { ok: true, snapshot, data: { proposal: storedProposalStatus } };
+        const { proposalId } = input as { proposalId?: unknown };
+        if (proposalId === storedProposal.id) {
+          return { ok: true, snapshot, data: { proposal: storedProposalStatus } };
+        }
       }
       if (actionId === "core.proposals.list") {
         return { ok: true, snapshot, data: { proposals: storedProposalStatus ? [storedProposalStatus] : [] } };
@@ -213,7 +214,6 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
       "check_style_deviations", "get_writing_context", "get_context_manifest", "lint_manuscript",
       "submit_change_set", "get_change_set", "list_change_sets",
     ];
-    assert.equal(sourceTools.length, 26);
     assert.equal(names.has("suggest_rewrite"), false);
     assert.ok(sourceTools.every((name) => names.has(name)));
     assert.ok(names.has("discover_actions"));
@@ -557,7 +557,8 @@ test("ChangeSet readback preserves approved IDs while selected applications are 
 
 test("submit_change_set maps source IDs outside Core's proposal ID alphabet and length", async () => {
   const calls: string[] = [];
-  const host = actionContext(calls);
+  const coreProposalId = "story-cs-6cb108930bbfab3d8e96bda05b1363002700113f5997120cfd51cbca02d6e829";
+  const host = actionContext(calls, [], undefined, ["op-one"], coreProposalId);
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(

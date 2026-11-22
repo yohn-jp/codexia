@@ -3,6 +3,7 @@ import test from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { UiContribution } from "@codexia/contracts";
+import type { ProjectId } from "@codexia/persistence-contracts";
 import { ApplicationStatus, hasApplicationStatus } from "./ApplicationStatus";
 import { availableModulePanels } from "./AvailableModulePanels";
 import { DocumentInspector } from "./DocumentInspector";
@@ -45,11 +46,11 @@ test("status presentation hides an empty state and exposes current errors and re
 
 test("library outline renders project, continuation, scene, and recovery controls from explicit props", () => {
   const markup = renderToStaticMarkup(createElement(LibraryOutline, {
-    projects: [{ id: "project-1", title: "Novel", version: 1, settings: {}, createdAt: "2026-11-09", updatedAt: "2026-11-09" } as never],
+    projects: [{ id: "project-1" as ProjectId, title: "Novel", version: 1, settings: {}, createdAt: "2026-11-09", updatedAt: "2026-11-09" }],
     activeProjectId: "project-1",
     tree,
     selectedSceneId: "scene-1",
-    continueCandidates: [],
+    continueCandidates: [{ sceneId: "scene-1", sentenceOffset: 2, pageIndex: 3, source: "local", deviceType: "desktop" }],
     deviceType: "desktop",
     continueError: "",
     recoverableEntries: [],
@@ -57,12 +58,12 @@ test("library outline renders project, continuation, scene, and recovery control
     onContinue: () => undefined,
     onSelectScene: () => undefined,
   }));
-  assert.match(markup, /class="sidebar"/u);
   assert.match(markup, /Novel/u);
   assert.match(markup, /aria-current="true"/u);
-  assert.match(markup, /class="continue-panel"/u);
   assert.match(markup, /作品構成/u);
   assert.match(markup, /Chapter One: Opening/u);
+  assert.match(markup, /<button[^>]*>続きを書く<\/button>/u);
+  assert.match(markup, /<button[^>]*>読書位置を開く<\/button>/u);
 });
 
 test("document inspector renders only the document facts and recovery records it receives", () => {
@@ -79,7 +80,7 @@ test("document inspector renders only the document facts and recovery records it
   assert.match(markup, /Outline text/u);
 });
 
-test("available module panels retain host catalog checks and the no-project placeholder", () => {
+test("an available panel keeps its workspace identity and explains a missing project", () => {
   const contribution: UiContribution = {
     id: "story:panel",
     module: "story",

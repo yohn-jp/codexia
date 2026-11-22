@@ -10,16 +10,24 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   let markdown = "Opening 😀 evidence, then edited text";
   let quote = "evidence";
   let fromUtf16 = markdown.indexOf(quote);
-  let revisionReads=0;
+  let revisionReads = 0;
+  let batchReads = 0;
+  const knowledgeIds = ["knowledge-1", "knowledge-2"] as KnowledgeNodeId[];
+  const evidenceId = "evidence-1";
+  const mention = { evidenceId, nodeId: knowledgeIds[0]!, status: "confirmed" };
+  const sourceRevision = () => ({
+    id: revisionId, projectId: "project-1" as ProjectId, documentId, parentRevisionId: null,
+    markdown, sha256: "", authorId: "author", createdAt: "",
+  });
   let aliasRows: Array<{id:string}> = [];
   let relationRows: Array<{id:string}> = [];
   let assertionLinks: Array<{assertionId:string;role:string}> = [];
   const reader = {
-    async listKnowledgeNodes() { return ["knowledge-1","knowledge-2"].map(id=>({ id, projectId:"project-1", type:"lore", name:"The clue", attributes:{}, status:"confirmed" as const, version:1, deletedAt:null, createdAt:"", updatedAt:"" })); },
+    async listKnowledgeNodes() { return knowledgeIds.map(id=>({ id, projectId:"project-1", type:"lore", name:"The clue", attributes:{}, status:"confirmed" as const, version:1, deletedAt:null, createdAt:"", updatedAt:"" })); },
     async listKnowledgeAliases(_projectId: ProjectId, _nodeId: string, limit?: number) { assert.equal(limit,500); return aliasRows; },
     async listKnowledgeRelations(_projectId: ProjectId, _nodeId: string, limit?: number) { assert.equal(limit,500); return relationRows; },
     async listNodeMentions(_projectId: ProjectId, nodeId: KnowledgeNodeId) {
-      return nodeId === "knowledge-1" ? [{ evidenceId:"evidence-1", nodeId, status:"confirmed" }] : [];
+      return nodeId === knowledgeIds[0] ? [mention] : [];
     },
     async getEvidenceAnchor() { return { id:"evidence-1", projectId:"project-1", documentId, revisionId, fromUtf16, toUtf16:fromUtf16+quote.length,
       quoteSha256:createHash("sha256").update(quote).digest("hex"), status:"confirmed", version:1, createdAt:"", updatedAt:"" }; },
@@ -28,7 +36,7 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
     async getRevision(_projectId: ProjectId, _documentId: Document["id"], id: RevisionId) {
       revisionReads++;
       assert.equal(id, revisionId);
-      return { id, projectId:"project-1" as ProjectId, documentId, parentRevisionId:null, markdown, sha256:"", authorId:"author", createdAt:"" };
+      return sourceRevision();
     },
   } as unknown as PersistenceReader;
   const documents = [
@@ -48,54 +56,23 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
       aliasesPerNode: number; relationsPerNode: number; mentionsPerNode: number; assertionsPerAnchor: number;
     }): Promise<KnowledgeProjectionBatch> {
       assert.deepEqual(limits, { aliasesPerNode: 500, relationsPerNode: 500, mentionsPerNode: 100, assertionsPerAnchor: 100 });
-      const batch: {
-        aliases: KnowledgeProjectionBatch["aliases"][number][];
-        relations: KnowledgeProjectionBatch["relations"][number][];
-        mentions: KnowledgeProjectionBatch["mentions"][number][];
-        anchors: KnowledgeProjectionBatch["anchors"][number][];
-        revisions: KnowledgeProjectionBatch["revisions"][number][];
-        assertionEvidence: KnowledgeProjectionBatch["assertionEvidence"][number][];
-        assertions: KnowledgeProjectionBatch["assertions"][number][];
-      } = { aliases: [], relations: [], mentions: [], anchors: [], revisions: [], assertionEvidence: [], assertions: [] };
-      for (const nodeId of nodeIds) {
-        for (const alias of await reader.listKnowledgeAliases(projectId, nodeId, limits.aliasesPerNode)) {
-          batch.aliases.push({ nodeId, alias });
-        }
-        for (const relation of await reader.listKnowledgeRelations(projectId, nodeId, limits.relationsPerNode)) {
-          batch.relations.push({ nodeId, relation });
-        }
-        batch.mentions.push(...await reader.listNodeMentions(projectId, nodeId, limits.mentionsPerNode));
-      }
-      const anchorsById = new Map<string, KnowledgeProjectionBatch["anchors"][number]>();
-      for (const evidenceId of new Set(batch.mentions.map(mention => mention.evidenceId))) {
-        const anchor = await reader.getEvidenceAnchor(projectId, evidenceId);
-        if (anchor) anchorsById.set(evidenceId, anchor);
-      }
-      batch.anchors.push(...anchorsById.values());
-      const revisionKeys = new Set<string>();
-      const assertionIds = new Set<string>();
-      for (const anchor of batch.anchors) {
-        const revisionKey = JSON.stringify([anchor.documentId, anchor.revisionId]);
-        if (!revisionKeys.has(revisionKey)) {
-          revisionKeys.add(revisionKey);
-          const revision = await reader.getRevision(projectId, anchor.documentId, anchor.revisionId);
-          if (revision) batch.revisions.push(revision);
-        }
-        for (const link of await reader.listEvidenceAssertions(projectId, anchor.id, limits.assertionsPerAnchor)) {
-          batch.assertionEvidence.push({ evidenceId: anchor.id, link });
-          if (!assertionIds.has(link.assertionId)) {
-            assertionIds.add(link.assertionId);
-            const assertion = await reader.getAssertion(projectId, link.assertionId);
-            if (assertion) batch.assertions.push(assertion);
-          }
-        }
-      }
-      return batch;
+      assert.deepEqual(nodeIds, knowledgeIds);
+      batchReads++;
+      return {
+        aliases: knowledgeIds.flatMap(nodeId => aliasRows.map(alias => ({ nodeId, alias }))),
+        relations: knowledgeIds.flatMap(nodeId => relationRows.map(relation => ({ nodeId, relation }))),
+        mentions: [mention],
+        anchors: [await reader.getEvidenceAnchor(projectId, evidenceId as Parameters<PersistenceReader["getEvidenceAnchor"]>[1])],
+        revisions: [sourceRevision()],
+        assertionEvidence: assertionLinks.map(link => ({ evidenceId, link })),
+        assertions: assertionLinks.map(link => ({ id: link.assertionId, status: "confirmed" })),
+      } as unknown as KnowledgeProjectionBatch;
     },
   } as unknown as PersistenceReader;
   const batchedProjection = await projectKnowledgeContext(batchReader, "project-1" as ProjectId, documents, documentMappings);
   assert.deepEqual(batchedProjection, projection, "batch and single-record reads produce identical projection output");
-  assert.equal(revisionReads,2,"each path loads one distinct source revision despite repeated evidence references");
+  assert.equal(batchReads, 1);
+  assert.equal(revisionReads, 1, "batch resolution does not fall back to fetching revisions");
   const ambiguous = await projectKnowledgeContext(reader, "project-1" as ProjectId, [
     { id:documentId, projectId:"project-1" as ProjectId, kind:"scene", parentId:null, title:"Scene", orderKey:"1", headRevisionId:"current-revision" as RevisionId, version:2, createdAt:"", updatedAt:"" },
   ], [{ documentId, storySceneId:"scene-story-id" }, { documentId:"other-document", storySceneId:"scene-story-id" }]);
@@ -105,7 +82,7 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.deepEqual(ambiguousBatch, ambiguous, "batch reads preserve ambiguous mapping omission");
   assert.equal(ambiguous.documentMappings.every(mapping => mapping.mapping === "ambiguous"), true);
   assert.equal((ambiguous.entries[0]!.evidence[0] as { storySceneId: string | null }).storySceneId, null);
-  assert.equal(revisionReads,4,"each path reads a source revision once even when references repeat");
+  assert.equal(revisionReads, 2, "only the two single-record projections fetch a revision");
   quote = "漢".repeat(2000); markdown = quote; fromUtf16 = 0;
   const oversizedDocuments = [
     { id:documentId, projectId:"project-1" as ProjectId, kind:"scene", parentId:null, title:"Scene", orderKey:"1", headRevisionId:revisionId, version:2, createdAt:"", updatedAt:"" },
@@ -131,4 +108,5 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.deepEqual(boundedBatch,bounded,"batch reads retain relation and assertion truncation flags");
   assert.equal(bounded.entries[0]!.relationLimitReached,true);
   assert.equal(bounded.entries[0]!.evidence[0]!.assertionLimitReached,true);
+  assert.equal(batchReads, 5, "each batched projection requests one bounded batch");
 });

@@ -82,6 +82,10 @@ async function main() {
     process.stderr.write("An empty browser shard cannot pass\n");
     return 1;
   }
+  if (!Number.isInteger(report.executed) || report.executed < 1) {
+    process.stderr.write("No browser case executed\n");
+    return 1;
+  }
   if (report.expected !== report.executed + report.skipped + report.notRun
     || report.expected !== report.passed + report.skipped + report.failed
     || !Array.isArray(report.tests)

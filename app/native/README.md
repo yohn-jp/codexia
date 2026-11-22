@@ -10,6 +10,6 @@ The API transport requires `VITE_CODEXIA_API_ORIGIN` to be an explicit HTTPS ori
 
 Set `VITE_CODEXIA_PUBLIC_READER_ORIGIN` to the public reader site's HTTPS origin when the native app should create distributable publication links. It accepts an origin only, without credentials, path, query, or fragment, and is independent of `VITE_CODEXIA_API_ORIGIN`. If it is unset, the share panel cannot create a link and never substitutes the Capacitor WebView origin. Web builds continue to use their current page origin.
 
-Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Better Auth 1.7.27 does not individually revoke already-issued API JWTs; those short-lived tokens can remain valid until their expiration.
+Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Already-issued API access JWTs can remain valid until expiration. The owning client can explicitly revoke an individual access token through the [RFC 7009 endpoint](../../docs/deployment/IOS-CLIENT.md#client-implementation).
 
 `npm test` runs native configuration, API-origin, callback-scheme, and bridge guard checks. The unsigned iOS workflow installs the isolated Capacitor toolchain before bundling, generates the project, registers the callback scheme, and resolves AppAuth through Swift Package Manager. Its macOS build verifies native compilation and IPA structure, not a configured provider, live API, signed install, or physical-device acceptance.

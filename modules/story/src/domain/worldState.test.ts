@@ -113,44 +113,22 @@ test("world-state projection folds location, acquaintance, item ownership and co
   assert.equal(getWorldStateAtScene({ ...story, sceneId: "not-a-scene" }).data, null);
 });
 
-test("state-event ordering and draft status prevent unconfirmed changes from becoming objective", () => {
-  const draft: SceneStateEvent = {
-    sceneId: "sc-2",
-    order: 2,
-    kind: "location",
-    subject: "char-alice",
-    object: "loc-draft",
-    payload: {},
-    source: "llm-draft",
-    status: "proposed",
+test("later unconfirmed or generated locations cannot replace the author-confirmed location", () => {
+  const confirmed: SceneStateEvent = {
+    sceneId: "sc-2", order: 2, kind: "location", subject: "char-alice",
+    object: "loc-castle", payload: {}, source: "manual", status: "confirmed",
   };
-  const folded = foldWorldStateUpToOrder({
-    snapshot,
-    sceneId: "sc-2",
-    order: 2,
-    events: [
-      {
-        sceneId: "sc-1",
-        order: 1,
-        kind: "location",
-        subject: "char-alice",
-        object: "loc-plaza",
-        payload: {},
-        source: "rule",
-      },
-      draft,
-      {
-        sceneId: "sc-2",
-        order: 2,
-        kind: "location",
-        subject: "char-alice",
-        object: "loc-castle",
-        payload: { via: "move_to" },
-        source: "rule",
-      },
-    ],
-  });
-  assert.equal(folded.data.locations["char-alice"]?.locationId, "loc-castle");
+  const later: SceneStateEvent = {
+    ...confirmed, sceneId: "sc-3", order: 3, object: "loc-market",
+  };
+  const locationAfter = (last: SceneStateEvent) => foldWorldStateUpToOrder({
+    snapshot, sceneId: "sc-3", order: 3, events: [confirmed, last],
+  }).data.locations["char-alice"]?.locationId;
+
+  assert.equal(locationAfter({ ...later, status: "proposed" }), "loc-castle");
+  assert.equal(locationAfter({ ...later, source: "llm-draft" }), "loc-castle");
+  assert.equal(locationAfter(later), "loc-market");
+
   const ruleEvents = listRuleStateEvents(worldInput()).data;
   assert.ok(ruleEvents.some((event) => event.eventId === "event-manual-1" && event.source === "manual"));
   const history = getEntityStateHistory({ ...worldInput(), entityId: "item-key" });
