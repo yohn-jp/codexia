@@ -78,7 +78,6 @@ export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await (await runtime.auth.$context).runMigrations();
     await migrateJwtAccessTokenRevocationSchema(runtime.pool);
-    process.stdout.write(`Better Auth PostgreSQL migrations completed for schema ${CODEXIA_AUTH_SCHEMA}.\n`);
   } finally {
     await runtime.pool.end();
   }
@@ -87,6 +86,7 @@ export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()
 async function main(): Promise<void> {
   requireExplicitApply(process.argv.slice(2));
   await migrateBetterAuth();
+  process.stdout.write(`Better Auth PostgreSQL migrations completed for schema ${CODEXIA_AUTH_SCHEMA}.\n`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
