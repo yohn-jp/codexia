@@ -97,7 +97,10 @@ function buildSceneContextData(
 
   const povLink = links.find((link) => link.from === sceneId && link.kind === "pov");
   const locationLink = links.find(
-    (link) => link.from === sceneId && (link.kind === "appears" || link.to.startsWith("loc-")),
+    (link) =>
+      link.from === sceneId &&
+      (link.kind === "appears" || link.to.startsWith("loc-")) &&
+      entities.get(link.to)?.type === "location",
   );
   const appears = getLinkedEntitiesData(entities, links, sceneId, "appears");
   const mentions = getLinkedEntitiesData(entities, links, sceneId, "mentions");
@@ -124,8 +127,10 @@ function buildSceneContextData(
   }
 
   const pov = povLink ? entities.get(povLink.to) : undefined;
+  const rawLocation =
+    typeof scene.raw.location === "string" ? entities.get(scene.raw.location) : undefined;
   const location =
-    (typeof scene.raw.location === "string" ? entities.get(scene.raw.location) : undefined) ??
+    (rawLocation?.type === "location" ? rawLocation : undefined) ??
     (locationLink ? entities.get(locationLink.to) : undefined);
 
   return {

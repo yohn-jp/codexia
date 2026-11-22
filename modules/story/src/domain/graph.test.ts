@@ -111,6 +111,39 @@ test("scene context resolves POV, raw location, relation collections and manuscr
   assert.equal(result.data?.manuscriptBody, "scene text");
 });
 
+test("scene context infers only location entities from appears links", () => {
+  const story = input(
+    [
+      entity("scene-person-first", "scene"),
+      entity("scene-location-first", "scene"),
+      entity("scene-people-only", "scene"),
+      entity("scene-explicit", "scene", { location: "loc-explicit" }),
+      entity("scene-wrong-type-location", "scene", { location: "char-c" }),
+      entity("char-a", "character"),
+      entity("char-b", "character"),
+      entity("char-c", "character"),
+      entity("loc-linked", "location"),
+      entity("loc-explicit", "location"),
+    ],
+    [
+      { from: "scene-person-first", to: "char-a", kind: "appears" },
+      { from: "scene-person-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "char-b", kind: "appears" },
+      { from: "scene-people-only", to: "char-c", kind: "appears" },
+    ],
+  );
+
+  const locationFor = (sceneId: string) =>
+    buildSceneContext({ ...story, sceneId }).data?.location?.id;
+
+  assert.equal(locationFor("scene-person-first"), "loc-linked");
+  assert.equal(locationFor("scene-location-first"), "loc-linked");
+  assert.equal(locationFor("scene-people-only"), undefined);
+  assert.equal(locationFor("scene-explicit"), "loc-explicit");
+  assert.equal(locationFor("scene-wrong-type-location"), undefined);
+});
+
 test("volume tree and scene-location chronology use volume/chapter/scene order", () => {
   const story = input(
     [
