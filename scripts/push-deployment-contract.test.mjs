@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
@@ -130,6 +131,89 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
+test('deployment requires the rootless base runtime under the lock before activation', () => {
+  const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'].cmd;
+  const start = shell.indexOf('if ! podman volume exists codexia-history');
+  const end = shell.indexOf("current_container=''", start);
+  assert.ok(start > shell.indexOf('flock --exclusive --nonblock') && end > start);
+  assert.ok(end < shell.indexOf('mkdir -p "$wants_dir"'));
+  assert.match(shell, /require_tunnel=.*'false' if \(codexia_lifecycle_fixture \| default\(false\) \| bool\) else 'true'/u);
+
+  const preflight = shell.slice(start, end).replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
+  const fixtureCommands = `
+    set -eu -o pipefail
+    unit_dir=/tmp/codexia-quadlets
+    podman() {
+      case "$1" in
+        volume) [[ "$*" == 'volume exists codexia-history' && "$missing" != history ]];;
+        inspect) [[ "$4" == codexia-db ]] && printf '%s\\n' "$db_health";;
+        *) return 99;;
+      esac
+    }
+    systemctl() {
+      case "$*" in
+        '--user is-active --quiet codexia-db.service') [[ "$missing" != db ]];;
+        '--user cat codexia-tunnel.service') [[ "$missing" != tunnel ]];;
+        '--user show --property=SourcePath --value codexia-db.service') [[ "$missing" != db-source ]] && printf '%s\\n' "$unit_dir/codexia-db.container";;
+        '--user show --property=SourcePath --value codexia-tunnel.service') [[ "$missing" != tunnel-source ]] && printf '%s\\n' "$unit_dir/codexia-tunnel.container";;
+        *) return 99;;
+      esac
+    }
+  `;
+  const safeFailure = transactionTasks.find(task => task.name === 'Report only an allowlisted deployment transaction failure stage');
+  for (const [missing, dbHealth, requireTunnel, error] of [
+    ['history', 'healthy', 'true', 'Deployment base runtime requires the rootless history volume'],
+    ['db', 'healthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['', 'unhealthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['tunnel', 'healthy', 'true', 'Deployment base runtime requires the rootless Tunnel Quadlet'],
+    ['db-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
+    ['tunnel-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
+    ['tunnel', 'healthy', 'false', ''],
+    ['', 'healthy', 'true', ''],
+  ]) {
+    const result = spawnSync('bash', ['-c', fixtureCommands + preflight], {
+      encoding: 'utf8',
+      env: { ...process.env, missing, db_health: dbHealth, require_tunnel: requireTunnel },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, error ? 1 : 0, result.stderr);
+    assert.equal(result.stderr.trim(), error);
+    if (error) assert.ok(safeFailure['ansible.builtin.fail'].msg.includes(error));
+  }
+  assert.match(safeFailure['ansible.builtin.fail'].msg,
+    /'encrypted backup' if 'Encrypted backup failed; candidate was not applied'/u);
+});
+
+test('production admission reuses canonical runtime validators and checks exact generated Quadlets', () => {
+  const transactionStages = transactionTasks;
+  const preflightTask = transactionStages.find(task => task.name ===
+    'Reuse the canonical rootless base admission before production activation');
+  assert.equal(preflightTask['ansible.builtin.include_tasks'], 'verify-deploy-base-runtime.yml');
+  assert.equal(preflightTask.when, 'not (codexia_lifecycle_fixture | default(false) | bool)');
+  const checks = parse(readFileSync(new URL('../deploy/ansible/verify-deploy-base-runtime.yml', import.meta.url), 'utf8'));
+  const quadlets = checks.find(task => task.name === 'Inspect every canonical base Quadlet without following links');
+  assert.deepEqual(quadlets.loop, [
+    'codexia.network', 'codexia-data.network', 'codexia-postgres.volume', 'codexia-data.volume',
+    'codexia-history.volume', 'codexia-db.container', 'codexia-tunnel.container',
+  ]);
+  const fileAdmission = checks.find(task => task.name ===
+    'Require every base Quadlet to match the reviewed repository source');
+  assert.ok(fileAdmission['ansible.builtin.assert'].that.some(clause =>
+    clause.includes("hash('sha256')")));
+  const generatedOrigins = checks.find(task => task.name === 'Require base services to originate from canonical rootless Quadlets');
+  assert.ok(generatedOrigins['ansible.builtin.assert'].that.some(clause =>
+    clause.includes("item.stdout == quadlet_dir + '/'")));
+  const includes = checks.filter(task => task['ansible.builtin.include_tasks'])
+    .map(task => task['ansible.builtin.include_tasks']);
+  assert.deepEqual(includes, ['verify-base-db-container.yml', 'verify-base-tunnel-container.yml']);
+  const networks = checks.find(task => task.name === 'Verify the canonical private network isolation before deployment');
+  assert.deepEqual(networks.loop.map(value => value.expected), ['codexia|bridge|false', 'codexia-data|bridge|true']);
+  const shell = transactionStages.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-db\.service/u);
+  assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-tunnel\.service/u);
+});
+
 test('the production Quadlet binds an immutable image and disables startup schema mutation', () => {
   const quadlet = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
   assert.match(quadlet, /^Image=CODEXIA_BACKEND_IMAGE$/mu);
@@ -234,7 +318,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   assert.match(databaseUnit, /^Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_DB=codexia$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_USER=codexia_admin$/mu);
-  assert.doesNotMatch(shell, /codexia-db\.container|codexia-postgres\.volume|podman volume/u,
+  assert.doesNotMatch(shell, /(?:cp|install|rm|mv|ln)[^\n]*codexia-db\.container|codexia-postgres\.volume|podman volume (?!exists codexia-history\b)/u,
     'an image-only API rollout must leave canonical PostgreSQL storage untouched');
 
   const restore = shell.indexOf('restore_previous(){');
