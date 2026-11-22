@@ -32,7 +32,7 @@ function metadataFetch(): typeof fetch {
   };
 }
 
-function installBrowserStubs() {
+function installBrowserStubs(href = config.redirectUri) {
   const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
   const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -46,7 +46,7 @@ function installBrowserStubs() {
   } });
   Object.defineProperty(globalThis, "window", { configurable: true, value: { location: {
     assign: (url: string) => { assigned = url; },
-    href: config.redirectUri,
+    href,
     origin: new URL(config.redirectUri).origin,
   } } });
   return {
@@ -60,8 +60,9 @@ function installBrowserStubs() {
   };
 }
 
-test("OAuth browser client uses state and S256 PKCE, then exchanges once without browser credentials", async () => {
-  const browser = installBrowserStubs();
+test("OAuth browser client uses state and S256 PKCE, exchanges once and returns to the original scene", async () => {
+  const returnPath = "/desktop/projects/project-1/scenes/scene-1?chapter=chapter-1#manuscript";
+  const browser = installBrowserStubs(new URL(returnPath, config.redirectUri).href);
   try {
     await beginOAuthAuthorization(config, metadataFetch());
     const authorization = new URL(browser.assigned);
@@ -73,7 +74,7 @@ test("OAuth browser client uses state and S256 PKCE, then exchanges once without
     const callback = `${config.redirectUri}?code=authorization-code&state=${state}&iss=${encodeURIComponent(config.issuer)}`;
 
     let submitted = new URLSearchParams();
-    const token = await completeOAuthAuthorization(config, callback,
+    const authorizationResult = await completeOAuthAuthorization(config, callback,
       async (input, init) => {
         if (init?.method !== "POST") return Response.json(metadata);
         assert.equal(String(input), metadata.token_endpoint);
@@ -87,7 +88,7 @@ test("OAuth browser client uses state and S256 PKCE, then exchanges once without
           expires_in: 300,
         });
       });
-    assert.equal(token, "codexia-api-access-token", "the API client uses the OAuth access token, never the OIDC ID token");
+    assert.deepEqual(authorizationResult, { accessToken: "codexia-api-access-token", returnPath });
     const verifier = submitted.get("code_verifier") ?? "";
     assert.match(verifier, /^[A-Za-z0-9._~-]{43,128}$/u);
     assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(verifier).digest("base64url"));

@@ -92,11 +92,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
         const config = nativeShell ? null : webOAuthConfig(mode);
         if (mounted) setOAuthConfig(config);
         if (config) {
-          const accessToken = await completeOAuthAuthorization(config);
-          if (accessToken) {
-            setOAuthAccessToken(accessToken);
-            // Remove the one-time authorization code from the address bar.
-            window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+          const authorization = await completeOAuthAuthorization(config);
+          if (authorization) {
+            setOAuthAccessToken(authorization.accessToken);
+            window.history.replaceState(window.history.state, "", authorization.returnPath);
           }
         }
       } catch (error) {
