@@ -115,7 +115,15 @@ observe_runtime() {
   history_mount=$(rootless_podman volume inspect --format '{{.Mountpoint}}' codexia-history)
   history_created=$(rootless_podman volume inspect --format '{{.CreatedAt}}' codexia-history)
   api_count=$(rootless_podman ps --filter name=codexia-api --format '{{.ID}}' | wc -l)
-  sentinel=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"' sh "SELECT CASE WHEN to_regclass('public.codexia_lifecycle_sentinel') IS NULL THEN 'not-created' ELSE (SELECT value FROM codexia_lifecycle_sentinel WHERE id = 1) END")
+  # PostgreSQL resolves relation references before evaluating CASE; an absent
+  # sentinel table must be checked without referring to it in the same query.
+  sentinel=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"' sh "SELECT to_regclass('public.codexia_lifecycle_sentinel') IS NOT NULL")
+  if [[ "$sentinel" == t ]]; then
+    sentinel=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"' sh "SELECT value FROM codexia_lifecycle_sentinel WHERE id = 1")
+  else
+    [[ "$sentinel" == f ]] || return 1
+    sentinel=not-created
+  fi
   test "$api_health" = healthy && test "$api_unit" = active && test "$api_count" = 1
   rootless_podman exec codexia-api node -e 'fetch("http://127.0.0.1:3000/health/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null
   node - "$report" "$key" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" \
