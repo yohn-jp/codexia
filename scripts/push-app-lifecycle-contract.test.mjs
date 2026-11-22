@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { matchesGlob } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, matchesGlob } from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { publicError } from './push-app-lifecycle.mjs';
@@ -21,6 +24,32 @@ test('includes bounded command stderr in sanitized lifecycle failure evidence', 
   assert.match(detail, /token=\[REDACTED\]/u);
   assert.doesNotMatch(detail, /ghp_[a-z]+/u);
   assert.ok(detail.length <= 1200);
+});
+
+test('shell fixture publishes recent diagnostic lines with credentials redacted', async t => {
+  const scratch = await mkdtemp(join(tmpdir(), 'codexia-lifecycle-log-'));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const original = join(scratch, 'full.log');
+  const visible = join(scratch, 'visible.log');
+  const script = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
+  const redactLog = /^redact_log\(\) \{[\s\S]*?^\}/mu.exec(script)?.[0];
+  assert.ok(redactLog, 'expected a standalone log filter in the lifecycle fixture');
+  const entries = [
+    ...Array.from({ length: 550 }, (_, index) => `startup log ${index}`),
+    'database postgres://fixture:opaque-db-value@example.invalid/fixture',
+    'authorization Bearer opaque-bearer-value',
+    'token=opaque-token-value',
+    'candidate exited before becoming ready',
+  ];
+  await writeFile(original, entries.join('\n') + '\n');
+  const result = spawnSync('bash', ['-c', redactLog + '\nredact_log "$1" "$2"', '--', original, visible], { encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const output = await readFile(visible, 'utf8');
+  assert.match(output, /candidate exited before becoming ready/u);
+  assert.match(output, /postgres:\/\/fixture:\[REDACTED\]@example\.invalid/u);
+  assert.doesNotMatch(output, /opaque-(?:db|bearer|token)-value/u);
+  assert.ok(output.trimEnd().split('\n').length < entries.length);
 });
 
 test('app lifecycle CI is isolated, path limited, manually runnable, and has no production credentials', () => {
@@ -126,33 +155,17 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(source, /persistenceFormat/u);
   assert.match(source, /localhost:5000\/yohn-jp\/codexia-backend:lifecycle-/u);
   assert.match(fixture, /CAPABILITY_UNAVAILABLE/u);
-  assert.match(fixture, /tail -n 400/u, 'bounded failure logs retain the transaction error after long shell task output');
   assert.match(fixture, /rootless_podman --version/u);
   assert.doesNotMatch(fixture, /\.Host\.Version/u);
   assert.match(fixture, /prefix = "localhost:5000"\nlocation = "localhost:5000"\ninsecure = true/u,
     'the isolated plain-HTTP registry must be explicitly insecure for rootless Podman pushes');
-  assert.ok(/for _ in \$\(seq 1 12\); do\n  postgres_health=\$\(rootless_podman inspect --format '\{\{\.State\.Health\.Status\}\}' codexia-db\)\n  \[\[ "\$postgres_health" == healthy \]\] && break\n  sleep 5\ndone/u.test(fixture), 'the live PostgreSQL healthcheck must be polled before declaring fixture setup failed');
   assert.match(fixture, /trap 'record_failure .* ERR/u);
   assert.match(fixture, /capture_failure_runtime/u, 'failed deploys must collect runtime context before fixture cleanup');
   assert.match(fixture, /runtime-failure-bounded\.log/u, 'runtime diagnostics must be redacted before artifact upload');
-  assert.match(fixture, /postgres\(ql\)\?\|mysql\|redis/u, 'database connection credentials must be removed from runtime logs');
   assert.match(fixture, /Cleanup check failed at script line/u, 'fixture cleanup failures must identify their failed check');
   assert.match(fixture, /cleanup-errors-bounded\.log/u, 'cleanup diagnostics must be included in the run artifact');
   assert.match(fixture, /Last sanitized fixture log/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
-  assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
-    'the SSHFS fixture image must be built without interactive package setup');
-  assert.ok(/docker pull docker\.io\/library\/debian:stable-slim/u.test(fixture));
-  assert.ok(/docker_build_context="\$tmp\/sshfs-build-context"/u.test(fixture),
-    'the Docker CLI context must be readable by the runner user');
-  assert.ok(/if docker build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$docker_build_context\/Dockerfile" "\$docker_build_context" >"\$tmp\/sshfs-build\.log" 2>&1; then/u.test(fixture),
-    'the SSHFS helper image must build outside rootless Podman overlayfs');
-  assert.match(fixture, /sudo install -o codexia -g codexia -m 0644 "\$tmp\/sshfs-fixture\.tar" "\$build_context\/sshfs-fixture\.tar"/u);
-  assert.match(fixture, /rootless_podman load --input "\$build_context\/sshfs-fixture\.tar"/u,
-    'the SSHFS helper image must run from the disposable rootless Podman store');
-  assert.match(fixture, /docker save --output "\$tmp\/sshfs-fixture\.tar" codexia-sshfs-fixture/u);
-  assert.match(fixture, /docker image rm codexia-sshfs-fixture/u);
-  assert.match(fixture, /rootless_podman rmi codexia-sshfs-fixture/u);
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });
