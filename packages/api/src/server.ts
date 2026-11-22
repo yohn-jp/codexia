@@ -3,7 +3,6 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
-import type { CloudflareAccessOptions } from "./cloudflare-access.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
 import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
@@ -131,9 +130,6 @@ export interface ApiServerOptions {
   closePersistenceOnShutdown?: boolean;
   /** Close the API-owned Better Auth PostgreSQL pool, never a caller-owned test/runtime pool. */
   closeBetterAuthOnShutdown?: boolean;
-  /** Rejected legacy inputs while callers migrate to verified OAuth. */
-  authToken?: string;
-  cloudflareAccess?: CloudflareAccessOptions;
   /** Optional standalone API-audience OAuth access tokens for the configured owner. */
   oauthOwner?: OAuthOwnerOptions;
   /** Explicitly registered standalone MCP OAuth clients, always separate from owner admission. */
@@ -599,9 +595,6 @@ export function createServer(options: ApiServerOptions): Server {
   if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
   const hosted = options.hosted;
   if (!hosted && !options.betterAuth) throw new Error("Standalone authentication requires Better Auth");
-  if (options.authToken !== undefined || options.cloudflareAccess !== undefined) {
-    throw new Error("Static-token and Access-owner credentials are no longer supported");
-  }
   if (hosted && (!hosted.projectId || hosted.authorization === undefined)) {
     throw new Error("Hosted runtime requires an assignment, assigned project, and grant policy");
   }

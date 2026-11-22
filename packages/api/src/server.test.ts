@@ -439,10 +439,15 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
 ) {
-  const server = createServer({ store, ...(options.betterAuth ? {} : { authToken: ACCESS_TOKEN }),
-    staticDir, persistence: admissionPersistence(store), ...options });
+  const defaults = testClientSettings("project-1", signedRequests.publicJwks, signedRequests.isActive);
+  const explicitIdentity = options.betterAuth || options.oauthOwner || options.oauthMcp;
+  const server = createServer({
+    store, staticDir, persistence: admissionPersistence(store),
+    ...(explicitIdentity ? { betterAuth: defaults.betterAuth } : defaults),
+    ...options,
+  });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
@@ -479,7 +484,7 @@ function createSignedRequestFixture() {
     publicJwks: { keys: [jwk] },
     isActive: async (token: string) => active.has(token),
     ownerHeaders: () => requestHeaders(TEST_WEB_CLIENT, "codexia:api"),
-    mcpHeaders: () => requestHeaders(TEST_MCP_CLIENT, "mcp:read mcp:propose"),
+    mcpHeaders: () => requestHeaders(TEST_MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
   };
 }
 
@@ -495,6 +500,8 @@ function testClientSettings(projectId: string, publicJwks: object, isActive: (to
     oauthMcp: { ...verifier, allowedClientIds: [TEST_MCP_CLIENT], ownerClientIds: [TEST_WEB_CLIENT], projectIdsByClient: { [TEST_MCP_CLIENT]: [projectId] } },
   };
 }
+
+const signedRequests = createSignedRequestFixture();
 
 function hostedTestPolicy(): HostedAuthorizationPolicy {
   const principals = new Map<string, HostedPrincipal>([
@@ -525,17 +532,15 @@ it("starts standalone API only with Better Auth and exposes no static login rout
   assert.throws(() => createServer({ store, persistence }), /Standalone authentication requires Better Auth/u);
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-canonical-auth-only-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
-  const client = createSignedRequestFixture();
-  const settings = testClientSettings("project-1", client.publicJwks, client.isActive);
-  const instance = await startCustomApi(store, staticDir, settings);
-  const headers = client.ownerHeaders();
+  const instance = await startCustomApi(store, staticDir);
+  const owner = signedRequests.ownerHeaders();
   t.after(instance.close);
-  const oldLogin = await fetch(instance.base + "/api/login", { method: "POST", headers, body: "{}" });
+  const oldLogin = await fetch(instance.base + "/api/login", { method: "POST", headers: owner, body: "{}" });
   assert.equal(oldLogin.status, 404);
   assert.equal(oldLogin.headers.get("set-cookie"), null);
-  const owner = await fetch(instance.base + "/api/session", { headers });
-  assert.deepEqual(await owner.json(), { authenticated: true, authorScope: "owner" });
-  const retiredLogout = await fetch(instance.base + "/api/logout", { method: "POST", headers, body: "{}" });
+  const session = await fetch(instance.base + "/api/session", { headers: owner });
+  assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
+  const retiredLogout = await fetch(instance.base + "/api/logout", { method: "POST", headers: owner, body: "{}" });
   assert.equal(retiredLogout.status, 410);
 });
 
@@ -698,21 +703,9 @@ function modelUsageRuntimeOptions(cacheDirectory: string): Omit<ModuleRuntimeOpt
   };
 }
 
-async function login(base: string): Promise<{ cookie: string; setCookie: string; body: unknown }> {
-  const response = await fetch(`${base}/api/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: base },
-    body: JSON.stringify({ token: ACCESS_TOKEN }),
-  });
-  assert.equal(response.status, 200);
-  const setCookie = response.headers.get("set-cookie");
-  assert.ok(setCookie);
-  return { cookie: setCookie.split(";", 1)[0]!, setCookie, body: await response.json() };
-}
-
-async function waitForJob(base: string, cookie: string, id: string): Promise<{ status: string; result: unknown }> {
+async function waitForJob(base: string, ownerAuthorization: string, id: string): Promise<{ status: string; result: unknown }> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const response = await fetch(`${base}/api/jobs/${encodeURIComponent(id)}`, { headers: { Cookie: cookie } });
+    const response = await fetch(`${base}/api/jobs/${encodeURIComponent(id)}`, { headers: { Authorization: ownerAuthorization } });
     assert.equal(response.status, 200);
     const job = await response.json() as { status: string; result: unknown };
     if (job.status === "done" || job.status === "error") return job;
@@ -1539,8 +1532,8 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await fetch(`${apiServer.base}/r/publishing/not-numeric/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token/extra`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`)).status, 404);
-    const owner = await login(apiServer.base);
-    assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Cookie: owner.cookie } })).status, 404,
+    const owner = signedRequests.ownerHeaders();
+    assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Authorization: owner.Authorization } })).status, 404,
       "the SPA fallback must not turn missing API routes into index.html");
     for (const name of ["main.js", "api.js", "drafts.js", "styles.css"]) {
       assert.equal((await fetch(`${apiServer.base}/${name}`)).status, 200);
@@ -1859,8 +1852,8 @@ describe("Codexia HTTP boundary", () => {
       runtime: domain.runtime,
       usageDirectory,
     });
-    const owner = await login(api.base);
-    const ownerHeaders = { Cookie: owner.cookie, Origin: api.base, "Content-Type": "application/json" };
+    const owner = signedRequests.ownerHeaders();
+    const ownerHeaders = { Authorization: owner.Authorization, Origin: api.base, "Content-Type": "application/json" };
     const expectedData = { report: { examples: 3, accuracy: 0.75 }, version: "synthetic-v1" };
     let progressAbort: AbortController | undefined;
     let progressReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -1874,7 +1867,7 @@ describe("Codexia HTTP boundary", () => {
     });
     progressAbort = new AbortController();
     const progressResponse = await fetch(`${api.base}/api/jobs/events`, {
-      headers: { Cookie: owner.cookie }, signal: progressAbort.signal,
+      headers: { Authorization: owner.Authorization }, signal: progressAbort.signal,
     });
     assert.equal(progressResponse.status, 200);
     assert.ok(progressResponse.body);
@@ -1907,7 +1900,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(directJobId);
     const directResult = await directResponse.json() as ActionResult;
     assert.deepEqual(directResult, { ok: true, snapshot: SNAPSHOT, data: expectedData });
-    const directJobResponse = await fetch(`${api.base}/api/jobs/${directJobId}`, { headers: { Cookie: owner.cookie } });
+    const directJobResponse = await fetch(`${api.base}/api/jobs/${directJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.equal(directJobResponse.status, 200);
     const directJob = await directJobResponse.json() as { status: string; result: unknown };
     assert.equal(directJob.status, "done");
@@ -1921,7 +1914,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(nestedJobId);
     assert.notEqual(nestedJobId, directJobId);
     assert.deepEqual(await nestedResponse.json(), { ok: true, snapshot: SNAPSHOT, data: expectedData });
-    const nestedJobResponse = await fetch(`${api.base}/api/jobs/${nestedJobId}`, { headers: { Cookie: owner.cookie } });
+    const nestedJobResponse = await fetch(`${api.base}/api/jobs/${nestedJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.deepEqual((await nestedJobResponse.json() as { result: unknown }).result, expectedData);
 
     const failedResponse = await fetch(`${api.base}/api/projects/project-1/actions/speaker.evaluation.run`, {
@@ -1931,7 +1924,7 @@ describe("Codexia HTTP boundary", () => {
     const failedJobId = failedResponse.headers.get("x-codexia-job-id");
     assert.ok(failedJobId);
     const failedResult = await failedResponse.json() as Extract<ActionResult, { ok: false }>;
-    const failedJobResponse = await fetch(`${api.base}/api/jobs/${failedJobId}`, { headers: { Cookie: owner.cookie } });
+    const failedJobResponse = await fetch(`${api.base}/api/jobs/${failedJobId}`, { headers: { Authorization: owner.Authorization } });
     const failedJob = await failedJobResponse.json() as { status: string; result: unknown; error: string; errorCode?: string; retryable?: boolean };
     assert.equal(failedJob.status, "error");
     assert.equal(failedJob.result, null);
@@ -1957,11 +1950,11 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(progressEvents.every(({ type, jobType, status, at }) => type === "job-progress" && jobType === "speaker-eval" && status === "running" && Date.parse(at) > 0));
     progressAbort.abort();
     await progressReader.cancel().catch(() => undefined);
-    const runningJobResponse = await fetch(`${api.base}/api/jobs/${asyncJobId}`, { headers: { Cookie: owner.cookie } });
+    const runningJobResponse = await fetch(`${api.base}/api/jobs/${asyncJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.equal(runningJobResponse.status, 200);
     assert.equal((await runningJobResponse.json() as { status: string }).status, "running");
     domain.releaseAsync();
-    const completedAsync = await waitForJob(api.base, owner.cookie, asyncJobId);
+    const completedAsync = await waitForJob(api.base, owner.Authorization, asyncJobId);
     assert.equal(completedAsync.status, "done");
     assert.deepEqual(completedAsync.result, expectedData);
 
@@ -2045,26 +2038,26 @@ describe("Codexia HTTP boundary", () => {
     await rm(workspaceDataRoot, { recursive: true, force: true });
     const apiServer = await startCustomApi(makeStore(), staticDir, { usageDirectory });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const bearer = { Authorization: `Bearer ${ACCESS_TOKEN}` };
+    const owner = signedRequests.ownerHeaders();
+    const bearer = { Authorization: signedRequests.mcpHeaders().Authorization };
     assert.equal((await fetch(`${apiServer.base}/api/jobs`, { headers: bearer })).status, 403,
       "legacy private history is cookie-owner-only");
-    const jobListResponse = await fetch(`${apiServer.base}/api/jobs`, { headers: { Cookie: owner.cookie } });
+    const jobListResponse = await fetch(`${apiServer.base}/api/jobs`, { headers: { Authorization: owner.Authorization } });
     assert.equal(jobListResponse.status, 200);
     assert.deepEqual(await jobListResponse.json(), [{
       id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
       result: { report: "explicitly mapped result" }, error: null,
       createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
     }]);
-    const mappedJob = await fetch(`${apiServer.base}/api/jobs/mapped-job`, { headers: { Cookie: owner.cookie } });
+    const mappedJob = await fetch(`${apiServer.base}/api/jobs/mapped-job`, { headers: { Authorization: owner.Authorization } });
     assert.equal(mappedJob.status, 200);
     assert.deepEqual(await mappedJob.json(), {
       id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
       result: { report: "explicitly mapped result" }, error: null,
       createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
     });
-    assert.equal((await fetch(`${apiServer.base}/api/jobs/unmapped-job`, { headers: { Cookie: owner.cookie } })).status, 404);
-    const inbox = await fetch(`${apiServer.base}/api/inbox`, { headers: { Cookie: owner.cookie } });
+    assert.equal((await fetch(`${apiServer.base}/api/jobs/unmapped-job`, { headers: { Authorization: owner.Authorization } })).status, 404);
+    const inbox = await fetch(`${apiServer.base}/api/inbox`, { headers: { Authorization: owner.Authorization } });
     const inboxBody = await inbox.json() as { items: Array<Record<string, unknown>>; unreadCount: number };
     assert.equal(inboxBody.unreadCount, 1);
     assert.equal(inboxBody.items.length, 1);
@@ -2077,16 +2070,16 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(JSON.stringify(inboxBody).includes("unmapped inbox body stays private"), false);
     const markRead = await fetch(`${apiServer.base}/api/inbox/mapped-inbox/read`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
     });
     assert.equal(markRead.status, 200);
     assert.equal(((await markRead.json() as { item: { read: boolean } }).item).read, true);
     const readAll = await fetch(`${apiServer.base}/api/inbox/read-all`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
     });
     assert.deepEqual(await readAll.json(), { marked: 0 });
     assert.equal((await fetch(`${apiServer.base}/api/inbox/unmapped-inbox/read`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
     })).status, 404);
     assert.deepEqual(await readFile(archivePath), sourceBytes, "removing the Core data root cannot remove or mutate the legacy archive");
   });
@@ -2099,9 +2092,9 @@ describe("Codexia HTTP boundary", () => {
     const runtime = jobHistoryRuntime(cacheDirectory);
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime, usageDirectory });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const streamAbort = new AbortController();
-    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Cookie: owner.cookie }, signal: streamAbort.signal });
+    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Authorization: owner.Authorization }, signal: streamAbort.signal });
     assert.equal(stream.status, 200);
     assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/u);
     assert.ok(stream.body);
@@ -2128,7 +2121,7 @@ describe("Codexia HTTP boundary", () => {
     })();
     const invocation = await fetch(`${apiServer.base}/api/projects/project-1/actions/speaker.test-worker`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { jobId: "real-worker-job" } }),
     });
     assert.equal(invocation.status, 200);
@@ -2140,7 +2133,7 @@ describe("Codexia HTTP boundary", () => {
     streamAbort.abort();
     await reader.cancel().catch(() => undefined);
     assert.deepEqual(events.map(({ status }) => status), ["queued", "running", "done"]);
-    const jobResponse = await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Cookie: owner.cookie } });
+    const jobResponse = await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: owner.Authorization } });
     assert.equal(jobResponse.status, 200);
     const job = await jobResponse.json() as { id: string; type: string; status: string; progress: unknown; result: unknown; error: unknown; createdAt: string; updatedAt: string; finishedAt: string };
     assert.deepEqual({ ...job, createdAt: "", updatedAt: "", finishedAt: "" }, {
@@ -2151,8 +2144,8 @@ describe("Codexia HTTP boundary", () => {
     const privateState = await readFile(resolve(usageDirectory, "jobs", "jobs-state.json"), "utf8");
     assert.equal(privateState.includes("worker-input-must-not-enter-owner-history"), false);
     assert.equal(privateState.includes("worker-input"), false);
-    assert.equal((await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } })).status, 403);
-    const inboxResponse = await fetch(`${apiServer.base}/api/inbox`, { headers: { Cookie: owner.cookie } });
+    assert.equal((await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } })).status, 403);
+    const inboxResponse = await fetch(`${apiServer.base}/api/inbox`, { headers: { Authorization: owner.Authorization } });
     assert.equal((await inboxResponse.json() as { unreadCount: number }).unreadCount, 1);
   });
 
@@ -2165,9 +2158,9 @@ describe("Codexia HTTP boundary", () => {
       runtime: jobHistoryRuntime(cacheDirectory), usageDirectory,
     });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const streamAbort = new AbortController();
-    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Cookie: owner.cookie }, signal: streamAbort.signal });
+    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Authorization: owner.Authorization }, signal: streamAbort.signal });
     assert.equal(stream.status, 200);
     assert.ok(stream.body);
     const reader = stream.body.getReader();
@@ -2200,7 +2193,7 @@ describe("Codexia HTTP boundary", () => {
     const actionAbort = new AbortController();
     const request = fetch(`${apiServer.base}/api/projects/project-1/actions/speaker.test-worker`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { jobId: "cancelled-worker-job", task: "hold" } }),
       signal: actionAbort.signal,
     }).catch((error: unknown) => error);
@@ -2213,7 +2206,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(await request instanceof Error, "the client request should be cancelled while its worker is running");
     streamAbort.abort();
     await reader.cancel().catch(() => undefined);
-    const statusResponse = await fetch(`${apiServer.base}/api/jobs/cancelled-worker-job`, { headers: { Cookie: owner.cookie } });
+    const statusResponse = await fetch(`${apiServer.base}/api/jobs/cancelled-worker-job`, { headers: { Authorization: owner.Authorization } });
     assert.equal(statusResponse.status, 200);
     const job = await statusResponse.json() as { status: string; error: string };
     assert.equal(job.status, "error");
@@ -2236,8 +2229,8 @@ describe("Codexia HTTP boundary", () => {
       runtimeOptions: modelUsageRuntimeOptions(cacheDirectory),
     });
     apiServer = await openApi(coreStore);
-    let owner = await login(apiServer.base);
-    const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
+    let owner = signedRequests.ownerHeaders();
+    const ownerHeaders = () => ({ Authorization: owner.Authorization, Origin: apiServer!.base, "Content-Type": "application/json" });
     const register = async () => {
       const response = await fetch(`${apiServer!.base}/api/projects`, { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }) });
       assert.equal(response.status, 201);
@@ -2255,7 +2248,7 @@ describe("Codexia HTTP boundary", () => {
     const event = usageEvent(identity, "host-usage-1", "2026-10-17T01:00:00.000Z", {
       cacheHit: true, promptVersion: "assistant-story-v2", durationMs: 1_842, queueWaitMs: 73,
     });
-    const descriptors = await fetch(`${apiServer.base}/api/projects/${project.id}/actions`, { headers: { Cookie: owner.cookie } });
+    const descriptors = await fetch(`${apiServer.base}/api/projects/${project.id}/actions`, { headers: { Authorization: owner.Authorization } });
     assert.equal(descriptors.status, 200);
     assert.ok((await descriptors.json() as { actions: Array<{ id: string }> }).actions.some(({ id }) => id === "assistant.model-usage-history"));
     await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "module activation alone must not create the history directory");
@@ -2271,7 +2264,7 @@ describe("Codexia HTTP boundary", () => {
     apiServer = undefined;
     coreStore = new CoreStore({ persistence });
     apiServer = await openApi(coreStore);
-    owner = await login(apiServer.base);
+    owner = signedRequests.ownerHeaders();
     const reconstructed = (await coreStore.listProjects()).find((item) => item.id === project.id)!;
     const newIdentity = (await coreStore.observe(reconstructed.id)).snapshot.projectId;
     assert.equal(newIdentity, identity, "reopening Core retains the native project identity");
@@ -2284,64 +2277,29 @@ describe("Codexia HTTP boundary", () => {
     assert.ok((await lstat(usageDirectory)).isDirectory(), "host history remains available in its separately configured directory");
   });
 
-  it("uses an HttpOnly same-site session and enforces same-origin writes", async (t) => {
+  it("keeps direct manuscript writes retired for the OAuth author", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
     tempDirs.push(staticDir);
     let directSaveCalls = 0;
     const apiServer = await startCustomApi(makeStore(() => { directSaveCalls += 1; }), staticDir);
     t.after(apiServer.close);
-
-    const crossOrigin = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://attacker.example" },
-      body: JSON.stringify({ token: ACCESS_TOKEN }),
-    });
-    assert.equal(crossOrigin.status, 403);
-
-    const invalid = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ token: "wrong" }),
-    });
-    assert.equal(invalid.status, 401);
-
-    const session = await login(apiServer.base);
-    assert.deepEqual(session.body, { authenticated: true });
-    assert.match(session.setCookie, /HttpOnly/u);
-    assert.match(session.setCookie, /SameSite=Strict/u);
-    assert.doesNotMatch(session.setCookie, /Secure/u);
-    const cookie = session.cookie;
-    const loginResponse = await fetch(`${apiServer.base}/api/session`, { headers: { Cookie: cookie } });
-    assert.equal(loginResponse.status, 200);
-    const projects = await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } });
-    assert.deepEqual(await projects.json(), {
+    const author = signedRequests.ownerHeaders();
+    const projectCollection = await fetch(apiServer.base + "/api/projects", { headers: author });
+    assert.equal(projectCollection.status, 200);
+    assert.deepEqual(await projectCollection.json(), {
       projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null,
     });
-
-    const mutation = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
-      method: "PUT",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ text: "new draft", revision: "revision-1" }),
+    const scene = apiServer.base + "/api/projects/project-1/scenes/scene-1";
+    const save = (revision: string, origin: string) => fetch(scene, {
+      method: "PUT", headers: { ...author, Origin: origin }, body: JSON.stringify({ text: "new draft", revision }),
     });
-    assert.equal(mutation.status, 410);
-    assert.equal((await mutation.json() as { code: string }).code, "SCENE_PROPOSAL_REQUIRED");
+    assert.equal((await save("revision-1", "https://unlisted.example")).status, 403);
+    for (const revision of ["revision-1", "revision-old"]) {
+      const mutation = await save(revision, apiServer.base);
+      assert.equal(mutation.status, 410);
+      assert.equal((await mutation.json() as { code: string }).code, "SCENE_PROPOSAL_REQUIRED");
+    }
     assert.equal(directSaveCalls, 0);
-
-    const stale = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
-      method: "PUT",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ text: "must not overwrite", revision: "revision-old" }),
-    });
-    assert.equal(stale.status, 410);
-    assert.equal(directSaveCalls, 0);
-
-    const logout = await fetch(`${apiServer.base}/api/logout`, {
-      method: "POST",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: "{}",
-    });
-    assert.equal(logout.status, 200);
-    assert.equal((await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } })).status, 401);
   });
 
   it("keeps PostgreSQL availability separate from an expired hosted Browser Grant", async (t) => {
@@ -2442,104 +2400,22 @@ describe("Codexia HTTP boundary", () => {
     } finally { clearTimeout(deadline); abort.abort(); }
   });
 
-  it("admits only the verified Cloudflare browser owner, never upgrades a bearer and preserves same-origin writes", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-access-"));
+  it("does not admit standalone Access assertions or legacy bearer credentials", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-retired-browser-identity-"));
     tempDirs.push(staticDir);
-    const issuer = "https://test.cloudflareaccess.com";
-    const audience = "a".repeat(64);
-    const origin = "https://codexia.example";
-    const email = "owner@example.com";
-    const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const jwk = { ...key.publicKey.export({ format: "jwk" }), kid: "access-key", alg: "RS256", use: "sig" };
-    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-    const now = Math.floor(Date.now() / 1000);
-    const token = (overrides: Record<string, unknown> = {}, header: Record<string, unknown> = {}) => {
-      const unsigned = encode({ alg: "RS256", typ: "JWT", kid: jwk.kid, ...header }) + "." + encode({
-        iss: issuer, aud: [audience], type: "app", sub: "owner-id", email,
-        iat: now - 1, nbf: now - 1, exp: now + 300, ...overrides,
-      });
-      return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
-    };
-    let jwksRequests = 0;
-    const persistence = await nativePersistence(t);
-    const apiServer = await startCustomApi(new CoreStore({ persistence }), staticDir, {
-      trustProxy: true, usageDirectory: staticDir, persistence,
-      cloudflareAccess: { issuer, audience, origin, ownerEmail: email, fetch: async (input) => {
-        assert.equal(String(input), issuer + "/cdn-cgi/access/certs");
-        jwksRequests++;
-        return Response.json({ keys: [jwk] });
-      } },
-    });
-    t.after(apiServer.close);
-    // Fetch normalizes Host to the loopback URL. Send the actual HTTP headers a
-    // TLS-terminating proxy would forward, while keeping the socket local.
-    const send = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
-      new Promise<Response>((resolveResponse, reject) => {
-        const request = httpRequest(apiServer.base + path, {
-          method: init.method ?? "GET",
-          headers: { Host: "codexia.example", "X-Forwarded-Proto": "https", ...headers },
-        }, incoming => {
-          const chunks: Buffer[] = [];
-          incoming.on("data", chunk => chunks.push(Buffer.from(chunk)));
-          incoming.on("error", reject);
-          incoming.on("end", () => {
-            const responseHeaders = new Headers();
-            for (const [name, value] of Object.entries(incoming.headers)) {
-              if (typeof value === "string") responseHeaders.set(name, value);
-              else if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
-            }
-            resolveResponse(new Response(Buffer.concat(chunks), { status: incoming.statusCode!, headers: responseHeaders }));
-          });
-        });
-        request.on("error", reject);
-        request.end(typeof init.body === "string" ? init.body : undefined);
-      });
-    const valid = token();
-    const browser = { "Cf-Access-Jwt-Assertion": valid };
-    const releaseVersion = await send("/api/version");
-    const browserVersion = await send("/api/browser/version");
-    assert.equal(releaseVersion.status, 200);
-    assert.equal(browserVersion.status, 200);
-    const identity = await releaseVersion.json() as { browserAuth: string };
-    assert.equal(identity.browserAuth, "cloudflare-access");
-    assert.deepEqual(await browserVersion.json(), identity);
-    const session = await send("/api/session", browser);
-    assert.equal(session.status, 200);
-    assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
-    assert.equal(session.headers.get("set-cookie"), null);
-    assert.equal((await send("/api/session", { "Cf-Access-Authenticated-User-Email": email })).status, 401);
-    assert.equal((await send("/api/session", { Cookie: "scriptorium_session=legacy" })).status, 401);
-    const signature = valid.split(".")[2]!;
-    const tampered = valid.slice(0, valid.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
-    for (const invalid of [
-      tampered, token({ iss: "https://other.cloudflareaccess.com" }), token({ aud: ["b".repeat(64)] }),
-      token({ email: "other@example.com" }), token({ exp: now - 1 }), token({ nbf: now + 100 }),
-      token({ sub: "", common_name: "service-token" }), token({ type: "org" }),
-      token({}, { alg: "none" }), token({}, { kid: "unknown" }),
-    ]) {
-      assert.equal((await send("/api/session", { "Cf-Access-Jwt-Assertion": invalid })).status, 401);
+    const api = await startApi(staticDir, true);
+    t.after(api.close);
+    const retired: Record<string, string>[] = [
+      { "CF-Access-Jwt-Assertion": "retired-fixture-assertion", "X-Forwarded-Proto": "https" },
+      { Cookie: "scriptorium_session=retired-fixture-session" },
+      { Authorization: `Bearer ${ACCESS_TOKEN}` },
+    ];
+    for (const headers of retired) {
+      const response = await fetch(api.base + "/api/session", { headers });
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("set-cookie"), null);
     }
-    assert.equal(jwksRequests, 1, "cache and unknown-kid refresh throttling");
-    assert.equal((await send("/api/session", { ...browser, Host: "wrong.example" })).status, 401);
-    assert.equal((await send("/api/session", { ...browser, Authorization: "Bearer invalid" })).status, 401);
-    const bearer = { ...browser, Authorization: "Bearer " + ACCESS_TOKEN };
-    const bearerSession = await send("/api/session", bearer);
-    assert.equal(bearerSession.status, 200);
-    assert.deepEqual(await bearerSession.json(), { authenticated: true, authorScope: "" });
-    assert.equal((await send("/api/jobs", bearer)).status, 403);
-    assert.equal((await send("/api/jobs", browser)).status, 200);
-    const mutation = { method: "POST", body: JSON.stringify({ title: "must not be created" }) };
-    assert.equal((await send("/api/v1/persistence/projects", { ...browser, Origin: "https://evil.example", "Content-Type": "application/json" }, mutation)).status, 403);
-    assert.equal((await send("/api/v1/persistence/projects", { ...bearer, Origin: origin, "Content-Type": "application/json" }, mutation)).status, 403);
-    const created = await send("/api/v1/persistence/projects", { ...browser, Origin: origin, "Content-Type": "application/json" }, {
-      method: "POST", body: JSON.stringify({ title: "Access owner " + randomUUID() }),
-    });
-    assert.equal(created.status, 201);
-    const createdProject = await created.json() as { project: { id: string } };
-    assert.ok(await persistence.read(reader => reader.getProject(createdProject.project.id as import("@codexia/persistence-contracts").ProjectId)));
-
-    assert.equal((await send("/api/login", { Origin: origin, "Content-Type": "application/json" }, { method: "POST", body: JSON.stringify({ token: ACCESS_TOKEN }) })).status, 410);
-    assert.equal((await send("/api/logout", { ...browser, Origin: origin }, { method: "POST" })).status, 410);
+    assert.equal((await fetch(api.base + "/api/session", { headers: signedRequests.ownerHeaders() })).status, 200);
   });
 
   it("authorizes standalone owner writes only with a verified API-audience OAuth access token", async (t) => {
@@ -2665,7 +2541,7 @@ describe("Codexia HTTP boundary", () => {
     const nonOwnerRoute = await fetch(api.base + "/api/logout", {
       method: "POST", headers: browserHeaders(valid),
     });
-    assert.equal(nonOwnerRoute.status, 403, "OAuth author access does not stand in for a browser session logout");
+    assert.equal(nonOwnerRoute.status, 410, "OAuth owner logout belongs to Better Auth");
     const unknownRoute = await fetch(api.base + "/api/non-allowlisted", { headers: browserHeaders(valid) });
     assert.equal(unknownRoute.status, 404);
     const unlistedOrigin = await fetch(api.base + "/api/session", {
@@ -2698,7 +2574,7 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { ...headers(ACCESS_TOKEN), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Legacy bearer cannot author" }),
     });
-    assert.equal(legacyBearerWrite.status, 403);
+    assert.equal(legacyBearerWrite.status, 401);
     const bothCredentials = await fetch(api.base + "/api/projects", {
       headers: { ...browserHeaders(valid), Cookie: "scriptorium_session=present" },
     });
@@ -2807,7 +2683,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(corsChallenge.status, 401);
     assert.equal(corsChallenge.headers.get("access-control-expose-headers"), "Mcp-Session-Id, WWW-Authenticate");
     assert.equal((await send("/mcp", ACCESS_TOKEN, initialize)).status, 401);
-    const cookie = (await login(api.base)).cookie;
+    const cookie = "scriptorium_session=retired-fixture-value";
     assert.equal((await fetch(api.base + "/mcp", { ...initialize, headers: { ...initialize.headers, Cookie: cookie, Origin: api.base } })).status, 401);
     assert.equal((await send("/api/session", ownerToken)).status, 200);
     assert.equal((await send("/mcp", ownerToken, initialize)).status, 403);
@@ -2978,30 +2854,6 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(onlineChecks >= 6, "every admitted or scope-bearing MCP API request checks online token activity");
   });
 
-  it("marks a session cookie Secure when HTTPS is asserted by a trusted proxy", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
-    tempDirs.push(staticDir);
-    const apiServer = await startApi(staticDir, true);
-    t.after(apiServer.close);
-    const origin = apiServer.base.replace(/^http:/u, "https:");
-    const response = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: origin,
-        "X-Forwarded-Proto": "https",
-      },
-      body: JSON.stringify({ token: ACCESS_TOKEN }),
-    });
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get("set-cookie") ?? "", /; Secure(?:;|$)/u);
-  });
-
-  it("rejects short access tokens before opening a listener", () => {
-    const store = makeStore();
-    assert.throws(() => createServer({ store, authToken: "too-short", persistence: admissionPersistence(store) }), /at least 32/u);
-  });
-
   it("rejects invalid browser CORS origins before opening a listener", () => {
     const store = makeStore();
     const persistence = admissionPersistence(store);
@@ -3012,7 +2864,7 @@ describe("Codexia HTTP boundary", () => {
       ["https://web.example.test", "https://web.example.test"],
     ]) {
       assert.throws(
-        () => createServer({ store, authToken: ACCESS_TOKEN, persistence, corsAllowedOrigins: origins }),
+        () => createServer({ store, persistence, corsAllowedOrigins: origins, ...testClientSettings("project-1", signedRequests.publicJwks, signedRequests.isActive) }),
         /exact normalized HTTPS origins/u,
         origins.join(", "),
       );
@@ -3033,7 +2885,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await readiness.json() as { ok: boolean }).ok, false);
 
     const status = await fetch(`${apiServer.base}/api/v1/persistence/status`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.ownerHeaders().Authorization },
     });
     assert.equal(status.status, 503);
     assert.deepEqual(await status.json(), { error: "PostgreSQL persistence is not ready", code: "PERSISTENCE_UNAVAILABLE" });
@@ -3071,7 +2923,7 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
+    const auth = { Authorization: signedRequests.ownerHeaders().Authorization };
 
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: auth });
     assert.deepEqual(await projects.json(), { projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null });
@@ -3177,7 +3029,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(statsBody.stats.totalPages400, 1);
   });
 
-  it("assigns proposal source at the host and keeps approval exclusive to same-origin owner sessions", async (t) => {
+  it("assigns proposal source at the host and keeps approval exclusive to the verified OAuth owner", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-proposals-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
@@ -3188,7 +3040,7 @@ describe("Codexia HTTP boundary", () => {
       effect: "metadata", reads: [], writes: [], message: "propose a bounded metadata update",
     };
     const proposal = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ id: "mcp-batch-1", source: "author", snapshot: SNAPSHOT, operations: [operation] }),
     });
     assert.equal(proposal.status, 201);
@@ -3197,15 +3049,15 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed[0]?.source, "mcp");
 
     const mcpApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ proposalId: "mcp-batch-1", operationIds: [operation.id], authorScope: "forged" }),
     });
     assert.equal(mcpApproval.status, 403);
     assert.deepEqual(fixture.approvals, []);
 
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const authorApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ proposalId: "mcp-batch-1", operationIds: [operation.id], authorScope: "forged" }),
     });
     assert.equal(authorApproval.status, 204);
@@ -3222,8 +3074,8 @@ describe("Codexia HTTP boundary", () => {
     const store = new CoreStore({ persistence });
     const apiServer = await startCustomApi(store, staticDir, { persistence });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+    const owner = signedRequests.ownerHeaders();
+    const headers = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
       method: "POST", headers, body: JSON.stringify({ title: "Native API test project" }),
     });
@@ -3280,14 +3132,11 @@ describe("Codexia HTTP boundary", () => {
     let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
     t.after(async () => { if (apiServer) await apiServer.close(); });
 
-    apiServer = await startCustomApi(store, staticDir, { persistence });
-    let owner = await login(apiServer.base);
-    const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
-    const registration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }),
-    });
-    assert.equal(registration.status, 201);
-    const project = await registration.json() as { id: string; title: string; version: number };
+    const project = await store.createProject({ title: "Native API test project" });
+    const settings = testClientSettings(project.id, signedRequests.publicJwks, signedRequests.isActive);
+    apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
+    let owner = signedRequests.ownerHeaders();
+    const ownerHeaders = () => ({ ...owner, Origin: apiServer!.base });
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation = (id: string, path: string, content: string): ChangeOperation => ({
       id, generation: 1, projectId: snapshot.projectId, baseProjectVersion: snapshot.projectVersion,
@@ -3308,19 +3157,19 @@ describe("Codexia HTTP boundary", () => {
     };
 
     const initial = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ ...proposal, source: "author" }),
     });
     assert.equal(initial.status, 201);
     assert.deepEqual(await initial.json(), proposal, "new bearer submissions are attributed to MCP regardless of request source");
 
-    const cookieOperation = operation("cookie_author_source_op", "meta/recovery/cookie-author.md", "Created by the owner session.\n");
-    const cookieCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
+    const authorOperation = operation("oauth_author_source_op", "meta/recovery/oauth-author.md", "Created by the owner session.\n");
+    const authorCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
-      body: JSON.stringify({ id: "cookie_author_source", snapshot, operations: [cookieOperation], source: "mcp" }),
+      body: JSON.stringify({ id: "oauth_author_source", snapshot, operations: [authorOperation], source: "mcp" }),
     });
-    assert.equal(cookieCreated.status, 201);
-    assert.equal((await cookieCreated.json() as ChangeProposal).source, "author", "new cookie submissions cannot claim MCP provenance");
+    assert.equal(authorCreated.status, 201);
+    assert.equal((await authorCreated.json() as ChangeProposal).source, "author", "new OAuth author submissions cannot claim MCP provenance");
 
     const approval = await fetch(`${apiServer.base}/api/projects/${project.id}/approvals`, {
       method: "POST", headers: ownerHeaders(),
@@ -3337,13 +3186,13 @@ describe("Codexia HTTP boundary", () => {
     await apiServer.close();
     apiServer = undefined;
     store = new CoreStore({ persistence });
-    apiServer = await startCustomApi(store, staticDir, { persistence });
-    owner = await login(apiServer.base);
+    apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
+    owner = signedRequests.ownerHeaders();
     const recoveredProject = (await store.listProjects()).find((item) => item.id === project.id)!;
     assert.equal(recoveredProject.id, project.id, "PostgreSQL project identity survives host replacement");
 
     const statusPath = `${apiServer.base}/api/projects/${recoveredProject.id}/proposals/${proposal.id}`;
-    const partialResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
+    const partialResponse = await fetch(statusPath, { headers: { Authorization: owner.Authorization } });
     assert.equal(partialResponse.status, 200);
     const partial = await partialResponse.json() as ProposalStatus;
     assert.equal(partial.proposal.source, "mcp");
@@ -3357,7 +3206,7 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(retry.status, 201);
     assert.deepEqual(await retry.json(), proposal, "the owner retry restores the exact original MCP payload and source");
-    const restoredResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
+    const restoredResponse = await fetch(statusPath, { headers: { Authorization: owner.Authorization } });
     const restored = await restoredResponse.json() as ProposalStatus;
     assert.deepEqual(restored.proposal, proposal);
     assert.deepEqual(restored.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
@@ -3383,17 +3232,17 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await unapprovedApply.json() as { code: string }).code, "operation_not_approved");
 
     const currentSnapshot = (await store.observe(recoveredProject.id)).snapshot;
-    const newCookieOperation = {
-      ...cookieOperation,
+    const newAuthorOperation = {
+      ...authorOperation,
       projectId: currentSnapshot.projectId,
       baseProjectVersion: currentSnapshot.projectVersion,
     };
-    const newCookieProposal = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
+    const newAuthorProposal = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
-      body: JSON.stringify({ id: "new_cookie_after_recovery", snapshot: currentSnapshot, operations: [newCookieOperation], source: "mcp" }),
+      body: JSON.stringify({ id: "new_oauth_after_recovery", snapshot: currentSnapshot, operations: [newAuthorOperation], source: "mcp" }),
     });
-    assert.equal(newCookieProposal.status, 201);
-    assert.equal((await newCookieProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new cookie proposals after recovery");
+    assert.equal(newAuthorProposal.status, 201);
+    assert.equal((await newAuthorProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new OAuth author proposals after recovery");
   });
 
   it("opens an existing PostgreSQL project outside the bounded project listing", async (t) => {
@@ -3403,7 +3252,7 @@ describe("Codexia HTTP boundary", () => {
     native.store.listProjectsPage = async () => ({ projects: [], nextCursor: null });
     const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
     t.after(apiServer.close);
-    const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
+    const auth = { Authorization: signedRequests.ownerHeaders().Authorization };
     assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), { projects: [], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/${native.project.id}`, { headers: auth });
     assert.equal(detail.status, 200);
@@ -3437,7 +3286,7 @@ describe("Codexia HTTP boundary", () => {
         t.after(apiServer.close);
         const endpoint = `${apiServer.base}/api/projects/${native.project.id}/snapshot`;
         const selector = `projection=editor&documentId=${created.document.id}`;
-        const auth = { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } };
+        const auth = { headers: { Authorization: signedRequests.ownerHeaders().Authorization } };
         assert.equal((await fetch(`${endpoint}?${selector}`)).status, 401);
         const bulk = await fetch(endpoint, auth);
         assert.equal(bulk.status, 413);
@@ -3501,7 +3350,7 @@ describe("Codexia HTTP boundary", () => {
     };
 
     const responsePromise = fetch(`${apiServer.base}/api/projects/${native.project.id}/review-queue`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.ownerHeaders().Authorization },
     });
     try {
       const responseBeforeRead = await Promise.race([
@@ -3540,8 +3389,8 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(store, staticDir);
     t.after(() => apiServer.close());
     assert.equal((await fetch(`${apiServer.base}/api/review-queue`)).status, 401);
-    const owner = await login(apiServer.base);
-    const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Cookie: owner.cookie } });
+    const owner = signedRequests.ownerHeaders();
+    const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Authorization: owner.Authorization } });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { unresolvedCount: 1234, items: [] });
     assert.deepEqual(calls, [null]);
@@ -3557,14 +3406,14 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(store, staticDir);
     let closed = false;
     t.after(async () => { if (!closed) await apiServer.close(); });
-    const owner = await login(apiServer.base);
-    const stream = await fetch(`${apiServer.base}/api/projects/events`, { headers: { Cookie: owner.cookie } });
+    const owner = signedRequests.ownerHeaders();
+    const stream = await fetch(`${apiServer.base}/api/projects/events`, { headers: { Authorization: owner.Authorization } });
     assert.equal(stream.status, 200);
     assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/u);
     assert.equal((await fetch(`${apiServer.base}/api/projects/events`)).status, 401);
     for (const suffix of ["sync", "reconcile", "publish", "checkpoints"]) {
       const response = await fetch(`${apiServer.base}/api/projects/project-1/${suffix}`, {
-        method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" }, body: "{}",
+        method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" }, body: "{}",
       });
       assert.equal(response.status, 404, `${suffix} must not retain a Git fallback`);
     }
@@ -3585,10 +3434,10 @@ describe("Codexia HTTP boundary", () => {
       async reconstructProject() { retiredCalls++; }, async detachProject() { retiredCalls++; },
     });
     const apiServer = await startCustomApi(store, staticDir); t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const routeAuthHeaders: Record<string, string>[] = [
-      { Authorization: `Bearer ${ACCESS_TOKEN}` },
-      { Cookie: owner.cookie, Origin: apiServer.base },
+      { Authorization: signedRequests.mcpHeaders().Authorization },
+      { Authorization: owner.Authorization, Origin: apiServer.base },
     ];
     for (const method of ["PUT", "PATCH", "DELETE"]) {
       for (const auth of routeAuthHeaders) {
@@ -3602,7 +3451,7 @@ describe("Codexia HTTP boundary", () => {
       }
     }
     const legacyRegistration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo" }),
     });
     assert.equal(legacyRegistration.status, 400);
@@ -3616,8 +3465,8 @@ describe("Codexia HTTP boundary", () => {
     const store = new CoreStore({ persistence });
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-project-")); tempDirs.push(staticDir);
     const apiServer = await startCustomApi(store, staticDir, { persistence }); t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base };
+    const owner = signedRequests.ownerHeaders();
+    const headers = { Authorization: owner.Authorization, Origin: apiServer.base };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
       method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Native project" }),
     });
@@ -3652,10 +3501,10 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir, { runtime: actionBoundaryRuntime(cacheDir) });
     t.after(apiServer.close);
-    const bearer = { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" };
+    const bearer = { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" };
 
     const version = await fetch(`${apiServer.base}/api/version`);
-    assert.deepEqual((await version.json() as { auth: string[] }).auth, ["cookie-owner", "bearer-read-compute-propose"]);
+    assert.deepEqual((await version.json() as { auth: string[] }).auth, ["oauth-owner", "oauth-mcp"]);
     const computed = await fetch(`${apiServer.base}/api/projects/project-1/actions/nlp.analyze`, {
       method: "POST", headers: bearer, body: JSON.stringify({ input: {} }),
     });
@@ -3682,13 +3531,13 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed.length, 0, "bearer HTTP compute must not reach the proposal coordinator");
 
     const operation: ChangeOperation = {
-      id: "mcp-cookie-operation", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
+      id: "mcp-owner-operation", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
       effect: "metadata", reads: [], writes: [], message: "MCP contribution proposal",
     };
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const actionProposal = await fetch(`${apiServer.base}/api/projects/project-1/actions/mcp.propose`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ input: operation }),
     });
     assert.equal(actionProposal.status, 200);
@@ -3697,7 +3546,7 @@ describe("Codexia HTTP boundary", () => {
 
     const httpProposal = await fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/propose`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify(operation),
     });
     assert.equal(httpProposal.status, 200);
@@ -3746,22 +3595,21 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime });
     t.after(apiServer.close);
 
-    const descriptors = await fetch(`${apiServer.base}/api/projects/project-1/actions`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    const descriptors = await fetch(`${apiServer.base}/api/projects/project-1/actions`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } });
     const actions = (await descriptors.json() as { actions: Array<{ id: string }> }).actions;
     assert.ok(actions.some(({ id }) => id === "publishing.read-core"));
     const invoked = await fetch(`${apiServer.base}/api/projects/project-1/actions/publishing.read-core`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
     });
     const invokedBody = await invoked.json() as { ok: boolean; data: unknown };
     assert.equal(invokedBody.ok, true, JSON.stringify(invokedBody));
 
     const ownerRoute = await fetch(`${apiServer.base}/api/projects/project-1/modules/publishing/share/secret`);
     assert.equal(ownerRoute.status, 401);
-    const owner = await login(apiServer.base);
     const publicResponse = await fetch(`${apiServer.base}/api/public/projects/project-1/modules/publishing/share/secret?lang=en`, {
       headers: {
-        Authorization: `Bearer ${ACCESS_TOKEN}`,
-        Cookie: owner.cookie,
+        Authorization: signedRequests.mcpHeaders().Authorization,
+        Cookie: "ambient-browser-cookie=fixture-value",
         "Proxy-Authorization": "Basic ambient-proxy-secret",
         "Mcp-Session-Id": "mcp-session-123",
       },
@@ -3813,7 +3661,7 @@ describe("Codexia HTTP boundary", () => {
     let closeCalled = false;
     t.after(async () => { if (!closeCalled) await apiServer.close().catch(() => undefined); });
     const request = fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/hang`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.mcpHeaders().Authorization },
     }).catch((error: unknown) => error);
     await entered;
     const startedAt = Date.now();
@@ -3830,10 +3678,10 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const raw = Buffer.from([0, 1, 2, 250]);
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ text: "", source: "camera", sceneId: "scene-one", attachments: [{ filename: "../../note.png", mimeType: "image/png", dataBase64: raw.toString("base64") }] }),
     });
     assert.equal(response.status, 201);
@@ -3854,12 +3702,12 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const raw = Buffer.alloc(6 * 1024 * 1024 + 2, 0x5a);
     const dataBase64 = raw.toString("base64");
     assert.ok(dataBase64.endsWith("=") && !dataBase64.endsWith("=="), "large one-byte-padding input exercises canonical final-group validation");
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ text: "Large canonical attachment", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64 }] }),
     });
     assert.equal(response.status, 201);
@@ -3878,7 +3726,7 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const dataBase64 = Buffer.alloc(6 * 1024 * 1024, 0x5a).toString("base64");
     const malformedEncodings = [
       `${dataBase64.slice(0, -1)}!`,
@@ -3888,7 +3736,7 @@ describe("Codexia HTTP boundary", () => {
     ];
     for (const malformedBase64 of malformedEncodings) {
       const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-        method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+        method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
         body: JSON.stringify({ text: "Malformed attachment", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64: malformedBase64 }] }),
       });
       assert.equal(response.status, 400);
@@ -3904,12 +3752,12 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const dataBase64 = Buffer.alloc(8 * 1024 * 1024 + 1, 0x5a).toString("base64");
     const requestBody = JSON.stringify({ text: "Over the raw attachment cap", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64 }] });
     assert.ok(Buffer.byteLength(requestBody) < 12 * 1024 * 1024, "the request remains within the existing JSON parser cap");
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base }, body: requestBody,
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base }, body: requestBody,
     });
     assert.equal(response.status, 413);
     assert.equal((await response.json() as { code?: string }).code, "SCRATCH_ATTACHMENT_TOO_LARGE");
@@ -3917,7 +3765,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.approvals.length, 0);
   });
 
-  it("stores project recent activity for cookie owners across API restarts and rejects bearer or cross-origin writes", async (t) => {
+  it("stores project recent activity for OAuth authors across API restarts and rejects MCP or cross-origin access", async (t) => {
     const root = await mkdtemp(resolve(tmpdir(), "codexia-api-recent-activity-"));
     const staticDir = resolve(root, "static");
     const usageDirectory = resolve(root, "host-history");
@@ -3930,14 +3778,15 @@ describe("Codexia HTTP boundary", () => {
       observeCalls += 1;
       throw new Error("simulated unavailable project observation");
     };
-    let apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
+    const settings = testClientSettings(native.project.id, signedRequests.publicJwks, signedRequests.isActive);
+    let apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence, ...settings });
     t.after(() => apiServer.close().catch(() => undefined));
-    let owner = await login(apiServer.base);
-    const ownerJson = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+    let owner = signedRequests.ownerHeaders();
+    const ownerJson = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
 
-    const empty = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const empty = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     assert.deepEqual(await empty.json(), { items: [] });
-    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } })).json(), { items: [] });
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Authorization: owner.Authorization } })).json(), { items: [] });
     assert.equal(observeCalls, 0, "project activity reads do not require a Core observation");
     const desktopFirst = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
@@ -3975,8 +3824,8 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal((await secondProjectActivity.json() as { items: unknown[] }).items.length, 1);
 
-    const bearerRead = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-    assert.equal(bearerRead.status, 403, "recent activity is owner-cookie state, not bearer project data");
+    const bearerRead = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } });
+    assert.equal(bearerRead.status, 403, "MCP credentials cannot read author activity for their assigned project");
     const crossOriginWrite = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: { ...ownerJson, Origin: "https://foreign.example" },
       body: JSON.stringify({ sceneId: "foreign", sentenceOffset: 0, deviceType: "mobile" }),
@@ -3990,17 +3839,17 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(observeCalls, 0, "cursor writes do not depend on project observation availability");
 
     await apiServer.close();
-    apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
-    owner = await login(apiServer.base);
+    apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence, ...settings });
+    owner = signedRequests.ownerHeaders();
     observeCalls = 0;
-    const afterRestart = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const afterRestart = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     const restored = await afterRestart.json() as { items: Array<{ sceneId: string; pageIndex: number | null; deviceType: string }> };
     assert.equal(restored.items.length, 2);
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.sceneId, "scene-two");
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
     assert.equal(restored.items.find((item) => item.deviceType === "mobile")?.sceneId, "scene-mobile");
     const stale = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
-      method: "PUT", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json",
+      method: "PUT", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json",
         "X-Codexia-Recent-Activity-Order": `${writer}:1` },
       body: JSON.stringify({ sceneId: "older", sentenceOffset: 1, deviceType: "desktop" }),
     });
@@ -4008,7 +3857,7 @@ describe("Codexia HTTP boundary", () => {
     const staleItems = await stale.json() as typeof restored;
     assert.deepEqual(staleItems, restored, "a delayed request after restart cannot rewind the accepted cursor");
     assert.equal(observeCalls, 0, "persisted cursors remain available while Core observation is unavailable after restart");
-    const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     const secondRestored = await secondAfterRestart.json() as { items: Array<{ sceneId: string }> };
     assert.deepEqual(secondRestored.items.map((item) => item.sceneId), ["second-project-scene"], "recent activity stays scoped to its PostgreSQL project identity");
   });
@@ -4138,8 +3987,8 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   t.after(apiServer.close);
   const url = apiServer.base + "/api/v1/persistence/projects/" + native.project.id + "/archive";
   assert.equal((await fetch(url)).status, 401);
-  const owner = await login(apiServer.base);
-  const exported = await fetch(url, { headers: { Cookie: owner.cookie } });
+  const owner = signedRequests.ownerHeaders();
+  const exported = await fetch(url, { headers: { Authorization: owner.Authorization } });
   assert.equal(exported.status, 200);
   const archive = await exported.json() as { format: string; documents: unknown[] };
   assert.equal(archive.format, "codexia-work/v1");
@@ -4147,14 +3996,14 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   const endpoint = apiServer.base + "/api/v1/persistence/import";
   const requestBody = JSON.stringify(archive);
   const bearer = await fetch(endpoint, { method: "POST", headers: {
-    Authorization: "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json"
+    Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json"
   }, body: requestBody });
   assert.equal(bearer.status, 403, "Bearer read access must not create works");
   const forbiddenOrigin = await fetch(endpoint, { method: "POST", headers: {
-    Cookie: owner.cookie, Origin: "https://other.example", "Content-Type": "application/json"
+    Authorization: owner.Authorization, Origin: "https://other.example", "Content-Type": "application/json"
   }, body: requestBody });
   assert.equal(forbiddenOrigin.status, 403, "Cookie writes require same origin");
-  const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+  const headers = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
   const importResponse = await fetch(endpoint, { method: "POST", headers, body: requestBody });
   assert.equal(importResponse.status, 201);
   const imported = await importResponse.json() as { project: { id: string }; replayed: boolean };
@@ -4165,7 +4014,7 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   const replay = await repeated.json() as { project: { id: string }; replayed: boolean };
   assert.equal(replay.replayed, true);
   assert.equal(replay.project.id, imported.project.id);
-  const importedExport = await fetch(apiServer.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", { headers: { Cookie: owner.cookie } });
+  const importedExport = await fetch(apiServer.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", { headers: { Authorization: owner.Authorization } });
   assert.equal(importedExport.status, 200);
   assert.equal((await importedExport.json() as { project: { title: string } }).project.title, native.project.title);
 
