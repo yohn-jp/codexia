@@ -1,4 +1,4 @@
-import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type NativeChangeSetReference, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
 import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
@@ -51,7 +51,7 @@ const contribution: ResponseGuard<UiContribution> = (v): v is UiContribution => 
 const jsonValue = (v: unknown): boolean => v === null || text(v) || typeof v === "number" && Number.isFinite(v) || bool(v) || Array.isArray(v) && v.every(jsonValue) || record(v) && Object.values(v).every(jsonValue);
 const jsonObject = (v: unknown): v is Record<string, unknown> => record(v) && Object.values(v).every(jsonValue);
 const persistenceProject: ResponseGuard<PersistenceProject> = (v): v is PersistenceProject => record(v) && text(v.id) && text(v.title) && jsonObject(v.settings) && integer(v.version) && v.version > 0 && text(v.createdAt) && text(v.updatedAt);
-const nativeOperationTypes = ["document.create", "document.update", "document.delete", "document.save", "document.restore", "knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
+const nativeOperationTypes = ["document.create", "document.update", "document.delete", "document.save", "document.restore", "module.record.save", "knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
 const nullablePositiveVersion = (v: unknown): boolean => v === null || integer(v) && v > 0;
 const hierarchyParent = (value: unknown): boolean => record(value) && text(value.documentId) && text(value.lookupId);
 const hierarchyDocument = (value: unknown): boolean => record(value) && text(value.logicalId) && (
@@ -74,6 +74,7 @@ const nativeOperation: ResponseGuard<ChangeSetOperation> = (v): v is ChangeSetOp
     case "document.save": return [c.projectId, c.documentId, c.baseRevisionId, c.authorId, c.clientId, c.idempotencyKey].every(text)
       && text(c.resultingSha256) && /^[0-9a-f]{64}$/u.test(c.resultingSha256) && Array.isArray(c.changes) && c.changes.every(textChange);
     case "document.restore": return [c.projectId, c.documentId, c.baseRevisionId, c.sourceRevisionId, c.authorId, c.idempotencyKey].every(text);
+    case "module.record.save": return [c.projectId, c.moduleId, c.key].every(text) && jsonObject(c.value) && nullablePositiveVersion(c.expectedVersion);
     case "knowledge.node.save": return [c.projectId, c.id, c.type, c.name].every(text) && jsonObject(c.attributes) && oneOf(c.status, ["proposed", "confirmed", "retired"]) && nullablePositiveVersion(c.expectedVersion);
     case "knowledge.alias.save": return [c.projectId, c.id, c.nodeId, c.surface, c.normalized].every(text) && nullableText(c.scope) && oneOf(c.status, ["proposed", "confirmed", "ambiguous", "retired"]);
     case "knowledge.relation.save": return [c.projectId, c.id, c.sourceId, c.targetId, c.type].every(text) && jsonObject(c.attributes) && jsonObject(c.validity) && oneOf(c.status, ["proposed", "confirmed", "rejected", "retired"]) && nullablePositiveVersion(c.expectedVersion);
@@ -147,6 +148,9 @@ export const responseContracts = {
   nativeChangeSets: (v: unknown): v is { changeSets: ChangeSet[] } => record(v) && array(changeSet)(v.changeSets),
   nativeChangeSet: nativeChangeSetRead,
   nativeChangeSetEnvelope: (v: unknown): v is { changeSet: ChangeSet } => record(v) && changeSet(v.changeSet),
+  nativeChangeSetReferenceEnvelope: (v: unknown): v is { changeSet: NativeChangeSetReference } =>
+    record(v) && record(v.changeSet) && text(v.changeSet.projectId) && text(v.changeSet.id) &&
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(v.changeSet.id),
   nativeChangeSetApplication: changeSetApplication,
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
   persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } | PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) &&

@@ -16,7 +16,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, isPrivatePublishingPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
@@ -1095,6 +1095,7 @@ export function createServer(options: ApiServerOptions): Server {
     allowedProjectIds?: readonly string[],
     resolveNativeProposalActor?: () => Promise<string>,
     canReviewPrivateChangeSets = false,
+    resolvePublishingAuthor?: () => Promise<string>,
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
@@ -1121,6 +1122,34 @@ export function createServer(options: ApiServerOptions): Server {
       },
       access,
     };
+    const assertPublishingRecordScope = (
+      scope: Parameters<NonNullable<ActionHostContext["readOwnModuleRecord"]>>[0],
+      key: string,
+    ): void => {
+      if (scope.moduleId !== "publishing" || !isPublishingRecordKey(key) ||
+          scope.access !== access || snapshotKey(scope.snapshot) !== snapshotKey(reader.snapshot)) {
+        throw httpFailure(403, "PUBLISHING_RECORD_SCOPE_DENIED", "Publishing record access is limited to the selected project snapshot");
+      }
+    };
+    host.readOwnModuleRecord = async (scope, key, recordSignal) => {
+      assertPublishingRecordScope(scope, key);
+      if (access !== "public") {
+        if (!resolvePublishingAuthor || source === "mcp") {
+          throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "Publishing settings require an authenticated author");
+        }
+        await resolvePublishingAuthor();
+      }
+      if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
+      return coreStore.readPublishingSnapshotRecord(projectId, scope.snapshot, key);
+    };
+    if (access !== "public" && source !== "mcp" && resolvePublishingAuthor) {
+      host.proposeOwnModuleRecord = async (scope, input, recordSignal) => {
+        assertPublishingRecordScope(scope, input.key);
+        const authorId = await resolvePublishingAuthor();
+        if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
+        return coreStore.proposePublishingSnapshotRecord(projectId, scope.snapshot, input, authorId);
+      };
+    }
     if (access !== "public") {
       host.trackDomainJob = async (descriptor, snapshot, jobSignal, execute) => {
         const type = descriptor.job.type;
@@ -1890,6 +1919,9 @@ export function createServer(options: ApiServerOptions): Server {
       if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author identity is required");
       return requireWritePermission();
     };
+    const resolvePublishingAuthor = canReviewPrivateChangeSets
+      ? async () => (await requireAuthorSession())?.userId ?? "owner"
+      : undefined;
     const authorizeActionProposal = async (): Promise<void> => {
       if (hosted) { await requireWritePermission(); return; }
       requireMcpEffect("propose");
@@ -2263,7 +2295,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2371,7 +2403,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
         if (mcpStreamableRoute && admittedMcpClient) {
           const { issuer, clientId, userId } = admittedMcpClient;
           host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);

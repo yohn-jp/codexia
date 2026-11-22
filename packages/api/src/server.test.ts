@@ -9,7 +9,7 @@ import { afterEach, describe, it } from "node:test";
 import { fromNodeHeaders } from "better-auth/node";
 import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import type { ChangeSetApplicationResult, ChangeSetResult, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
+import type { ChangeSetApplicationResult, ChangeSetId, ChangeSetResult, JsonObject, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
 import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
@@ -4086,9 +4086,18 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
   const grantsPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
   const episodesPath = "meta/scriptorium/modules/publishing/episodes.yaml";
   const grantBody = '{"tokenHash":"fixture-private-digest","label":"Proofreader"}';
-  await persistence.transaction(tx => tx.saveModuleRecord({
-    projectId, moduleId: "core.artifacts", key: grantsPath, expectedVersion: null, value: { content: grantBody },
-  }));
+  const legacyProject = await persistence.read(reader => reader.getProject(projectId));
+  assert.ok(legacyProject);
+  const legacySnapshot = { projectId, projectVersion: legacyProject.version };
+  await persistence.transaction(async tx => {
+    await tx.saveModuleRecord({
+      projectId, moduleId: "core.authority.snapshots", key: "snapshot:" + legacyProject.version, expectedVersion: null,
+      value: { snapshot: legacySnapshot, project: legacyProject, documents: [], files: {
+        [grantsPath]: { content: grantBody, encoding: "utf8", revision: createHash("sha256").update(grantBody).digest("hex") },
+      } } as unknown as JsonObject,
+    });
+    await tx.updateProject({ projectId, expectedVersion: legacyProject.version });
+  });
   const snapshot = (await store.observe(projectId)).snapshot;
   const ordinaryId = randomUUID();
   const privateIds = [randomUUID(), randomUUID()] as const;
@@ -4101,17 +4110,28 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
         ...(privatePath ? [{ path: privatePath, revision: null, content: "Author draft" }] : []),
       ],
     };
-    await store.propose(projectId, { id, snapshot, operations: [operation], source: "author" });
+    const proposal: ChangeProposal = { id, snapshot, operations: [operation], source: "author" };
+    if (privatePath) {
+      const status: ProposalStatus = {
+        proposal, state: "proposed", approvedOperationIds: [], appliedOperationIds: [], applications: [], stale: false,
+      };
+      await persistence.transaction(tx => tx.saveModuleRecord({
+        projectId, moduleId: "core.authority.proposals", key: "proposal:" + id, expectedVersion: null,
+        value: status as unknown as JsonObject,
+      }));
+    } else {
+      await store.propose(projectId, proposal);
+    }
   }
   const native = await persistence.transaction(tx => tx.createChangeSet({
     projectId, authorId: "owner", idempotencyKey: "private-publishing",
     operations: [{
       type: "module.record.save",
-      command: { projectId, moduleId: "publishing", key: "share-grants", expectedVersion: null, value: { grants: [grantBody] } },
+      command: { projectId, moduleId: "publishing", key: "share-grants", expectedVersion: null, value: { version: 1, grants: [] } },
     }],
     readSet: [{ resource: "module_record", id: '["publishing","share-grants"]', expectedVersion: null }],
     writeSet: [{ resource: "module_record", id: '["publishing","share-grants"]' }],
-    provenance: { source: "publishing.native", actorId: "owner", details: {} },
+    provenance: { source: "publishing.native", actorId: "owner", details: { projectVersion: snapshot.projectVersion } },
   }));
   const client = createSignedRequestFixture();
   const standalone = await startCustomApi(store, staticDir, {
@@ -4136,9 +4156,9 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
   ];
   for (const { name, base, headers, author, directPersistence } of readers) {
     await t.test(name, async () => {
-      const invoke = async <Data>(action: string, input: unknown): Promise<ActionResult<Data>> => {
+      const invoke = async <Data>(action: string, input: unknown, selected?: SnapshotId): Promise<ActionResult<Data>> => {
         const url = base + projectPath + "/actions/" + action;
-        const body = JSON.stringify({ input });
+        const body = JSON.stringify({ input, snapshot: selected });
         if (headers.Cookie) {
           const response = await rawHostedRequest(url, headers, body);
           assert.equal(response.status, 200, response.body);
@@ -4179,7 +4199,7 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
       else assert.ok(!detail.ok && detail.error.code === "PROPOSAL_NOT_FOUND", JSON.stringify(detail));
 
       const resolved = await invoke<{ sceneId: null; document: { path: string; content: string } | null }>(
-        "core.document.resolve", { path: grantsPath },
+        "core.document.resolve", { path: grantsPath }, legacySnapshot,
       );
       assert.ok(resolved.ok, JSON.stringify(resolved));
       assert.equal(resolved.data.sceneId, null);
@@ -4195,6 +4215,106 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
       }
     });
   }
+});
+
+it("binds Publishing record ports to the requested snapshot and authenticated author", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Publishing port");
+  const directory = await mkdtemp(resolve(tmpdir(), "codexia-publishing-port-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = "share-grants";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "publishing", key, value: { version: 1, grants: [] }, expectedVersion: null,
+  }));
+  const pinned = (await store.reader(project.id)).snapshot;
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "publishing", key, value: { version: 1, grants: [] }, expectedVersion: 1,
+  }));
+
+  const fixtureRuntime = () => {
+    const manifest: ModuleManifest = {
+      id: "publishing", version: "0.1.0", contractVersion: 1,
+      dependencies: [], provides: [], requires: [], statePaths: [], locality: "local",
+    };
+    const schema: ValueSchema = { parse: value => value };
+    const definition: ModuleDefinition = {
+      manifest, ui: [],
+      actions: [{
+        id: "publishing.fixture-read", effect: "read", inputSchema: schema, outputSchema: schema,
+        async invoke(input, context) {
+          const record = await context.readOwnModuleRecord?.((input as { key: string }).key);
+          return { ok: true, snapshot: context.reader.snapshot, data: { version: record?.version ?? null } };
+        },
+      }, {
+        id: "publishing.fixture-propose", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const changeSet = await context.proposeOwnModuleRecord?.({
+            key, value: { version: 1, grants: [] }, expectedVersion: 2, idempotencyKey: randomUUID(),
+          });
+          return { ok: true, snapshot: context.reader.snapshot, data: { changeSet: changeSet ?? null } };
+        },
+      }],
+      http: [{
+        id: "fixture-public", path: "fixture-public", methods: ["GET"], access: "public", effect: "read",
+        async handle(_request, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          return Response.json({ version: record?.version ?? null, write: Boolean(context.proposeOwnModuleRecord) });
+        },
+      }],
+      async dispose() {},
+    };
+    return new ModuleRuntime({
+      manifests: [manifest], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory: directory,
+    });
+  };
+  const client = createSignedRequestFixture();
+  const standalone = await startCustomApi(store, directory, {
+    persistence, runtime: fixtureRuntime(), ...testClientSettings(project.id, client.publicJwks, client.isActive),
+  });
+  t.after(standalone.close);
+  const hosted = await startHostedApi(store, directory, hostedTestPolicy(), undefined, fixtureRuntime(), undefined, persistence, project.id);
+  t.after(hosted.close);
+  const base = "/api/projects/" + project.id;
+  const actionUrl = (origin: string, action: string) => origin + base + "/actions/publishing.fixture-" + action;
+  const body = (input: unknown = {}, snapshot?: SnapshotId) => JSON.stringify({ input, snapshot });
+  const invoke = async (origin: string, action: string, headers: Record<string, string>, input?: unknown, snapshot?: SnapshotId) => {
+    const response = await fetch(actionUrl(origin, action), { method: "POST", headers, body: body(input, snapshot) });
+    assert.equal(response.status, 200);
+    return await response.json() as ActionResult;
+  };
+  const owner = client.ownerHeaders();
+  const admitted = await invoke(standalone.base, "read", owner, { key }, pinned);
+  assert.ok(admitted.ok, JSON.stringify(admitted));
+  assert.deepEqual(admitted.data, { version: 1 });
+  const current = await invoke(standalone.base, "read", owner, { key });
+  assert.ok(current.ok, JSON.stringify(current));
+  assert.deepEqual(current.data, { version: 2 });
+  const unknown = await invoke(standalone.base, "read", owner, { key: "not-a-publishing-record" });
+  assert.equal(unknown.ok, false);
+  const external = await invoke(standalone.base, "read", client.mcpHeaders(), { key });
+  assert.equal(external.ok, false);
+
+  const anon = await fetch(standalone.base + "/api/public/projects/" + project.id + "/modules/publishing/fixture-public");
+  assert.equal(anon.status, 200);
+  assert.deepEqual(await anon.json(), { version: 2, write: false });
+  const hostingAuthor = {
+    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
+    Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=fixture-csrf",
+    "X-CSRF-Token": "fixture-csrf", "Content-Type": "application/json",
+  };
+  const hostingResponse = await rawHostedRequest(actionUrl(hosted.base, "propose"), hostingAuthor, body());
+  assert.equal(hostingResponse.status, 200, hostingResponse.body);
+  const proposed = JSON.parse(hostingResponse.body) as ActionResult<{ changeSet: { id: string; projectId: string } }>;
+  assert.ok(proposed.ok, hostingResponse.body);
+  assert.equal(proposed.data.changeSet?.projectId, project.id);
+  const changeSet = await persistence.read(reader => reader.getChangeSet(project.id, proposed.data.changeSet.id as ChangeSetId));
+  assert.equal(changeSet?.authorId, "writer-1");
+  assert.equal(changeSet?.status, "proposed");
+  assert.equal((await persistence.read(reader => reader.getModuleRecord(project.id, "publishing", key)))?.version, 2);
+  const mcpWrite = await invoke(standalone.base, "propose", client.mcpHeaders());
+  const hostedBearerWrite = await invoke(hosted.base, "propose", { Authorization: "Bearer write-grant", "Content-Type": "application/json" });
+  assert.ok(!mcpWrite.ok || (mcpWrite.data as { changeSet: unknown }).changeSet === null);
+  assert.ok(!hostedBearerWrite.ok || (hostedBearerWrite.data as { changeSet: unknown }).changeSet === null);
+  assert.equal((await persistence.read(reader => reader.listChangeSets(project.id, 20))).length, 1);
 });
 
 it("reorders hierarchy only by approving a version-bound native ChangeSet", async (t) => {
