@@ -59,6 +59,8 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /trap 'record_failure .* ERR/u);
   assert.match(fixture, /Last Ansible log .* redacted tail/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
+  assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
+    'the isolated SSHFS image must install packages without an interactive debconf frontend');
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });

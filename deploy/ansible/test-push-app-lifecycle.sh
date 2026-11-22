@@ -427,7 +427,7 @@ sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context
 cat > "$tmp/sshfs.Dockerfile" <<'DOCKERFILE'
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-RUN apt-get update -qq && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash backup && mkdir -p /home/backup/.ssh /backups && chown -R backup:backup /home/backup/.ssh /backups && chmod 0700 /home/backup/.ssh
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash backup && mkdir -p /home/backup/.ssh /backups && chown -R backup:backup /home/backup/.ssh /backups && chmod 0700 /home/backup/.ssh
 COPY --chown=backup:backup authorized_keys /home/backup/.ssh/authorized_keys
 RUN chmod 0600 /home/backup/.ssh/authorized_keys
 COPY entrypoint.sh /entrypoint.sh
