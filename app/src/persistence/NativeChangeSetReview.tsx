@@ -285,17 +285,17 @@ function DocumentBodyReview({ projectId, operation }: { projectId: string; opera
   if (operation.type === "document.create") {
     return <details className="native-review-body-copy">
       <summary>作成される本文を確認</summary>
-      <pre>{operation.command.markdown}</pre>
+      <pre role="region" aria-label="作成される本文" tabIndex={0}>{operation.command.markdown}</pre>
     </details>;
   }
   if (operation.type === "document.save") {
     if (result && "error" in result) return <p className="native-review-unknown">変更前を確認できません。{result.error}</p>;
     if (!result) return <p className="native-review-pending">基準Revisionを照合しています。</p>;
-    return <div className="native-review-diff-list" aria-label="検証済み原稿差分">
+    return <div className="native-review-diff-list" role="group" aria-label="検証済み原稿差分">
       {operation.command.changes.map((change, index) => (
         <div className="native-review-diff-row" key={index}>
-          <div><h5>変更前</h5><pre>{result.before.slice(change.fromUtf16, change.toUtf16) || "（この位置に本文はありません）"}</pre></div>
-          <div><h5>変更後</h5><pre>{change.insert || "（この範囲を削除）"}</pre></div>
+          <div><h5>変更前</h5><pre role="region" aria-label={`変更前の本文、変更箇所${index + 1}`} tabIndex={0}>{result.before.slice(change.fromUtf16, change.toUtf16) || "（この位置に本文はありません）"}</pre></div>
+          <div><h5>変更後</h5><pre role="region" aria-label={`変更後の本文、変更箇所${index + 1}`} tabIndex={0}>{change.insert || "（この範囲を削除）"}</pre></div>
         </div>
       ))}
     </div>;
@@ -304,8 +304,8 @@ function DocumentBodyReview({ projectId, operation }: { projectId: string; opera
     if (result && "error" in result) return <p className="native-review-unknown">復元する本文を確認できません。{result.error}</p>;
     if (!result) return <p className="native-review-pending">基準と復元元のRevisionを照合しています。</p>;
     return <div className="native-review-diff-row native-review-revision-bodies">
-      <details><summary>変更前の本文</summary><pre>{result.before}</pre></details>
-      <details><summary>復元後の本文</summary><pre>{result.after}</pre></details>
+      <details><summary>変更前の本文</summary><pre role="region" aria-label="復元前の本文" tabIndex={0}>{result.before}</pre></details>
+      <details><summary>復元後の本文</summary><pre role="region" aria-label="復元後の本文" tabIndex={0}>{result.after}</pre></details>
     </div>;
   }
   return null;
@@ -477,13 +477,8 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
   return <section className="proposal-review native-changeset-review" aria-labelledby="native-review-title">
     <header className="native-review-masthead">
       <div>
-        <p className="native-review-kicker">提案を確認</p>
         <h2 id="native-review-title">変更提案</h2>
         <p className="native-review-intro">提案内容と対象を確認します。承認しても正本には反映されず、適用は別の操作です。</p>
-      </div>
-      <div className="native-review-total" aria-label={"この作品の取得済み提案 " + changeSets.length + " 件"}>
-        <strong>{changeSets.length.toString().padStart(2, "0")}</strong>
-          <span>件の提案</span>
       </div>
     </header>
     <div className="native-review-toolbar">
@@ -539,16 +534,16 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
                 {current.operations.length === 0 && <p className="native-review-unknown">提案に操作が含まれていないため、変更内容を確認できません。</p>}
                 {current.operations.map((operation, index) => <section className="proposal-operation native-review-operation" key={operation.type + ":" + index}>
                   <div className="native-review-operation-heading">
-                    <span className="native-review-operation-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="native-review-operation-number">{index + 1}</span>
                     <div><h5>{operationLabel(operation)}</h5><p>{operationTarget(operation)}</p></div>
                   </div>
                   <div className="native-review-diff-overview">
-                    <div><span>変更前</span><p>{beforeSummary(operation)}</p></div>
+                    <div className="native-review-before"><span>変更前</span><p>{beforeSummary(operation)}</p></div>
                     <span className="native-review-diff-arrow" aria-hidden="true">→</span>
-                    <div><span>変更後</span><dl className="native-review-fields">
+                    <div className="native-review-after"><span>変更後</span><dl className="native-review-fields">
                       {operationFields(operation).map((field) => <div key={field.label}>
                         <dt>{field.label}</dt><dd>{typeof field.value === "object" && field.value !== null
-                          ? <pre>{readableValue(field.value)}</pre>
+                          ? <pre role="region" aria-label={`${field.label}の提案値`} tabIndex={0}>{readableValue(field.value)}</pre>
                           : readableValue(field.value)}</dd>
                       </div>)}
                     </dl></div>
@@ -561,21 +556,21 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
                     {mergePlanConflicts(operation.command.plan).length > 0
                       ? <div role="alert"><strong>競合</strong><ul>{mergePlanConflicts(operation.command.plan).map(conflict => <li key={conflict}>{conflict}</li>)}</ul></div>
                       : <p>Preview conflicts: なし</p>}
-                    <details><summary>統合計画と対象リソースを確認</summary><pre>{JSON.stringify(operation.command.plan, null, 2)}</pre></details>
+                    <details><summary>統合計画と対象リソースを確認</summary><pre role="region" aria-label="Knowledge統合計画" tabIndex={0}>{JSON.stringify(operation.command.plan, null, 2)}</pre></details>
                   </section>}
                   {operation.type === "evidence.anchor.save" && <div className="native-review-evidence">
                     <button type="button" className="quiet-button" disabled={busy || loading} onClick={() => void inspectSource(operation.command, current.id + ":" + index)}>引用元Revisionを確認</button>
                     {sourceQuote?.key === current.id + ":" + index && <div className="native-review-quote"><q>{sourceQuote.quote}</q><p>Revision: <code>{operation.command.revisionId}</code> · {operation.command.status}</p>{onOpenSource && <button type="button" className="quiet-button" onClick={() => void onOpenSource(operation.command, sourceQuote.quote).catch(error => setMessage(errorText(error)))}>原稿で確認</button>}</div>}
                   </div>}
-                  <details className="native-review-operation-payload"><summary>操作payloadと期待versionを確認</summary><pre>{JSON.stringify(operation.command, null, 2)}</pre></details>
+                  <details className="native-review-operation-payload"><summary>操作payloadと期待versionを確認</summary><pre role="region" aria-label="操作payloadと期待version" tabIndex={0}>{JSON.stringify(operation.command, null, 2)}</pre></details>
                 </section>)}
               </section>
               <details className="native-review-technical">
                 <summary>read set・write set・作成元を確認</summary>
                 <div className="native-review-technical-grid">
-                  <section><h4>読み取り前提</h4><pre>{JSON.stringify(current.readSet, null, 2)}</pre></section>
-                  <section><h4>書き込み対象</h4><pre>{JSON.stringify(current.writeSet, null, 2)}</pre></section>
-                  <section><h4>作成元と権限</h4><pre>{JSON.stringify({
+                  <section><h4>読み取り前提</h4><pre role="region" aria-label="読み取り前提のJSON" tabIndex={0}>{JSON.stringify(current.readSet, null, 2)}</pre></section>
+                  <section><h4>書き込み対象</h4><pre role="region" aria-label="書き込み対象のJSON" tabIndex={0}>{JSON.stringify(current.writeSet, null, 2)}</pre></section>
+                  <section><h4>作成元と権限</h4><pre role="region" aria-label="作成元と権限のJSON" tabIndex={0}>{JSON.stringify({
                     id: current.id,
                     projectId: current.projectId,
                     authorId: current.authorId,
@@ -595,7 +590,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
               {current.status === "applied" && detail?.receipt && <section className="native-review-receipt" aria-label="適用receipt">
                 <div className="native-review-section-heading"><h4>適用receipt</h4><span>{detail.receipt.replayed ? "再確認" : "適用結果"}</span></div>
                 <p>正本への適用結果をサーバーのreceiptで確認しました。</p>
-                <pre>{JSON.stringify(detail.receipt, null, 2)}</pre>
+                <pre role="region" aria-label="適用receiptのJSON" tabIndex={0}>{JSON.stringify(detail.receipt, null, 2)}</pre>
               </section>}
               {current.status === "applied" && !detail?.receipt && <p className="native-review-unknown" role="status">適用済みの状態を確認しましたが、receiptを取得できませんでした。最新状態を再確認してください。</p>}
               <div className="proposal-actions native-review-actions">
