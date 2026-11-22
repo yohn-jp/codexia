@@ -349,3 +349,8 @@ test('release workflow_run dispatch is main-only while PR artifact builds and ma
     ]) assert.ok(admission.if.includes(required), `${filename} must retain source authorization: ${required}`);
   }
 });
+
+test('Passkey bootstrap remains in the canonical browser verification graph', () => {
+  assert.ok(VERIFICATION_TASKS.includes('browser-core-passkey-bootstrap'));
+  assert.ok(Object.values(VERIFICATION_GROUPS).some(tasks => tasks.includes('browser-core-passkey-bootstrap')));
+});

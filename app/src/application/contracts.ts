@@ -20,6 +20,8 @@ export interface WorkspacePanelRequest {
 /** Shared production UI assembled by the application controller for either shell. */
 export interface ApplicationShellProps {
   mode: UiMode;
+  /** Current API runtime. Hosted identity is managed by Praetorium, not the local owner panel. */
+  hosted?: boolean;
   header: ReactNode;
   /** Production-authorized buttons/status for the Desktop Studio masthead. */
   desktopActions?: ReactNode;

@@ -597,8 +597,9 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
 
 export async function browserArtifactRecords(deployedDirectory, browserIds) {
   // Public readers and authenticated authoring shells load the same selected,
-  // capability-gated module browser closure. All three entries must be audited.
-  const records = await Promise.all(['', 'desktop', 'mobile'].map((ui) =>
+  // capability-gated module browser closure. Audit the three authoring/public
+  // entries and the dedicated OAuth login/consent browser entry closure.
+  const records = await Promise.all(['', 'desktop', 'mobile', 'oauth'].map((ui) =>
     browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), browserIds, ui)));
   return {
     files: records.flatMap(({ files }) => files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
@@ -631,8 +632,23 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     throw new Error('Vite browser manifest is invalid');
   }
-  const applicationEntry = manifest['index.html'];
-  const { entryFile } = browserManifestEntryFiles(manifest);
+  const oauth = ui === 'oauth';
+  const oauthEntryKeys = ['oauth-login.html', 'oauth-consent.html'];
+  const applicationEntry = manifest[oauth ? oauthEntryKeys[0] : 'index.html'];
+  const { entryFile } = oauth ? { entryFile: applicationEntry?.file } : browserManifestEntryFiles(manifest);
+  if (oauth) {
+    const entryKeys = Object.entries(manifest).filter(([, item]) => item?.isEntry === true)
+      .map(([key]) => key).sort();
+    if (canonicalJson(entryKeys) !== canonicalJson([...oauthEntryKeys].sort())) {
+      throw new Error('OAuth Vite manifest must contain exactly login and consent HTML entries');
+    }
+    for (const [key, name] of [['oauth-login.html', 'login'], ['oauth-consent.html', 'consent']]) {
+      const asset = manifest[key]?.file;
+      if (typeof asset !== 'string' || !new RegExp('^assets/' + name + '-[A-Za-z0-9_-]{8}\\.js$', 'u').test(asset)) {
+        throw new Error('OAuth Vite manifest must contain dedicated content-hashed entries');
+      }
+    }
+  } else {
   const expectedDynamicSources = browserIds.map((id) => `../modules/${id}/dist/browser.js`).sort();
   const appManifest = JSON.parse(await readFile(path.join(root, 'app/package.json'), 'utf8'));
   const ionicPrefix = `../node_modules/.pnpm/@ionic+core@${appManifest.dependencies['@ionic/core']}/node_modules/@ionic/core/components/`;
@@ -648,6 +664,7 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   if (canonicalJson(dynamicSources) !== canonicalJson(expectedDynamicSources)) {
     throw new Error('Vite manifest contains an unexpected browser module chunk');
   }
+  }
 
   const visited = new Set();
   const reachable = new Set();
@@ -659,7 +676,7 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
     reachable.add(entry.file);
     for (const dependency of [...(entry.imports ?? []), ...(entry.dynamicImports ?? [])]) visit(dependency);
   }
-  visit('index.html');
+  for (const key of oauth ? oauthEntryKeys : ['index.html']) visit(key);
   const expectedJavascript = [...reachable].filter((file) => file.endsWith('.js')).sort();
   const manifestJavascript = [...new Set(Object.values(manifest).filter((item) => typeof item?.file === 'string' && item.file.endsWith('.js')).map(({ file }) => file))].sort();
   if (canonicalJson(expectedJavascript) !== canonicalJson(manifestJavascript)) {
@@ -670,10 +687,13 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
     ...(typeof item?.file === 'string' ? [item.file] : []),
     ...(Array.isArray(item?.css) ? item.css : []),
   ]).filter((file) => /\.(?:m?js|css)$/u.test(file)))].sort();
+  if (oauth && !manifestFiles.some((file) => file.endsWith('.css'))) {
+    throw new Error('OAuth Vite manifest must include its dedicated stylesheet');
+  }
   const actualFiles = [];
   async function walk(directory, relative = '') {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (relative === '' && (entry.name === '.vite' || (!ui && ['desktop', 'mobile'].includes(entry.name)))) continue;
+      if (relative === '' && (entry.name === '.vite' || (!ui && ['desktop', 'mobile', 'oauth'].includes(entry.name)))) continue;
       const relativePath = path.posix.join(relative, entry.name);
       const absolute = path.join(directory, entry.name);
       const info = await lstat(absolute);

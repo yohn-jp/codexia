@@ -2867,7 +2867,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </article>,
       document.body,
     )}
-    <Shell mode={mode}
+    <Shell mode={mode} hosted={hosted}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={writingContext}

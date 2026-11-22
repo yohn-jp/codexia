@@ -1,6 +1,6 @@
 / /index.html 200
-/oauth/login /index.html 200
-/oauth/consent /index.html 200
+/oauth/login /oauth/oauth-login.html 200
+/oauth/consent /oauth/oauth-consent.html 200
 /desktop /desktop/index.html 200
 /desktop/ /desktop/index.html 200
 /desktop/library /desktop/index.html 200

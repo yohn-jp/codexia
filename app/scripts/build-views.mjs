@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const appRoot = fileURLToPath(new URL('../', import.meta.url));
 const viteCli = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
 
-for (const ui of ['launcher', 'desktop', 'mobile']) {
+for (const ui of ['launcher', 'desktop', 'mobile', 'oauth']) {
   const result = spawnSync(process.execPath, [viteCli, 'build'], {
     cwd: appRoot,
     env: { ...process.env, CODEXIA_UI: ui },

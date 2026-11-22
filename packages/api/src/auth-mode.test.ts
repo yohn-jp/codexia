@@ -1,6 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveStandaloneAuthMode } from "./auth-mode.js";
+import { resolveBetterAuthOidcSettings, resolveStandaloneAuthMode } from "./auth-mode.js";
+
+test("Better Auth OIDC provider settings may be omitted as one tuple", () => {
+  assert.deepEqual(resolveBetterAuthOidcSettings({}), {});
+  assert.deepEqual(resolveBetterAuthOidcSettings({
+    oidcIssuer: "https://id.example.test",
+    oidcClientId: "codexia",
+    oidcClientSecret: "secret",
+  }), {
+    oidcIssuer: "https://id.example.test",
+    oidcClientId: "codexia",
+    oidcClientSecret: "secret",
+  });
+});
+
+test("partial Better Auth OIDC provider settings fail closed", () => {
+  for (const values of [
+    { oidcIssuer: "https://id.example.test" },
+    { oidcClientId: "codexia" },
+    { oidcClientSecret: "secret" },
+    { oidcIssuer: "https://id.example.test", oidcClientId: "codexia" },
+    { oidcIssuer: "https://id.example.test", oidcClientSecret: "secret" },
+    { oidcClientId: "codexia", oidcClientSecret: "secret" },
+  ]) {
+    assert.throws(() => resolveBetterAuthOidcSettings(values), /settings require .* together/u);
+  }
+});
 
 test("Better Auth settings require an explicit Better Auth mode", () => {
   assert.throws(

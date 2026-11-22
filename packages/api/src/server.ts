@@ -2,7 +2,7 @@ import { EventStreams } from "./event-streams.js";
 import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
-import { resolveStandaloneAuthMode } from "./auth-mode.js";
+import { resolveBetterAuthOidcSettings, resolveStandaloneAuthMode } from "./auth-mode.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
@@ -444,7 +444,8 @@ async function staticAliasTarget(
 }
 
 function isContentHashedAssetPath(pathname: string): boolean {
-  return /^\/(?:desktop\/|mobile\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname);
+  return /^\/(?:desktop\/|mobile\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname) ||
+    /^\/oauth\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css|svg)$/u.test(pathname);
 }
 
 async function serveStatic(
@@ -458,8 +459,8 @@ async function serveStatic(
   const publicReaderPath = isPublicReaderPath(path);
   const files: Record<string, { filename: string; contentType: string }> = {
     "/": { filename: "index.html", contentType: "text/html; charset=utf-8" },
-    "/oauth/login": { filename: "index.html", contentType: "text/html; charset=utf-8" },
-    "/oauth/consent": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/login": { filename: "oauth/oauth-login.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/consent": { filename: "oauth/oauth-consent.html", contentType: "text/html; charset=utf-8" },
     "/main.js": { filename: "main.js", contentType: "text/javascript; charset=utf-8" },
     "/api.js": { filename: "api.js", contentType: "text/javascript; charset=utf-8" },
     "/drafts.js": { filename: "drafts.js", contentType: "text/javascript; charset=utf-8" },
@@ -474,7 +475,9 @@ async function serveStatic(
   if (ui && /^(?:main\.js|styles\.css)$/u.test(uiPath)) {
     file = { filename: `${ui}/${uiPath}`, contentType: uiPath.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8" };
   }
-  const assetPrefix = ui ? `/${ui}/assets/` : "/assets/";
+  const oauthAssetRequest = !ui && path.startsWith("/oauth/assets/");
+  const assetPrefix = ui ? `/${ui}/assets/` : oauthAssetRequest ? "/oauth/assets/" : "/assets/";
+  const staticAssetsDirectory = resolve(staticDir, ...(ui ? [ui] : oauthAssetRequest ? ["oauth"] : []), "assets");
   if (!file && path.startsWith(assetPrefix)) {
     const name = path.slice(assetPrefix.length);
     if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") return false;
@@ -486,7 +489,7 @@ async function serveStatic(
       ".ttf": "font/ttf", ".otf": "font/otf", ".ico": "image/x-icon",
     };
     if (!contentTypes[extension] || !/^[A-Za-z0-9._-]{1,180}$/u.test(name)) return false;
-    file = { filename: resolve(staticDir, ...(ui ? [ui] : []), "assets", name), contentType: contentTypes[extension] };
+    file = { filename: resolve(staticAssetsDirectory, name), contentType: contentTypes[extension] };
   }
   if (!file) return false;
   try {
@@ -497,10 +500,13 @@ async function serveStatic(
     }
     const target = file.filename.startsWith(sep) ? file.filename : resolve(staticDir, file.filename);
     const root = await realpath(staticDir);
-    const uiAssetsDirectory = resolve(staticDir, ...(ui ? [ui] : []), "assets");
-    const assetsDirectory = path.startsWith(assetPrefix) || target.startsWith(`${uiAssetsDirectory}${sep}`)
-      ? uiAssetsDirectory
+    const assetsDirectory = path.startsWith(assetPrefix) || target.startsWith(`${staticAssetsDirectory}${sep}`)
+      ? staticAssetsDirectory
       : undefined;
+    if (path.startsWith("/oauth/") && (await lstat(resolve(staticDir, "oauth"))).isSymbolicLink()) {
+      sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
+      return true;
+    }
     if (ui && (await lstat(resolve(staticDir, ui))).isSymbolicLink()) {
       sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
       return true;
@@ -535,7 +541,7 @@ async function serveStatic(
     response.end(request.method === "HEAD" ? undefined : content);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (path.startsWith(assetPrefix) && (code === "ENOENT" || code === "ENOTDIR")) {
+    if ((path.startsWith(assetPrefix) || path.startsWith("/oauth/assets/")) && (code === "ENOENT" || code === "ENOTDIR")) {
       sendJson(response, 404, { error: "Page not found", code: "NOT_FOUND" });
     } else {
       sendJson(response, 503, { error: "Writing application is not built", code: "APP_NOT_BUILT" });
@@ -620,7 +626,11 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 export function createServer(options: ApiServerOptions): Server {
   if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
   const hosted = options.hosted;
-  if (!hosted && (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
+  if (!hosted && options.betterAuth && (options.authToken !== undefined || options.cloudflareAccess)) {
+    throw new Error("Better Auth cannot coexist with legacy static-token or Access-owner authentication");
+  }
+  if (!hosted && !options.betterAuth &&
+      (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
     throw new Error("CODEXIA_AUTH_TOKEN must contain at least 32 characters");
   }
   if (hosted && (options.authToken !== undefined || !hosted.projectId || hosted.authorization === undefined)) {
@@ -1658,6 +1668,13 @@ export function createServer(options: ApiServerOptions): Server {
       fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
       return;
     }
+    if (options.betterAuth && routePath === "/api/auth/oauth2/get-consents" && method === "GET") {
+      if (crossOrigin) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent listing requires a same-origin request"); return; }
+      const result = await options.betterAuth.listOwnerOAuthConsents(options.betterAuth.toHeaders(request.headers));
+      if (result.status === 200) sendJson(response, 200, result.consents);
+      else fail(response, result.status, "OAUTH_CONSENT_LIST_DENIED", "OAuth consent listing requires the owner session");
+      return;
+    }
     if (options.betterAuth && routePath.startsWith("/api/auth/")) {
       const host = request.headers.host ?? "localhost";
       const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
@@ -1754,6 +1771,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     if (routePath === "/api/login" && method === "POST") {
+      if (options.betterAuth) { fail(response, 410, "STATIC_TOKEN_LOGIN_RETIRED", "Static-token sign-in is disabled; use Better Auth OAuth"); return; }
       if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGIN_RETIRED", "Browser authentication is handled by Cloudflare Access"); return; }
       if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "Request origin must match this application"); return; }
       const body = await readJson(request, parsedBody);
@@ -1772,7 +1790,7 @@ export function createServer(options: ApiServerOptions): Server {
         ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
         hosted: Boolean(hosted),
         ...(cloudflareAccess ? { browserAuth: "cloudflare-access" } : {}),
-        profile, auth: [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        profile, auth: options.betterAuth ? ["oauth-owner", "oauth-mcp"] : [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
@@ -1791,7 +1809,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
     let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
-    const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
+    const isLegacyBearer = !options.betterAuth && Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
     if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
@@ -1858,8 +1876,8 @@ export function createServer(options: ApiServerOptions): Server {
         catch { /* Missing/invalid identity or unavailable keys fails closed. */ }
       }
     }
-    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : cloudflareAccess
-      ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
+    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : options.betterAuth
+      ? false : cloudflareAccess ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isOAuthAuthor = Boolean(oauthPrincipal);
     const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(oauthMcpPrincipal));
@@ -1993,6 +2011,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/logout" && method === "POST") {
+      if (options.betterAuth) { fail(response, 410, "LEGACY_LOGOUT_RETIRED", "Use the Better Auth session revocation endpoint"); return; }
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Only an owner session can log out"); return; }
       if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGOUT_REQUIRED", "Log out through Cloudflare Access"); return; }
       if (sessionId) sessions.delete(sessionId);
@@ -2668,8 +2687,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       throw error;
     }
   }
-  const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
-  if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  const configuredLegacyToken = readCodexiaEnvironment("AUTH_TOKEN");
   const oauthValues = {
     issuer: readCodexiaEnvironment("OAUTH_ISSUER"),
     audience: readCodexiaEnvironment("OAUTH_AUDIENCE"),
@@ -2692,6 +2710,11 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     mcpProjectAssignments: readCodexiaEnvironment("OAUTH_MCP_PROJECT_ASSIGNMENTS"),
     apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
   };
+  const betterAuthOidcSettings = resolveBetterAuthOidcSettings({
+    oidcIssuer: betterAuthValues.oidcIssuer,
+    oidcClientId: betterAuthValues.oidcClientId,
+    oidcClientSecret: betterAuthValues.oidcClientSecret,
+  });
   const betterAuthConfigured = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
@@ -2699,14 +2722,22 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
   ].some((value) => value !== undefined);
   const authMode = resolveStandaloneAuthMode(readCodexiaEnvironment("AUTH_MODE"), betterAuthConfigured);
+  if (authMode === "better-auth" &&
+      (configuredLegacyToken !== undefined || readCodexiaEnvironment("AUTH_TOKEN_FILE") !== undefined ||
+       readCodexiaEnvironment("BROWSER_AUTH") === "cloudflare-access")) {
+    throw new Error("Better Auth forbids static-token and Access-owner compatibility credentials");
+  }
+  const authToken = authMode === "token" ? configuredLegacyToken?.trim() : undefined;
+  if (authMode === "token" && (!authToken || authToken.length < 32)) {
+    throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  }
   const requiredBetterAuthValues = [
-    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
-    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
     betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds,
   ];
   if (authMode === "better-auth" && requiredBetterAuthValues.some((value) => !value)) {
-    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
+    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
   if (authMode === "better-auth" && [oauthValues.issuer, oauthValues.audience, oauthValues.jwksUrl].some((value) => value !== undefined)) {
     throw new Error("Better Auth mode cannot be combined with legacy standalone OAuth settings");
@@ -2719,9 +2750,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     betterAuth = createBetterAuthRuntime({
       databaseUrl: betterAuthValues.databaseUrl!,
       publicOrigin: betterAuthValues.publicOrigin!,
-      oidcIssuer: betterAuthValues.oidcIssuer!,
-      oidcClientId: betterAuthValues.oidcClientId!,
-      oidcClientSecret: betterAuthValues.oidcClientSecret!,
+      ...betterAuthOidcSettings,
       authSecret: betterAuthValues.authSecret!,
       oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
       oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
@@ -2791,8 +2820,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     return await startServer({
       store,
       ...persistenceOptions,
-      authToken,
-      ...(browserAuth === "cloudflare-access" ? { cloudflareAccess: {
+      ...(authToken !== undefined ? { authToken } : {}),
+      ...(authMode === "token" && browserAuth === "cloudflare-access" ? { cloudflareAccess: {
         issuer: readCodexiaEnvironment("ACCESS_ISSUER") ?? "",
         audience: readCodexiaEnvironment("ACCESS_AUDIENCE") ?? "",
         origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",

@@ -69,3 +69,15 @@ variable "frontend_route_enabled" {
   description = "Enable only the explicit UI routes after Access and routing acceptance; false leaves UI on the retained origin during rollback."
   default     = false
 }
+
+variable "public_oauth_edge_enabled" {
+  type        = bool
+  description = "Enable exact-path Access Bypass apps and Tunnel routes for OAuth/MCP only after Passkey-first OAuth acceptance; false keeps every path under the existing Access boundary."
+  default     = false
+}
+
+variable "passkey_oauth_runtime_ready" {
+  type        = bool
+  description = "Operator confirmation that Passkey-first Better Auth, registered OAuth clients, and remote MCP OAuth acceptance are deployed and verified. Required when public_oauth_edge_enabled is true."
+  default     = false
+}

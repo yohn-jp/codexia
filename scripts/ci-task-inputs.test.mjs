@@ -178,3 +178,13 @@ test('browser input proofs bind the lane image for both browsers in the shared W
     assert.equal(changed(writing).environment, original(writing).environment, `${writing} uses the unchanged Chromium-only image`);
   }
 });
+
+test('Passkey browser shard binds the dedicated acceptance environment', () => {
+  assert.deepEqual(taskInvocation('browser-core-passkey-bootstrap', '/opt/node/bin/node'), {
+    executable: '/opt/node/bin/node',
+    arguments: ['scripts/run-browser-shard.mjs', '--profile', 'core', '--suite', 'passkey-bootstrap', '--prebuilt'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL',
+      'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
+      'CODEXIA_PASSKEY_ACCEPTANCE'],
+  });
+});

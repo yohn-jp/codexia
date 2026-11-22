@@ -42,3 +42,38 @@ export async function continueOAuthLogin(client: {
     throw new Error("Sign-in could not be started. Retry when the identity provider is available.");
   }
 }
+
+/** Starts the maintained Passkey authentication flow before continuing to fixed consent. */
+export async function continuePasskeyLogin(client: {
+  signIn: { passkey(): Promise<{ error?: unknown } | unknown> };
+}, authorizationSearch: string): Promise<void> {
+  if (!authorizationSearch.startsWith("?") || !hasSignedOAuthPrompt(authorizationSearch)) {
+    throw new Error("The authorization request is missing or invalid.");
+  }
+  const result = await client.signIn.passkey();
+  if (result && typeof result === "object" && "error" in result && result.error) {
+    throw new Error("Passkey sign-in could not be completed. Try again or use the configured identity provider.");
+  }
+}
+
+export interface AuthMethodAvailability {
+  readonly passkey: true;
+  readonly upstreamOidc: boolean;
+}
+
+/** Reads the server's public sign-in capability without relying on deployment environment assumptions. */
+export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch): Promise<AuthMethodAvailability> {
+  const response = await fetcher("/api/auth/codexia/auth-methods", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error("Sign-in methods could not be loaded.");
+  const value: unknown = await response.json();
+  if (typeof value !== "object" || value === null || Array.isArray(value) ||
+      (value as Record<string, unknown>).passkey !== true || typeof (value as Record<string, unknown>).upstreamOidc !== "boolean") {
+    throw new Error("Sign-in methods could not be loaded.");
+  }
+  return value as AuthMethodAvailability;
+}

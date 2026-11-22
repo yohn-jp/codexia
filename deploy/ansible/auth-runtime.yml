@@ -9,23 +9,32 @@
       - codexia_service_home == '/home/' + codexia_service_user
       - codexia_auth_database_url_file is string and codexia_auth_database_url_file is match('^/[^\r\n]+$')
       - codexia_auth_secret_file is string and codexia_auth_secret_file is match('^/[^\r\n]+$')
-      - codexia_oidc_client_secret_file is string and codexia_oidc_client_secret_file is match('^/[^\r\n]+$')
       - codexia_oauth_introspection_client_secret_file is string and codexia_oauth_introspection_client_secret_file is match('^/[^\r\n]+$')
+      - >-
+        ((codexia_oidc_issuer is defined and codexia_oidc_client_id is defined and codexia_oidc_client_secret_file is defined) or
+         (codexia_oidc_issuer is not defined and codexia_oidc_client_id is not defined and codexia_oidc_client_secret_file is not defined))
       - codexia_public_origin is string and codexia_public_origin is match('^https://[a-zA-Z0-9.-]+(:[0-9]+)?$')
-      - codexia_oidc_issuer is string and codexia_oidc_issuer is match('^[!-~]+$')
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('scheme')) == 'https'
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('hostname')) is string
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('hostname') | length) > 0
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('username')) is none
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('password')) is none
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('query')) == ''
-      - (codexia_oidc_issuer | ansible.builtin.urlsplit('fragment')) == ''
-      - codexia_oidc_issuer != codexia_public_origin + '/api/auth'
-      - codexia_oidc_client_id is string and codexia_oidc_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer is string and codexia_oidc_issuer is match('^[!-~]+$'))
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('scheme')) == 'https'
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('hostname')) is string
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('hostname') | length) > 0
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('username')) is none
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('password')) is none
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('query')) == ''
+      - codexia_oidc_issuer is not defined or (codexia_oidc_issuer | ansible.builtin.urlsplit('fragment')) == ''
+      - codexia_oidc_issuer is not defined or codexia_oidc_issuer != codexia_public_origin + '/api/auth'
+      - codexia_oidc_client_id is not defined or (codexia_oidc_client_id is string and codexia_oidc_client_id is match('^[a-zA-Z0-9._:/|+-]+$'))
       - codexia_oauth_introspection_client_id is string and codexia_oauth_introspection_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
       - (codexia_auth_registration_pending | default(false)) is boolean
       - (codexia_auth_registration_pending | default(false)) or (codexia_oauth_owner_subject | default('')) is match('^[a-zA-Z0-9._@:/|+-]+$')
       - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_owner_subject is not defined
+      - >-
+        ((codexia_auth_passkey_bootstrap_owner_id is defined and codexia_auth_passkey_bootstrap_owner_email is defined and codexia_auth_passkey_bootstrap_owner_name is defined) or
+         (codexia_auth_passkey_bootstrap_owner_id is not defined and codexia_auth_passkey_bootstrap_owner_email is not defined and codexia_auth_passkey_bootstrap_owner_name is not defined))
+      - codexia_auth_passkey_bootstrap_owner_id is not defined or (codexia_auth_registration_pending | default(false))
+      - codexia_auth_passkey_bootstrap_owner_id is not defined or codexia_auth_passkey_bootstrap_owner_id is match('^[a-zA-Z0-9._@:/|+-]+$')
+      - codexia_auth_passkey_bootstrap_owner_email is not defined or codexia_auth_passkey_bootstrap_owner_email is match('^[!-~]+$')
+      - codexia_auth_passkey_bootstrap_owner_name is not defined or codexia_auth_passkey_bootstrap_owner_name is match('^[!-~]+$')
       - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_owner_client_ids.split(',') | length == 2
       - codexia_oauth_owner_client_ids is string and codexia_oauth_owner_client_ids is match('^[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$')
       - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
@@ -54,14 +63,19 @@
 
 - name: Read protected Better Auth inputs into no-log task memory
   ansible.builtin.set_fact:
-    codexia_auth_secret_sources:
-      codexia-auth-database-url: "{{ codexia_auth_database_url_file }}"
-      codexia-auth-secret: "{{ codexia_auth_secret_file }}"
-      codexia-oidc-client-secret: "{{ codexia_oidc_client_secret_file }}"
-      codexia-oauth-introspection-client-secret: "{{ codexia_oauth_introspection_client_secret_file }}"
+    codexia_auth_secret_sources: >-
+      {{ {'codexia-auth-database-url': codexia_auth_database_url_file,
+          'codexia-auth-secret': codexia_auth_secret_file,
+          'codexia-oauth-introspection-client-secret': codexia_oauth_introspection_client_secret_file}
+         | combine({'codexia-oidc-client-secret': codexia_oidc_client_secret_file} if codexia_oidc_client_secret_file is defined else {}) }}
+    codexia_auth_passkey_bootstrap_values: >-
+      {{ {'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_ID': codexia_auth_passkey_bootstrap_owner_id,
+          'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_EMAIL': codexia_auth_passkey_bootstrap_owner_email,
+          'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_NAME': codexia_auth_passkey_bootstrap_owner_name}
+         if codexia_auth_passkey_bootstrap_owner_id is defined else {} }}
     codexia_auth_database_url: "{{ lookup('ansible.builtin.file', codexia_auth_database_url_file, rstrip=false) | string }}"
     codexia_auth_secret_value: "{{ lookup('ansible.builtin.file', codexia_auth_secret_file, rstrip=false) | string }}"
-    codexia_oidc_client_secret_value: "{{ lookup('ansible.builtin.file', codexia_oidc_client_secret_file, rstrip=false) | string }}"
+    codexia_oidc_client_secret_value: "{{ lookup('ansible.builtin.file', codexia_oidc_client_secret_file, rstrip=false) | string if codexia_oidc_client_secret_file is defined else '' }}"
     codexia_oauth_introspection_client_secret_value: "{{ lookup('ansible.builtin.file', codexia_oauth_introspection_client_secret_file, rstrip=false) | string }}"
   no_log: true
 
@@ -84,7 +98,7 @@
       - codexia_auth_database_parts.query == ''
       - codexia_auth_database_parts.fragment == ''
       - codexia_auth_secret_value | length >= 32 and codexia_auth_secret_value is match('^[!-~]+$')
-      - codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$')
+      - codexia_oidc_client_secret_file is not defined or (codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$'))
       - codexia_oauth_introspection_client_secret_value | length >= (32 if codexia_auth_registration_pending | default(false) else 16)
       - codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
     fail_msg: The Better Auth URL must target codexia_auth_runtime on the existing codexia database; secret inputs must be nonempty printable values.
@@ -258,6 +272,33 @@
     group: "{{ codexia_service_group | default(codexia_service_user) }}"
     mode: '0700'
   when: codexia_auth_registration_pending | default(false)
+
+- name: Install the one-time Passkey owner grant launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/grant-passkey-owner.sh"
+    dest: "{{ home }}/.local/bin/codexia-grant-passkey-owner"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+  when:
+    - codexia_auth_registration_pending | default(false)
+    - codexia_auth_passkey_bootstrap_owner_id is defined
+
+- name: Install the operator-mediated Passkey recovery grant launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/grant-passkey-owner-recovery.sh"
+    dest: "{{ home }}/.local/bin/codexia-grant-passkey-recovery"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+
+- name: Install the isolated Passkey recovery listener launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/recover-passkey-owner.sh"
+    dest: "{{ home }}/.local/bin/codexia-recover-passkey"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
 
 - name: Report staged auth role, schema and environment without enabling runtime
   ansible.builtin.debug:

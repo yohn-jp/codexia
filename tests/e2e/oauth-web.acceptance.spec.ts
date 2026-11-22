@@ -49,7 +49,7 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
         await page.getByRole("link", { name: "Continue to the identity provider" }).click();
         await expect(page).toHaveURL(origin + "/");
         const response = page.waitForResponse(origin + "/register");
-        await page.getByRole("button", { name: "Register the approved clients" }).click();
+        await page.getByRole("button", { name: "Register the approved OAuth clients" }).click();
         const registration = await response;
         assert.equal(registration.status(), 200, await registration.text());
         return await registration.json() as BootstrapRegistration;
@@ -73,7 +73,7 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     };
     // Never mutate app/dist: other Playwright shards concurrently serve its
     // standard (non-OAuth) shells from the same checkout.
-    for (const ui of ["launcher", "desktop", "mobile"]) {
+    for (const ui of ["launcher", "desktop", "mobile", "oauth"]) {
       const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build"], {
         cwd: resolve("."),
         encoding: "utf8",
@@ -138,7 +138,7 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     await page.waitForURL((url) => url.pathname === "/oauth/login" && Boolean(url.searchParams.get("sig")));
     const signedSearch = new URL(page.url()).search;
     try {
-      await page.getByRole("button", { name: "登録済みアカウントで続ける" }).click({ timeout: 8000 });
+      await page.getByRole("button", { name: "IDプロバイダーでサインイン" }).click({ timeout: 8000 });
     } catch (error) {
       console.error("OAuth login page rendered:", await page.locator("body").innerText());
       throw error;

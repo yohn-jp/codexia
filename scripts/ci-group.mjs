@@ -105,7 +105,8 @@ async function executeTaskInContext(task, index, scope) {
           await withBrowserFixture(task, index, async env => {
             executing = true;
             await run(process.execPath, ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'],
-              { ...env, CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+              { ...env, ...(task.endsWith('-passkey-bootstrap') ? { CODEXIA_PASSKEY_ACCEPTANCE: '1' } : {}),
+                CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
           });
         } catch (error) { if (!executing) blocked = true; throw error; }
       } else if (task.startsWith('hosted-native-')) {
