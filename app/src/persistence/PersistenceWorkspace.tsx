@@ -15,7 +15,7 @@ import { api, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
-import { parseApplicationLocation, switchApplicationPath } from "../application/navigation";
+import { parseApplicationLocation, rememberUiMode, switchApplicationPath } from "../application/navigation";
 import { PersistenceScratch, type ScratchGuard } from "./PersistenceScratch";
 import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
@@ -2350,8 +2350,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const handleTermNavigate = useCallback((path: string) => {
     void navigateReference(path).catch((error) => setPageError(error instanceof Error ? error.message : "参照を開けませんでした。"));
   }, [navigateReference]);
-  const switchPath = switchApplicationPath(window.location.href, mode === "desktop" ? "mobile" : "desktop");
-
   const editorFontFamily = typography.fontFamily === "mincho" ? "serif" : "sans-serif";
   const typographyStyle = {
     fontSize: typography.fontSize,
@@ -2813,7 +2811,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       panels={panels}
       requestedPanel={requestedPanel}
       beforeLayoutChange={protectTransition}
-      onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
+      onSwitchMode={async () => {
+        const nextMode = mode === "desktop" ? "mobile" : "desktop";
+        if (!await protectTransition()) return false;
+        rememberUiMode(nextMode);
+        window.location.assign(switchApplicationPath(window.location.href, nextMode));
+        return true;
+      }}
     />
   </div>;
 }
