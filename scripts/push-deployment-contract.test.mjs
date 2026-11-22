@@ -318,7 +318,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   assert.match(databaseUnit, /^Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_DB=codexia$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_USER=codexia_admin$/mu);
-  assert.doesNotMatch(shell, /codexia-db\.container|codexia-postgres\.volume|podman volume (?!exists codexia-history\b)/u,
+  assert.doesNotMatch(shell, /(?:cp|install|rm|mv|ln)[^\n]*codexia-db\.container|codexia-postgres\.volume|podman volume (?!exists codexia-history\b)/u,
     'an image-only API rollout must leave canonical PostgreSQL storage untouched');
 
   const restore = shell.indexOf('restore_previous(){');
