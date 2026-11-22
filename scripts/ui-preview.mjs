@@ -4,8 +4,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -82,7 +81,7 @@ async function engineFor(preference) {
 async function build(profile) {
   const { createBuildCommands } = await import('./profile-package.mjs');
   const manifest = JSON.parse(await readFile(path.join(root, 'profiles', `${profile}.json`), 'utf8'));
-  for (const step of createBuildCommands(profile, manifest)) {
+  for (const step of createBuildCommands(profile, manifest, { includeUi: false })) {
     console.log(`Building: ${step.command} ${step.args.join(' ')}`);
     await run(step.command, step.args, { env: { ...process.env, ...step.env, CODEXIA_PROFILE: profile }, inherit: true });
   }
@@ -90,9 +89,8 @@ async function build(profile) {
 
 async function verifyBuild(profile) {
   await Promise.all([
-    'app/dist/index.html', 'app/dist/desktop/index.html', 'app/dist/mobile/index.html',
     'packages/api/dist/server.js', 'packages/core/dist/index.js',
-    `profiles/${profile}/generated/browser.mjs`,
+    `profiles/${profile}/generated/browser.mjs`, `profiles/${profile}/generated/server.mjs`,
   ].map(filename => readFile(path.join(root, filename))));
 }
 
@@ -115,26 +113,42 @@ async function waitForDatabase(connectionString) {
   throw new Error(`Disposable PostgreSQL did not become ready: ${lastError?.message}`);
 }
 
-async function waitForApi(port, child) {
-  const baseURL = `http://127.0.0.1:${port}`;
-  for (let n = 0; n < 120; n += 1) {
-    if (child.exitCode !== null) throw new Error(`E2E server exited (${child.exitCode}) before readiness`);
-    try {
-      const response = await fetch(`${baseURL}/api/health`, { signal: AbortSignal.timeout(1000) });
-      if (response.ok && (await response.json()).status === 'ok') {
-        for (const mode of ['desktop', 'mobile']) {
-          const page = await fetch(`${baseURL}/${mode}/`, { signal: AbortSignal.timeout(1500) });
-          if (!page.ok || !(page.headers.get('content-type') ?? '').includes('text/html')) throw new Error(`/${mode}/ not ready`);
-        }
-        return baseURL;
-      }
-    } catch { /* Until server has migrated, seeded and started. */ }
-    await delay(500);
+async function checkPreviewReady(origin) {
+  const health = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(1000) });
+  if (!health.ok || (await health.json()).status !== 'ok') throw new Error('Local preview API is not ready');
+  for (const mode of ['desktop', 'mobile']) {
+    const page = await fetch(`${origin}/${mode}/`, { signal: AbortSignal.timeout(1500) });
+    if (!page.ok || !(page.headers.get('content-type') ?? '').includes('text/html')) throw new Error(`/${mode}/ is not ready`);
   }
-  throw new Error(`Timed out waiting for the UI/API at ${baseURL}`);
 }
 
-async function captureScreenshots(baseURL, token, title) {
+async function seedPreviewProject(fixture) {
+  const origin = fixture.apiOrigin;
+  const headers = { Origin: origin, Authorization: `Bearer ${await fixture.issueOwnerAccessToken()}`, 'Content-Type': 'application/json' };
+  async function create(endpoint, data) {
+    const response = await fetch(new URL(endpoint, origin), {
+      method: 'POST', headers: { ...headers, 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify(data), redirect: 'error', signal: AbortSignal.timeout(5000),
+    });
+    if (response.status !== 201) throw new Error(`Preview ${data.kind ?? 'project'} creation returned ${response.status}`);
+    return response.json();
+  }
+  const { project } = await create('/api/v1/persistence/projects', { title: `UI Preview ${randomUUID()}` });
+  const documents = `/api/v1/persistence/projects/${project.id}/documents`;
+  const { document: volume } = await create(documents, { kind: 'volume', title: 'Volume One', orderKey: 'a', markdown: '' });
+  const { document: chapter } = await create(documents, { kind: 'chapter', parentId: volume.id, title: 'Chapter One', orderKey: 'a', markdown: '' });
+  const { document: scene } = await create(documents, {
+    kind: 'scene', parentId: chapter.id, title: 'Scene One', orderKey: 'a',
+    markdown: '# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n',
+  });
+  await create(documents, {
+    kind: 'scene', parentId: chapter.id, title: 'Scene Two', orderKey: 'b',
+    markdown: '# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n',
+  });
+  return { project, scene };
+}
+
+async function captureScreenshots(baseURL, { project, scene }, signInAuthorBrowser) {
   const { chromium } = await import('@playwright/test');
   let browser;
   try {
@@ -150,29 +164,10 @@ async function captureScreenshots(baseURL, token, title) {
       const context = await browser.newContext({ viewport: { width, height } });
       try {
         const page = await context.newPage();
-        await page.goto(`${baseURL}/${mode}/`, { waitUntil: 'domcontentloaded' });
-        const login = page.getByLabel('アクセス・トークン');
-        const workspace = page.getByRole('heading', { name: 'Database workspace' });
-        // The API check completes asynchronously; do not sample visibility before React has rendered.
-        await login.or(workspace).first().waitFor({ state: 'visible', timeout: 20_000 });
-        if (await login.isVisible()) {
-          await login.fill(token);
-          await page.getByRole('button', { name: 'PostgreSQL作品を開く' }).click();
-        }
-        await workspace.waitFor({ timeout: 20_000 });
-        const projectsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects?limit=100`);
-        if (!projectsResponse.ok()) throw new Error(`${mode} projects returned ${projectsResponse.status()}`);
-        const { projects } = await projectsResponse.json();
-        const project = projects.find(item => item.title === title);
-        if (!project) throw new Error(`${mode}: seeded preview project not found`);
-        const docsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects/${project.id}/documents`);
-        if (!docsResponse.ok()) throw new Error(`${mode} documents returned ${docsResponse.status()}`);
-        const { documents } = await docsResponse.json();
-        const scene = documents.find(item => item.kind === 'scene');
-        if (!scene) throw new Error(`${mode}: seeded scene not found`);
         const route = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === 'mobile' ? '?view=writing' : ''}`;
-        await page.goto(new URL(route, baseURL).toString());
+        const accessToken = await signInAuthorBrowser(page, baseURL, mode, { path: route });
         await page.getByRole('textbox', { name: '本文', exact: true }).waitFor({ timeout: 20_000 });
+        await page.getByRole('heading', { name: scene.title, exact: true }).waitFor({ timeout: 20_000 });
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: path.join(artifactDir, 'snapshots', `${mode}.png`), fullPage: true });
         // Freeze the authenticated DOM; no bearer cookie, API access or browser script is copied.
@@ -194,7 +189,7 @@ async function captureScreenshots(baseURL, token, title) {
           copy.querySelector('head')?.prepend(base);
           return '<!doctype html>\n' + copy.outerHTML;
         });
-        if (html.includes(token)) throw new Error(`${mode} visual snapshot unexpectedly contains an auth token`);
+        if (html.includes(accessToken)) throw new Error(`${mode} visual snapshot unexpectedly contains an OAuth bearer`);
         await writeFile(path.join(artifactDir, 'snapshots', `${mode}.html`), html);
         htmlByMode[mode] = html;
       } finally { await context.close(); }
@@ -234,15 +229,17 @@ async function serveSnapshots(htmlByMode, baseURL, id) {
 
 async function main() {
   const options = parsePreviewArgs(process.argv.slice(2));
+  // Keep the disposable preview isolated from operator API and frontend settings.
+  for (const key of Object.keys(process.env)) {
+    if (/^(?:CODEXIA|SCRIPTORIUM|VITE)_/iu.test(key)) delete process.env[key];
+  }
   const engine = await engineFor(options.engine);
   const container = `codexia-ui-preview-${randomUUID().slice(0, 12)}`;
   const password = randomBytes(24).toString('hex');
-  const token = randomBytes(32).toString('hex');
-  const title = `UI Preview ${randomUUID()}`;
-  const stateDir = await mkdtemp(path.join(tmpdir(), 'codexia-ui-preview-'));
+  const databaseName = 'codexia_web_oauth_test';
   const id = randomUUID();
   const sessionFile = path.join(artifactDir, 'session.json');
-  let serverChild;
+  let fixture;
   let snapshotServer;
   let containerStarted = false;
   let stopRequested = false;
@@ -252,41 +249,32 @@ async function main() {
   try {
     // Fail early if the expected host port is already in use, before building anything.
     const { createServer: createTcpServer } = await import('node:net');
-    for (const port of [options.port, options.port + 1]) {
-      const probe = createTcpServer();
-      await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(port, '127.0.0.1', resolve); });
-      await new Promise(resolve => probe.close(resolve));
-    }
+    const probe = createTcpServer();
+    await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(options.port, '127.0.0.1', resolve); });
+    await new Promise(resolve => probe.close(resolve));
     if (!options.skipBuild) await build(options.profile);
     await verifyBuild(options.profile);
     console.log(`Starting disposable PostgreSQL 17 with ${engine}`);
     await run(engine, [
       'run', '-d', '--rm', '--name', container, '--label', 'dev.codexia.purpose=ui-preview',
       '-e', 'POSTGRES_USER=codexia', '-e', `POSTGRES_PASSWORD=${password}`,
-      '-e', 'POSTGRES_DB=codexia_preview', '-p', '127.0.0.1::5432', 'postgres:17',
+      '-e', `POSTGRES_DB=${databaseName}`, '-p', '127.0.0.1::5432', 'postgres:17',
     ]);
     containerStarted = true;
     const databasePort = parsePublishedPort(await run(engine, ['port', container, '5432/tcp']));
-    const connectionString = `postgres://codexia:${password}@127.0.0.1:${databasePort}/codexia_preview`;
+    const connectionString = `postgres://codexia:${password}@127.0.0.1:${databasePort}/${databaseName}`;
     await waitForDatabase(connectionString);
-    // Do not inherit an operator's production Codexia configuration into the disposable E2E server.
-    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CODEXIA_') && !key.startsWith('SCRIPTORIUM_'))),
-      CODEXIA_PROFILE: options.profile,
-      CODEXIA_E2E_DATABASE_URL: connectionString,
-      CODEXIA_E2E_STATE_DIR: stateDir,
-      CODEXIA_E2E_PROJECT_TITLE: title,
-      CODEXIA_E2E_AUTH_TOKEN: token,
-      CODEXIA_E2E_PORT: String(options.port),
-      CODEXIA_E2E_EXTERNAL_DATABASE: '0',
-      CODEXIA_E2E_TEMP_STATE_DIR: '0',
-      CODEXIA_HOSTED_MODE: '0',
-    };
-    serverChild = spawn(process.execPath, ['--import', 'tsx/esm', 'tests/e2e/test-server.ts'], { cwd: root, env, stdio: 'inherit', windowsHide: true });
-    const baseURL = await waitForApi(options.port, serverChild);
+    process.env.CODEXIA_AUTH_TEST_DISPOSABLE = '1';
+    const { tsImport } = await import('tsx/esm/api');
+    const { startAuthorBrowserFixture, signInAuthorBrowser } = await tsImport('../tests/e2e/author-oauth-server.ts', import.meta.url);
+    fixture = await startAuthorBrowserFixture({ databaseUrl: connectionString, profile: options.profile, apiPort: options.port });
+    const baseURL = fixture.apiOrigin;
+    await checkPreviewReady(baseURL);
+    const writing = await seedPreviewProject(fixture);
     console.log(`\nCodexia preview: ${baseURL}/desktop/ and ${baseURL}/mobile/`);
-    console.log(`Disposable owner token (local only): ${token}`);
+    console.log('Use OAuthでサインイン with the local preview identity provider.');
     if (options.capture) {
-      const htmlByMode = await captureScreenshots(baseURL, token, title);
+      const htmlByMode = await captureScreenshots(baseURL, writing, signInAuthorBrowser);
       ({ server: snapshotServer, port: options.snapshotPort } = await serveSnapshots(htmlByMode, baseURL, id));
       await mkdir(artifactDir, { recursive: true });
       await writeFile(sessionFile, JSON.stringify({ id, snapshotBaseURL: `http://127.0.0.1:${options.snapshotPort}` }, null, 2));
@@ -297,22 +285,17 @@ async function main() {
       console.log('Capture disabled; run again without --no-capture to scan authenticated UI snapshots.');
     }
     console.log('Ctrl+C stops the test server and removes the disposable PostgreSQL container/database.');
-    while (!stopRequested && serverChild.exitCode === null) await delay(250);
-    if (!stopRequested) throw new Error(`E2E server exited unexpectedly (${serverChild.exitCode})`);
+    while (!stopRequested) await delay(250);
   } finally {
     process.removeListener('SIGINT', requestStop);
     process.removeListener('SIGTERM', requestStop);
     if (snapshotServer) await new Promise(resolve => snapshotServer.close(resolve));
     await rm(sessionFile, { force: true });
-    if (serverChild && serverChild.exitCode === null) {
-      serverChild.kill('SIGTERM');
-      await Promise.race([new Promise(resolve => serverChild.once('exit', resolve)), delay(3000)]);
-      if (serverChild.exitCode === null) serverChild.kill('SIGKILL');
+    try {
+      await fixture?.close();
+    } finally {
+      if (containerStarted) await run(engine, ['stop', '--time', '3', container]).catch(error => console.error('Remove preview container manually:', container, error.message));
     }
-    if (containerStarted) {
-      await run(engine, ['stop', '--time', '3', container]).catch(error => console.error('Remove preview container manually:', container, error.message));
-    }
-    await rm(stateDir, { recursive: true, force: true });
   }
 }
 
