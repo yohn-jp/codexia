@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, nextOrderKey, PRIVATE_PUBLISHING_PATHS } from "@codexia/contracts";
+import { assertProjectPath, isPublishingRecordKey, nextOrderKey, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
 import {
   CORE_DOCUMENT_PATHS,
   HIERARCHY_CREATE_SOURCE,
   HIERARCHY_DELETE_SOURCE,
   HIERARCHY_REORDER_SOURCE,
+  PUBLISHING_CHANGESET_SOURCE,
   hierarchyDocumentPaths,
   PersistenceError,
   type Assertion,
@@ -505,12 +506,33 @@ function validateChangeSetOperations(
       (operations.length !== 1 || first?.type !== "document.create" || !first.hierarchy)) {
     throw validationError("A hierarchy create must be the only operation in its native ChangeSet");
   }
+  if (provenance.source === PUBLISHING_CHANGESET_SOURCE) {
+    const observation = readSet[0];
+    if (operations.length !== 1 || first?.type !== "module.record.save" || first.command.moduleId !== "publishing" ||
+        !isPublishingRecordKey(first.command.key) || !provenance.actorId?.trim() || readSet.length !== 1 ||
+        observation?.resource !== "module_record" || observation.id !== JSON.stringify(["publishing", first.command.key]) ||
+        observation.expectedVersion !== first.command.expectedVersion) {
+      throw validationError("Publishing ChangeSets require one versioned Publishing record update");
+    }
+    const { key, value } = first.command;
+    let normalized: JsonObject;
+    try {
+      normalized = key === PUBLISHING_EPISODES_KEY ? parsePublishingEpisodesRecord(value) : parsePublishingShareGrantIndex(value);
+    } catch {
+      throw validationError("The Publishing record does not match its canonical format");
+    }
+    if (digest(normalized) !== digest(value)) throw validationError("The Publishing record is not normalized");
+  }
   for (const operation of operations) {
     if (operation.type === "document.create" && operation.hierarchy !== undefined && provenance.source !== HIERARCHY_CREATE_SOURCE) {
       throw validationError("Hierarchy documents require a native hierarchy ChangeSet");
     }
     if (operation.type === "knowledge.merge" && !allowKnowledgeMerge) throw validationError("Knowledge merge operations require the native merge proposal entrypoint");
     if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
+    if (operation.type === "module.record.save" && operation.command.moduleId === "publishing" &&
+        isPublishingRecordKey(operation.command.key) && provenance.source !== PUBLISHING_CHANGESET_SOURCE) {
+      throw validationError("Protected Publishing records require a Publishing ChangeSet");
+    }
     if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
   }
   assertNonEmpty(provenance.source, "ChangeSet provenance source");
@@ -1696,6 +1718,9 @@ class PostgresTransaction implements PersistenceTransaction {
     await this.lockProject(command.projectId);
     assertNonEmpty(command.authorId, "ChangeSet author id");
     assertNonEmpty(command.idempotencyKey, "ChangeSet idempotency key");
+    if (command.provenance.source === PUBLISHING_CHANGESET_SOURCE && command.authorId !== command.provenance.actorId) {
+      throw validationError("Publishing ChangeSet author and proposal actor must match");
+    }
     validateChangeSetOperations(
       command.projectId,
       command.operations,
@@ -1721,7 +1746,8 @@ class PostgresTransaction implements PersistenceTransaction {
     }
     let readSet = command.readSet;
     if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE ||
-        command.provenance.source === HIERARCHY_DELETE_SOURCE || command.provenance.source === HIERARCHY_CREATE_SOURCE) {
+        command.provenance.source === HIERARCHY_DELETE_SOURCE || command.provenance.source === HIERARCHY_CREATE_SOURCE ||
+        command.provenance.source === PUBLISHING_CHANGESET_SOURCE) {
       const sourceVersion = command.provenance.details.projectVersion;
       if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
@@ -1730,6 +1756,7 @@ class PostgresTransaction implements PersistenceTransaction {
       readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
       await this.assertChangeSetReadSet(command.projectId, readSet);
     }
+    if (command.provenance.source === PUBLISHING_CHANGESET_SOURCE) await this.assertChangeSetReadSet(command.projectId, readSet);
     const firstOperation = command.operations[0];
     if (firstOperation?.type === "document.create" && firstOperation.hierarchy) {
       await this.checkHierarchyCreate(firstOperation.command, firstOperation.hierarchy);

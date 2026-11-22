@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
-import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
+import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
@@ -172,7 +172,13 @@ export type AuthorReviewItem =
       receipt: ChangeSetApplicationResult | null;
     };
 type StoredFile = { content: string; encoding: "utf8" | "base64"; revision: string; documentId?: string; metadata?: boolean };
-type Manifest = { snapshot: SnapshotId; files: Record<string, StoredFile>; documents: Document[]; project: Project };
+type Manifest = {
+  snapshot: SnapshotId;
+  files: Record<string, StoredFile>;
+  documents: Document[];
+  project: Project;
+  publishingRecords?: Partial<Record<(typeof PUBLISHING_RECORD_KEYS)[number], OwnModuleRecord>>;
+};
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
 type StoryProjectionEntry = { documents: NativeStoryDocument[]; fingerprint: string; bytes: number };
 const AUTHORITY = "core.authority.proposals";
@@ -190,6 +196,11 @@ const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const pid = (value: string) => value as ProjectId;
 function fail(status: number, code: string, message: string): never { throw new CoreError(status, code, message); }
+function assertCurrentPublishingWrite(operation: ChangeOperation): void {
+  if (operation.writes.some(({ path }) => isPrivatePublishingPath(path))) {
+    fail(409, "publishing_reproposal_required", "Propose this update from the Publishing panel using the current project state");
+  }
+}
 function safePath(value: string): void { assertProjectPath(value); }
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -342,7 +353,16 @@ export class CoreStore implements MutationCoordinator {
     const headKeys = documents.flatMap((document) => document.headRevisionId ? [{ documentId: document.id, revisionId: document.headRevisionId }] : []);
     const headRevisions = await reader.getDocumentHeadRevisions(pid(projectId), headKeys);
     const revisionsByHead = new Map(headRevisions.map((head) => [JSON.stringify([head.documentId, head.revisionId]), head.revision]));
-    const records = (await Promise.all([reader.listModuleRecords(pid(projectId),PATHS),reader.listModuleRecords(pid(projectId),ARTIFACTS)])).flat(); const files: Record<string,StoredFile> = {};
+    const [pathRecords, artifacts, publishing] = await Promise.all([
+      reader.listModuleRecords(pid(projectId), PATHS),
+      reader.listModuleRecords(pid(projectId), ARTIFACTS),
+      Promise.all(PUBLISHING_RECORD_KEYS.map(key => reader.getModuleRecord(pid(projectId), "publishing", key))),
+    ]);
+    const publishingRecords: NonNullable<Manifest["publishingRecords"]> = {};
+    for (const record of publishing) {
+      if (record && isPublishingRecordKey(record.key)) publishingRecords[record.key] = { value: record.value, version: record.version };
+    }
+    const files: Record<string,StoredFile> = {};
     const add = (key: string, content: string, encoding: "utf8"|"base64" = "utf8", documentId?: string, metadata?: boolean) => {
       safePath(key); if (files[key]) fail(409,"duplicate_document_path","Project contains duplicate document paths");
       const file = {content,encoding,revision:hash(Buffer.from(content,encoding)),...(documentId ? {documentId}:{}),...(metadata ? {metadata:true}:{})};
@@ -351,7 +371,7 @@ export class CoreStore implements MutationCoordinator {
     };
     add("meta/project.yaml", YAML.stringify({title:project.title,...project.settings}));
     const byId = new Map(documents.map((document) => [document.id,document]));
-    const mappings = new Map(records.filter((record) => record.moduleId === PATHS).map((record) => [record.key, record.value]));
+    const mappings = new Map(pathRecords.map((record) => [record.key, record.value]));
     const metadataFor = (document: Document) => storyMetadata(mappings.get(document.id));
     const projectedId = (document: Document) => storyDocumentId(document, metadataFor(document));
     for (const [documentOrder, document] of documents.entries()) {
@@ -382,14 +402,14 @@ export class CoreStore implements MutationCoordinator {
         if (document.kind !== "volume" && document.kind !== "chapter") add(manuscriptPath,revision.markdown,"utf8",document.id);
       }
     }
-    for (const record of records.filter((record) => record.moduleId === ARTIFACTS)) {
-      if (record.value.deleted === true) continue;
+    for (const record of artifacts) {
+      if (record.value.deleted === true || isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
     }
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
     add(KNOWLEDGE_CONTEXT_PATH, JSON.stringify(await projectKnowledgeContext(reader,pid(projectId),documents,documentMappings)));
-    return {snapshot:{projectId,projectVersion:project.version},files,documents,project};
+    return {snapshot:{projectId,projectVersion:project.version},files,documents,project,publishingRecords};
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
     if (pinned && pinned.projectId !== projectId) fail(409,"snapshot_scope_mismatch","Snapshot belongs to another project");
@@ -539,6 +559,57 @@ export class CoreStore implements MutationCoordinator {
   async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> {
     const manifest = await this.manifest(projectId,pinned);
     return makeReader(manifest,() => this.nativeStoryProjection(manifest));
+  }
+  async readPublishingSnapshotRecord(projectId: string, snapshot: SnapshotId, key: string): Promise<OwnModuleRecord | undefined> {
+    if (!isPublishingRecordKey(key)) fail(400, "invalid_publishing_record", "Publishing record key is not supported");
+    const manifest = await this.manifest(projectId, snapshot);
+    if (!manifest.publishingRecords) fail(409, "snapshot_unavailable", "Select a current snapshot for Publishing settings");
+    return structuredClone(manifest.publishingRecords[key]);
+  }
+
+  async proposePublishingSnapshotRecord(
+    projectId: string, snapshot: SnapshotId, input: OwnModuleRecordProposal, actorId: string,
+  ): Promise<NativeChangeSetReference> {
+    const { key, value, expectedVersion, idempotencyKey } = input;
+    if (snapshot.projectId !== projectId) fail(409, "snapshot_scope_mismatch", "Snapshot belongs to another project");
+    if (!isPublishingRecordKey(key) || !isJsonValue(value) || value === null || typeof value !== "object" || Array.isArray(value) ||
+        (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) ||
+        !idempotencyKey.trim() || idempotencyKey.length > 200 || !actorId.trim()) {
+      fail(400, "invalid_publishing_record", "Publishing record, version, idempotency key and author are required");
+    }
+    let record: JsonObject;
+    try {
+      record = key === PUBLISHING_EPISODES_KEY ? parsePublishingEpisodesRecord(value) : parsePublishingShareGrantIndex(value);
+    } catch {
+      fail(400, "invalid_publishing_record", "The Publishing record does not match its canonical format");
+    }
+    const recordId = JSON.stringify(["publishing", key]);
+    const requestDigest = hash(canonicalJson({ actorId, key, value: record, expectedVersion }));
+    return this.persistence.transaction(async tx => {
+      await tx.assertProjectVersion(pid(projectId));
+      const existing = await tx.getChangeSetByIdempotencyKey(pid(projectId), idempotencyKey);
+      if (existing) {
+        if (existing.authorId !== actorId || existing.provenance.source !== PUBLISHING_CHANGESET_SOURCE ||
+            existing.provenance.details.requestDigest !== requestDigest) {
+          throw new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
+            resource: "idempotency_key", id: idempotencyKey,
+          });
+        }
+        return { id: existing.id, projectId: existing.projectId };
+      }
+      const { changeSet } = await tx.createChangeSet({
+        projectId: pid(projectId), authorId: actorId, idempotencyKey,
+        operations: [{ type: "module.record.save", command: {
+          projectId: pid(projectId), moduleId: "publishing", key, value: record, expectedVersion,
+        } }],
+        readSet: [{ resource: "module_record", id: recordId, expectedVersion }],
+        writeSet: [{ resource: "module_record", id: recordId }],
+        provenance: { source: PUBLISHING_CHANGESET_SOURCE, actorId, details: {
+          projectVersion: snapshot.projectVersion, requestDigest,
+        } },
+      });
+      return { id: changeSet.id, projectId: changeSet.projectId };
+    });
   }
   async observe(projectId: string): Promise<ProjectObservation> { const project = await this.persistence.read((reader)=>reader.getProject(pid(projectId))); if (!project) fail(404,"project_not_found","Project not found"); return {snapshot:{projectId,projectVersion:project.version},observedAt:new Date().toISOString(),state:"fresh"}; }
   private logicalId(index: SnapshotIndex, document: Document): string { return index.logicalIdByDocumentId.get(document.id) ?? document.id; }
@@ -728,6 +799,7 @@ export class CoreStore implements MutationCoordinator {
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
       for (const operation of proposal.operations) {
+        assertCurrentPublishingWrite(operation);
         await assertEvidenceRevisions(reader, proposal, operation);
       }
 
@@ -1035,6 +1107,7 @@ export class CoreStore implements MutationCoordinator {
       const replay = approved.map(({ status }) => applicationFor(status)).find((receipt) => receipt !== undefined);
       if (replay) return recordApplication(replay);
 
+      assertCurrentPublishingWrite(operation);
       if (operation.writes.some(({ path }) => PRESERVATION_ARCHIVE_PATH.test(path))) {
         fail(409, "preservation_archive_read_only", "Module preservation archives are read-only");
       }

@@ -148,6 +148,46 @@ test("project presentation reads the selected project's public title and subtitl
   assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
 });
 
+test("Publishing reads approved native records at the selected version without exposing files", async () => {
+  const project = await createProject();
+  const key = "share-grants";
+  const oldPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "core.artifacts", key: oldPath,
+    value: { content: "Legacy state retained for maintenance", encoding: "utf8" }, expectedVersion: null,
+  }));
+  const old = await core.reader(project.id);
+  assert.equal(await old.read(oldPath), null);
+  assert.equal(await core.readPublishingSnapshotRecord(project.id, old.snapshot, key), undefined);
+  await assert.rejects(core.readPublishingSnapshotRecord(project.id, old.snapshot, "unexpected"), { code: "invalid_publishing_record" });
+  const input = { key, value: { version: 1, grants: [] }, expectedVersion: null, idempotencyKey: randomUUID() };
+  const submit = (snapshot = old.snapshot) => core.proposePublishingSnapshotRecord(project.id, snapshot, input, "author");
+  const reference = await submit();
+  const persisted = () => persistence.read(reader => reader.getModuleRecord(project.id, "publishing", key));
+  assert.equal(await persisted(), undefined);
+  const changeSet = await persistence.read(reader => reader.getChangeSet(project.id, reference.id as import("@codexia/persistence-contracts").ChangeSetId));
+  assert.ok(changeSet);
+  const apply = (version: number) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: project.id, changeSetId: changeSet.id, expectedVersion: version,
+  }));
+  await assert.rejects(apply(changeSet.version), { code: "invalid_change_set_state" });
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+  }));
+  const applied = await apply(approved.version);
+  const current = await core.reader(project.id);
+  assert.notEqual(current.snapshot.projectVersion, old.snapshot.projectVersion);
+  assert.equal(await current.read(oldPath), null);
+  assert.ok(!(await current.list("")).includes(oldPath));
+  assert.deepEqual(await core.readPublishingSnapshotRecord(project.id, current.snapshot, key), { value: input.value, version: 1 });
+  assert.equal(await core.readPublishingSnapshotRecord(project.id, old.snapshot, key), undefined);
+  assert.deepEqual(await submit(current.snapshot), reference);
+  assert.deepEqual(await apply(approved.version), { ...applied, replayed: true });
+  await assert.rejects(core.proposePublishingSnapshotRecord(project.id, current.snapshot, {
+    ...input, idempotencyKey: randomUUID(),
+  }, "author"), { code: "conflict" });
+});
+
 test("native hierarchy creation rejects an older project version without materializing a snapshot", async () => {
   const project = await createProject();
   await persistence.transaction(tx => tx.updateProject({
@@ -353,7 +393,7 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
     };
     const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
     if (compatible) files[knowledgePath] = file(JSON.stringify({version:1,projectId:project.id,documentMappings:[],entries:[],nodeLimitReached:false}));
-    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files} as unknown as JsonObject,expectedVersion:null}));
+    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...(compatible ? { publishingRecords: {} } : {})} as unknown as JsonObject,expectedVersion:null}));
     return {project,snapshot,knowledgePath};
   }
   const compatible = await seedLegacy(true);
@@ -381,6 +421,8 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   const compatibleFiles = await exactFiles(await store.reader(compatible.project.id, compatible.snapshot));
   const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
   const oldFiles = await exactFiles(oldPinned);
+  await assert.rejects(store.readPublishingSnapshotRecord(incompatible.project.id, incompatible.snapshot, "episodes"),
+    { code: "snapshot_unavailable" });
   assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
