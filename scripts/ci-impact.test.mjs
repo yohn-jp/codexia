@@ -29,7 +29,8 @@ test('PR paths and completed-Verify release impact retain component build inputs
   ));
   const releaseScope = JSON.parse(readFileSync(new URL('../deploy/release-impact-paths.json', import.meta.url), 'utf8'));
   for (const [index, component] of ['frontend','backend'].entries()) {
-    assert.deepEqual(releases[index].on.pull_request.paths, releaseScope[component], component + ' release path drift');
+    const prOnly = component === 'backend' ? releaseScope.backendPullRequestOnly : [];
+    assert.deepEqual(releases[index].on.pull_request.paths, [...releaseScope[component], ...prOnly], component + ' PR path drift');
   }
   const changes = [
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
@@ -151,6 +152,24 @@ test('test-only changes select their owner while non-executable documentation se
   assert.ok(selected.tasks.includes('test-types-modules'));
   assert.ok(!selected.tasks.includes('build-full'));
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+});
+
+test('proof ineligibility can expand an affected PR plan to the complete task inventory without losing its actual diff', async () => {
+  const { createVerificationPlan, verificationPlanOutputs } = await import('./ci-impact.mjs');
+  const affected = createVerificationPlan({ files: ['modules/search/src/browser.ts'], event: 'pull_request',
+    sha: 'a'.repeat(40), base: 'b'.repeat(40) });
+  const fallback = createVerificationPlan({ ...affected, forceFull: true });
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  assert.equal(affected.mode, 'affected');
+  assert.equal(fallback.mode, 'full');
+  assert.equal(fallback.forceFull, true);
+  assert.deepEqual(fallback.files, affected.files, 'Fallback retains the exact source diff for later first-parent validation');
+  assert.deepEqual(fallback.tasks, VERIFICATION_TASKS);
+  assert.equal(fallback.full_model_oci, affected.full_model_oci);
+  const outputs = verificationPlanOutputs(fallback);
+  assert.deepEqual(JSON.parse(outputs.unit), ['core', 'modules']);
+  assert.deepEqual(JSON.parse(outputs.types), ['sources', 'tests']);
+  assert.equal(JSON.parse(outputs.plan).forceFull, true);
 });
 
 test('OAuth browser acceptance is selected in both profile browser lanes', async () => {

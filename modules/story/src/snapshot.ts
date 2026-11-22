@@ -124,9 +124,14 @@ function parseMarkdown(content: string): { raw: Record<string, unknown>; body: s
   const delimiter = /^---[ \t]*\r?$/gm;
   delimiter.lastIndex = opening[0].length;
   const closing = delimiter.exec(content);
-  if (!closing) return null;
-  const raw = asRecord(YAML.parse(content.slice(opening[0].length, closing.index)));
-  if (!raw) return null;
+  if (!closing) return { raw: {}, body: content.trim() };
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = asRecord(YAML.parse(content.slice(opening[0].length, closing.index)));
+  } catch {
+    return { raw: {}, body: content.trim() };
+  }
+  if (!raw) return { raw: {}, body: content.trim() };
   let bodyStart = closing.index + closing[0].length;
   if (content.startsWith("\r\n", bodyStart)) bodyStart += 2;
   else if (content.startsWith("\n", bodyStart)) bodyStart += 1;

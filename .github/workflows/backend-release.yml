@@ -55,6 +55,16 @@ on:
       - scripts/release-impact.test.mjs
       - scripts/release-source-gate.mjs
       - scripts/release-source-gate.test.mjs
+      - .github/workflows/push-app-lifecycle.yml
+      - deploy/ansible/**
+      - deploy/backup/**
+      - deploy/postgres/**
+      - deploy/quadlet/**
+      - docs/deployment/PUSH-DEPLOYMENT.md
+      - docs/deployment/IAC.md
+      - scripts/component-release-record.mjs
+      - scripts/push-app-lifecycle*.mjs
+      - scripts/push-auth-lifecycle-oidc.mjs
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './ci-contract.mjs';
+import { taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.dockerignore',
@@ -145,10 +146,11 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
 
-export function createVerificationPlan({ files, event, sha, base = null }) {
+export function createVerificationPlan({ files, event, sha, base = null, forceFull = false }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
+  if (typeof forceFull !== 'boolean') throw new Error('Invalid full verification fallback flag');
   const selected = new Set(['coverage']);
-  let full = event !== 'pull_request' || !Array.isArray(files);
+  let full = forceFull || event !== 'pull_request' || !Array.isArray(files);
   const fullModelOci = event === 'pull_request' && Array.isArray(files) && files.some(matchesFullModelOciPath);
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
@@ -197,7 +199,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
-    version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
+    version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null, forceFull,
     full_model_oci: fullModelOci,
     tasks,
     groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
@@ -216,42 +218,72 @@ export function validateVerificationPlan(plan) {
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 function assertTaskInputReuse(plan, reuse) {
   if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
-  if (reuse.format !== 'codexia-ci-task-input-reuse/v1') throw new Error('Unknown task input reuse format');
-  if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
+  if (!['codexia-ci-task-input-reuse/v1', 'codexia-ci-task-input-reuse/v2'].includes(reuse.format)) throw new Error('Unknown task input reuse format');
   if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
-  const proof = reuse.coverage;
-  if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== 'coverage' || proof.sourceSha !== plan.base) {
-    throw new Error('Invalid exact-base coverage proof identity');
+  const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
+      throw new Error(`Invalid exact-base ${task} proof identity`);
+    }
+    if (!/^[a-f0-9]{40}$/u.test(proof.sourceSha ?? '') || !/^[a-f0-9]{40}$/u.test(proof.proofSourceSha ?? '')) throw new Error('Invalid task proof source');
+    if (!/^[a-f0-9]{64}$/u.test(proof.planDigest ?? '')) throw new Error('Invalid task proof plan digest');
+    for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'artifactId']) {
+      if (!Number.isSafeInteger(proof[key]) || proof[key] < 1) throw new Error(`Invalid task proof ${key}`);
+    }
+    const group = taskExecution ? taskGroup(task) : 'types-tests';
+    const workflowJob = taskExecution ? taskWorkflowJob(task) : 'types';
+    if (proof.workflowJob !== workflowJob || proof.artifactName !== `ci-evidence-${group}`) throw new Error('Invalid task proof producer identity');
+    if (!/^sha256:[a-f0-9]{64}$/u.test(proof.artifactDigest ?? '')) throw new Error('Invalid task proof artifact digest');
+    if (!proof.inputClosure || typeof proof.inputClosure !== 'object' || Array.isArray(proof.inputClosure) ||
+        JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
+        Object.values(proof.inputClosure).some(value => !/^[a-f0-9]{64}$/u.test(value))) throw new Error('Incomplete task proof input closure');
+    const runtime = proof.runtime;
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) throw new Error('Missing task proof runtime');
+    for (const key of ['platform', 'arch', 'nodeVersion', 'execPath', 'cwd']) if (typeof runtime[key] !== 'string' || !runtime[key]) throw new Error(`Invalid task proof runtime ${key}`);
+    if (!/^(?:\/|[A-Za-z]:\\)/u.test(runtime.execPath) || !/^(?:\/|[A-Za-z]:\\)/u.test(runtime.cwd)) throw new Error('Task proof runtime paths must be absolute');
+    for (const key of ['imageOS', 'imageVersion']) if (runtime[key] !== null && typeof runtime[key] !== 'string') throw new Error(`Invalid task proof runtime ${key}`);
+    const certification = proof.certification;
+    if (!certification || typeof certification !== 'object' || certification.sourceSha !== plan.base ||
+        !['Certify every required exact-source matrix element', 'Certify reused merged PR proof'].includes(certification.step)) {
+      throw new Error('Invalid main task proof certification');
+    }
+    for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId']) {
+      if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
+    }
+  };
+  if (reuse.format === 'codexia-ci-task-input-reuse/v1') {
+    if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
+    assertReceipt(reuse.coverage, 'coverage');
+    return;
   }
-  for (const key of ['sourceSha']) if (!/^[a-f0-9]{40}$/u.test(proof[key] ?? '')) throw new Error(`Invalid task proof ${key}`);
-  if (!/^[a-f0-9]{40}$/u.test(proof.proofSourceSha ?? '')) throw new Error('Invalid task proof producer source');
-  for (const key of ['planDigest']) if (!/^[a-f0-9]{64}$/u.test(proof[key] ?? '')) throw new Error(`Invalid task proof ${key}`);
-  for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'artifactId']) {
-    if (!Number.isSafeInteger(proof[key]) || proof[key] < 1) throw new Error(`Invalid task proof ${key}`);
+  if (Object.keys(reuse).some(key => !['format', 'coverage', 'omitted'].includes(key))) throw new Error('Unsupported task input proof task');
+  if (reuse.coverage !== undefined) assertReceipt(reuse.coverage, 'coverage');
+  const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
+  if (!reuse.omitted || typeof reuse.omitted !== 'object' || Array.isArray(reuse.omitted) ||
+      JSON.stringify(Object.keys(reuse.omitted).sort()) !== JSON.stringify(omitted.sort())) {
+    throw new Error('Task proof inventory does not match omitted validations');
   }
-  if (proof.workflowJob !== 'types' || proof.artifactName !== 'ci-evidence-types-tests') throw new Error('Invalid task proof producer identity');
-  if (!/^sha256:[a-f0-9]{64}$/u.test(proof.artifactDigest ?? '')) throw new Error('Invalid task proof artifact digest');
-  if (!proof.inputClosure || typeof proof.inputClosure !== 'object' || Array.isArray(proof.inputClosure) ||
-      JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
-      Object.values(proof.inputClosure).some(value => !/^[a-f0-9]{64}$/u.test(value))) throw new Error('Incomplete task proof input closure');
-  const runtime = proof.runtime;
-  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) throw new Error('Missing task proof runtime');
-  for (const key of ['platform', 'arch', 'nodeVersion', 'execPath', 'cwd']) if (typeof runtime[key] !== 'string' || !runtime[key]) throw new Error(`Invalid task proof runtime ${key}`);
-  if (!/^(?:\/|[A-Za-z]:\\)/u.test(runtime.execPath) || !/^(?:\/|[A-Za-z]:\\)/u.test(runtime.cwd)) throw new Error('Task proof runtime paths must be absolute');
-  for (const key of ['imageOS', 'imageVersion']) if (runtime[key] !== null && typeof runtime[key] !== 'string') throw new Error(`Invalid task proof runtime ${key}`);
-  const certification = proof.certification;
-  if (!certification || typeof certification !== 'object' || certification.sourceSha !== plan.base ||
-      !['Certify every required exact-source matrix element', 'Certify reused merged PR proof'].includes(certification.step)) {
-    throw new Error('Invalid main task proof certification');
-  }
-  for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId']) {
-    if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
-  }
+  for (const task of omitted) assertReceipt(reuse.omitted[task], task, { taskExecution: true });
 }
 
 export function planDigest(plan) {
   const { taskInputReuse: _taskInputReuse, ...canonical } = validateVerificationPlan(plan);
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+export function verificationPlanOutputs(plan) {
+  validateVerificationPlan(plan);
+  return {
+    plan: JSON.stringify(plan),
+    unit: JSON.stringify(['core', 'modules'].filter(id => plan.groups.includes(`unit-${id}`))),
+    types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
+    build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
+    oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
+    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
+      .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
+    hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
+    hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
+    full_model_oci: String(plan.full_model_oci),
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -272,18 +304,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   mkdirSync(path.dirname(planPath), { recursive: true });
   writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   if (process.env.GITHUB_OUTPUT) {
-    const outputs = {
-      plan: JSON.stringify(plan),
-      unit: JSON.stringify(['core', 'modules'].filter(id => plan.groups.includes(`unit-${id}`))),
-      types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
-      build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
-      oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
-      browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit'].filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
-      hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
-      hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
-      full_model_oci: String(plan.full_model_oci),
-    };
-    appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
+    appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(verificationPlanOutputs(plan)).map(([key, value]) => `${key}=${value}\n`).join(''));
   }
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `Verification plan: **${plan.mode}**, ${plan.tasks.length}/${VERIFICATION_TASKS.length} validations in ${plan.groups.length} execution groups at ${sha}.\n\n` +

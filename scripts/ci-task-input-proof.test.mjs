@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { assertCompleteTaskInputProofSet, assertTaskProducerInventory, assertTrustedCertifiedSourceTaskInputProof, assertTrustedTaskInputProof, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 import { createVerificationPlan, planDigest as createPlanDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
+import { taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const planDigest = 'b'.repeat(64);
@@ -97,6 +98,24 @@ test('task proof trust requires an exact successful main run, matching job attem
     expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /workflow job ID mismatch/);
 });
 
+test('task execution proof trust accepts a non-coverage task only from its exact main evidence artifact', () => {
+  const identity = { sourceSha, planDigest, workflowRunId: 42, workflowAttempt: 2 };
+  const inputProof = proof('unit-core', { workflowAttempt: 2, workflowJob: 'unit', mode: 'task-execution' });
+  const run = { id: 42, workflow_id: 7, event: 'push', head_branch: 'main', head_sha: sourceSha,
+    run_attempt: 2, status: 'completed', conclusion: 'success', repository: { id: 9 } };
+  const job = { id: 84, run_id: 42, run_attempt: 2, head_sha: sourceSha, name: 'unit-core',
+    status: 'completed', conclusion: 'success' };
+  const artifact = { id: 91, name: 'ci-evidence-unit-core', digest: `sha256:${'c'.repeat(64)}`, expired: false,
+    workflow_run: { id: 42, head_sha: sourceSha } };
+  const expected = { repositoryId: 9, workflowId: 7, task: 'unit-core', jobName: 'unit-core', workflowJob: 'unit',
+    artifactName: 'ci-evidence-unit-core', artifactId: 91, artifactDigest: artifact.digest };
+  assert.doesNotThrow(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact, expected }));
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof: { ...inputProof, mode: 'static-coverage' },
+    identity, run, job, artifact, expected }), /Unsupported reusable task input proof mode/);
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact,
+    expected: { ...expected, artifactDigest: `sha256:${'d'.repeat(64)}` } }), /artifact digest mismatch/);
+});
+
 test('task proof reuse metadata is limited to a complete coverage receipt and stays outside the plan digest', () => {
   const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
   const receipt = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: 'e'.repeat(64), workflowRunId: 42,
@@ -114,6 +133,31 @@ test('task proof reuse metadata is limited to a complete coverage receipt and st
   assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
     ...reusedPlan.taskInputReuse, unsupported: receipt,
   } }), /Unsupported task/);
+});
+
+test('affected PR reuse metadata must account for every omitted validation with exact task artifacts', () => {
+  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
+  const digest = 'e'.repeat(64);
+  const runtime = proof('coverage').runtime;
+  const coverage = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: digest,
+    workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types',
+    artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
+    inputClosure: proof('coverage').inputClosure, runtime,
+    certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
+      jobId: 85, step: 'Certify every required exact-source matrix element' } };
+  const omitted = Object.fromEntries(Object.values(VERIFICATION_GROUPS).flat().filter(task => task !== 'coverage').map(task => {
+    const group = taskGroup(task);
+    return [task, { ...coverage, task, workflowJob: taskWorkflowJob(task), artifactName: `ci-evidence-${group}`,
+      artifactId: 100 + Object.keys(VERIFICATION_GROUPS).indexOf(group) }];
+  }));
+  const reuse = { format: 'codexia-ci-task-input-reuse/v2', coverage, omitted };
+  assert.doesNotThrow(() => validateVerificationPlan({ ...plan, taskInputReuse: reuse }));
+  const missing = structuredClone(reuse);
+  delete missing.omitted['unit-core'];
+  assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: missing }), /proof inventory/);
+  const foreignArtifact = structuredClone(reuse);
+  foreignArtifact.omitted['unit-core'].artifactName = 'ci-evidence-unit-modules';
+  assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: foreignArtifact }), /producer identity/);
 });
 
 test('a PR task proof is trusted only through a successful exact-main certification', () => {
@@ -151,12 +195,16 @@ test('report-only producer inventory binds exact source, run, job, and selected 
     workflowRunId: 501, workflowAttempt: 2, workflowJob: 'unit',
     workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main', workflowSha: sourceSha,
   };
+  const taskInputProof = proof('unit-contracts', { planDigest: digest, workflowRunId: 501, workflowAttempt: 2,
+    workflowJob: 'unit', mode: 'task-execution', runtime: { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3',
+      execPath: '/opt/node/bin/node', cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' } });
   const report = {
     group: 'unit-core', sha: sourceSha, planDigest: digest,
     ...workflowIdentity,
     results: tasks.map((task, i) => ({
       task, status: 'passed', seconds: i + 1,
-      invocations: [{ executable: 'node', arguments: ['scripts/ci-workspace.mjs', 'unit', task.slice(5)], environmentKeys: [] }],
+       invocations: [{ executable: '/opt/node/bin/node', arguments: ['scripts/ci-workspace.mjs', 'unit', task.slice(5)], environmentKeys: [] }],
+      ...(task === 'unit-contracts' ? { inputProof: taskInputProof } : {}),
     })),
   };
   const inventory = {
@@ -166,7 +214,7 @@ test('report-only producer inventory binds exact source, run, job, and selected 
     runner: { os: 'Linux', arch: 'X64', imageOS: 'ubuntu24', imageVersion: '20261115.1', nodeVersion: 'v24.22.3' },
     selectedTasks: tasks,
     groupInvocations: [],
-    taskInvocations: report.results.map(({ task, status, invocations }) => ({ task, status, invocations })),
+    taskInvocations: report.results.map(({ task, status, invocations, inputProof }) => ({ task, status, invocations, ...(inputProof ? { inputProof } : {}) })),
   };
   assert.doesNotThrow(() => assertTaskProducerInventory({ plan, report, inventory }));
   assert.throws(() => assertTaskProducerInventory({ plan, report, inventory: { ...inventory, workflowAttempt: 1 } }), /Attempt/);

@@ -26,6 +26,11 @@ h1{font-size:clamp(36px,5.4vw,71px);line-height:1.01;font-weight:660;letter-spac
 .control label{font-size:11px;font-weight:750;letter-spacing:.05em;color:var(--muted)}
 .control select{width:100%;background:#192329;border:1px solid #405058;border-radius:6px;padding:12px 36px 12px 13px;color:#eff8f4;cursor:pointer}
 .control select:disabled{opacity:.6;cursor:not-allowed}
+.copy-diagnostics{background:#284b40;border:1px solid #7cb59f;border-radius:6px;color:#f0fcf6;padding:11px 12px;cursor:pointer;font-size:12px;font-weight:720;text-align:center}
+.copy-diagnostics:hover:not(:disabled){background:#35594a}
+.copy-diagnostics:disabled{opacity:.6;cursor:not-allowed}
+#copy-hint{font-size:10px;line-height:1.4;color:var(--muted)}
+#copy-status{font-size:11px;color:#b0dbca;min-height:1em;line-height:1.4}
 .status{color:#aab8bf;font-size:12px;min-height:29px;overflow-wrap:anywhere}
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;border:1px solid var(--line);background:var(--line);margin:10px 0 24px}
 .metric{background:#11191d;min-width:0;padding:22px 23px;display:flex;flex-direction:column;gap:8px}

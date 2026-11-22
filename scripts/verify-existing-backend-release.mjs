@@ -75,6 +75,11 @@ export function successfulPublicationJobs(jobs,promoted,hasPromotion=promoted){
   return !hasPromotion||exactJob('Resolve verified backend promotion','success');
 }
 
+export function backendReleaseSourceTree(sourceSha,git=execFileSync){
+  assert.match(sourceSha??'',/^[a-f0-9]{40}$/u,'Backend release source SHA is invalid');
+  return git('git',['rev-parse',sourceSha+'^{tree}'],{encoding:'utf8'}).trim();
+}
+
 export async function verifyExistingBackendRelease({env=process.env,args=process.argv.slice(2)}={}){
   const [image,mainSha,producerSha,version,profile,event]=args;
   assert.equal(env.GITHUB_REPOSITORY,REPOSITORY);
@@ -99,12 +104,12 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
     const directory=env.CODEXIA_BACKEND_PROMOTION_DIR;
     assert.ok(typeof directory==='string'&&path.isAbsolute(directory),'Backend promotion receipt directory is invalid');
     receipt=JSON.parse(await readFile(path.join(directory,'codexia-backend-promotion.json'),'utf8'));
-    mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
+    mainTree=backendReleaseSourceTree(mainSha);
   }else{
     const manifest=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
     assert.ok(typeof manifest==='string'&&path.isAbsolute(manifest),'Backend build manifest path is invalid');
     receipt=JSON.parse(await readFile(manifest,'utf8'));
-    mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
+    mainTree=backendReleaseSourceTree(mainSha);
     assert.equal(receipt.workflowRunId,Number(env.GITHUB_RUN_ID),'Backend build receipt run ID mismatch');
     assert.equal(receipt.workflowRunNumber,Number(env.GITHUB_RUN_NUMBER),'Backend build receipt run number mismatch');
     assert.equal(receipt.sourceSha,mainSha,'Backend build receipt source mismatch');

@@ -425,7 +425,7 @@ async function runLifecycle() {
   const bgeModelDirectory = "/models/" + MODEL_IDS.reranker.id + "/" + MODEL_IDS.reranker.revision + "/onnx";
   assert.ok((await fs.readdir(e5ModelDirectory)).length > 0);
   assert.ok((await fs.readdir(bgeModelDirectory)).length > 0);
-  const {createPostgresPersistence, migratePostgresDatabase} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+  const {createPostgresPersistence, migratePostgresDatabase} = await import("@codexia/persistence-postgres");
   const databaseUrl = process.env.CODEXIA_DATABASE_URL;
   assert.ok(databaseUrl, "disposable PostgreSQL URL is required");
   await migratePostgresDatabase(databaseUrl);
@@ -880,7 +880,7 @@ async function replacementProbe() {
     await waitFor(async () => (await captureMetrics(undefined, composition.moduleWorkerEntries)).compiledWorkerCount === 0,
       "replacement semantic worker did not exit after its capability lease was released", 30_000);
     const {CoreStore} = await import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js");
-    const {createPostgresPersistence} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+    const {createPostgresPersistence} = await import("@codexia/persistence-postgres");
     const persistence = createPostgresPersistence(process.env.CODEXIA_DATABASE_URL);
     try {
       const reader = await new CoreStore({persistence}).reader(PROJECT_ID);

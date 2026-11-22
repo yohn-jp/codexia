@@ -67,6 +67,34 @@ test('observed dependency chain chooses latest completed prerequisite', () => {
   assert.equal(report.jobs.find(x=>x.name==='build-core').steps[0].phase,'Validation');
 });
 
+
+test('bottleneck attribution separates validation and reveals near-finishing siblings', () => {
+  const sameFinishGroup = [...jobs, job(7,'browser-full-writing',28,32,54)];
+  const report = observeRun(run(),sameFinishGroup,graph);
+  assert.equal(report.bottleneck.available,true);
+  assert.equal(report.bottleneck.leafName,'browser-core-webkit');
+  assert.equal(report.bottleneck.leafSeconds,26);
+  assert.equal(report.bottleneck.leafQueueSeconds,3);
+  assert.equal(report.bottleneck.beforeValidationSeconds,0);
+  assert.equal(report.bottleneck.validationSeconds,26);
+  assert.equal(report.bottleneck.certificationTailSeconds,5);
+  assert.equal(report.bottleneck.runnerUpName,'browser-full-writing');
+  assert.equal(report.bottleneck.runnerUpGapSeconds,3);
+  assert.deepEqual(report.bottleneck.nearFinish.map(item=>item.name),
+    ['browser-core-webkit','browser-full-writing']);
+});
+
+test('bottleneck remains unavailable for failed certification, reruns and missing steps', () => {
+  assert.equal(observeRun(run({conclusion:'failure'}),jobs,graph).bottleneck.available,false);
+  assert.equal(observeRun(run({run_attempt:2}),jobs,graph).bottleneck.available,false);
+  const noSteps = jobs.map(item => item.name === 'browser-core-webkit' ? { ...item, steps: [] } : item);
+  const observation = observeRun(run(),noSteps,graph).bottleneck;
+  assert.equal(observation.available,true);
+  assert.equal(observation.validationSeconds,null);
+  assert.equal(observation.beforeValidationSeconds,null);
+  assert.equal(observation.containerSeconds,null);
+});
+
 test('missing dependency or failed certification remains unavailable', () => {
   assert.equal(blockingChain(run(),jobs.filter(x=>!x.name.startsWith('build-') && x.name!=='plan'),graph).verified,false);
   assert.equal(blockingChain(run(),jobs.map(x=>x.name==='certification'?{...x,conclusion:'failure'}:x),graph).verified,false);
@@ -185,6 +213,15 @@ test('collector reports runs whose PR association cannot be resolved', async () 
   assert.deepEqual(observed.prs.map(item=>({number:item.number,sha:item.sha})),[
     {number:42,sha:'a'.repeat(40)},
   ]);
+});
+
+test('diagnostic JSON is copied from a single accessible button', () => {
+  const html=readFileSync(new URL('./site/index.html',import.meta.url),'utf8');
+  const client=readFileSync(new URL('./site/dashboard.js',import.meta.url),'utf8');
+  assert.match(html,/id="copy-diagnostics"[^>]*disabled/u);
+  assert.match(html,/id="copy-status" role="status" aria-live="polite"/u);
+  assert.match(client,/navigator\.clipboard\.writeText/u);
+  assert.match(client,/buildDiagnosticExport/u);
 });
 
 test('static shell displays live telemetry and no invented metrics', () => {

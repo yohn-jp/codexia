@@ -4,7 +4,7 @@ import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
-import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndex } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
 export type { ProposalStatus } from "@codexia/contracts";
 export interface TreeScene {
@@ -147,7 +147,6 @@ const hash = (value: string | Uint8Array) => createHash("sha256").update(value).
 const pid = (value: string) => value as ProjectId;
 function fail(status: number, code: string, message: string): never { throw new CoreError(status, code, message); }
 function safePath(value: string): void { assertProjectPath(value); }
-function body(content: string): string { return content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n)?/, ""); }
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -457,7 +456,7 @@ export class CoreStore implements MutationCoordinator {
     const paths=index.pathsByDocumentId.get(document.id), manuscriptPath=paths?.bodyPath, metadataPath=paths?.metadataPath;
     const manuscript=manuscriptPath ? manifest.files[manuscriptPath] : undefined, metadata=metadataPath ? manifest.files[metadataPath] : undefined;
     if (!manuscriptPath || !metadataPath || !manuscript || !metadata) fail(404,"scene_not_found","Scene body not found");
-    return {snapshot:manifest.snapshot,scene:{id:this.logicalId(index,document),title:document.title,text:body(manuscript.content),revision:hash(metadata.content+"\0"+manuscript.content)},document:{path:manuscriptPath,content:manuscript.content,revision:manuscript.revision},metadata:{path:metadataPath,content:metadata.content,revision:metadata.revision}};
+    return {snapshot:manifest.snapshot,scene:{id:this.logicalId(index,document),title:document.title,text:manuscriptBody(manuscript.content),revision:hash(metadata.content+"\0"+manuscript.content)},document:{path:manuscriptPath,content:manuscript.content,revision:manuscript.revision},metadata:{path:metadataPath,content:metadata.content,revision:metadata.revision}};
   }
   async readScene(projectId:string,sceneId:string):Promise<Scene> { return (await this.readSceneSnapshot(projectId,sceneId)).scene; }
   async resolveDocumentScene(projectId:string,path:string,pinned?:SnapshotId) { safePath(path); const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const id=manifest.files[path]?.documentId; const document=id ? index.documentsById.get(id):undefined; return {snapshot:manifest.snapshot,sceneId:document ? this.logicalId(index,document):null}; }
@@ -466,7 +465,7 @@ export class CoreStore implements MutationCoordinator {
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const results:LiteralSearchResult[]=[];
     const normalizedQuery=query.toLocaleLowerCase();
     if (query) for (const document of manifest.documents) { const bodyPath=index.pathsByDocumentId.get(document.id)?.bodyPath,entry=bodyPath ? manifest.files[bodyPath] : undefined; for (const field of ["name","body"] as const) {
-      const text=field==="name" ? document.title:entry ? body(entry.content):""; const folded=text.toLocaleLowerCase(), match=folded.indexOf(normalizedQuery); if(match<0)continue;
+      const text=field==="name" ? document.title:entry ? manuscriptBody(entry.content):""; const folded=text.toLocaleLowerCase(), match=folded.indexOf(normalizedQuery); if(match<0)continue;
       let offset=match, end=match+normalizedQuery.length;
       if(folded.length!==text.length) {
         let original=0, normalized=0;
@@ -1018,10 +1017,10 @@ export class CoreStore implements MutationCoordinator {
     const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(manifest.snapshot,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision");
   }
   async listManuscriptSnapshots(projectId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;snapshots:ManuscriptSnapshotMeta[]}>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=document.headRevisionId ? await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId!)) : {revisions:[]};return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=document.headRevisionId ? await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId!)) : {revisions:[]};return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(manuscriptBody(revision.markdown)).length,source:"postgres"}))};
   }
   async readManuscriptSnapshot(projectId:string,snapshotId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;manuscriptSnapshot:ManuscriptSnapshot}>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(manuscriptBody(revision.markdown)).length,source:"postgres",body:manuscriptBody(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
   }
   async status(projectId:string) { const observation=await this.observe(projectId);return {...observation.snapshot,state:"durable" as const}; }
   async history(projectId:string,pinned?:SnapshotId):Promise<Commit[]> {

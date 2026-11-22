@@ -127,6 +127,26 @@ export async function collectGitHubPages(fetchPage, itemsKey) {
     if (items.length === expectedCount) return items;
   }
 }
+/**
+ * Fetches every page of GitHub REST list endpoints that return arrays rather
+ * than the total_count object used by Actions jobs and artifacts.
+ * @param {(page: number, perPage: number) => Promise<unknown>} fetchPage
+ */
+export async function collectGitHubArrayPages(fetchPage) {
+  if (typeof fetchPage !== 'function') throw new Error('Invalid GitHub array pagination request');
+  const perPage = 100;
+  /** @type {unknown[]} */
+  const items = [];
+  for (let page = 1; page <= 10_000; page++) {
+    const result = await fetchPage(page, perPage);
+    if (!Array.isArray(result) || result.length > perPage) {
+      throw new Error('Invalid GitHub array pagination response');
+    }
+    items.push(...result);
+    if (result.length < perPage) return items;
+  }
+  throw new Error('GitHub array pagination exceeded its safety limit');
+}
 /** @param {string} tag @param {string} expectedSha @param {string} actualSha */
 export function assertReleaseIdentity(tag, expectedSha, actualSha) {
   if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag) || !/^[a-f0-9]{40}$/.test(expectedSha) || actualSha !== expectedSha) {

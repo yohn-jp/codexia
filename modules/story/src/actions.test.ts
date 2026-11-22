@@ -233,6 +233,47 @@ test("native PostgreSQL manuscript projections are visible to scene context alon
   assert.equal(metadataOnly.entities.has(id), true);
 });
 
+test("native scene context preserves Markdown horizontal rules and parses explicit YAML frontmatter", async () => {
+  const ordinaryId = "33333333-3333-4333-8333-333333333333";
+  const unclosedRuleId = "44444444-4444-4444-8444-444444444444";
+  const frontmatterId = "55555555-5555-4555-8555-555555555555";
+  const ordinaryMarkdown = "---\n普通の回想\n---\n「すぐに戻ります。」";
+  const unclosedRuleMarkdown = "---\n\n水平線の後に続く本文です。";
+  const frontmatterMarkdown = "---\ntitle: Explicit title\nstatus: draft\n---\n本文です。";
+  const scenePath = (id: string) => `plot/volumes/vol-main/chapters/ch-main-1/scenes/${id}.yaml`;
+  const documentPath = (id: string) => `documents/${id}.md`;
+  const files = fixtureFiles({
+    [scenePath(ordinaryId)]: yaml({ id: ordinaryId, title: "Ordinary Markdown", manuscript: documentPath(ordinaryId) }),
+    [scenePath(unclosedRuleId)]: yaml({ id: unclosedRuleId, title: "Unclosed rule", manuscript: documentPath(unclosedRuleId) }),
+    [scenePath(frontmatterId)]: yaml({ id: frontmatterId, title: "Explicit frontmatter", manuscript: documentPath(frontmatterId) }),
+    [documentPath(ordinaryId)]: ordinaryMarkdown,
+    [documentPath(unclosedRuleId)]: unclosedRuleMarkdown,
+    [documentPath(frontmatterId)]: frontmatterMarkdown,
+  });
+  const reader = makeReader(files);
+  const context = makeActionContext(reader);
+
+  for (const [id, markdown] of [
+    [ordinaryId, ordinaryMarkdown],
+    [unclosedRuleId, unclosedRuleMarkdown],
+  ] as const) {
+    const result = await invoke<{ manuscript?: { id: string }; manuscriptBody?: string }>(
+      "story.scene.context", { sceneId: id }, context,
+    );
+    assert.equal(result.data.manuscript?.id, `doc-ms-${id}`);
+    assert.equal(result.data.manuscriptBody, markdown);
+    assert.deepEqual(result.snapshot, reader.snapshot);
+  }
+
+  const explicit = await invoke<{ manuscript?: { id: string; name?: string; status?: string }; manuscriptBody?: string }>(
+    "story.scene.context", { sceneId: frontmatterId }, context,
+  );
+  assert.equal(explicit.data.manuscript?.id, `doc-ms-${frontmatterId}`);
+  assert.equal(explicit.data.manuscript?.name, "Explicit title");
+  assert.equal(explicit.data.manuscript?.status, "draft");
+  assert.equal(explicit.data.manuscriptBody, "本文です。");
+});
+
 test("snapshot materialization reads each pinned Story snapshot without proposing writes", async () => {
   const counted = (files: Map<string, string>, projectId: string, projectVersion: number) => {
     const base = makeReader(files, projectId);

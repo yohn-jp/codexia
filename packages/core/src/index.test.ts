@@ -19,6 +19,24 @@ function isHierarchyConflict(error: unknown): boolean {
 }
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("Core scene snapshots preserve horizontal-rule Markdown and strip explicit YAML frontmatter", async () => {
+  const p = await hierarchy();
+  const path = "manuscript/v1/c1/s1.md";
+  const ordinaryMarkdown = "---\n普通の回想\n---\n「すぐに戻ります。」";
+  const originalReader = await core.reader(p.id);
+  const original = await originalReader.read(path);
+  await accept(p.id, operation(originalReader.snapshot, path, ordinaryMarkdown, original!.revision));
+
+  const ordinarySnapshot = await core.readSceneSnapshot(p.id, "s1");
+  assert.equal(ordinarySnapshot.document.content, ordinaryMarkdown);
+  assert.equal(ordinarySnapshot.scene.text, ordinaryMarkdown);
+
+  const explicitMarkdown = "---\ntitle: Explicit title\nstatus: draft\n---\n本文です。";
+  const currentReader = await core.reader(p.id);
+  const current = await currentReader.read(path);
+  await accept(p.id, operation(currentReader.snapshot, path, explicitMarkdown, current!.revision));
+  assert.equal((await core.readSceneSnapshot(p.id, "s1")).scene.text, "本文です。");
+});
 test("PostgreSQL projection labels a note with misleading scene ancestry by its canonical document kind", async () => {
   const p = await hierarchy();
   const documents = await persistence.read((reader) => reader.listDocuments(p.id));
