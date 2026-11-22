@@ -16,7 +16,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, isPrivatePublishingPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
@@ -521,6 +521,11 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
   return Reflect.ownKeys(value).every((key) => typeof key === "string" && allowed.has(key));
 }
 
+function isVisibleProposal(status: ProposalStatus, canReviewPrivateChangeSets: boolean): boolean {
+  return canReviewPrivateChangeSets ||
+    !status.proposal.operations.some((operation) => operation.writes.some(({ path }) => isPrivatePublishingPath(path)));
+}
+
 function projectPathId(value: string): string { return parseProjectId(value); }
 
 function optionalSnapshot(query: URLSearchParams, selectedProjectId?: string): { pinned?: SnapshotId } {
@@ -780,6 +785,7 @@ export function createServer(options: ApiServerOptions): Server {
     authorizeProposal?: () => Promise<void>,
     allowedProjectIds?: readonly string[],
     resolveNativeProposalActor?: () => Promise<string>,
+    canReviewPrivateChangeSets = false,
   ): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
@@ -993,12 +999,12 @@ export function createServer(options: ApiServerOptions): Server {
       { module: "core", action: make("core.proposals.list", emptyInput, async () => {
         if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
         const proposals = await coreStore.listProposals(projectId);
-        return { proposals: proposals.slice(0, 1000) };
+        return { proposals: proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) };
       }) },
       { module: "core", action: make("core.proposals.get", proposalInput, async (_context, input) => {
         if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
         const status = await coreStore.getProposal(projectId, (input as { proposalId: string }).proposalId);
-        if (!status) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
+        if (!status || !isVisibleProposal(status, canReviewPrivateChangeSets)) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
         return { proposal: status };
       }) },
       { module: "core", action: {
@@ -1009,12 +1015,16 @@ export function createServer(options: ApiServerOptions): Server {
           return { path: value.path };
         } },
         async invoke(input, context) {
+          const { path } = input as { path: string };
+          if (!canReviewPrivateChangeSets && isPrivatePublishingPath(path)) {
+            return { ok: true, snapshot: context.reader.snapshot, data: { sceneId: null, document: null } };
+          }
           if (!coreStore.resolveDocumentScene) return { ok: false, snapshot: context.reader.snapshot,
             error: { code: "DOCUMENT_NAVIGATION_UNAVAILABLE", message: "Document navigation is unavailable", retryable: false } };
-          const result = await coreStore.resolveDocumentScene(projectId, (input as { path: string }).path, context.reader.snapshot);
-          const document = result.sceneId === null ? await context.reader.read((input as { path: string }).path) : undefined;
+          const result = await coreStore.resolveDocumentScene(projectId, path, context.reader.snapshot);
+          const document = result.sceneId === null ? await context.reader.read(path) : undefined;
           return { ok: true, snapshot: result.snapshot, data: { sceneId: result.sceneId,
-            ...(document !== undefined ? { document: document ? { path: (input as { path: string }).path, content: document.content, revision: document.revision } : null } : {}) } };
+            ...(document !== undefined ? { document: document ? { path, content: document.content, revision: document.revision } : null } : {}) } };
         },
       } },
       { module: "core", action: make("core.search", searchInput, async (context, input) => {
@@ -1032,6 +1042,7 @@ export function createServer(options: ApiServerOptions): Server {
         projectId: projectId as import("@codexia/persistence-contracts").ProjectId,
         actorId: actorId as import("@codexia/persistence-contracts").ActorId,
         origin: source === "mcp" ? "external-agent" : "author",
+        canReviewPrivateChangeSets,
         authorizeProposal: authorizeProposal ?? (async () => { throw httpFailure(403, "WRITE_PERMISSION_REQUIRED", "Current authenticated write permission is required to propose native changes"); }),
       }).map(action => ({ module: "core" as const, action })),
     ];
@@ -1083,6 +1094,7 @@ export function createServer(options: ApiServerOptions): Server {
     allowedEffects?: readonly ActionDescriptor["effect"][],
     allowedProjectIds?: readonly string[],
     resolveNativeProposalActor?: () => Promise<string>,
+    canReviewPrivateChangeSets = false,
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
@@ -1093,7 +1105,7 @@ export function createServer(options: ApiServerOptions): Server {
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
-      }, allowedProjectIds, resolveNativeProposalActor),
+      }, allowedProjectIds, resolveNativeProposalActor, canReviewPrivateChangeSets && source !== "mcp"),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
         if (hosted || (source === "mcp" && authorizeProposal)) {
@@ -1821,6 +1833,7 @@ export function createServer(options: ApiServerOptions): Server {
     const isOAuthAuthor = Boolean(oauthPrincipal);
     const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : Boolean(admittedMcpClient);
     const isAuthor = isCookie || isOAuthAuthor;
+    const canReviewPrivateChangeSets = isAuthor && (!hosted || hostedPrincipal?.permissions.includes("write") === true);
     const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
     const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = admittedMcpClient
       ? (["read", "compute", "propose"] as const).filter((effect) =>
@@ -1922,6 +1935,7 @@ export function createServer(options: ApiServerOptions): Server {
       url: request.url ?? routePath,
       body: parsedBody,
       requestHeaders: request.headers,
+      canReviewPrivateChangeSets,
       requireAuthor: async () => {
         const principal = await requireAuthorSession();
         return principal?.userId ?? "owner";
@@ -2056,7 +2070,7 @@ export function createServer(options: ApiServerOptions): Server {
       const projectIds = admittedMcpClient
         ? [...admittedMcpClient.projectIds]
         : hosted ? (await listProjects()).map(project => project.id) : null;
-      sendJson(response, 200, await coreStore.reviewQueue(projectIds));
+      sendJson(response, 200, await coreStore.reviewQueue(projectIds, { excludePrivateProposals: !canReviewPrivateChangeSets }));
       return;
     }
 
@@ -2172,13 +2186,14 @@ export function createServer(options: ApiServerOptions): Server {
       }
       if (suffix === "proposals" && method === "GET") {
         if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        sendJson(response, 200, { proposals: (await coreStore.listProposals(projectId)).slice(0, 1000) }); return;
+        const proposals = await coreStore.listProposals(projectId);
+        sendJson(response, 200, { proposals: proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
       }
       const proposalMatch = suffix.match(/^proposals\/([^/]+)$/u);
       if (proposalMatch && method === "GET") {
         if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
         const proposal = await coreStore.getProposal(projectId, parseProjectId(proposalMatch[1]!));
-        if (!proposal) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
+        if (!proposal || !isVisibleProposal(proposal, canReviewPrivateChangeSets)) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
         sendJson(response, 200, proposal); return;
       }
       if (suffix === "approvals" && method === "POST") {
@@ -2248,7 +2263,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2356,7 +2371,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets);
         if (mcpStreamableRoute && admittedMcpClient) {
           const { issuer, clientId, userId } = admittedMcpClient;
           host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
@@ -2388,7 +2403,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (suffix === "review-queue" && method === "GET") {
         if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
         const result = await coreStore.listProposalsSnapshot(projectId);
-        sendJson(response, 200, { snapshot: result.snapshot, proposals: result.proposals.slice(0, 1000) }); return;
+        sendJson(response, 200, { snapshot: result.snapshot, proposals: result.proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
       }
 
       if (suffix.startsWith("modules/") || suffix.startsWith("actions/")) throw httpFailure(404, "NOT_FOUND", "API route not found");

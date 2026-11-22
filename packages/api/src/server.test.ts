@@ -4078,6 +4078,122 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.equal(nestedChange.status, "proposed");
 });
 
+it("restricts Publishing review payloads and legacy files to authenticated authors", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Private Publishing review");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-publishing-review-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const projectId = project.id;
+  const grantsPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+  const episodesPath = "meta/scriptorium/modules/publishing/episodes.yaml";
+  const grantBody = '{"tokenHash":"fixture-private-digest","label":"Proofreader"}';
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId, moduleId: "core.artifacts", key: grantsPath, expectedVersion: null, value: { content: grantBody },
+  }));
+  const snapshot = (await store.observe(projectId)).snapshot;
+  const ordinaryId = randomUUID();
+  const privateIds = [randomUUID(), randomUUID()] as const;
+  for (const [id, privatePath] of [[ordinaryId], [privateIds[0], grantsPath], [privateIds[1], episodesPath]] as const) {
+    const operation: ChangeOperation = {
+      id: randomUUID(), projectId, baseProjectVersion: snapshot.projectVersion, generation: 0,
+      effect: "metadata", reads: [], message: "Update fixture metadata",
+      writes: [
+        { path: "meta/review-notes.md", revision: null, content: "Public review notes" },
+        ...(privatePath ? [{ path: privatePath, revision: null, content: "Author draft" }] : []),
+      ],
+    };
+    await store.propose(projectId, { id, snapshot, operations: [operation], source: "author" });
+  }
+  const native = await persistence.transaction(tx => tx.createChangeSet({
+    projectId, authorId: "owner", idempotencyKey: "private-publishing",
+    operations: [{
+      type: "module.record.save",
+      command: { projectId, moduleId: "publishing", key: "share-grants", expectedVersion: null, value: { grants: [grantBody] } },
+    }],
+    readSet: [{ resource: "module_record", id: '["publishing","share-grants"]', expectedVersion: null }],
+    writeSet: [{ resource: "module_record", id: '["publishing","share-grants"]' }],
+    provenance: { source: "publishing.native", actorId: "owner", details: {} },
+  }));
+  const client = createSignedRequestFixture();
+  const standalone = await startCustomApi(store, staticDir, {
+    persistence, ...testClientSettings(projectId, client.publicJwks, client.isActive),
+  });
+  t.after(standalone.close);
+  const hosted = await startHostedApi(store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, persistence, projectId);
+  t.after(hosted.close);
+  const projectPath = "/api/projects/" + projectId;
+  const nativePath = "/api/v1/persistence/projects/" + projectId + "/changesets";
+  const hostedBrowser = (grant: string) => ({
+    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
+    Cookie: `__Host-praetorium_access=${grant}; __Host-praetorium_csrf=fixture-csrf`,
+    "X-CSRF-Token": "fixture-csrf", "Content-Type": "application/json",
+  });
+  const readers: Array<{ name: string; base: string; headers: Record<string, string>; author: boolean; directPersistence: boolean }> = [
+    { name: "OAuth author", base: standalone.base, headers: client.ownerHeaders(), author: true, directPersistence: true },
+    { name: "OAuth MCP reader", base: standalone.base, headers: client.mcpHeaders(), author: false, directPersistence: false },
+    { name: "Hosted write browser", base: hosted.base, headers: hostedBrowser("write-grant"), author: true, directPersistence: true },
+    { name: "Hosted read browser", base: hosted.base, headers: hostedBrowser("read-grant"), author: false, directPersistence: true },
+    { name: "Hosted write bearer", base: hosted.base, headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, author: false, directPersistence: true },
+  ];
+  for (const { name, base, headers, author, directPersistence } of readers) {
+    await t.test(name, async () => {
+      const invoke = async <Data>(action: string, input: unknown): Promise<ActionResult<Data>> => {
+        const url = base + projectPath + "/actions/" + action;
+        const body = JSON.stringify({ input });
+        if (headers.Cookie) {
+          const response = await rawHostedRequest(url, headers, body);
+          assert.equal(response.status, 200, response.body);
+          return JSON.parse(response.body) as ActionResult<Data>;
+        }
+        const response = await fetch(url, { method: "POST", headers, body });
+        assert.equal(response.status, 200);
+        return await response.json() as ActionResult<Data>;
+      };
+      // A browser does not attach Origin to these same-origin GET requests.
+      const getHeaders = new Headers(headers);
+      getHeaders.delete("origin");
+      const expectedIds = (author ? [ordinaryId, ...privateIds] : [ordinaryId]).sort();
+      for (const path of ["/proposals", "/review-queue"]) {
+        const response = await fetch(base + projectPath + path, { headers: getHeaders });
+        assert.equal(response.status, 200);
+        const { proposals } = await response.json() as { proposals: ProposalStatus[] };
+        assert.deepEqual(proposals.map(status => status.proposal.id).sort(), expectedIds);
+      }
+      const globalQueue = await fetch(base + "/api/review-queue", { headers: getHeaders });
+      assert.equal(globalQueue.status, 200);
+      const queue = await globalQueue.json() as { unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> };
+      assert.deepEqual(queue.items.filter(item => item.projectId === projectId).map(item => item.proposal.proposal.id).sort(), expectedIds);
+      if (base === hosted.base) assert.equal(queue.unresolvedCount, expectedIds.length);
+      for (const id of [ordinaryId, ...privateIds]) {
+        const response = await fetch(base + projectPath + "/proposals/" + id, { headers: getHeaders });
+        assert.equal(response.status, author || id === ordinaryId ? 200 : 404);
+        if (!author && id !== ordinaryId) assert.equal((await response.json()).code, "PROPOSAL_NOT_FOUND");
+      }
+      const list = await invoke<{ proposals: ProposalStatus[] }>("core.proposals.list", {});
+      assert.ok(list.ok, JSON.stringify(list));
+      assert.deepEqual(list.data.proposals.map(({ proposal }) => proposal.id).sort(), expectedIds);
+      const detail = await invoke<{ proposal: ProposalStatus }>("core.proposals.get", { proposalId: privateIds[0] });
+      if (author) assert.ok(detail.ok && detail.data.proposal.proposal.id === privateIds[0], JSON.stringify(detail));
+      else assert.ok(!detail.ok && detail.error.code === "PROPOSAL_NOT_FOUND", JSON.stringify(detail));
+
+      const resolved = await invoke<{ sceneId: null; document: { path: string; content: string } | null }>(
+        "core.document.resolve", { path: grantsPath },
+      );
+      assert.ok(resolved.ok, JSON.stringify(resolved));
+      assert.equal(resolved.data.sceneId, null);
+      if (author) assert.equal(resolved.data.document?.content, grantBody);
+      else assert.equal(resolved.data.document, null);
+
+      const nativeDetail = await invoke<{ changeSet: { id: string } } | null>("core.changeset.get", { changeSetId: native.changeSet.id });
+      assert.ok(nativeDetail.ok, JSON.stringify(nativeDetail));
+      assert.equal(nativeDetail.data?.changeSet.id, author ? native.changeSet.id : undefined);
+      if (directPersistence) {
+        const response = await fetch(base + nativePath + "/" + native.changeSet.id, { headers: getHeaders });
+        assert.equal(response.status, author ? 200 : 404);
+      }
+    });
+  }
+});
+
 it("reorders hierarchy only by approving a version-bound native ChangeSet", async (t) => {
   const native = await nativeProject(t, "Native hierarchy reorder");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-reorder-"));
