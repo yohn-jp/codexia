@@ -247,7 +247,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await page.getByRole("textbox", { name: "本文", exact: true }).fill(manuscript);
     const savePromise = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${createdProject.id}/documents/${scene.id}` && response.request().method() === "PATCH" && response.status() === 200);
     await savePromise;
-    await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+    await expect(page.locator(".pg-save-state summary")).toHaveText("作品に保存済み", { timeout: 15_000 });
 
     const persisted = createPostgresPersistence(fixtureDatabaseUrl);
     try {

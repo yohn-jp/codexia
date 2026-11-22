@@ -20,11 +20,11 @@ export async function expectNoUnsavedDeviceChanges(page: Page): Promise<void> {
   await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
 }
 export async function expectServerSaved(page: Page): Promise<void> {
-  await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+  await expect(page.locator(".pg-save-state summary")).toHaveText("作品に保存済み", { timeout: 15_000 });
 }
 export async function expectServerSaveFailure(page: Page): Promise<void> {
   const details = await openProtectionDetails(page);
-  await expect(details.locator("summary")).toHaveText("要確認", { timeout: 15_000 });
+  await expect(details.locator("summary")).toHaveText(/保存結果を確認できません|作品への保存を確認できません/, { timeout: 15_000 });
   await expect(details).toContainText("今回の保存結果を確認できません");
 }
 export async function openRevisionHistory(scope: Page | Locator): Promise<void> {
