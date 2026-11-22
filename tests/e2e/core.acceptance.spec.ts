@@ -1,5 +1,6 @@
 import type { Page, Response } from "@playwright/test";
 import type { ChangeOperation } from "@codexia/contracts";
+import type { ChangeSet } from "@codexia/persistence-contracts";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import { expect, test, type AuthorApiFetch, type AuthorizeAuthor } from "./author-oauth-fixture";
 import { createHash, randomUUID } from "node:crypto";
@@ -1247,26 +1248,33 @@ test("native publishing uses the external reader origin and preserves proposal, 
   const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
   const scope = panel.getByRole("combobox", { name: "範囲", exact: true });
   const target = panel.getByRole("combobox", { name: "対象", exact: true });
-  const approveAndApply = async (proposalId: string) => {
-    const proposalResponse = await author.fetch(`${origin}/api/projects/${projectId}/proposals/${encodeURIComponent(proposalId)}`);
-    expect(proposalResponse.ok(), await proposalResponse.text()).toBe(true);
-    const proposalStatus = await proposalResponse.json() as {
-      proposal: { operations: Array<{ id: string }> };
-    };
-    const operations = proposalStatus.proposal.operations;
-    expect(operations.length).toBeGreaterThan(0);
-    const approval = await author.fetch(`${origin}/api/projects/${projectId}/approvals`, {
-      method: "POST",
-      data: { proposalId, operationIds: operations.map((operation) => operation.id) },
+  type ShareProposal = { proposalId: string; changeSet: Pick<ChangeSet, "id" | "projectId"> };
+  const shareChangeSetPath = (id: string) =>
+    `${origin}${rootPath}/${projectId}/changesets/${encodeURIComponent(id)}`;
+  const approveAndApply = async (proposal: ShareProposal, verifyApprovalOnly?: () => Promise<void>) => {
+    expect(proposal.changeSet).toEqual({ id: proposal.proposalId, projectId });
+    const path = shareChangeSetPath(proposal.proposalId);
+    const proposedResponse = await author.fetch(path);
+    expect(proposedResponse.status(), await proposedResponse.text()).toBe(200);
+    const { changeSet } = await proposedResponse.json() as { changeSet: ChangeSet };
+    expect(changeSet).toMatchObject({ id: proposal.proposalId, projectId, status: "proposed" });
+    expect(changeSet.operations).toHaveLength(1);
+    expect(changeSet.operations[0]).toMatchObject({
+      type: "module.record.save", command: { projectId, moduleId: "publishing", key: "share-grants" },
     });
-    expect(approval.status(), await approval.text()).toBe(204);
-    for (const operation of operations) {
-      const applied = await author.fetch(`${origin}/api/projects/${projectId}/apply`, {
-        method: "POST",
-        data: operation,
-      });
-      expect(applied.status(), await applied.text()).toBe(201);
-    }
+
+    const approval = await author.fetch(`${path}/approve`, {
+      method: "POST", data: { expectedVersion: changeSet.version },
+    });
+    expect(approval.status(), await approval.text()).toBe(200);
+    const { changeSet: approved } = await approval.json() as { changeSet: ChangeSet };
+    expect(approved).toMatchObject({ id: changeSet.id, projectId, status: "approved" });
+    await verifyApprovalOnly?.();
+    const applied = await author.fetch(`${path}/apply`, {
+      method: "POST", data: { expectedVersion: approved.version },
+    });
+    expect(applied.status(), await applied.text()).toBe(200);
+    expect(await applied.json()).toMatchObject({ changeSet: { id: changeSet.id, projectId, status: "applied" } });
   };
   await scope.selectOption("volume");
   await expect(target).toHaveValue(volume.document.id);
@@ -1290,7 +1298,7 @@ test("native publishing uses the external reader origin and preserves proposal, 
   expect(actionResponse.ok(), await actionResponse.text()).toBe(true);
   const actionBody = await actionResponse.json() as {
     ok: boolean;
-    data: { token: string; proposalId: string; share: { id: string } };
+    data: ShareProposal & { token: string; share: { id: string } };
   };
   expect(actionBody.ok).toBe(true);
   expect(actionResponse.request().postDataJSON()).toMatchObject({ input: { kind: "scene", id: rootScene.document.id } });
@@ -1320,10 +1328,13 @@ test("native publishing uses the external reader origin and preserves proposal, 
     await expect(readerPage.getByRole("heading", { name: "共有された原稿" })).toBeVisible();
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
 
-    await approveAndApply(actionBody.data.proposalId);
-
+    expect((await readerContext.request.get(shareChangeSetPath(actionBody.data.proposalId))).status()).toBe(401);
     const publicBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(actionBody.data.token)}`;
-    const catalogueResponse = await page.request.get(publicBase);
+    await approveAndApply(actionBody.data, async () => {
+      expect((await readerContext.request.get(publicBase)).status()).toBe(404);
+    });
+
+    const catalogueResponse = await readerContext.request.get(publicBase);
     expect(catalogueResponse.ok(), await catalogueResponse.text()).toBe(true);
     const catalogue = await catalogueResponse.json() as {
       sceneCount: number;
@@ -1336,12 +1347,12 @@ test("native publishing uses the external reader origin and preserves proposal, 
     await expect.poll(() => publicReaderRequests.length).toBeGreaterThan(0);
     expect(publicReaderRequests.every((requestOrigin) => requestOrigin === publicReaderOrigin.origin)).toBe(true);
     await readerPage.goto(issuedUrl.toString());
-    const selected = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(rootScene.document.id)}`);
+    const selected = await readerContext.request.get(`${publicBase}/scenes/${encodeURIComponent(rootScene.document.id)}`);
     expect(selected.ok(), await selected.text()).toBe(true);
     expect(await selected.json()).toMatchObject({ id: rootScene.document.id, body: "ROOT-ONLY BODY\n" });
-    const other = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(chapterScene.document.id)}`);
+    const other = await readerContext.request.get(`${publicBase}/scenes/${encodeURIComponent(chapterScene.document.id)}`);
     expect(other.status()).toBe(404);
-    const secondChapterScene = await page.request.get(`${publicBase}/scenes/${encodeURIComponent(otherChapterScene.document.id)}`);
+    const secondChapterScene = await readerContext.request.get(`${publicBase}/scenes/${encodeURIComponent(otherChapterScene.document.id)}`);
     expect(secondChapterScene.status()).toBe(404);
     await expect(readerPage.getByRole("region", { name: "作品直下のシーン" }).getByRole("button")).toHaveText("同じタイトル");
     await readerPage.getByRole("button", { name: "同じタイトル", exact: true }).click();
@@ -1354,12 +1365,12 @@ test("native publishing uses the external reader origin and preserves proposal, 
     });
     expect(shortExpiryResponse.ok(), await shortExpiryResponse.text()).toBe(true);
     const shortExpiryAction = await shortExpiryResponse.json() as {
-      data: { token: string; proposalId: string; share: { id: string; expiresAt: string } };
+      data: ShareProposal & { token: string; share: { id: string; expiresAt: string } };
     };
-    await approveAndApply(shortExpiryAction.data.proposalId);
+    await approveAndApply(shortExpiryAction.data);
     const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
     const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
-    expect((await page.request.get(shortExpiryBase)).ok()).toBe(true);
+    expect((await readerContext.request.get(shortExpiryBase)).ok()).toBe(true);
     await page.waitForTimeout(Math.max(0, Date.parse(shortExpiryAction.data.share.expiresAt) - Date.now() + 100));
     await readerPage.goto(shortExpiryUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
@@ -1374,9 +1385,11 @@ test("native publishing uses the external reader origin and preserves proposal, 
       method: "POST", data: { input: { id: actionBody.data.share.id } },
     });
     expect(revokeResponse.ok(), await revokeResponse.text()).toBe(true);
-    const revokeAction = await revokeResponse.json() as { data: { proposalId: string } };
-    expect((await page.request.get(publicBase)).ok(), "proposed revocation does not affect the published snapshot").toBe(true);
-    await approveAndApply(revokeAction.data.proposalId);
+    const revokeAction = await revokeResponse.json() as { data: ShareProposal };
+    expect((await readerContext.request.get(publicBase)).ok(), "proposed revocation does not affect the published snapshot").toBe(true);
+    await approveAndApply(revokeAction.data, async () => {
+      expect((await readerContext.request.get(publicBase)).ok()).toBe(true);
+    });
     await readerPage.goto(issuedUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
     const revokedListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
