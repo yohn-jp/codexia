@@ -2,13 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createServer as createControlServer, type Server } from "node:http";
 import { rm } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { DocumentId } from "@codexia/persistence-contracts";
-import type { ModuleId, ModuleManifest } from "@codexia/contracts";
-import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { createServer } from "../../packages/api/dist/server.js";
 import { CoreStore } from "../../packages/core/dist/index.js";
+import { browserServerProfile } from "./browser-server-profile";
 
 function requiredSetting(name: string): string {
   const value = process.env[name];
@@ -63,27 +61,7 @@ async function startTestServer(): Promise<void> {
   await migratePostgresDatabase(databaseUrl);
   if (process.env.CODEXIA_E2E_EXTERNAL_DATABASE !== "1") await createDatabaseFixture();
 
-  const profile = process.env.CODEXIA_PROFILE ?? "core";
-  let runtimeOptions: ModuleRuntimeOptions | undefined;
-  if (profile !== "core") {
-    const generatedPath = resolve("profiles", profile, "generated", "server.mjs");
-    const composition = await import(pathToFileURL(generatedPath).href) as {
-      profile: string;
-      moduleManifests: ModuleManifest[];
-      moduleLoaders: Partial<Record<ModuleId, ModuleLoader>>;
-      moduleDirectories: ModuleRuntimeOptions["moduleDirectories"];
-      moduleWorkerEntries: ModuleRuntimeOptions["workerEntries"];
-    };
-    if (composition.profile !== profile) throw new Error(`Generated E2E module profile does not match ${profile}`);
-    runtimeOptions = {
-      manifests: composition.moduleManifests,
-      enabled: composition.moduleManifests.map((manifest) => manifest.id),
-      loaders: composition.moduleLoaders,
-      moduleDirectories: composition.moduleDirectories,
-      workerEntries: composition.moduleWorkerEntries,
-      cacheDirectory: join(stateDir, "module-cache"),
-    };
-  }
+  const serverProfile = await browserServerProfile(process.env.CODEXIA_PROFILE ?? "core", join(stateDir, "module-cache"));
 
   const startApi = async (): Promise<Server> => {
     const persistence = createPostgresPersistence(databaseUrl);
@@ -93,9 +71,8 @@ async function startTestServer(): Promise<void> {
       authToken,
       staticDir: staticDirectory ?? resolve("app/dist"),
       usageDirectory: join(stateDir, "host-history"),
-      profile,
+      ...serverProfile,
       persistence, closePersistenceOnShutdown: true,
-      ...(runtimeOptions ? { runtimeOptions } : {}),
     });
     await listen(server, port);
     return server;

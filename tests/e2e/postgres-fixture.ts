@@ -123,16 +123,8 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   } else {
     expect(session.status()).toBe(200);
   }
-  const createdProject = await page.request.post(new URL("/api/v1/persistence/projects", appBaseURL).toString(), { headers, data: { title: `Writing ${crypto.randomUUID()}` } });
-  expect(createdProject.status()).toBe(201);
-  const { project } = await createdProject.json() as { project: FixtureProject };
-  async function create(title: string, orderKey: string, markdown: string): Promise<FixtureDocument> {
-    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, appBaseURL).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown } });
-    expect(response.status()).toBe(201);
-    return (await response.json() as { document: FixtureDocument }).document;
-  }
-  const scene = await create(title, "a", manuscript);
-  const second = await create("次のシーン", "b", "最初の本文。\n次の文章です。");
+  const fixture = await seedWritingProject(page.request.fetch.bind(page.request), appBaseURL, title, manuscript);
+  const { project, scene } = fixture;
   // Fixture setup must not race an unrelated prior project's guarded selector.
   // Exercise the supported canonical deep link instead of mutating UI selection.
   const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
@@ -140,6 +132,21 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  return fixture;
+}
+
+export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title: string, manuscript: string): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
+  const headers = { Origin: new URL(origin).origin };
+  const createdProject = await fetch(new URL("/api/v1/persistence/projects", origin).toString(), { method: "POST", headers, data: { title: `Writing ${crypto.randomUUID()}` } });
+  expect(createdProject.status()).toBe(201);
+  const { project } = await createdProject.json() as { project: FixtureProject };
+  async function create(title: string, orderKey: string, markdown: string): Promise<FixtureDocument> {
+    const response = await fetch(new URL(`/api/v1/persistence/projects/${project.id}/documents`, origin).toString(), { method: "POST", headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: FixtureDocument }).document;
+  }
+  const scene = await create(title, "a", manuscript);
+  const second = await create("次のシーン", "b", "最初の本文。\n次の文章です。");
   return { project, scene, second };
 }
 

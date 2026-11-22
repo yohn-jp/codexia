@@ -10,17 +10,18 @@ const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
 const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const externalServer = Boolean(configuredBaseURL);
-const selfHostedAuthFixture = selectedTestFile === "oauth-web.acceptance.spec.ts";
-const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && !externalServer;
+const selfHostedAuthFixture = selectedTestFile === "oauth-web.acceptance.spec.ts" || selectedTestFile === "outline-headings.acceptance.spec.ts";
+const legacyServer = !externalServer && !selfHostedAuthFixture;
+const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && legacyServer;
 const stateDir = process.env.CODEXIA_E2E_STATE_DIR
-  ?? (externalServer ? tmpdir() : mkdtempSync(join(tmpdir(), "codexia-e2e-")));
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN
-  ?? (configuredBaseURL ? process.env.CODEXIA_AUTH_TOKEN : undefined)
-  ?? "codexia-e2e-token-for-local-testing-only";
+  ?? (isTemporaryStateDir ? mkdtempSync(join(tmpdir(), "codexia-e2e-")) : tmpdir());
+if (!selfHostedAuthFixture) {
+  process.env.CODEXIA_E2E_AUTH_TOKEN ??= (configuredBaseURL ? process.env.CODEXIA_AUTH_TOKEN : undefined)
+    ?? "codexia-e2e-token-for-local-testing-only";
+}
 
 process.env.CODEXIA_E2E_STATE_DIR = stateDir;
 process.env.CODEXIA_E2E_PROJECT_TITLE ??= `Acceptance manuscript ${randomUUID()}`;
-process.env.CODEXIA_E2E_AUTH_TOKEN = authToken;
 process.env.CODEXIA_E2E_PORT ??= "4173";
 process.env.CODEXIA_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
 if (!externalServer && !process.env.CODEXIA_E2E_DATABASE_URL) {
@@ -74,13 +75,13 @@ export default defineConfig({
       },
     },
   ],
-  webServer: externalServer || selfHostedAuthFixture
-    ? undefined
-    : {
+  webServer: legacyServer
+    ? {
         command: "node --import tsx/esm tests/e2e/test-server.ts",
         cwd: resolve("."),
         url: `${baseURL}/api/health`,
         reuseExistingServer: false,
         timeout: 120_000,
-      },
+      }
+    : undefined,
 });

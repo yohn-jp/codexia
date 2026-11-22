@@ -18,6 +18,7 @@ export interface BetterAuthFixtureOptions {
   readonly staticDirectory?: string;
   readonly apiPort?: number;
   readonly usePostgresPersistence?: boolean;
+  readonly appProfile?: Pick<ApiServerOptions, "profile" | "runtimeOptions">;
   readonly registerInBrowser?: (bootstrapOrigin: string) => Promise<BootstrapRegistration>;
 }
 
@@ -263,9 +264,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     }
 
     const makeApi = (withOwner: boolean, withPostgresPersistence = false): Server => createServer({
-      // OAuth fixture does not provision Full runtime manifests; browser coverage
-      // exercises the same authentication contract in both build profiles.
       profile: "core",
+      ...(withOwner ? options.appProfile : {}),
       store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
       persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
       staticDir: options.staticDirectory ?? process.cwd(),
