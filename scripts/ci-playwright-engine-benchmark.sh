@@ -20,7 +20,16 @@ if [[ "$engine" == native ]]; then
   [[ "$mode" == acceptance ]] || exit 2
   : "${CODEXIA_PROFILE:?required profile}"
   : "${CODEXIA_E2E_DATABASE_URL:?required disposable postgres URL}"
-  corepack enable
+  if [[ "${CODEXIA_BENCH_NODE_MOUNT:-}" == 1 ]]; then
+    # The Actions Node 24 toolcache is mounted read-only into host-launched images.
+    # Provide a writable pnpm shim without modifying that toolcache.
+    mkdir -p /tmp/codexia-bench-bin
+    printf '#!/bin/sh\\nexec corepack pnpm "$@"\\n' > /tmp/codexia-bench-bin/pnpm
+    chmod +x /tmp/codexia-bench-bin/pnpm
+    export PATH="/tmp/codexia-bench-bin:$PATH"
+  else
+    corepack enable
+  fi
   corepack pnpm@12.21.0 --version
   git --version
   test "$(node --version)" = 'v24.22.3'
@@ -64,7 +73,7 @@ capabilities=$("$engine" run --rm --pull=never --entrypoint /bin/sh "$image" -ec
 probe_ms=$(( ($(date +%s%N)-probe_start)/1000000 ))
 echo "$capabilities"
 eligible=false
-if [[ "$capabilities" == *'chromium=true webkit=true git=true node=v24.22.3'* ]]; then eligible=true; fi
+if [[ "$capabilities" == *'chromium=true webkit=true git=true'* ]]; then eligible=true; fi
 printf 'BENCHMARK_IMAGE engine=%s variant=%s runner=%s pull_ms=%s probe_ms=%s uncompressed_bytes=%s full_webkit_eligible=%s\n' "$engine" "$variant" "${ImageVersion:-unknown}" "$pull_ms" "$probe_ms" "$image_bytes" "$eligible"
 {
   echo "### $engine / $variant / ${CODEXIA_PROFILE:-probe}"
@@ -78,9 +87,15 @@ if [[ "$eligible" != true ]]; then echo "Incompatible: full WebKit group also re
 : "${GITHUB_WORKSPACE:?required checkout}"
 : "${CODEXIA_E2E_DATABASE_URL:?required postgres URL}"
 test "${CI:-}" = true
+host_node=$(readlink -f "$(command -v node)")
+host_node_prefix="${host_node%/bin/node}"
+test -x "$host_node_prefix/bin/node"
+test "$("$host_node_prefix/bin/node" --version)" = 'v24.22.3'
 runtime_start=$(date +%s%N)
 "$engine" run --rm --pull=never --init --ipc=host --network host \
-  --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
+  --volume "$GITHUB_WORKSPACE:/work" --volume "$host_node_prefix:/opt/codexia-node:ro" --workdir /work \
+  --env PATH="/opt/codexia-node/bin:/usr/local/bin:/usr/bin:/bin" \
+  --env CODEXIA_BENCH_NODE_MOUNT=1 \
   --env CI --env CODEXIA_PROFILE --env CODEXIA_E2E_DATABASE_URL \
   --entrypoint /bin/bash "$image" \
   /work/scripts/ci-playwright-engine-benchmark.sh native "$variant" acceptance
