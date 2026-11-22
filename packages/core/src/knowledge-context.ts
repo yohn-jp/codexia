@@ -1,5 +1,7 @@
 import type { PersistenceReader, ProjectId, Document } from "@codexia/persistence-contracts";
 import { createHash } from "node:crypto";
+import type { KnowledgeProjectionData, KnowledgeProjectionEntry, KnowledgeProjectionEvidence, SnapshotId, SnapshotKnowledgeProjection } from "@codexia/contracts";
+import { canonicalJson } from "./operation-records.js";
 
 /** Read-only snapshot projection. PostgreSQL remains the sole authority. */
 export const KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.json";
@@ -20,7 +22,12 @@ function groupBy<T, K>(items: readonly T[], keyOf: (item: T) => K): Map<K, T[]> 
   return groups;
 }
 
-export async function projectKnowledgeContext(reader: PersistenceReader, projectId: ProjectId, documents: readonly Document[], documentMappings: readonly KnowledgeDocumentMapping[] = []) {
+export function makeKnowledgeProjection(snapshot: SnapshotId, data: KnowledgeProjectionData): SnapshotKnowledgeProjection {
+  const revision = createHash("sha256").update(canonicalJson({ projectId: snapshot.projectId, data })).digest("hex");
+  return { ...data, source: { kind: "knowledge-projection", snapshot: { ...snapshot }, revision } };
+}
+
+export async function projectKnowledgeContext(reader: PersistenceReader, projectId: ProjectId, documents: readonly Document[], documentMappings: readonly KnowledgeDocumentMapping[] = []): Promise<KnowledgeProjectionData> {
   const nodes = await reader.listKnowledgeNodes(projectId, 1000);
   const documentById = new Map(documents.map(document => [document.id, document]));
   const storyIds = new Map<string, number>();
@@ -48,7 +55,7 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
   const revisionsByKey = batch ? new Map(batch.revisions.map(revision => [JSON.stringify([revision.documentId, revision.id]), revision])) : null;
   const assertionEvidenceById = batch ? groupBy(batch.assertionEvidence, item => item.evidenceId) : null;
   const assertionsById = batch ? new Map(batch.assertions.map(assertion => [assertion.id, assertion])) : null;
-  const entries = [];
+  const entries: KnowledgeProjectionEntry[] = [];
   let remainingQuoteBytes = MAX_PROJECTED_QUOTES_TOTAL_BYTES;
   for (const node of ordered) {
     const aliases = (batch
@@ -60,7 +67,7 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
     const mentions = (batch
       ? mentionsByNode?.get(node.id) ?? []
       : [...await reader.listNodeMentions(projectId,node.id,100)]).sort((a,b)=>a.evidenceId.localeCompare(b.evidenceId));
-    const evidence = [];
+    const evidence: KnowledgeProjectionEvidence[] = [];
     for (const mention of mentions) {
       const anchor = batch ? anchorsById?.get(mention.evidenceId) : await reader.getEvidenceAnchor(projectId,mention.evidenceId);
       if (!anchor) continue;
@@ -91,11 +98,11 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
         if (assertion) assertions.push({ assertion, role:link.role });
       }
       assertions.sort((a,b)=>a.assertion.id.localeCompare(b.assertion.id)||a.role.localeCompare(b.role));
-      evidence.push({ mention,anchor,current,stale:!current,sourceDocumentId:anchor.documentId,sourceRevisionId:anchor.revisionId,
+      evidence.push({ mention,anchor,current,
         storySceneId:mapping && storyIds.get(mapping.storySceneId) === 1 && documentIds.get(mapping.documentId) === 1 ? mapping.storySceneId : null,
-        quote:quoteAvailable ? quote : null,quoteAvailable, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions,assertionLimitReached:assertionLinks.length>=MAX_PROJECTED_ASSERTIONS_PER_ANCHOR });
+        quote:quoteAvailable ? quote : null, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions,assertionLimitReached:assertionLinks.length>=MAX_PROJECTED_ASSERTIONS_PER_ANCHOR });
     }
     entries.push({node,aliases,relations,evidence,evidenceLimitReached:mentions.length===100,aliasLimitReached:aliases.length>=MAX_PROJECTED_ALIASES_PER_NODE,relationLimitReached:relations.length>=MAX_PROJECTED_RELATIONS_PER_NODE});
   }
-  return {version:1,projectId,documentMappings:mappings,entries,nodeLimitReached:nodes.length===1000};
+  return {documentMappings:mappings,entries,nodeLimitReached:nodes.length===1000};
 }

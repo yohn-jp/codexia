@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import type { Document, KnowledgeNodeId, KnowledgeProjectionBatch, PersistenceReader, ProjectId, RevisionId } from "@codexia/persistence-contracts";
-import { projectKnowledgeContext } from "./knowledge-context.js";
+import { makeKnowledgeProjection, projectKnowledgeContext } from "./knowledge-context.js";
 
 test("Knowledge projection binds evidence to Story identity and exact anchored revision", async () => {
   const documentId = "document-uuid" as Document["id"];
@@ -44,11 +44,20 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   ];
   const documentMappings = [{ documentId, storySceneId:"scene-story-id" }];
   const projection = await projectKnowledgeContext(reader, "project-1" as ProjectId, documents, documentMappings);
-  const evidence = projection.entries[0]!.evidence[0] as { storySceneId?: string; sourceRevisionId?: string; quote?: string | null } | undefined;
+  const evidence = projection.entries[0]!.evidence[0];
   assert.equal(projection.documentMappings[0]?.storySceneId, "scene-story-id");
   assert.equal(evidence?.storySceneId, "scene-story-id");
-  assert.equal(evidence?.sourceRevisionId, revisionId);
+  assert.equal(evidence?.anchor.revisionId, revisionId);
   assert.equal(evidence?.quote, quote);
+  const initial = makeKnowledgeProjection({ projectId: "project-1", projectVersion: 5 }, projection);
+  const advanced = makeKnowledgeProjection({ projectId: "project-1", projectVersion: 6 }, {
+    nodeLimitReached: projection.nodeLimitReached, entries: projection.entries, documentMappings: projection.documentMappings,
+  });
+  assert.equal(initial.source.revision, advanced.source.revision, "the same projection survives key order and unrelated project version changes");
+  assert.equal(advanced.source.snapshot.projectVersion, 6, "the read identity remains bound to the selected project version");
+  assert.notEqual(initial.source.revision, makeKnowledgeProjection({ projectId: "project-1", projectVersion: 5 }, {
+    ...projection, nodeLimitReached: true,
+  }).source.revision, "the completeness of Knowledge is part of the projection revision");
   assert.equal(revisionReads,1,"repeated evidence references share one immutable revision read");
   const batchReader = {
     ...reader,
@@ -93,7 +102,6 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.deepEqual(oversizedBatch, oversized, "batch reads preserve quote verification and byte-budget omission");
   const oversizedEvidence = oversized.entries[0]!.evidence[0]!;
   assert.equal(oversizedEvidence.quote,null);
-  assert.equal(oversizedEvidence.quoteAvailable,false);
   assert.equal(oversizedEvidence.quoteOmission,"projection-budget");
   aliasRows=Array.from({length:500},(_,index)=>({id:`alias-${index}`}));
   const boundedAliases=await projectKnowledgeContext(reader,"project-1" as ProjectId,[]);
