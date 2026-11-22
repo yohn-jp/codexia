@@ -1,6 +1,9 @@
 name: Compare Docker, Podman and jobs.container startup
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/container-pull-engine-benchmark.yml
   workflow_dispatch:
 
 permissions:
