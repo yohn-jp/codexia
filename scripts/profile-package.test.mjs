@@ -6,7 +6,10 @@ test('Core package depends on the API and builds no optional module package', ()
   const profile = { profile: 'core', modules: [] };
   const packageManifest = {
     name: '@codexia/profile-core',
-    dependencies: { '@codexia/api': 'workspace:*' },
+    dependencies: {
+      '@codexia/api': 'workspace:*',
+      '@codexia/persistence-postgres': 'workspace:*',
+    },
   };
   assert.deepEqual(validateProfilePackage('core', profile, packageManifest, new Set()), {
     profileName: 'core',
@@ -36,6 +39,7 @@ test('Full package waits for selected module producers and exact package depende
     name: '@codexia/profile-full',
     dependencies: {
       '@codexia/api': 'workspace:*',
+      '@codexia/persistence-postgres': 'workspace:*',
       '@codexia/module-story': 'workspace:*',
       '@codexia/module-semantic': 'workspace:*',
       '@codexia/module-search': 'workspace:*',
@@ -50,8 +54,23 @@ test('Full package waits for selected module producers and exact package depende
     /not been produced: search/u,
   );
   assert.throws(
-    () => validateProfilePackage('full', profile, { ...packageManifest, dependencies: { '@codexia/api': 'workspace:*', '@codexia/module-story': 'workspace:*' } }, new Set(['story', 'semantic', 'search'])),
+    () => validateProfilePackage('full', profile, {
+      ...packageManifest,
+      dependencies: {
+        '@codexia/api': 'workspace:*',
+        '@codexia/persistence-postgres': 'workspace:*',
+        '@codexia/module-story': 'workspace:*',
+      },
+    }, new Set(['story', 'semantic', 'search'])),
     /dependencies do not match/u,
+  );
+  assert.throws(
+    () => validateProfilePackage('full', profile, {
+      ...packageManifest,
+      dependencies: Object.fromEntries(Object.entries(packageManifest.dependencies)
+        .filter(([name]) => name !== '@codexia/persistence-postgres')),
+    }, new Set(['story', 'semantic', 'search'])),
+    /must depend on @codexia\/persistence-postgres/u,
   );
 
   const commands = createBuildCommands('full', profile);

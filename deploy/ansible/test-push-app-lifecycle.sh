@@ -62,8 +62,38 @@ redact_log() {
   sed -E \
     -e 's/(Bearer )[A-Za-z0-9._~-]+/\1[REDACTED]/g' \
     -e 's/(fixture-(auth|tunnel)-token-)[A-Za-z0-9]+/\1[REDACTED]/g' \
+    -e 's#((postgres(ql)?|mysql|redis)://[^:/@]+:)[^@/[:space:]]+@#\1[REDACTED]@#Ig' \
     -e 's/((password|token)(_file)?[=: ]+)[^[:space:]]+/\1[REDACTED]/Ig' \
     "$source" | tail -n 400 > "$target"
+}
+capture_failure_runtime() {
+  local context="$tmp/runtime-failure.log" unit name
+  {
+    printf 'Rootless systemd unit state\n'
+    for unit in codexia-api.service codexia-db.service codexia-tunnel.service; do
+      printf 'UNIT=%s\n' "$unit"
+      rootless_systemctl show --no-pager --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus "$unit" 2>&1 || true
+    done
+    printf '\nRootless container state\n'
+    rootless_podman ps --all --format '{{.Names}} {{.Status}} {{.Image}}' 2>&1 || true
+    for name in codexia-api codexia-db; do
+      if rootless_podman container exists "$name" >/dev/null 2>&1; then
+        printf '\nContainer log tail: %s\n' "$name"
+        rootless_podman logs --tail 60 "$name" 2>&1 || true
+      fi
+    done
+    printf '\nRecent rootless service warnings and errors\n'
+    rootless journalctl --user --no-pager --since='5 minutes ago' --priority=warning \
+      -u codexia-api.service -u codexia-db.service -u codexia-tunnel.service 2>&1 || true
+    printf '\nBackup mount state\n'
+    rootless findmnt -T "$fixture_home/.local/state/codexia-backup-mount" -n -o FSTYPE,SOURCE 2>&1 || true
+    rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 2 -printf '%P %y\n' 2>&1 || true
+  } > "$context" 2>&1
+  redact_log "$context" "$RUNNER_TEMP/codexia-push-app-lifecycle/runtime-failure-bounded.log"
+}
+cleanup_failed() {
+  cleanup_status=1
+  printf 'Cleanup check failed at script line %s: %s\n' "$1" "${2:-unspecified check}" >> "$tmp/cleanup-errors.log"
 }
 record_failure() {
   local status=$1 line=$2 command=$3 latest_log='' log
@@ -74,6 +104,7 @@ const fs=require('node:fs');const [path,status,line,command]=process.argv.slice(
 FAILURE
   printf 'Lifecycle fixture failed at line %s (exit %s): %s\n' "$line" "$status" \
     "$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).failure.command' "$report")" >&2
+  if [[ "$runtime_ready" == true ]]; then capture_failure_runtime; fi
   for log in "$tmp"/*.log; do
     [[ -f "$log" ]] || continue
     if [[ -z "$latest_log" || "$log" -nt "$latest_log" ]]; then latest_log=$log; fi
@@ -81,7 +112,7 @@ FAILURE
   if [[ -n "$latest_log" ]]; then
     local bounded="$RUNNER_TEMP/codexia-push-app-lifecycle/failure-bounded.log"
     redact_log "$latest_log" "$bounded"
-    printf '%s\n' "Last Ansible log ($latest_log), redacted tail:" >&2
+    printf '%s\n' "Last sanitized fixture log ($latest_log):" >&2
     cat "$bounded" >&2
   fi
   return "$status"
@@ -178,91 +209,94 @@ cleanup() {
   trap - EXIT
   set +e
   if [[ "$backup_mounted" == true ]] || rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" 2>/dev/null; then
-    rootless fusermount3 -u "$fixture_home/.local/state/codexia-backup-mount" || cleanup_status=1
-    rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_status=1
+    rootless fusermount3 -u "$fixture_home/.local/state/codexia-backup-mount" || cleanup_failed "$LINENO" 'SSHFS unmount'
+    rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_failed "$LINENO" 'SSHFS mount remains'
   fi
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
     rootless_systemctl stop codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
     local name rc
     for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs; do
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
-      if (( rc == 0 )); then rootless_podman rm -f "$name" >/dev/null 2>&1 || cleanup_status=1; fi
+      if (( rc == 0 )); then rootless_podman rm -f "$name" >/dev/null 2>&1 || true; fi
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
-      (( rc == 1 )) || cleanup_status=1
+      (( rc == 1 )) || cleanup_failed "$LINENO" "$name container absence verification"
     done
     for name in codexia-postgres codexia-data codexia-history; do
       rc=0; rootless_podman volume exists "$name" >/dev/null 2>&1 || rc=$?
-      if (( rc == 0 )); then rootless_podman volume rm "$name" >/dev/null 2>&1 || cleanup_status=1; fi
+      if (( rc == 0 )); then rootless_podman volume rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name volume removal"; fi
       rc=0; rootless_podman volume exists "$name" >/dev/null 2>&1 || rc=$?
-      (( rc == 1 )) || cleanup_status=1
+      (( rc == 1 )) || cleanup_failed "$LINENO" "$name volume absence verification"
     done
     for name in codexia-data codexia codexia-lifecycle-backup; do
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
-      if (( rc == 0 )); then rootless_podman network rm "$name" >/dev/null 2>&1 || cleanup_status=1; fi
+      if (( rc == 0 )); then rootless_podman network rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name network removal"; fi
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
-      (( rc == 1 )) || cleanup_status=1
+      (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
     for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
-      if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_status=1; fi
+      if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
-      (( rc == 1 )) || cleanup_status=1
+      (( rc == 1 )) || cleanup_failed "$LINENO" "$name secret absence verification"
     done
     rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
-    if (( rc == 0 )); then rootless_podman rmi codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_status=1; fi
+    if (( rc == 0 )); then rootless_podman rmi codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_failed "$LINENO"; fi
     rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
-    (( rc == 1 )) || cleanup_status=1
+    (( rc == 1 )) || cleanup_failed "$LINENO"
     if [[ -n "$build_context" ]] && rootless test -d "$build_context"; then
-      rootless rm -r "$build_context" || cleanup_status=1
-      rootless test ! -e "$build_context" || cleanup_status=1
+      rootless rm -r "$build_context" || cleanup_failed "$LINENO"
+      rootless test ! -e "$build_context" || cleanup_failed "$LINENO"
     fi
   fi
   if [[ "$docker_fixture_image_created" == true ]]; then
-    docker image rm codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_status=1
-    docker image inspect codexia-sshfs-fixture >/dev/null 2>&1 && cleanup_status=1
+    docker image rm codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_failed "$LINENO"
+    docker image inspect codexia-sshfs-fixture >/dev/null 2>&1 && cleanup_failed "$LINENO"
   fi
   if [[ -n "$fixture_ip" ]]; then
-    sudo sed -i "\\|^$fixture_ip codexia-backup-fixture$|d" /etc/hosts || cleanup_status=1
-    grep -q "^$fixture_ip codexia-backup-fixture$" /etc/hosts && cleanup_status=1
+    sudo sed -i "\\|^$fixture_ip codexia-backup-fixture$|d" /etc/hosts || cleanup_failed "$LINENO"
+    grep -q "^$fixture_ip codexia-backup-fixture$" /etc/hosts && cleanup_failed "$LINENO"
   fi
   if [[ "$registry_configured" == true ]]; then
-    rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_status=1
-    rootless test ! -e "$fixture_home/.config/containers/registries.conf" || cleanup_status=1
+    rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_failed "$LINENO"
+    rootless test ! -e "$fixture_home/.config/containers/registries.conf" || cleanup_failed "$LINENO"
   fi
   if [[ "$environment_generator_installed" == true ]]; then
-    sudo rm -f -- "$environment_generator" || cleanup_status=1
-    [[ ! -e "$environment_generator" && ! -L "$environment_generator" ]] || cleanup_status=1
+    sudo rm -f -- "$environment_generator" || cleanup_failed "$LINENO"
+    [[ ! -e "$environment_generator" && ! -L "$environment_generator" ]] || cleanup_failed "$LINENO"
   fi
   if [[ "$environment_generator_dir_created" == true ]]; then
-    sudo rmdir -- "$environment_generator_dir" 2>/dev/null || cleanup_status=1
+    sudo rmdir -- "$environment_generator_dir" 2>/dev/null || cleanup_failed "$LINENO"
   fi
   if [[ "$manager_configured" == true ]]; then
-    if [[ -e "$manager_dropin" || -L "$manager_dropin" ]]; then sudo rm -f "$manager_dropin" || cleanup_status=1; fi
-    if [[ -d "$manager_dropin_dir" ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_status=1; fi
-    sudo systemctl daemon-reload || cleanup_status=1
-    [[ ! -e "$manager_dropin" && ! -d "$manager_dropin_dir" ]] || cleanup_status=1
+    if [[ -e "$manager_dropin" || -L "$manager_dropin" ]]; then sudo rm -f "$manager_dropin" || cleanup_failed "$LINENO"; fi
+    if [[ -d "$manager_dropin_dir" ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_failed "$LINENO"; fi
+    sudo systemctl daemon-reload || cleanup_failed "$LINENO"
+    [[ ! -e "$manager_dropin" && ! -d "$manager_dropin_dir" ]] || cleanup_failed "$LINENO"
   fi
   if [[ "$user_created" == true ]]; then
     if getent passwd "$fixture_user" >/dev/null 2>&1; then
-      sudo loginctl disable-linger "$fixture_user" || cleanup_status=1
+      sudo loginctl disable-linger "$fixture_user" || cleanup_failed "$LINENO"
       sudo systemctl stop "user@${fixture_uid}.service" || true
       sudo loginctl kill-user "$fixture_user" 2>/dev/null || true
-      sudo userdel --remove "$fixture_user" || cleanup_status=1
+      sudo userdel --remove "$fixture_user" || cleanup_failed "$LINENO"
     fi
-    if getent group "$fixture_user" >/dev/null 2>&1; then sudo groupdel "$fixture_user" || cleanup_status=1; fi
-    sudo sed -i '/^codexia:/d' /etc/subuid /etc/subgid || cleanup_status=1
-    getent passwd "$fixture_user" >/dev/null 2>&1 && cleanup_status=1
-    getent passwd "$fixture_uid" >/dev/null 2>&1 && cleanup_status=1
-    getent group "$fixture_user" >/dev/null 2>&1 && cleanup_status=1
-    getent group "$fixture_gid" >/dev/null 2>&1 && cleanup_status=1
-    [[ ! -e "$fixture_home" ]] || cleanup_status=1
-    grep -q '^codexia:' /etc/subuid /etc/subgid && cleanup_status=1
+    if getent group "$fixture_user" >/dev/null 2>&1; then sudo groupdel "$fixture_user" || cleanup_failed "$LINENO"; fi
+    sudo sed -i '/^codexia:/d' /etc/subuid /etc/subgid || cleanup_failed "$LINENO"
+    getent passwd "$fixture_user" >/dev/null 2>&1 && cleanup_failed "$LINENO"
+    getent passwd "$fixture_uid" >/dev/null 2>&1 && cleanup_failed "$LINENO"
+    getent group "$fixture_user" >/dev/null 2>&1 && cleanup_failed "$LINENO"
+    getent group "$fixture_gid" >/dev/null 2>&1 && cleanup_failed "$LINENO"
+    [[ ! -e "$fixture_home" ]] || cleanup_failed "$LINENO"
+    grep -q '^codexia:' /etc/subuid /etc/subgid && cleanup_failed "$LINENO"
   fi
   if [[ "$system_config_created" == true ]]; then
-    sudo rm -rf -- /etc/codexia || cleanup_status=1
-    [[ ! -e /etc/codexia && ! -L /etc/codexia ]] || cleanup_status=1
+    sudo rm -rf -- /etc/codexia || cleanup_failed "$LINENO"
+    [[ ! -e /etc/codexia && ! -L /etc/codexia ]] || cleanup_failed "$LINENO"
   fi
-  rm -rf -- "$tmp" || cleanup_status=1
+  if [[ -f "$tmp/cleanup-errors.log" ]]; then
+    redact_log "$tmp/cleanup-errors.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/cleanup-errors-bounded.log"
+  fi
+  rm -rf -- "$tmp" || cleanup_failed "$LINENO"
   node - "$report" "$status" "$cleanup_status" <<'NODE'
 const fs=require('node:fs');const [path,status,cleanup]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(path,'utf8'));r.cleanup={status:Number(cleanup)===0?'PASS':'FAIL',exitCode:Number(cleanup)};r.states ||= {};if(Number(cleanup)===0)r.states.fixture_cleanup={status:'PASS',detail:'fixture resources removed'};else r.states.fixture_cleanup={status:'FAIL',detail:'fixture cleanup left a resource or mount'};if(Number(status)!==0&&r.states.backup_remote_filesystem?.status==='IN_PROGRESS')r.states.backup_remote_filesystem={status:'NOT_CHECKED',detail:'deployment did not reach backup artifact creation'};r.logs=fs.readdirSync(require('node:path').dirname(path)).filter(name=>name.endsWith('-bounded.log')).map(name=>({file:name,redacted:true}));if(Number(cleanup)!==0)r.status='FAIL';else if(Number(status)===78)r.status='NOT_CHECKED';else if(Number(status)!==0)r.status=r.status==='NOT_CHECKED'?'NOT_CHECKED':'FAIL';else {const required=['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','fixture_cleanup'];r.status=required.every(key=>r.states[key]?.status==='PASS')?'PASS':'NOT_CHECKED';}fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});}catch{}
 NODE

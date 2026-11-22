@@ -425,7 +425,7 @@ async function runLifecycle() {
   const bgeModelDirectory = "/models/" + MODEL_IDS.reranker.id + "/" + MODEL_IDS.reranker.revision + "/onnx";
   assert.ok((await fs.readdir(e5ModelDirectory)).length > 0);
   assert.ok((await fs.readdir(bgeModelDirectory)).length > 0);
-  const {createPostgresPersistence, migratePostgresDatabase} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+  const {createPostgresPersistence, migratePostgresDatabase} = await import("@codexia/persistence-postgres");
   const databaseUrl = process.env.CODEXIA_DATABASE_URL;
   assert.ok(databaseUrl, "disposable PostgreSQL URL is required");
   await migratePostgresDatabase(databaseUrl);
@@ -880,7 +880,7 @@ async function replacementProbe() {
     await waitFor(async () => (await captureMetrics(undefined, composition.moduleWorkerEntries)).compiledWorkerCount === 0,
       "replacement semantic worker did not exit after its capability lease was released", 30_000);
     const {CoreStore} = await import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js");
-    const {createPostgresPersistence} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+    const {createPostgresPersistence} = await import("@codexia/persistence-postgres");
     const persistence = createPostgresPersistence(process.env.CODEXIA_DATABASE_URL);
     try {
       const reader = await new CoreStore({persistence}).reader(PROJECT_ID);
@@ -899,7 +899,16 @@ try {
   else if (mode === "replacement-probe") await replacementProbe();
   else throw new Error("unknown P13 container mode");
 } catch (error) {
-  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({ status: "failed" }) + "\\n", { mode: 0o600 }).catch(() => {});
+  const message = error instanceof Error ? error.message : String(error);
+  const safeMessage = [AUTH_TOKEN, process.env.CODEXIA_DATABASE_URL, PROJECT_ID]
+    .filter(Boolean)
+    .reduce((value, secret) => value.replaceAll(secret, "[redacted]"), message)
+    .slice(0, 4_000);
+  const safeCode = typeof error?.code === "string" && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? error.code : undefined;
+  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({
+    status: "failed",
+    error: { name: error instanceof Error ? error.name.slice(0, 80) : "Error", code: safeCode, message: safeMessage },
+  }) + "\\n", { mode: 0o600 }).catch(() => {});
   console.error("P13 OCI acceptance failed: " + (error instanceof Error ? error.message : String(error)));
   process.exitCode = 1;
 }

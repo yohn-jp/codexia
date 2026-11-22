@@ -52,7 +52,22 @@ test('runtime verification uses a separate proof stage and shares the production
   const transaction = parse(readFileSync(new URL('../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'));
   const prepare = parse(readFileSync(new URL('../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
   assert.equal(transaction[0]['ansible.builtin.include_tasks'], 'deploy-prepare.yml');
+  const productionDigestGate = transaction.find(task => task.name === 'Require one canonical immutable digest for the installed API image');
+  assert.ok(productionDigestGate.when.includes('not (codexia_lifecycle_fixture | default(false) | bool)'),
+    'production must retain its unique canonical GHCR digest admission');
+  const fixtureDigestGate = transaction.find(task => task.name === 'Require the exact immutable running image reference in the disposable registry');
+  assert.ok(fixtureDigestGate, 'the disposable registry must admit only its exact immutable running image reference');
+  assert.ok(fixtureDigestGate['ansible.builtin.assert'].that.some(condition => condition.includes('codexia_current_api_image_name.stdout in')));
+  assert.match(fixtureDigestGate['ansible.builtin.assert'].that.join(' '), /localhost:5000\|ghcr/u,
+    'the exact digest may retain its GHCR source name after the fixture registry rewrite');
   assert.ok(prepare.some(task => task.name === 'Install the interrupted deployment recovery helper'));
+  const transactionCommand = transaction.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  assert.equal(typeof transactionCommand['ansible.builtin.shell'], 'object');
+  assert.equal(typeof transactionCommand['ansible.builtin.shell'].cmd, 'string');
+  assert.equal(transactionCommand.failed_when, false);
+  const safeFailure = transaction.find(task => task.name === 'Report only an allowlisted deployment transaction failure stage');
+  assert.ok(safeFailure, 'transaction failure diagnostics must not expose command output');
+  assert.match(safeFailure['ansible.builtin.fail'].msg, /fresh database schema initialization/u);
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
   assert.equal(fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-prepare.yml'),
@@ -85,7 +100,12 @@ test('image selection binds the PR Full artifact and fails closed without a comp
     'the isolated plain-HTTP registry must be explicitly insecure for rootless Podman pushes');
   assert.ok(/for _ in \$\(seq 1 12\); do\n  postgres_health=\$\(rootless_podman inspect --format '\{\{\.State\.Health\.Status\}\}' codexia-db\)\n  \[\[ "\$postgres_health" == healthy \]\] && break\n  sleep 5\ndone/u.test(fixture), 'the live PostgreSQL healthcheck must be polled before declaring fixture setup failed');
   assert.match(fixture, /trap 'record_failure .* ERR/u);
-  assert.match(fixture, /Last Ansible log .* redacted tail/u);
+  assert.match(fixture, /capture_failure_runtime/u, 'failed deploys must collect runtime context before fixture cleanup');
+  assert.match(fixture, /runtime-failure-bounded\.log/u, 'runtime diagnostics must be redacted before artifact upload');
+  assert.match(fixture, /postgres\(ql\)\?\|mysql\|redis/u, 'database connection credentials must be removed from runtime logs');
+  assert.match(fixture, /Cleanup check failed at script line/u, 'fixture cleanup failures must identify their failed check');
+  assert.match(fixture, /cleanup-errors-bounded\.log/u, 'cleanup diagnostics must be included in the run artifact');
+  assert.match(fixture, /Last sanitized fixture log/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
   assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
     'the SSHFS fixture image must be built without interactive package setup');

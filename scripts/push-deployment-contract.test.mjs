@@ -102,17 +102,28 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(recoveryScript, /flock --exclusive --nonblock/u);
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   assert.ok(transaction, 'Ansible must keep the service change and rollback inside one locked transaction');
-  assert.match(transaction['ansible.builtin.shell'], /flock --exclusive --nonblock/u);
+  assert.match(transaction['ansible.builtin.shell'].cmd, /flock --exclusive --nonblock/u);
+  assert.match(transaction['ansible.builtin.shell'].cmd, /\$\{\{ '\{' \}\}#rollback_images/u,
+    'bash array-length syntax must be escaped from Jinja comment parsing');
   assert.equal(transaction.args.executable, '/bin/bash');
   assert.equal(transaction.no_log, true, 'the deployment transaction must not log secret values');
-  assert.match(transaction['ansible.builtin.shell'], /default\.target\.wants/u, 'the API must recover after a VM reboot');
-  assert.match(transaction['ansible.builtin.shell'], /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd/u, 'updates must commit an encrypted off-VM backup under the same lock');
-  assert.match(transaction['ansible.builtin.shell'], /restore_previous/u, 'failed candidate activation must restore the prior release');
-  assert.match(transaction['ansible.builtin.shell'], /stop codexia-api\.service[\s\S]*running_image[\s\S]*candidate_image/u, 'candidate acceptance must follow successful shutdown and match the certified running digest');
-  assert.match(transaction['ansible.builtin.shell'], /restored_image[\s\S]*rollback_image/u, 'rollback health must be bound to the prior digest snapshot');
-  assert.match(transaction['ansible.builtin.shell'], /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
-  assert.match(transaction['ansible.builtin.shell'], /current_image.*candidate_image/su, 'same-digest application must be idempotent');
-  assert.match(transaction['ansible.builtin.shell'], /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
+  assert.equal(transaction.failed_when, false, 'the transaction result must be available for a separate sanitized failure report');
+  const safeFailure = transactionTasks.find(task => task.name === 'Report only an allowlisted deployment transaction failure stage');
+  assert.ok(safeFailure, 'failed transaction output must be summarized with fixed public labels');
+  assert.match(safeFailure.when, /codexia_deploy_transaction\.rc/u);
+  assert.match(safeFailure['ansible.builtin.fail'].msg, /fresh database schema initialization/u);
+  assert.match(safeFailure['ansible.builtin.fail'].msg, /PostgreSQL connectivity/u);
+  assert.match(safeFailure['ansible.builtin.fail'].msg, /container runtime or unclassified initializer error/u);
+  assert.doesNotMatch(safeFailure['ansible.builtin.fail'].msg, /stderr\s*\}\}/u,
+    'raw transaction stderr must never be rendered into an Ansible failure message');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /default\.target\.wants/u, 'the API must recover after a VM reboot');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd/u, 'updates must commit an encrypted off-VM backup under the same lock');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /restore_previous/u, 'failed candidate activation must restore the prior release');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /stop codexia-api\.service[\s\S]*running_image[\s\S]*candidate_image/u, 'candidate acceptance must follow successful shutdown and match the certified running digest');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /restored_image[\s\S]*rollback_image/u, 'rollback health must be bound to the prior digest snapshot');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /current_image.*candidate_image/su, 'same-digest application must be idempotent');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
 test('the production Quadlet binds an immutable image and disables startup schema mutation', () => {
@@ -130,7 +141,7 @@ test('first activation initializes only a pristine database after backup under b
     'codexia_database_initialization_approved | default(false) | bool',
   ]);
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
-  const shell = transaction['ansible.builtin.shell'];
+  const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
   const freshMigration = shell.indexOf('initializeFreshPostgresSchema');
   const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"'));
@@ -155,7 +166,7 @@ test('first activation initializes only a pristine database after backup under b
 test('failed fresh-schema initialization restores a first activation without stopping an absent API service', () => {
   const tasks = transactionTasks;
   const transaction = tasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
-  const shell = transaction['ansible.builtin.shell'];
+  const shell = transaction['ansible.builtin.shell'].cmd;
   const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('if { [[ "$tunnel_present" == true ]]'));
   assert.ok(restore.startsWith('restore_previous(){'), 'canonical rollback helper must be present');
   assert.match(restore, /if \[\[ "\$had_unit" == true \|\| -e "\$active_unit" \|\| -L "\$active_unit" \]\]; then[\s\S]*?systemctl --user stop codexia-api\.service/u,
@@ -185,7 +196,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   const deploy = transactionTasks;
   const transaction = deploy.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   assert.ok(transaction, 'the app activation must remain one serialized transaction');
-  const shell = transaction['ansible.builtin.shell'];
+  const shell = transaction['ansible.builtin.shell'].cmd;
 
   const stopTunnel = shell.indexOf('systemctl --user stop codexia-tunnel.service');
   const stopApi = shell.indexOf('systemctl --user stop codexia-api.service');

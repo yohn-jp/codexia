@@ -8,6 +8,7 @@
   ],
   "dependencies": {
     "@codexia/api": "workspace:*",
+    "@codexia/persistence-postgres": "workspace:*",
     "@codexia/module-diagnostics": "workspace:*",
     "@codexia/module-mcp": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
