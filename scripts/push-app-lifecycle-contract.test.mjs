@@ -50,6 +50,9 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(source, /selectBackendArtifacts/u);
   assert.match(source, /apiArrayPages\('releases'\)/u,
     'the GitHub releases endpoint must use its array response pagination contract');
+  assert.match(source, /publicationRun\.head_sha === metadata\.publication\.workflowHeadSha/u,
+    'a workflow_run publication binds the runner head SHA separately from the backend source SHA');
+  assert.doesNotMatch(source, /publicationRun\.head_sha === metadata\.sourceSha/u);
   assert.match(source, /downloadArtifact/u);
   assert.match(source, /validatePushDeploymentCertificatePair/u);
   assert.match(source, /migrationFingerprint/u);

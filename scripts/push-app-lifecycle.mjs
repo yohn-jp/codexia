@@ -163,7 +163,7 @@ async function certifiedCompatibleCandidate(head) {
       const publicationRun = await api(`actions/runs/${metadata.publication.workflowRunId}`);
       check(publicationRun.path === '.github/workflows/backend-release.yml' && publicationRun.event === 'workflow_run' &&
         publicationRun.head_branch === 'main' && publicationRun.status === 'completed' && publicationRun.conclusion === 'success' &&
-        publicationRun.head_sha === metadata.sourceSha, 'Historical backend publication run does not bind the release source');
+        publicationRun.head_sha === metadata.publication.workflowHeadSha, 'Historical backend publication run does not bind its recorded workflow head');
       const [jobs, artifacts] = await Promise.all([
         apiPages(`actions/runs/${publicationRun.id}/jobs?filter=latest`, 'jobs'),
         apiPages(`actions/runs/${publicationRun.id}/artifacts`, 'artifacts'),
