@@ -302,6 +302,9 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       method: "POST", redirect: "manual",
       headers: { origin: bootstrapOrigin, cookie: cookie.header(), ...headers },
     });
+    if ((await postBootstrap("/api/auth/passkey/verify-registration")).status !== 404) {
+      throw new Error("OIDC-only bootstrap exposed a Passkey ceremony on its temporary hostname");
+    }
     if ((await postBootstrap("/register")).status !== 401) throw new Error("Bootstrap accepted a request without an IdP session");
     if ((await postBootstrap("/login", { origin: apiOrigin })).status !== 403) throw new Error("Bootstrap accepted a foreign origin");
     async function signIntoBootstrap(): Promise<void> {

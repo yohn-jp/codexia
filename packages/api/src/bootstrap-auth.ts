@@ -220,6 +220,9 @@ try{
       return runtime.handler(new Request(url, { headers }));
     }
     if ((method === "GET" || method === "POST") && url.pathname.startsWith("/api/auth/passkey/")) {
+      if (!config.passkeyBootstrap && !options.passkeyRecoveryOwnerId) {
+        return new Response("Passkey endpoints are unavailable during OIDC client setup", { status: 404 });
+      }
       return runtime.handler(new Request(url, { method, headers, ...(body ? { body: new Uint8Array(body) } : {}) }));
     }
     if (method === "POST" && (url.pathname === "/login" || url.pathname === "/register")) {
