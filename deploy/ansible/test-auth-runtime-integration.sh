@@ -235,6 +235,7 @@ if grep -Eq 'fixture-introspection-client-secret-drift' "$tmp/auth-drift.log"; t
   echo 'Secret input leaked into Ansible failure output' >&2
   exit 1
 fi
+printf '%s' 'fixture-introspection-client-secret-39017' > "$tmp/introspection-secret"
 test "$(runtime_psql "$tmp/runtime-password" <<'SQL'
 SELECT value FROM codexia_auth.acceptance_probe WHERE id=1;
 SQL
