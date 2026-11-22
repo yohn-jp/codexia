@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
 import { captureTaskInputSource, taskInvocation } from './ci-task-inputs.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
@@ -147,5 +149,32 @@ test('uncommitted worktree changes cannot influence proof for a pinned Git SHA',
   assert.notEqual(committed.source, original.source, 'Commit content must change source proof');
   for (const field of ['tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
     assert.equal(committed[field], original[field], field);
+  }
+});
+
+test('browser input proofs bind the lane image for both browsers in the shared WebKit lane', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const mutatedScripts = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
+  t.after(() => rm(mutatedScripts, { recursive: true, force: true }));
+  for (const file of ['ci-task-inputs.mjs', 'ci-contract.mjs', 'ci-browser-image-digests.mjs']) {
+    await cp(new URL(file, import.meta.url), path.join(mutatedScripts, file));
+  }
+  const digestsFile = path.join(mutatedScripts, 'ci-browser-image-digests.mjs');
+  const digests = await readFile(digestsFile, 'utf8');
+  await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
+  const { captureTaskInputSource: captureWithChangedWebKitImage } = await import(
+    pathToFileURL(path.join(mutatedScripts, 'ci-task-inputs.mjs')).href
+  );
+  const inputs = { root, sha, runtime };
+  const original = captureTaskInputSource(inputs);
+  const changed = captureWithChangedWebKitImage(inputs);
+  for (const profile of ['core', 'full']) {
+    for (const shard of ['ui-v1', 'oauth-web', 'webkit']) {
+      const task = `browser-${profile}-${shard}`;
+      assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed multi-browser image`);
+    }
+    const writing = `browser-${profile}-core`;
+    assert.equal(changed(writing).environment, original(writing).environment, `${writing} uses the unchanged Chromium-only image`);
   }
 });

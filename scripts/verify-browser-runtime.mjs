@@ -6,8 +6,7 @@ import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { chromium, webkit } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { BROWSER_SHARDS, VERIFICATION_GROUPS } from "./ci-contract.mjs";
-import { PLAYWRIGHT_IMAGE_DIGESTS } from "./ci-browser-image-digests.mjs";
+import { browserRuntimeRequirements } from "./ci-browser-image-digests.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -16,21 +15,7 @@ process.chdir(root);
 // Derive browser requirements from the canonical CI task inventory.
 // The WebKit group also contains Chromium UI/auth tasks.
 const browserGroup = process.env.CODEXIA_CI_BROWSER_GROUP;
-const groupTasks = VERIFICATION_GROUPS[`browser-${browserGroup}`];
-assert.ok(Array.isArray(groupTasks) && groupTasks.length > 0, "Unknown CI browser group");
-const profile = browserGroup.split("-")[0];
-const taskPrefix = `browser-${profile}-`;
-const projectByShard = new Map(BROWSER_SHARDS.map(shard => [shard.id, shard.project]));
-const requiredProjects = new Set(groupTasks.map(task => {
-  assert.ok(task.startsWith(taskPrefix), "Browser group contains a foreign profile task");
-  const project = projectByShard.get(task.slice(taskPrefix.length));
-  assert.ok(project === "chromium" || project === "webkit", `Unknown browser project: ${task}`);
-  return project;
-}));
-assert.ok(requiredProjects.has("chromium"), "Every browser group must validate Chromium");
-const expectedImageDigest = requiredProjects.has("webkit")
-  ? PLAYWRIGHT_IMAGE_DIGESTS.webkit
-  : PLAYWRIGHT_IMAGE_DIGESTS.chromium;
+const { projects, imageDigest: expectedImageDigest } = browserRuntimeRequirements(`browser-${browserGroup}`);
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node, "24.22.3", "The browser runner must use pinned Node 24.22.3");
@@ -64,7 +49,7 @@ async function verifyBrowser(name, browserType) {
 }
 
 const browsers = { chromium: await verifyBrowser("Chromium", chromium) };
-if (requiredProjects.has("webkit")) browsers.webkit = await verifyBrowser("WebKit", webkit);
+if (projects.has("webkit")) browsers.webkit = await verifyBrowser("WebKit", webkit);
 process.stdout.write(`PLAYWRIGHT_RUNTIME PASS ${JSON.stringify({
   os: "ubuntu-noble",
   imageDigest: expectedImageDigest,
