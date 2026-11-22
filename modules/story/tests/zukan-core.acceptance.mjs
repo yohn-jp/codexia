@@ -63,7 +63,6 @@ async function applyProposal(store, projectId, proposal) {
 test("Story Zukan actions read and apply durable PostgreSQL proposals", async (t) => {
   const tempRoot = await mkdtemp(join(tmpdir(), "codexia-story-zukan-pg-"));
   const files = {
-    "meta/project.yaml": "id: zukan-acceptance\ntitle: Zukan Acceptance\n",
     "bible/characters/char-uma/profile.yaml": "id: char-uma\ntype: character\nname: Uma\nnotes:\n  lead:\n    - type: paragraph\n      text: Character notes.\n  sections: []\n",
     "plot/volumes/vol-main/volume.yaml": "id: vol-main\ntype: volume\nname: Main\norder: 1\n",
     "plot/volumes/vol-main/chapters/ch-main-1/chapter.yaml": "id: ch-main-1\ntype: chapter\nname: Arrival\nvolume: vol-main\norder: 1\n",

@@ -43,7 +43,6 @@ function syntheticFiles() {
   const putYaml = (path, value) => { files[path] = YAML.stringify(value); };
   const putText = (path, content) => { files[path] = content; };
 
-  putYaml("meta/project.yaml", { title: "P06 Synthetic Work", ownerNote: "preserve-project-metadata" });
   putYaml("plot/volumes/vol-one/volume.yaml", { id: "vol-one", name: "第一巻", order: 1 });
   putYaml("plot/volumes/vol-one/chapters/ch-one/chapter.yaml", { id: "ch-one", title: "第一章", volume: "vol-one", order: 1 });
   putYaml("plot/volumes/vol-one/chapters/ch-one/scenes/sc-one.yaml", {

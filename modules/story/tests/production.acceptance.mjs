@@ -12,7 +12,6 @@ import { createPostgresPersistence } from "../../../packages/persistence-postgre
 import { postgresFixture } from "../../../tests/helpers/postgres-fixture.mjs";
 
 const workFiles = {
-  "meta/project.yaml": "title: Work Uma\nownerNote: preserve-project-metadata\n",
   "bible/characters/char-uma/profile.yaml": "id: char-uma\ntype: character\nname: Work Uma\naliases: [Uma]\nnotes:\n  lead:\n    - type: paragraph\n      text: Work record.\n  sections: []\n",
   "bible/locations/loc-cafe.yaml": "id: loc-cafe\ntype: location\nname: Work Cafe\n",
   "bible/locations/loc-park.yaml": "id: loc-park\ntype: location\nname: Work Park\n",
