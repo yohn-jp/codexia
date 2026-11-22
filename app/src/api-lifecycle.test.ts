@@ -309,7 +309,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     failProjectFetchWhileActive = false;
 
     holdLogoutBody = true;
-    const logoutRequest = api.logout();
+    const logoutRequest = api.logoutHosted();
     await logoutBodyAdmission;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));

@@ -89,6 +89,19 @@ test("an unavailable initial version cannot incorrectly offer the standalone tok
   await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
 });
 
+test("an unauthenticated standalone browser without Web OAuth configuration cannot submit a static token", async ({ page }) => {
+  await page.route("**/api/browser/version", route => route.fulfill({
+    json: { name: "codexia", version: "test", hosted: false, profile: "core" },
+  }));
+  await page.route("**/api/session", route => route.fulfill({
+    status: 401, json: { error: "Authentication required", code: "UNAUTHORIZED" },
+  }));
+  await page.goto("/desktop/");
+  await expect(page.getByRole("heading", { name: "サインインを利用できません" })).toBeVisible();
+  await expect(page.getByText("管理者に Web OAuth クライアントの設定を確認してください。")).toBeVisible();
+  await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+});
+
 test("an unknown hosted grant requests refresh and retries the initial session check", async ({ page }) => {
   let sessionRequests = 0;
   let refreshRequests = 0;

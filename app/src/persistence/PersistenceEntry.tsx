@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, setOAuthAccessToken, type PersistenceStatus } from "../api";
 import { ApiError } from "../api-error";
 import { beginOAuthAuthorization, completeOAuthAuthorization, webOAuthConfig, type OAuthWebConfig } from "../oauth";
@@ -21,7 +21,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   const [hostedMode, setHostedMode] = useState(false);
   const [oauthConfig, setOAuthConfig] = useState<OAuthWebConfig | null>(null);
   const [authorScope, setAuthorScope] = useState("owner");
-  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const pageWasHiddenRef = useRef(false);
@@ -209,29 +208,14 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     }
   }
 
-  async function signIn(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setBusy(true);
-    setMessage("");
-    try {
-      await api.login(token);
-      setToken("");
-      await inspect();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "ログインできませんでした。");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function completeLogout(): Promise<void> {
+  async function completeHostedLogout(): Promise<void> {
     if (busy) return;
     setBusy(true);
     setMessage("");
     try {
       if (!await protectBeforeAuthTransition("ログアウト")) return;
       setSessionBlocked(true);
-      await api.logout();
+      await api.logoutHosted();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);
       setState("signed-out");
@@ -262,7 +246,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
         if (nativeShell) { void completeNativeLogout(); return; }
         if (oauthConfig) { void completeWebOAuthLogout(); return; }
         if (accessMode && !hostedMode) { void completeAccessLogout(); return; }
-        void completeLogout();
+        if (hostedMode) void completeHostedLogout();
       }} />
     </div>
     {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
@@ -274,7 +258,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       {nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeSignIn()}>ネイティブ認証で再入場</button>}
       {nativeShell && nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeLogout()}>ログアウトを再試行</button>}
       {!nativeShell && oauthConfig && <button type="button" disabled={busy} onClick={() => void completeWebOAuthLogout()}>ログアウトを再試行</button>}
-      {!nativeShell && !oauthConfig && (!accessMode || hostedMode) && <button type="button" disabled={busy} onClick={() => void completeLogout()}>ログアウトを再試行</button>}
+      {!nativeShell && !oauthConfig && hostedMode && <button type="button" disabled={busy} onClick={() => void completeHostedLogout()}>ログアウトを再試行</button>}
       {hostedMode && <button type="button" disabled={busy} onClick={() => void reenterHosted()}>Praetoriumから再入場</button>}
       <button type="button" disabled={busy} onClick={() => void (async () => {
         if (!protectionRef.current || !await protectionRef.current()) { setMessage("入力を保護できないため再読み込みを停止しました。接続を再確認してください。"); return; }
@@ -332,22 +316,12 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     </section>
   </main>;
   return <main className={`pg-entry pg-${mode}`}>
-    <form className="pg-login" onSubmit={(event) => void signIn(event)}>
+    <section className="pg-login" aria-labelledby="pg-auth-configuration-title">
       <p className="eyebrow">Codexia · Database</p>
-      <h1>作品を開く</h1>
-      <p>認証トークンはこのブラウザーに保存されません。</p>
-      <label htmlFor="pg-access-token">アクセス・トークン</label>
-      <input
-        id="pg-access-token"
-        type="password"
-        autoComplete="current-password"
-        required
-        value={token}
-        onChange={(event) => setToken(event.target.value)}
-      />
+      <h1 id="pg-auth-configuration-title">サインインを利用できません</h1>
+      <p>管理者に Web OAuth クライアントの設定を確認してください。</p>
       {message && <p role="alert">{message}</p>}
-      <button type="submit" disabled={busy || token.length < 32}>{busy ? "接続しています…" : "PostgreSQL作品を開く"}</button>
       <a href="/">画面選択へ戻る</a>
-    </form>
+    </section>
   </main>;
 }

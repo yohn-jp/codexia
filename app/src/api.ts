@@ -560,24 +560,20 @@ export const api = {
     hostedMode = version.hosted;
     return version;
   },
-  login: (token: string) => request(dto.loggedIn, "/api/login", { method: "POST", body: JSON.stringify({ token }) }),
   session: () => request(dto.session, "/api/session"),
-  logout: async () => {
+  logoutHosted: async () => {
     const lifecycle = documentLifecycle;
     const init = { method: "POST" };
     return withDocumentDepartureClassification(lifecycle, init, async () => {
-      if (hostedMode === true) {
-        const response = await fetchWithHostedRefresh("/_platform/logout", init);
-        if (response.status === 204) return { authenticated: false as const };
-        const body: unknown = await response.json().catch(() => null);
-        if (!response.ok) {
-          const details = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-          throw new ApiError(typeof details.error === "string" ? details.error : `Logout failed (${response.status})`, response.status,
-            typeof details.code === "string" ? details.code : "LOGOUT_FAILED");
-        }
-        return decodeResponse(body, dto.loggedOut);
+      const response = await fetchWithHostedRefresh("/_platform/logout", init);
+      if (response.status === 204) return { authenticated: false as const };
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const details = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+        throw new ApiError(typeof details.error === "string" ? details.error : `Logout failed (${response.status})`, response.status,
+          typeof details.code === "string" ? details.code : "LOGOUT_FAILED");
       }
-      return request(dto.loggedOut, "/api/logout", { method: "POST", body: "{}" });
+      return decodeResponse(body, dto.loggedOut);
     });
   },
   jobs: (signal?: AbortSignal) => request(dto.jobs, "/api/jobs", { ...(signal ? { signal } : {}) }),
