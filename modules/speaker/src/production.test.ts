@@ -300,8 +300,8 @@ test("speaker actions retain dialogue from Markdown beginning with a horizontal 
     for (let index = 0; index < 14; index += 1) {
       const currentSceneId = `sc-synthetic-${String(index + 1).padStart(2, "0")}`;
       if (holdoutIds.includes(currentSceneId)) {
-        const sceneResult = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: currentSceneId }, host);
-        const row = (dataOf(sceneResult).attributions as typeof attributions)[0]!;
+        const sceneResult: Parameters<typeof dataOf>[0] = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: currentSceneId }, host);
+        const row: (typeof attributions)[number] = (dataOf(sceneResult).attributions as typeof attributions)[0]!;
         assert.equal(row.speakerEntityId, "char-hero", `synthetic rule attribution ${currentSceneId}`);
         holdoutPredictionsBeforeTraining.set(currentSceneId, row.speakerEntityId);
       }
