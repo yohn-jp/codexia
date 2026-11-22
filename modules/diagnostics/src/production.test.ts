@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
+import YAML from "yaml";
+import type { ChangeOperation, ChangeProposal, NativeStoryDocument, SnapshotId } from "@codexia/contracts";
 import { ModuleRuntime } from "@codexia/module-runtime";
 import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
@@ -178,9 +179,12 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const nativePath = `documents/${nativeDocumentId}.md`;
   const nativeSceneId = "scene-native";
   const original = "---\n正体と真相…\n---\n星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
-  files.set("plot/volumes/v1/scenes/scene-native.yaml", {
-    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\ngoal: 秘密を隠す\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
-  });
+  const metadata = { id: nativeSceneId, type: "scene", title: "夜明け", name: "夜明け", order: "0001", goal: "秘密を隠す", manuscript: nativePath };
+  const nativeScene: NativeStoryDocument = {
+    id: nativeSceneId, kind: "scene", title: metadata.title, orderKey: metadata.order, documentOrder: 0,
+    metadataPath: "plot/volumes/v1/scenes/scene-native.yaml", metadataRevision: "native-scene-r1",
+    metadataContent: YAML.stringify(metadata), metadata,
+  };
   files.set(nativePath, { content: original, revision: "native-body-r1", documentKind: "scene" });
   files.set("documents/123e4567-e89b-42d3-a456-426614174001.md", {
     content: "note …", revision: "native-note-r1", documentKind: "note",
@@ -204,7 +208,8 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     revision: "lint-rules-r1",
   });
   const proposals: ChangeProposal[] = [];
-  const { runtime, host } = await createRuntime(files, proposals);
+  const { runtime, host: runtimeHost } = await createRuntime(files, proposals);
+  const host = { ...runtimeHost, reader: { ...runtimeHost.reader, nativeStoryDocuments: [nativeScene] } };
   try {
     const nativePlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId }, host);
     assert.ok(nativePlot.ok, JSON.stringify(nativePlot));

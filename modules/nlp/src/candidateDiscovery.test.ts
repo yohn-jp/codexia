@@ -46,6 +46,20 @@ test("candidate discovery only reads native manuscript bodies linked by the pinn
   ]);
 });
 
+test("candidate discovery does not infer native manuscripts when the pinned hierarchy is empty", async () => {
+  const unexpectedPath = "documents/unlinked.md";
+  const entities = await readCanonicalSnapshotEntities({
+    snapshot: { projectId: "project-a", projectVersion: 9 },
+    async list(prefix) { return prefix === "documents" ? [unexpectedPath] : []; },
+    async read(path) {
+      assert.notEqual(path, unexpectedPath, "an unlinked document is not part of the candidate corpus");
+      return null;
+    },
+  }, new AbortController().signal);
+
+  assert.deepEqual(entities, []);
+});
+
 test("term variants prefer a known canonical term even when an unknown variant is more frequent", () => {
   assert.deepEqual(
     suggestTermVariants([{ term: "王都街道筋", count: 20 }], new Set(["王都街道", "王都街道筋線"])),

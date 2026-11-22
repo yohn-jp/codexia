@@ -69,8 +69,7 @@ export async function readCanonicalSnapshotEntities(
   reader: SnapshotReader,
   signal: AbortSignal,
 ): Promise<CanonicalSnapshotEntity[]> {
-  const nativeStoryDocuments = reader.nativeStoryDocuments;
-  const hierarchy = new Map((nativeStoryDocuments ?? [])
+  const hierarchy = new Map((reader.nativeStoryDocuments ?? [])
     .filter((document) => !PRESERVATION_ARCHIVE_PATH.test(document.metadataPath))
     .map((document) => [document.metadataPath, document]));
   const nativeSceneBodyPaths = new Set<string>();
@@ -79,18 +78,14 @@ export async function readCanonicalSnapshotEntities(
     const path = nativeSceneBodyPath(document.metadata.manuscript);
     if (path) nativeSceneBodyPaths.add(path);
   }
-  const prefixes = nativeStoryDocuments ? ENTITY_PREFIXES : [...ENTITY_PREFIXES, "documents"];
-  const listedPaths = (await Promise.all(prefixes.map((prefix) => reader.list(prefix)))).flat();
+  // Native document bodies are selected by the pinned scene links, not a path inventory.
+  const listedPaths = (await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat();
   const listedEntities = listedPaths.filter((path) => !PRESERVATION_ARCHIVE_PATH.test(path) && /\.(?:ya?ml|md)$/i.test(path));
   const paths = [...new Set([...listedEntities, ...hierarchy.keys(), ...nativeSceneBodyPaths])].sort();
   if (paths.length > MAX_ENTITY_FILES) throw new TypeError(`Project analysis exceeds ${MAX_ENTITY_FILES} canonical entity files`);
 
-  const orderedPaths = [
-    ...paths.filter((path) => !path.startsWith("documents/")),
-    ...paths.filter((path) => path.startsWith("documents/")),
-  ];
   const entities: CanonicalSnapshotEntity[] = [];
-  for (const path of orderedPaths) {
+  for (const path of paths) {
     if (signal.aborted) throw Object.assign(new Error("Snapshot entity read was cancelled"), { code: "job_cancelled" });
     const document = hierarchy.get(path);
     if (document) {
@@ -99,12 +94,11 @@ export async function readCanonicalSnapshotEntities(
       entities.push(canonicalEntity(document.id, type, path, raw));
       continue;
     }
-    const file = await reader.read(path);
-    if (!file) continue;
-    if (file.documentKind === "note") continue;
-    const isMarkdown = /\.md$/i.test(path);
     const isNativeSceneBody = nativeSceneBodyPaths.has(path);
     if (path.startsWith("documents/") && !isNativeSceneBody) continue;
+    const file = await reader.read(path);
+    if (!file || file.documentKind === "note") continue;
+    const isMarkdown = /\.md$/i.test(path);
     let raw: Record<string, unknown>;
     let body: string | undefined;
     if (isMarkdown && (isNativeSceneBody || path.startsWith("manuscript/"))) {
@@ -122,10 +116,6 @@ export async function readCanonicalSnapshotEntities(
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       raw = parsed as Record<string, unknown>;
       if (typeof raw.id !== "string") continue;
-      if (!nativeStoryDocuments && file.documentKind === "scene") {
-        const manuscriptPath = nativeSceneBodyPath(raw.manuscript);
-        if (manuscriptPath) nativeSceneBodyPaths.add(manuscriptPath);
-      }
     }
     const id = isNativeSceneBody
       ? `doc-${path.slice("documents/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
@@ -135,5 +125,5 @@ export async function readCanonicalSnapshotEntities(
     const type = isNativeSceneBody ? "scene" : inferredType(path, raw);
     entities.push(canonicalEntity(id, type, path, raw, body));
   }
-  return entities.sort((left, right) => left.filePath < right.filePath ? -1 : left.filePath > right.filePath ? 1 : 0);
+  return entities;
 }
