@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
+import { taskInvocation } from './ci-task-inputs.mjs';
 
 export const TASK_INPUT_DIMENSIONS = Object.freeze([
   'source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers',
@@ -100,10 +101,11 @@ export function assertTrustedTaskInputProof({ inputProof, identity, run, job, ar
   assert.equal(job.run_attempt, identity.workflowAttempt, 'Task proof job attempt mismatch');
   assert.equal(job.head_sha, identity.sourceSha, 'Task proof job source mismatch');
   assert.equal(job.name, expected.jobName, 'Task proof job name mismatch');
+  assert.equal(inputProof.task, expected.task ?? 'coverage', 'Task proof task mismatch');
   assert.equal(inputProof.workflowJob, expected.workflowJob, 'Task proof workflow job ID mismatch');
   assert.equal(inputProof.format, 'codexia-ci-task-input-proof/v2', 'Unknown task input proof format');
-  assert.equal(inputProof.task, 'coverage', 'Unsupported reusable task input proof');
-  assert.equal(inputProof.mode, 'static-coverage', 'Unsupported reusable task input proof mode');
+  assert.ok(inputProof.task === 'coverage' ? inputProof.mode === 'static-coverage' : inputProof.mode === 'task-execution',
+    'Unsupported reusable task input proof mode');
   assert.equal(inputProof.status, 'passed', 'Reusable task input proof did not pass');
   assert.equal(job.status, 'completed', 'Task proof job is unfinished');
   assert.equal(job.conclusion, 'success', 'Task proof job did not succeed');
@@ -125,8 +127,9 @@ export function assertTrustedCertifiedSourceTaskInputProof({ inputProof, identit
   assertIdentity(identity, 'expected');
   assertCompleteTaskInputProofSet({ tasks: [inputProof?.task], proofs: [inputProof], ...identity });
   assert.equal(inputProof.format, 'codexia-ci-task-input-proof/v2', 'Unknown certified task input proof format');
-  assert.equal(inputProof.task, 'coverage', 'Unsupported certified task input proof');
-  assert.equal(inputProof.mode, 'static-coverage', 'Unsupported certified task input proof mode');
+  assert.equal(inputProof.task, expected.task ?? 'coverage', 'Certified task proof task mismatch');
+  assert.ok(inputProof.task === 'coverage' ? inputProof.mode === 'static-coverage' : inputProof.mode === 'task-execution',
+    'Unsupported certified task input proof mode');
   assert.equal(inputProof.status, 'passed', 'Certified source task proof did not pass');
   assert.equal(inputProof.workflowJob, expected.workflowJob, 'Certified source proof workflow job ID mismatch');
 
@@ -227,10 +230,11 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
     assert.deepEqual(recorded.inputProof, result.inputProof, 'Producer task input proof mismatch');
     if (recorded.inputProof !== undefined) {
       const proof = recorded.inputProof;
-      assert.equal(recorded.task, 'coverage', 'Input closure is not supported for this task');
+      assert.equal(proof.task, recorded.task, 'Input closure task mismatch');
       assert.equal(result.status, 'passed', 'Input closure requires a passed task');
       assert.equal(proof.format, 'codexia-ci-task-input-proof/v2', 'Unknown task input proof format');
-      assert.equal(proof.mode, 'static-coverage', 'Unsupported task input proof mode');
+      assert.ok(proof.task === 'coverage' ? proof.mode === 'static-coverage' : proof.mode === 'task-execution',
+        'Unsupported task input proof mode');
       assert.equal(proof.status, 'passed', 'Task input proof did not pass');
       assert.equal(proof.sourceSha, plan.sha, 'Task input proof source mismatch');
       assert.equal(proof.planDigest, planDigest(plan), 'Task input proof plan mismatch');
@@ -256,6 +260,11 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
       assert.equal(proof.runtime.imageVersion, inventory.runner.imageVersion, 'Task input proof image version mismatch');
       assert.equal(proof.runtime.platform, inventory.runner.os.toLowerCase(), 'Task input proof platform mismatch');
       assert.equal(proof.runtime.arch, inventory.runner.arch.toLowerCase(), 'Task input proof architecture mismatch');
+      if (proof.mode === 'task-execution') {
+        const expectedInvocations = taskInvocation(recorded.task, proof.runtime.execPath);
+        assert.deepEqual(recorded.invocations, Array.isArray(expectedInvocations) ? expectedInvocations : [expectedInvocations],
+          'Task input proof invocation does not match the canonical runner');
+      }
     }
     assertInvocationList(recorded.invocations, recorded.task, { required: result.status === 'passed' && recorded.inputProof?.reusedFrom === undefined });
   }

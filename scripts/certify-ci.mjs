@@ -9,7 +9,7 @@ import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
-import { assertReusedCoverageProof } from './ci-task-proof-reuse.mjs';
+import { assertReusedCoverageProof, assertReusedOmittedTaskProofs } from './ci-task-proof-reuse.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -35,6 +35,9 @@ const run = await request(`actions/runs/${GITHUB_RUN_ID}`);
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
 if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all validations');
+if (run.event === 'pull_request' && plan.mode === 'affected') {
+  assert.equal(plan.taskInputReuse?.format, 'codexia-ci-task-input-reuse/v2', 'Affected PR plan requires complete omitted-task input equivalence');
+}
 const jobs = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`), 'jobs');
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
@@ -57,6 +60,10 @@ assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption r
 if (reusedCoverageReports.length === 1) {
   await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
     repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
+}
+if (plan.mode === 'affected') {
+  await assertReusedOmittedTaskProofs({ plan, current: run, repository: GITHUB_REPOSITORY, token: GH_TOKEN,
+    request: async (url, options) => fetch(url, options) });
 }
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
