@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import type { SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
@@ -73,11 +74,15 @@ export async function readCanonicalSnapshotEntities(
     if (path.startsWith("documents/") && !isNativeSceneBody) continue;
     let raw: Record<string, unknown>;
     let body: string | undefined;
-    if (isMarkdown) {
+    if (isMarkdown && (isNativeSceneBody || path.startsWith("manuscript/"))) {
+      const manuscript = splitManuscriptMarkdown(file.content);
+      raw = manuscript.metadata;
+      body = manuscript.body.trim();
+    } else if (isMarkdown) {
       const parsed = frontMatter(file.content);
-      if (!parsed && !isNativeSceneBody) continue;
-      raw = parsed?.raw ?? {};
-      body = parsed?.body ?? file.content.trim();
+      if (!parsed) continue;
+      raw = parsed.raw;
+      body = parsed.body;
     } else {
       let parsed: unknown;
       try { parsed = YAML.parse(file.content); } catch { continue; }

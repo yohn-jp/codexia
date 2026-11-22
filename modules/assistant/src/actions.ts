@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ModelMessage, ToolSet } from "ai";
@@ -805,9 +806,8 @@ function sceneContext(snapshot: LoadedStorySnapshot, sceneId: string): { scene: 
   if (!manuscriptPath) throw codeError("assistant_source_missing", `Scene ${sceneId} has no manuscript reference`);
   assertProjectPath(manuscriptPath);
   const manuscript = sourceFile(snapshot, manuscriptPath);
-  const frontMatter = /^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n/.exec(manuscript.content);
-  const bodyOffset = frontMatter?.[0].length ?? 0;
-  return { scene, manuscript, body: manuscript.content.slice(bodyOffset).trim(), bodyOffset };
+  const { prefix, body } = splitManuscriptMarkdown(manuscript.content);
+  return { scene, manuscript, body: body.trim(), bodyOffset: prefix.length };
 }
 
 type ZukanSource = { source: ReturnType<typeof sceneContext>; quote: string };

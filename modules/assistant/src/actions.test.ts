@@ -926,7 +926,7 @@ test("manuscript and sandbox Zukan suggestions are grounded before Story receive
     "bible/dialogue_sketches/ds-zukan.yaml": "id: ds-zukan\ntype: dialogue_sketch\nname: Tea chat\nparticipantEntityIds:\n  - char-zukan\nlines:\n  - speakerEntityId: char-zukan\n    text: 好きな紅茶を飲む。\n",
     "plot/volumes/vol-main/chapters/ch-zukan/chapter.yaml": "id: ch-zukan\ntype: chapter\nname: Zukan chapter\nvolume: vol-main\norder: 1\n",
     "plot/volumes/vol-main/chapters/ch-zukan/scenes/sc-zukan.yaml": "id: sc-zukan\ntype: scene\nchapter: ch-zukan\norder: 1\ntitle: Red sword\nmanuscript: manuscript/vol-main/ch-zukan/sc-zukan.md\n",
-    "manuscript/vol-main/ch-zukan/sc-zukan.md": "アリスは赤い剣を拾った。",
+    "manuscript/vol-main/ch-zukan/sc-zukan.md": "---\nアリスは赤い剣を拾った。\n---\n幕が下りた。",
   };
   const usageEvents: ModelUsageEvent[] = [];
   const usageStore: ModelUsageStore = {

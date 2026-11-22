@@ -48,13 +48,14 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
 
   await createHierarchy({ kind: "volume", id: "legacy-volume", title: "Legacy volume" });
   await createHierarchy({ kind: "chapter", id: "legacy-chapter", title: "Legacy chapter", volumeId: "legacy-volume" });
+  const legacySceneMarkdown = "---\nInterlude\n---\nQuartz legacy passage remains searchable.";
   await createHierarchy({
     kind: "scene",
     id: "legacy-scene",
     title: "Legacy scene",
     volumeId: "legacy-volume",
     chapterId: "legacy-chapter",
-    manuscriptBody: "Quartz legacy passage remains searchable.",
+    manuscriptBody: legacySceneMarkdown,
   });
 
   const chapter = (await persistence!.read((reader) => reader.listDocuments(project.id)))
@@ -92,6 +93,7 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   assert.equal(canonicalEntities.some((entity) => entity.raw.id === noteDocumentId), false,
     "a note projected under a scene-shaped path must not enter the canonical scene/entity set");
   const legacyEntityId = "ms-legacy-volume-legacy-chapter-legacy-scene";
+  assert.equal(canonicalEntities.find((entity) => entity.id === legacyEntityId)?.body, legacySceneMarkdown);
   const nativeEntityId = "doc-" + nativeDocumentId;
   const notePath = "documents/" + noteDocumentId + ".md";
   const nativePath = "documents/" + nativeDocumentId + ".md";

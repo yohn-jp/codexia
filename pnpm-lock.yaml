@@ -574,7 +574,11 @@ importers:
         specifier: 8.15.6
         version: 8.15.6
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/core:
     dependencies:

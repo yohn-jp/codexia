@@ -1,4 +1,4 @@
-import { buildSceneContext, getVolumeTree } from "./graph.js";
+import { buildSceneContext, orderedStoryScenes } from "./graph.js";
 import {
   analyzeThreadLifecycles,
   type ThreadLifecycleSnapshot,
@@ -25,22 +25,12 @@ export interface ThreadStatusEntry {
 export function collectSceneTextInputs(
   input: StoryGraphInput,
 ): StorySnapshotResult<ThreadSceneTextInput[]> {
-  const scenes: ThreadSceneTextInput[] = [];
-  let order = 0;
-  for (const { volume, chapters } of getVolumeTree(input).data) {
-    for (const { scenes: chapterScenes } of chapters) {
-      for (const scene of chapterScenes) {
-        order++;
-        const context = buildSceneContext({ ...input, sceneId: scene.id }).data;
-        scenes.push({
-          sceneId: scene.id,
-          order,
-          text: context?.manuscriptBody ?? "",
-          volumeId: volume.id,
-        });
-      }
-    }
-  }
+  const scenes = orderedStoryScenes(input).map(({ scene, volumeId }, index) => ({
+    sceneId: scene.id,
+    order: index + 1,
+    text: buildSceneContext({ ...input, sceneId: scene.id }).data?.manuscriptBody ?? "",
+    ...(volumeId ? { volumeId } : {}),
+  }));
   return snapshotResult(input.snapshot, scenes);
 }
 

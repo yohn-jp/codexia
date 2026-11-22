@@ -190,9 +190,9 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const nativeDocumentId = "123e4567-e89b-42d3-a456-426614174000";
   const nativePath = `documents/${nativeDocumentId}.md`;
   const nativeSceneId = "scene-native";
-  const original = "星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
+  const original = "---\n回想…\n---\n星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
   files.set("plot/volumes/v1/scenes/scene-native.yaml", {
-    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
+    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\ngoal: 夜明けを待つ\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
   });
   files.set(nativePath, { content: original, revision: "native-body-r1", documentKind: "scene" });
   files.set("documents/123e4567-e89b-42d3-a456-426614174001.md", {
@@ -219,6 +219,11 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const proposals: ChangeProposal[] = [];
   const { runtime, host } = await createRuntime(files, proposals);
   try {
+    const nativePlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId }, host);
+    assert.equal(nativePlot.ok, true, JSON.stringify(nativePlot));
+    const suppliedPlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId, text: original }, host);
+    assert.deepEqual(nativePlot, suppliedPlot);
+
     const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: nativePath, baseRevision: "native-body-r1", operationId: "native-lint-fix",
     }, host);
@@ -229,6 +234,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     assert.ok(lintProposal, "native lint fix returns a Core proposal");
     assert.deepEqual(lintProposal.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
     assert.deepEqual(lintProposal.operations[0]?.writes.map(({ path }) => path), [nativePath]);
+    assert.equal(lintProposal.operations[0]?.writes[0]?.content, original.replaceAll("…", "……"));
     assert.equal(files.get(nativePath)?.content, original, "lint proposals do not change the selected snapshot");
 
     const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId: nativeSceneId }, host);
@@ -242,7 +248,8 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
         evidence: Array<{ revision: string }>;
       } | null;
     };
-    assert.equal(formatData.formattedText, "星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    assert.equal(formatData.formattedText, "---\n回想……\n---\n星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    assert.equal(formatData.proposal?.operations[0]?.writes[0]?.content, formatData.formattedText);
     assert.deepEqual(formatData.proposal?.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
     assert.equal(formatData.proposal?.operations[0]?.writes[0]?.path, nativePath);
     assert.equal(formatData.sourceProposal?.operations[0]?.target.manuscriptId, `doc-ms-${nativeDocumentId}`);

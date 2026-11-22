@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 import {
@@ -352,18 +353,6 @@ function pathForEntity(type: string, id: string, raw: ObjectValue): string {
   fail(`Unsupported entity type: ${type}`);
 }
 function workEntity(entity: StoryEntity): WorkEntity { return { id: entity.id, type: entity.type, filePath: entity.filePath, raw: structuredClone(entity.raw), ...(entity.body !== undefined ? { body: entity.body } : {}) }; }
-function parsedMarkdown(content: string): { prefix: string; raw: ObjectValue; body: string; rawBody: string } {
-  const opening = /^---[ \t]*\r?\n/.exec(content);
-  if (!opening) return { prefix: "", raw: {}, body: content.trim(), rawBody: content };
-  const delimiter = /^---[ \t]*\r?$/gm; delimiter.lastIndex = opening[0].length;
-  const closing = delimiter.exec(content); if (!closing) fail("Manuscript frontmatter is unclosed");
-  const raw = YAML.parse(content.slice(opening[0].length, closing.index));
-  if (raw !== null && !isRecord(raw)) fail("Manuscript frontmatter must be a YAML mapping");
-  let bodyStart = closing.index + closing[0].length;
-  if (content.startsWith("\r\n", bodyStart)) bodyStart += 2; else if (content.startsWith("\n", bodyStart)) bodyStart += 1;
-  const prefix = content.slice(0, bodyStart), rawBody = content.slice(bodyStart);
-  return { prefix, raw: (raw ?? {}) as ObjectValue, body: rawBody.trim(), rawBody };
-}
 function outputYaml(value: ObjectValue): string { return YAML.stringify(value); }
 function entityForId(entities: Map<string, WorkEntity>, id: unknown, label: string): WorkEntity {
   const entity = typeof id === "string" ? entities.get(id) : undefined;
@@ -626,16 +615,17 @@ export async function buildNarrativeChangeProposal(context: ModuleActionContext,
       if (manuscript.type !== "manuscript" || scene.type !== "scene" || scene.raw.manuscript !== manuscript.filePath || manuscript.body === undefined) fail("Manuscript and scene do not match", "operation_precondition_conflict");
       assertPrecondition(manuscript, condition, `Manuscript ${manuscript.id}`); addEntityRead(manuscript); addEntityRead(scene);
       const manuscriptFile = files.get(manuscript.filePath); if (!manuscriptFile) fail(`Manuscript file not found: ${manuscript.filePath}`);
-      const doc = parsedMarkdown(manuscriptFile.content), replacementRange = op.range as ObjectValue;
+      const { prefix, body: rawBody } = splitManuscriptMarkdown(manuscriptFile.content);
+      const replacementRange = op.range as ObjectValue;
       const start = Number(replacementRange.start), end = Number(replacementRange.end);
-      if (end > doc.body.length) fail("Manuscript replacement range exceeds the selected body", "operation_precondition_conflict");
-      const leftTrim = doc.rawBody.length - doc.rawBody.trimStart().length;
+      if (end > rawBody.trim().length) fail("Manuscript replacement range exceeds the selected body", "operation_precondition_conflict");
+      const leftTrim = rawBody.length - rawBody.trimStart().length;
       const replacement = String(op.replacement);
-      const body = doc.rawBody.slice(0, leftTrim + start) + replacement + doc.rawBody.slice(leftTrim + end);
-      const next = doc.prefix + body;
+      const body = rawBody.slice(0, leftTrim + start) + replacement + rawBody.slice(leftTrim + end);
+      const next = prefix + body;
       setFileWrite(files, reads, writes, manuscript.filePath, next, [{
-        fromUtf16: doc.prefix.length + leftTrim + start,
-        toUtf16: doc.prefix.length + leftTrim + end,
+        fromUtf16: prefix.length + leftTrim + start,
+        toUtf16: prefix.length + leftTrim + end,
         insert: replacement,
       }]);
       manuscript.body = body.trim();

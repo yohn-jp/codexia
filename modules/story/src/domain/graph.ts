@@ -343,11 +343,9 @@ export function getVolumeTree(input: StoryGraphInput): StorySnapshotResult<Story
   return snapshotResult(input.snapshot, getVolumeTreeData(input.entities, input.documentOrderByEntityId));
 }
 
-export function buildSceneLocationInfos(
-  input: StoryGraphInput,
-): StorySnapshotResult<SceneLocationInfo[]> {
-  const infos: SceneLocationInfo[] = [];
-  let globalOrder = 0;
+type OrderedStoryScene = { scene: StoryEntity; volumeId?: string; chapterId?: string };
+
+export function orderedStoryScenes(input: StoryGraphInput): OrderedStoryScene[] {
   const volumes = getVolumeTreeData(input.entities, input.documentOrderByEntityId);
   const directRootScenes = listByTypeData(input.entities, "scene").filter((scene) =>
     !(typeof scene.raw.volume === "string" && scene.raw.volume.length > 0) &&
@@ -365,28 +363,33 @@ export function buildSceneLocationInfos(
     })),
   ].sort((a, b) => compareDocumentOrder(a.entity, b.entity, input.documentOrderByEntityId));
 
-  const appendScene = (scene: StoryEntity, chapterId?: string) => {
-    globalOrder += 1;
-    const context = buildSceneContextData(input.entities, input.links, scene.id);
-    const characterIds =
-      context?.appears.filter((entity) => entity.type === "character").map((entity) => entity.id) ?? [];
-    infos.push({
-      sceneId: scene.id,
-      order: globalOrder,
-      locationId: context?.location?.id,
-      characterIds,
-      ...(chapterId ? { chapterId } : {}),
-    });
-  };
-
+  const ordered: OrderedStoryScene[] = [];
   for (const entry of topLevel) {
     if (entry.kind === "scene") {
-      appendScene(entry.scene);
+      ordered.push({ scene: entry.scene });
       continue;
     }
     for (const { chapter, scenes } of entry.tree.chapters) {
-      for (const scene of scenes) appendScene(scene, chapter.id);
+      for (const scene of scenes) ordered.push({ scene, volumeId: entry.tree.volume.id, chapterId: chapter.id });
     }
   }
+  return ordered;
+}
+
+export function buildSceneLocationInfos(
+  input: StoryGraphInput,
+): StorySnapshotResult<SceneLocationInfo[]> {
+  const infos = orderedStoryScenes(input).map(({ scene, chapterId }, index) => {
+    const context = buildSceneContextData(input.entities, input.links, scene.id);
+    const characterIds =
+      context?.appears.filter((entity) => entity.type === "character").map((entity) => entity.id) ?? [];
+    return {
+      sceneId: scene.id,
+      order: index + 1,
+      locationId: context?.location?.id,
+      characterIds,
+      ...(chapterId ? { chapterId } : {}),
+    };
+  });
   return snapshotResult(input.snapshot, infos);
 }

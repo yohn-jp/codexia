@@ -1,3 +1,4 @@
+import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import YAML from "yaml";
 import { assertProjectPath, type SnapshotReader } from "@codexia/contracts";
 import type { StoryEntity, StoryGraphInput, StoryLink } from "./domain/index.js";
@@ -118,26 +119,6 @@ function extractLinks(entityId: string, raw: Record<string, unknown>, links: Sto
   }
 }
 
-function parseMarkdown(content: string): { raw: Record<string, unknown>; body: string } | null {
-  const opening = /^---[ \t]*\r?\n/.exec(content);
-  if (!opening) return { raw: {}, body: content.trim() };
-  const delimiter = /^---[ \t]*\r?$/gm;
-  delimiter.lastIndex = opening[0].length;
-  const closing = delimiter.exec(content);
-  if (!closing) return { raw: {}, body: content.trim() };
-  let raw: Record<string, unknown> | null;
-  try {
-    raw = asRecord(YAML.parse(content.slice(opening[0].length, closing.index)));
-  } catch {
-    return { raw: {}, body: content.trim() };
-  }
-  if (!raw) return { raw: {}, body: content.trim() };
-  let bodyStart = closing.index + closing[0].length;
-  if (content.startsWith("\r\n", bodyStart)) bodyStart += 2;
-  else if (content.startsWith("\n", bodyStart)) bodyStart += 1;
-  return { raw, body: content.slice(bodyStart).trim() };
-}
-
 // Core projects native PostgreSQL documents at documents/<documentId>.md.
 const NATIVE_DOCUMENT_PATH = /^documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.md$/u;
 
@@ -152,17 +133,16 @@ function manuscriptId(filePath: string): string | null {
 function parseStoryEntity(file: StoryFile): StoryEntity | null {
   const id = manuscriptId(file.path);
   if (id !== null) {
-    const parsed = parseMarkdown(file.content);
-    if (!parsed) return null;
+    const { metadata, body } = splitManuscriptMarkdown(file.content);
     return {
       id,
       type: "manuscript",
-      name: typeof parsed.raw.title === "string" ? parsed.raw.title : undefined,
-      status: typeof parsed.raw.status === "string" ? parsed.raw.status : undefined,
-      tags: Array.isArray(parsed.raw.tags) ? parsed.raw.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
+      name: typeof metadata.title === "string" ? metadata.title : undefined,
+      status: typeof metadata.status === "string" ? metadata.status : undefined,
+      tags: Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
       filePath: file.path,
-      raw: parsed.raw,
-      body: parsed.body,
+      raw: metadata,
+      body: body.trim(),
     };
   }
   if (!file.path.endsWith(".yaml") && !file.path.endsWith(".yml")) return null;

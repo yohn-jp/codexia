@@ -274,6 +274,57 @@ test("native scene context preserves Markdown horizontal rules and parses explic
   assert.equal(explicit.data.manuscriptBody, "本文です。");
 });
 
+test("a Story proposal edits prose between Markdown rules at the original UTF-16 offsets", async () => {
+  const path = "manuscript/vol-main/ch-main-1/sc-1.md";
+  const content = "---\r\n回想。\r\n---\r\n現在。\r\n";
+  const reader = makeReader(fixtureFiles({ [path]: content }));
+  const context = makeActionContext(reader);
+  context.invoke = async () => ({
+    ok: false, snapshot: reader.snapshot,
+    error: { code: "PROPOSAL_NOT_FOUND", message: "missing", retryable: false },
+  });
+  const assessment = { confidence: 1, risk: "low" };
+  const start = content.indexOf("回想");
+  const proposal = await invoke("story.changes.propose", {
+    schemaVersion: 1, id: "horizontal-rule-edit", projectId: context.projectId,
+    goal: "Correct the opening scene", status: "proposed", assessment, evidence: [],
+    diagnostics: { before: null, after: null },
+    operations: [{
+      id: "replace-opening", kind: "manuscript.replace-range", assessment, evidenceIds: [],
+      target: { manuscriptId: "ms-vol-main-ch-main-1-sc-1", sceneId: "sc-1" },
+      precondition: { kind: "content-hash", value: sourceHash(content.trim()) },
+      range: { start, end: start + 2 }, replacement: "記憶",
+    }],
+  }, context);
+  const write = proposal.proposals?.[0]?.operations[0]?.writes.find((entry) => entry.path === path);
+  assert.equal(write?.content, content.replace("回想", "記憶"));
+  assert.deepEqual(write?.textChanges, [{ fromUtf16: start, toUtf16: start + 2, insert: "記憶" }]);
+});
+
+test("thread status follows a root scene into the next chapter scene in document order", async () => {
+  const rootId = "11111111-1111-4111-8111-111111111111";
+  const files = fixtureFiles({
+    [`plot/volumes/root/chapters/root/scenes/${rootId}.yaml`]: yaml({
+      id: rootId, type: "scene", order: 0, manuscript: `documents/${rootId}.md`,
+    }),
+    [`documents/${rootId}.md`]: "An unopened door.",
+    "plot/threads/thread-door.yaml": yaml({ id: "thread-door", type: "thread", planted: [rootId], payoff: ["sc-2"] }),
+  });
+  const context = makeActionContext(makeReader(files));
+  for (const [at, expected] of [[rootId, "planted"], ["sc-1", "planted"], ["sc-2", "resolved"]]) {
+    const result = await invoke<{ threads: Array<{ status: string; plantedSceneId: string }> }>(
+      "story.threads.status", { at, threadId: "thread-door" }, context,
+    );
+    assert.equal(result.data.threads[0]?.status, expected);
+    assert.equal(result.data.threads[0]?.plantedSceneId, rootId);
+  }
+  const lifecycle = await invoke<{ snapshots: Array<{ state: string; plantedSceneId: string }> }>(
+    "story.threads.lifecycle", { threadId: "thread-door" }, context,
+  );
+  assert.equal(lifecycle.data.snapshots[0]?.state, "resolved");
+  assert.equal(lifecycle.data.snapshots[0]?.plantedSceneId, rootId);
+});
+
 test("snapshot materialization reads each pinned Story snapshot without proposing writes", async () => {
   const counted = (files: Map<string, string>, projectId: string, projectVersion: number) => {
     const base = makeReader(files, projectId);
