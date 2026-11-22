@@ -137,7 +137,7 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   return fixture;
 }
 
-export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。\n"): Promise<WritingFixture> {
+export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<WritingFixture> {
   const headers = { Origin: new URL(origin).origin };
   const createdProject = await fetch(new URL("/api/v1/persistence/projects", origin).toString(), { method: "POST", headers, data: { title: `Writing ${crypto.randomUUID()}` } });
   expect(createdProject.status()).toBe(201);
@@ -152,7 +152,7 @@ export async function seedWritingProject(fetch: APIRequestContext["fetch"], orig
   return { project, scene, second };
 }
 
-export function writingFixturePath(shell: "desktop" | "mobile", project: FixtureProject, scene: FixtureDocument): string {
+export function writingFixturePath(shell: "desktop" | "mobile", project: Pick<FixtureProject, "id">, scene: Pick<FixtureDocument, "id">): string {
   return `/${shell}/projects/${project.id}/scenes/${scene.id}${shell === "mobile" ? "?view=writing" : ""}`;
 }
 
