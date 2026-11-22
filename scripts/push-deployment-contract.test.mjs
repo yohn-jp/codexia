@@ -253,8 +253,8 @@ test('Better Auth activation is explicit, validates staged state, and retains mo
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
-  const authMigration = shell.indexOf('/app/packages/api/dist/migrate-auth.js --apply');
-  const verifyClients = shell.indexOf('/app/packages/api/dist/verify-auth-clients.js');
+  const authMigration = shell.indexOf('/app/node_modules/@codexia/api/dist/migrate-auth.js --apply');
+  const verifyClients = shell.indexOf('/app/node_modules/@codexia/api/dist/verify-auth-clients.js');
   const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
   assert.ok(backup >= 0 && authMigration > backup && verifyClients > authMigration && installCandidate > verifyClients,
     'Better Auth migration and client checks must follow encrypted backup and precede the API mode switch');

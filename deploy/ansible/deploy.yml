@@ -324,7 +324,7 @@
       - "{{ home }}/.config/codexia-auth/runtime-{{ codexia_auth_settings_sha256 }}.env"
       - --entrypoint=node
       - "{{ codexia_image }}"
-      - /app/packages/api/dist/verify-auth-clients.js
+      - /app/node_modules/@codexia/api/dist/verify-auth-clients.js
   register: codexia_auth_client_preflight
   changed_when: false
   when: codexia_auth_mode == 'better-auth' and codexia_current_container_exists.rc == 0 and (codexia_current_auth_mode | default('unknown')) == 'better-auth'
@@ -626,14 +626,14 @@
           --env-file "$auth_settings_file" --entrypoint=node "$candidate_image" "$script" "$@"
       }
       if [[ "$auth_mode" == better-auth && "$auth_transition" == true ]]; then
-        if ! run_auth_cli /app/packages/api/dist/migrate-auth.js --apply; then
+        if ! run_auth_cli /app/node_modules/@codexia/api/dist/migrate-auth.js --apply; then
           restore_previous || echo 'Previous API recovery failed after Better Auth migration failure' >&2
           echo 'Better Auth migrations failed; the prior token API was restored and auth schema state was retained for inspection' >&2
           exit 1
         fi
       fi
       if [[ "$auth_mode" == better-auth ]]; then
-        if ! run_auth_cli /app/packages/api/dist/verify-auth-clients.js; then
+        if ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
           restore_previous || echo 'Previous API recovery failed after Better Auth registration verification failure' >&2
           echo 'Better Auth schema or registered clients failed verification; the prior API was restored' >&2
           exit 1

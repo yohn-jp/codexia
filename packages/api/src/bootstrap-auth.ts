@@ -1,9 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import type { RequestListener } from "node:http";
 import { createServer } from "node:https";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, OIDC_PROVIDER_ID, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateBetterAuth, readBetterAuthMigrationConfig } from "./migrate-auth.js";
@@ -206,7 +205,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   main().catch(() => {
     process.stderr.write("Better Auth bootstrap could not start.\n");
     process.exitCode = 1;

@@ -1,8 +1,8 @@
+import { realpathSync } from "node:fs";
 import { readCodexiaEnvironment } from "./environment.js";
 import { CODEXIA_AUTH_SCHEMA, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
 import type { Pool } from "pg";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const CODEXIA_AUTH_RUNTIME_ROLE = "codexia_auth_runtime";
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   await migrateBetterAuth();
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   main().catch(() => {
     process.stderr.write("Better Auth migration failed; configuration or database details are redacted.\n");
     process.exitCode = 1;

@@ -41,5 +41,16 @@ if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$auth_dir/runtime.env" ||
   exit 1
 fi
 
-# The isolated listener is reachable through an operator SSH forward only.
-timeout --foreground --kill-after=15s 15m podman run --rm --pull=never   --name codexia-auth-registration --userns=keep-id:uid=1000,gid=1000 --user 1000:1000   --network codexia --network codexia-data --publish 127.0.0.1:8443:8443   --read-only --cap-drop=all --security-opt=no-new-privileges   --volume "$auth_dir/tls.crt:/run/codexia-bootstrap/tls.crt:ro"   --volume "$auth_dir/tls.key:/run/codexia-bootstrap/tls.key:ro"   --env-file "$auth_dir/runtime.env" --env-file "$auth_dir/bootstrap.env"   --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL   --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET   --secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET   --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET   --entrypoint=node "$2" /app/packages/api/dist/bootstrap-auth.js --apply
+# Publish only on host loopback for the operator SSH forward. Keep it off the Tunnel.
+podman run --rm --pull=never --timeout=900 \
+  --name codexia-auth-registration --userns=keep-id:uid=1000,gid=1000 --user 1000:1000 \
+  --network codexia --network codexia-data --publish 127.0.0.1:8443:8443 \
+  --read-only --cap-drop=all --security-opt=no-new-privileges \
+  --volume "$auth_dir/tls.crt:/run/codexia-bootstrap/tls.crt:ro" \
+  --volume "$auth_dir/tls.key:/run/codexia-bootstrap/tls.key:ro" \
+  --env-file "$auth_dir/runtime.env" --env-file "$auth_dir/bootstrap.env" \
+  --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
+  --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
+  --secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET \
+  --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET \
+  --entrypoint=node "$2" /app/node_modules/@codexia/api/dist/bootstrap-auth.js --apply

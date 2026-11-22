@@ -85,7 +85,8 @@
       - codexia_auth_database_parts.fragment == ''
       - codexia_auth_secret_value | length >= 32 and codexia_auth_secret_value is match('^[!-~]+$')
       - codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$')
-      - codexia_oauth_introspection_client_secret_value | length >= 16 and codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
+      - codexia_oauth_introspection_client_secret_value | length >= (32 if codexia_auth_registration_pending | default(false) else 16)
+      - codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
     fail_msg: The Better Auth URL must target codexia_auth_runtime on the existing codexia database; secret inputs must be nonempty printable values.
   no_log: true
 
