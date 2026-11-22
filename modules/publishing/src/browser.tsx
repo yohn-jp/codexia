@@ -1,6 +1,7 @@
 import { createElement, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
+import { publicReaderOrigin, publicReaderUrl } from "./share-url.js";
 
 interface SceneItem { id: string; title: string }
 interface ChapterItem { id: string; title: string; scenes: SceneItem[] }
@@ -416,6 +417,12 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [revealed, setRevealed] = useState<{ url: string; proposalId: string; target: string } | null>(null);
+  const nativeConfig = (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__;
+  const readerOrigin = publicReaderOrigin({
+    native: nativeConfig !== undefined,
+    configuredReaderOrigin: nativeConfig?.publicReaderOrigin ?? null,
+    currentOrigin: window.location.origin,
+  });
   const targets = useMemo(() => {
     const volumes = tree?.volumes ?? [];
     return {
@@ -446,12 +453,12 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   async function create() {
     const target = options.find((item) => item.id === scopeId);
     if (!target) { setError("共有範囲を選択してください"); return; }
+    if (!readerOrigin) { setError("公開読者サイトのHTTPS URLが未設定のため、配布用リンクを作成できません。"); return; }
     setBusy(true); setError(""); setStatus(""); setRevealed(null);
     try {
       const data = await invoke(context, "publishing.shares.create", { kind, id: scopeId, label, expiresInHours: Number(hours) });
       const token = String(data.token);
-      const url = window.location.origin + "/r/publishing/" +
-        encodeURIComponent(context.snapshot.projectId) + "/" + encodeURIComponent(token);
+      const url = publicReaderUrl(readerOrigin, context.snapshot.projectId, token);
       setRevealed({ url, proposalId: String(data.proposalId), target: target.title });
       setStatus("リンク発行の提案を作成しました。");
       setLabel("");
@@ -474,6 +481,7 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   return <Panel title="読み取り専用共有リンク">
     <p style={{ margin: 0 }}>読者は有効期限まで、選択した範囲の保存済み本文を閲覧できます。公開中に原稿を保存すると、読者がアクセスしたときの本文も変わります。</p>
     <p style={{ margin: 0 }}>リンクが失効すると、以後のリンク経由の閲覧が止まります。読者がすでに保存したコピーは手元に残ります。</p>
+    {!readerOrigin && <p role="status">公開読者サイトのHTTPS URLが未設定のため、配布用リンクを作成できません。</p>}
     {revealed && <div style={{ border: "1px solid #547a40", padding: 10, overflowWrap: "anywhere" }}>
       <p>発行提案中 {revealed.target}</p>
       <p>URLは今回だけ表示されます。控えておき、提案 {revealed.proposalId} を承認して適用した後に読者へ渡してください。</p>
@@ -494,7 +502,7 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
       </label>
       <label>表示名 <input style={fieldStyle()} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={120} /></label>
       <label>提案作成からの有効時間（時間） <input style={fieldStyle()} type="number" min={1} max={87600} value={hours} onChange={(event) => setHours(event.target.value)} /></label>
-      <button type="submit" style={buttonStyle()} disabled={busy || !options.some((item) => item.id === scopeId)}>{busy ? "準備中…" : "リンク発行の提案を作成"}</button>
+      <button type="submit" style={buttonStyle()} disabled={busy || !readerOrigin || !options.some((item) => item.id === scopeId)}>{busy ? "準備中…" : "リンク発行の提案を作成"}</button>
     </form>
     <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8 }}>
       {shares.map((share) => {
