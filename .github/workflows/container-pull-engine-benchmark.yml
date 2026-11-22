@@ -11,8 +11,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: container-engine-benchmark-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   host-pull:
+    if: github.event_name == 'workflow_dispatch'
     name: ${{ matrix.engine }} pull / trial ${{ matrix.trial }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -93,6 +98,7 @@ jobs:
           printf 'BENCHMARK engine=%s trial=%s pull_ms=%s startup_ms=%s runner_image=%s\n' "$ENGINE" "$TRIAL" "$pull_ms" "$startup_ms" "${ImageVersion:-unknown}"
 
   job-container:
+    if: github.event_name == 'workflow_dispatch'
     name: jobs.container / trial ${{ matrix.trial }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -118,6 +124,7 @@ jobs:
           printf 'BENCHMARK engine=jobs.container trial=%s runner_image=%s\n' '${{ matrix.trial }}' "${ImageVersion:-unknown}"
 
   paired-pull:
+    if: github.event_name == 'workflow_dispatch'
     name: Same-runner Docker vs Podman / ${{ matrix.order }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -161,6 +168,7 @@ jobs:
       contents: read
       packages: read
     strategy:
+      max-parallel: 2
       fail-fast: false
       matrix:
         engine: [docker, podman]
@@ -179,6 +187,7 @@ jobs:
         run: bash scripts/ci-playwright-engine-benchmark.sh "$ENGINE" "$VARIANT" probe
 
   real-webkit:
+    needs: image-capability
     name: Real four-shard WebKit / ${{ matrix.engine }} / ${{ matrix.variant }} / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -186,6 +195,7 @@ jobs:
       contents: read
       packages: read
     strategy:
+      max-parallel: 4
       fail-fast: false
       matrix:
         engine: [docker, podman]
@@ -242,10 +252,12 @@ jobs:
           retention-days: 3
 
   container-webkit-reference:
+    needs: image-capability
     name: Reference jobs.container / four-shard WebKit / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
+      max-parallel: 2
       fail-fast: false
       matrix:
         profile: [core, full]
@@ -290,10 +302,12 @@ jobs:
         run: bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
 
   dual-webkit-local:
+    needs: image-capability
     name: Local dual-browser minimal Podman / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     strategy:
+      max-parallel: 1
       fail-fast: false
       matrix:
         profile: [core, full]
