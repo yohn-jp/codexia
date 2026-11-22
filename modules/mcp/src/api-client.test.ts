@@ -98,6 +98,28 @@ test("project discovery rejects an empty continuation emitted by the host", asyn
   await assert.rejects(client.listProjectPage(1), { code: "INVALID_RESPONSE", status: 502 });
 });
 
+test("stdio API client preserves OAuth rejection codes without a credential fallback", async () => {
+  for (const { status, code } of [
+    { status: 401, code: "OAUTH_TOKEN_INVALID" },
+    { status: 401, code: "OAUTH_TOKEN_INACTIVE" },
+    { status: 403, code: "OAUTH_MCP_SCOPE_REQUIRED" },
+  ]) {
+    const authorizations: Array<string | null> = [];
+    const client = new ApiClient({
+      baseUrl: "https://codexia.test",
+      token: "test-access-token",
+      projectId: "project-one",
+      fetch: async (_url, init) => {
+        authorizations.push(new Headers(init?.headers).get("authorization"));
+        return Response.json({ error: { code, message: "Access token rejected" } }, { status });
+      },
+    });
+
+    await assert.rejects(client.listActions(), { status, code });
+    assert.deepEqual(authorizations, ["Bearer test-access-token"]);
+  }
+});
+
 test("stdio API client cancels in-flight discovery and invocation requests", { timeout: 2_000 }, async () => {
   const fetcher: typeof fetch = async (_input, init = {}) => {
     const signal = init.signal;
