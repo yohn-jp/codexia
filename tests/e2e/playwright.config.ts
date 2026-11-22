@@ -10,7 +10,14 @@ const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
 const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const externalServer = Boolean(configuredBaseURL);
-const selfHostedAuthFixture = selectedTestFile === "oauth-web.acceptance.spec.ts" || selectedTestFile === "outline-headings.acceptance.spec.ts";
+const selfHostedAuthFixture = [
+  "job-inbox.acceptance.spec.ts",
+  "native-review.acceptance.spec.ts",
+  "oauth-web.acceptance.spec.ts",
+  "outline-headings.acceptance.spec.ts",
+  "recent-activity.acceptance.spec.ts",
+  "ui-v1.acceptance.spec.ts",
+].includes(selectedTestFile ?? "");
 const legacyServer = !externalServer && !selfHostedAuthFixture;
 const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && legacyServer;
 const stateDir = process.env.CODEXIA_E2E_STATE_DIR
