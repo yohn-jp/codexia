@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Document, DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndexFile } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndexFile } from "./snapshot-index.js";
 
 const projectId = "project-index" as ProjectId;
 
@@ -58,6 +58,27 @@ test("snapshot indexes keep parent order, first logical ID resolution, paths, an
   assert.equal(index.firstDocumentByLookupId.get(second.id), second);
   assert.equal(index.sceneCharacterCountsByDocumentId.get(first.id), 5);
   assert.equal(index.sceneCharacterCountsByDocumentId.get(second.id), 4);
+});
+
+test("scene writing counts preserve a leading Markdown horizontal rule unless it is YAML frontmatter", () => {
+  const volume = document("volume-rule", "volume", "Volume", null, "01");
+  const chapter = document("chapter-rule", "chapter", "Chapter", volume.id, "01");
+  const ordinaryScene = document("scene-rule", "scene", "Horizontal rule", chapter.id, "01");
+  const frontmatterScene = document("scene-frontmatter", "scene", "Explicit frontmatter", chapter.id, "02");
+  const ordinaryMarkdown = "---\n普通の回想\n---\n「すぐに戻ります。」";
+  const frontmatterMarkdown = "---\ntitle: Explicit title\n---\n本文です。";
+  const index = createSnapshotIndex([volume, chapter, ordinaryScene, frontmatterScene], {
+    "body/rule.md": file(ordinaryMarkdown, ordinaryScene.id),
+    "body/frontmatter.md": file(frontmatterMarkdown, frontmatterScene.id),
+  });
+
+  assert.equal(
+    index.sceneCharacterCountsByDocumentId.get(ordinaryScene.id),
+    Array.from(ordinaryMarkdown).filter((character) => !/\s/u.test(character)).length,
+  );
+  assert.equal(index.sceneCharacterCountsByDocumentId.get(frontmatterScene.id), 5);
+  assert.equal(manuscriptBody(ordinaryMarkdown), ordinaryMarkdown);
+  assert.equal(manuscriptBody(frontmatterMarkdown), "本文です。");
 });
 
 test("snapshot indexes preserve actual ID lookup precedence when logical IDs collide with document IDs", () => {

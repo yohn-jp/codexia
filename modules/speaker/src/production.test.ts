@@ -79,7 +79,7 @@ function initialFiles(sceneCount = 14): Map<string, { content: string; revision:
       `manuscript: ${manuscriptPath}`,
       "",
     ].join("\n"));
-    add(manuscriptPath, sceneText());
+    add(manuscriptPath, index === 0 ? `---\n普通の回想\n---\n${sceneText()}` : sceneText());
   }
   const voiceProbeText = "星野は灯りを見た。『俺がゆっくり行きます。』";
   add("plot/volumes/volume-1/chapters/chapter-1/scenes/sc-synthetic-voice-probe.yaml", [
@@ -226,7 +226,7 @@ test("evaluation and retraining actions advertise their source job types", async
   assert.deepEqual(actions.get("speaker.retraining.run")?.job, { type: "speaker-retrain" });
 });
 
-test("speaker actions run real CPU attribution, propose corrections/model adoption, and reload from the reviewed snapshot", { timeout: 180_000 }, async () => {
+test("speaker actions retain dialogue from Markdown beginning with a horizontal rule and run real CPU attribution", { timeout: 180_000 }, async () => {
   const files = initialFiles();
   let snapshot = snapshotFor(files);
   const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-p10-cache-"));
