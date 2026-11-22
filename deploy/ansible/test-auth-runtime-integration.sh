@@ -88,7 +88,7 @@ all:
         codexia_oidc_issuer: https://idp.example.invalid/oidc
         codexia_oidc_client_id: codexia-web
         codexia_oauth_introspection_client_id: codexia-resource-server
-        codexia_oauth_owner_subject: fixture-provider|stable-owner-subject
+        codexia_auth_registration_pending: true
         codexia_oauth_owner_client_ids: codexia-web,codexia-ios
         codexia_api_audience: https://codexia.example.invalid/api
 YAML
@@ -187,6 +187,18 @@ env_output=$(podman run --rm --network codexia-data \
   --entrypoint sh "$(podman inspect --format '{{.Config.Image}}' codexia-db)" \
   -ec 'test -n "$CODEXIA_AUTH_DATABASE_URL" && test -n "$CODEXIA_AUTH_SECRET" && test -n "$CODEXIA_OIDC_CLIENT_SECRET" && test -n "$CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET" && printf AUTH_ENV_SECRET_INJECTION_VERIFIED')
 test "$env_output" = AUTH_ENV_SECRET_INJECTION_VERIFIED
+
+runtime_env="$service_home/.config/codexia-auth/runtime.env"
+registration_launcher="$service_home/.local/bin/codexia-register-auth"
+test "$(as_service stat -c '%a:%U' "$registration_launcher")" = "700:$service_user"
+if as_service grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$runtime_env"; then
+  echo 'Pending setup staged an owner before identity verification' >&2
+  exit 1
+fi
+sed -i 's/codexia_auth_registration_pending: true/codexia_auth_registration_pending: false/' "$tmp/auth-inventory.yml"
+sed -i '/codexia_auth_registration_pending: false/a\        codexia_oauth_owner_subject: fixture-provider|stable-owner-subject' "$tmp/auth-inventory.yml"
+apply_stage > "$tmp/auth-finalize.log" 2>&1 || { cat "$tmp/auth-finalize.log"; exit 1; }
+as_service grep -Fxq 'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-provider|stable-owner-subject' "$runtime_env"
 
 apply_stage > "$tmp/auth-repeat.log" 2>&1 || { cat "$tmp/auth-repeat.log"; exit 1; }
 grep -q 'changed=0' "$tmp/auth-repeat.log"

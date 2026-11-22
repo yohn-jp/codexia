@@ -1,8 +1,8 @@
+import { realpathSync } from "node:fs";
 import { readCodexiaEnvironment } from "./environment.js";
 import { CODEXIA_AUTH_SCHEMA, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
 import type { Pool } from "pg";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const CODEXIA_AUTH_RUNTIME_ROLE = "codexia_auth_runtime";
@@ -17,8 +17,7 @@ function csvSetting(suffix: string): string[] {
   return [...new Set(requiredSetting(suffix).split(",").map((value) => value.trim()).filter(Boolean))];
 }
 
-export function readBetterAuthMigrationConfig(): BetterAuthRuntimeConfig {
-  requiredSetting("OAUTH_OWNER_SUBJECT");
+export function readBetterAuthMigrationConfig(requireOwner = true): BetterAuthRuntimeConfig {
   return {
     databaseUrl: requiredSetting("AUTH_DATABASE_URL"),
     publicOrigin: requiredSetting("PUBLIC_ORIGIN"),
@@ -28,6 +27,7 @@ export function readBetterAuthMigrationConfig(): BetterAuthRuntimeConfig {
     authSecret: requiredSetting("AUTH_SECRET"),
     oauthIntrospectionClientId: requiredSetting("OAUTH_INTROSPECTION_CLIENT_ID"),
     oauthIntrospectionClientSecret: requiredSetting("OAUTH_INTROSPECTION_CLIENT_SECRET"),
+    ...(requireOwner ? { ownerSubject: requiredSetting("OAUTH_OWNER_SUBJECT") } : {}),
     ownerClientIds: csvSetting("OAUTH_OWNER_CLIENT_IDS"),
     mcpClientIds: (readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
     ...(readCodexiaEnvironment("API_AUDIENCE") ? { apiAudience: readCodexiaEnvironment("API_AUDIENCE")! } : {}),
@@ -52,8 +52,7 @@ export async function assertAuthMigrationDatabaseIdentity(pool: Pool): Promise<v
   }
 }
 
-export async function migrateBetterAuth(): Promise<void> {
-  const config = readBetterAuthMigrationConfig();
+export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()): Promise<void> {
   const runtime = createBetterAuthRuntime(config);
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
@@ -70,7 +69,7 @@ async function main(): Promise<void> {
   await migrateBetterAuth();
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   main().catch(() => {
     process.stderr.write("Better Auth migration failed; configuration or database details are redacted.\n");
     process.exitCode = 1;

@@ -74,7 +74,7 @@ function imageIdentity(image, { expectedImage = false, disposableRegistry = fals
     const expectedDigestRefs = disposableRegistry ? [image, `localhost:5000/yohn-jp/codexia-backend@${digest}`] : [image];
     const identity = assertBackendImageIdentity(value, observed, {});
     if (expectedImage) check(expectedDigestRefs.some(reference => observed.RepoDigests?.includes(reference)), 'Pulled backend image does not bind its exact immutable digest');
-    return { identity, imageId: observed.Id, repoDigests: observed.RepoDigests || [] };
+    return { identity, imageId: observed.Id, repoDigests: observed.RepoDigests || [], layers: observed.RootFS?.Layers, labels: observed.Config?.Labels };
   } finally {
     rootlessPodman(['rm', '--force', container]);
     execFileSync('sudo', ['rm', '-f', scratch], { stdio: 'ignore' });
@@ -295,11 +295,36 @@ async function recordFailedCandidate(image) {
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
 }
 
+async function recordAuthCandidate(scenario, image) {
+  check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
+    'Better Auth test image proof must remain bound to the current Actions run');
+  check(['auth-primary', 'auth-update', 'auth-failed'].includes(scenario) &&
+    /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image || ''), 'Invalid Better Auth test image');
+  const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
+  check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && evidence.sourceSha === sourceSha &&
+    evidence.runId === runId && evidence.runAttempt === attempt, 'Better Auth image evidence belongs to another run');
+  const base = imageIdentity(evidence.candidates.head.image, { expectedImage: true, disposableRegistry: true });
+  rootlessPodman(['pull', image], { timeout: 180_000 });
+  const observed = imageIdentity(image, { expectedImage: true, disposableRegistry: true });
+  assert.deepEqual(observed.identity, base.identity, 'Better Auth fixture image lost the verified Full application identity');
+  assert.ok(Array.isArray(base.layers) && base.layers.length > 0);
+  assert.deepEqual(observed.layers?.slice(0, base.layers.length), base.layers, 'Better Auth fixture image changed verified application layers');
+  assert.equal(observed.labels?.['org.codexia.lifecycle-scenario'], scenario);
+  const candidate = { image, digest: image.split('@')[1], imageId: observed.imageId, profile: 'full', identity: observed.identity,
+    baseImage: evidence.candidates.head.image, testOnly: true };
+  evidence.candidates[scenario] = candidate;
+  await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 });
+  const report = JSON.parse(await readFile(reportPath, 'utf8'));
+  report.images.push({ ...candidate, role: scenario, repoDigests: observed.repoDigests, productionAdmissionUsed: false });
+  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = process.argv[2] || 'prepare';
   const operation = command === 'prepare' ? prepareImages : command === 'mirror' ? mirrorPreparedImages :
-    command === 'record-failed' ? () => recordFailedCandidate(process.argv[3]) : null;
-  if (!operation) throw new Error('Usage: push-app-lifecycle.mjs [prepare|mirror|record-failed <immutable-image>]');
+    command === 'record-failed' ? () => recordFailedCandidate(process.argv[3]) :
+    command === 'record-auth' ? () => recordAuthCandidate(process.argv[3], process.argv[4]) : null;
+  if (!operation) throw new Error('Usage: push-app-lifecycle.mjs [prepare|mirror|record-failed <immutable-image>|record-auth <scenario> <immutable-image>]');
   operation().catch(async error => {
     const bounded = publicError(error);
     try {

@@ -95,6 +95,16 @@ revision_label="$("$engine" image inspect --format '{{index .Config.Labels "org.
 fingerprint="$("$engine" exec "$container_name" node --input-type=module -e 'import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());')"
 node scripts/backend-update-identity.mjs verify "$identity" "$api_version" "$platform" "$revision_label" "$fingerprint" "$expected_source" "$expected_profile"
 
+# Execute the packaged entry points under their same symlink paths as push deployment.
+for command in bootstrap-auth migrate-auth verify-auth-clients; do
+  status=0
+  message=$("$engine" exec "$container_name" node "/app/node_modules/@codexia/api/dist/$command.js" 2>&1) || status=$?
+  [[ "$status" == 1 && "$message" == "Better Auth "* ]] || {
+    echo "Packaged Better Auth command did not run its input guard: $command" >&2
+    exit 1
+  }
+done
+
 session_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$port/api/session")"
 root_response="$(curl --silent --write-out '\n%{http_code}' "http://127.0.0.1:$port/")"
 desktop_response="$(curl --silent --write-out '\n%{http_code}' "http://127.0.0.1:$port/desktop/")"

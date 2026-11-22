@@ -31,6 +31,7 @@ flock --exclusive --nonblock 9 || {
 
 if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" <<'NODE'
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
     typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
@@ -43,12 +44,33 @@ if (value.phase === 'pending' && value.hadUnit) {
   const unit = fs.readFileSync(process.argv[4], 'utf8');
   const unitMatch = unit.match(/^Image=(\S+)$/m);
   const unitImage = unitMatch?.[1] ?? '';
+  const modes = [...unit.matchAll(/^Environment=CODEXIA_AUTH_MODE=([^\r\n]*)$/gm)].map(match => match[1]);
+  const unitAuthMode = modes.length === 1 ? modes[0] : modes.length === 0 && unit.includes('Environment=CODEXIA_AUTH_TOKEN_FILE=') &&
+    !unit.includes('codexia-auth-database-url') && !unit.includes('codexia-auth/runtime') ? 'token' : '';
+  const settingsDigests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([a-f0-9]{64}|none)$/gm)].map(match => match[1]);
   if (!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(unitImage)) process.exit(2);
+  if (modes.length > 1 || !['token', 'better-auth'].includes(unitAuthMode) || settingsDigests.length > 1) process.exit(2);
+  if (unitAuthMode === 'better-auth') {
+    const [digest] = settingsDigests;
+    const files = [...unit.matchAll(/^EnvironmentFile=([^\r\n]+)$/gm)].map(match => match[1]);
+    if (!value.releasePresent || !/^[a-f0-9]{64}$/.test(digest || '') || files.length !== 1 ||
+        !files[0].startsWith('/') || !files[0].endsWith('/.config/codexia-auth/runtime-' + digest + '.env')) process.exit(2);
+    const settings = fs.lstatSync(files[0], { throwIfNoEntry: false });
+    if (!settings?.isFile() || settings.uid !== process.getuid() || (settings.mode & 0o777) !== 0o600 ||
+        createHash('sha256').update(fs.readFileSync(files[0])).digest('hex') !== digest) process.exit(2);
+  }
   if (value.releasePresent) {
     const info = fs.lstatSync(process.argv[3]);
     if (!info.isFile() || info.isSymbolicLink()) process.exit(2);
     const release = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     previousImage = release.image;
+    if (unitAuthMode === 'better-auth' && (release.authMode !== unitAuthMode || release.authSettingsSha256 !== settingsDigests[0])) process.exit(2);
+    if (release.authMode !== undefined && release.authMode !== unitAuthMode) process.exit(2);
+    if (release.authSettingsSha256 !== undefined) {
+      if (!/^([a-f0-9]{64}|none)$/.test(release.authSettingsSha256)) process.exit(2);
+      const unitDigest = settingsDigests[0] ?? (unitAuthMode === 'token' ? 'none' : '');
+      if (release.authSettingsSha256 !== unitDigest) process.exit(2);
+    }
   } else {
     previousImage = unitImage;
   }

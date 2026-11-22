@@ -154,7 +154,7 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     };
     assert.ok(context.data, `Fastify consent context failed: ${JSON.stringify(context.error)}`);
     assert.deepEqual(context.data.requestedScopes, ["openid", "codexia:api", "offline_access"]);
-    assert.equal(context.data.client.name, "Codexia Fixture Web");
+    assert.equal(context.data.client.name, "Codexia Web");
     assert.equal(context.data.redirectUri, new URLSearchParams(resumedUrl.search).get("redirect_uri"), "the server-verified consent context must bind the registered callback");
 
     const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } }) as {
@@ -205,6 +205,23 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     const apiSessionBody = await apiSession.json();
     assert.equal(apiSession.status, 200, JSON.stringify(apiSessionBody));
     assert.deepEqual(apiSessionBody, { authenticated: true, authorScope: "owner" });
+
+    const signingKeysBeforeRestart = await fixture.readSigningKeyIds();
+    assert.ok(signingKeysBeforeRestart.length > 0, "Better Auth must persist its signing key before the API restart");
+    await fixture.restartApi();
+    assert.deepEqual((await fixture.readSigningKeyIds()).sort(), [...signingKeysBeforeRestart].sort(),
+      "a new API runtime must reuse persisted Better Auth signing keys");
+    const restartedDiscovery = await apiRequest(`${origin}/.well-known/openid-configuration/api/auth`, { headers: { accept: "application/json" } });
+    assert.equal(restartedDiscovery.status, 200, "OAuth discovery remains available after API restart");
+    const restartedKeys = await apiRequest(`${baseAuth}/jwks`, { headers: { accept: "application/json" } });
+    const jwks = await restartedKeys.json() as { keys?: Array<{ kid?: string }> };
+    assert.equal(restartedKeys.status, 200);
+    assert.deepEqual((jwks.keys ?? []).map((key) => key.kid).sort(), signingKeysBeforeRestart.sort(),
+      "the published JWKS still names the persisted signing keys");
+    const restartedSession = await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } });
+    assert.equal(restartedSession.status, 200, "an already issued API token remains connected after the API runtime restart");
+    const restartedLoginSession = await apiRequest(`${baseAuth}/get-session`, { headers: { cookie: cookieHeader() } });
+    assert.equal(restartedLoginSession.status, 200, "the Better Auth login session remains available after the API runtime restart");
 
     const refreshResponse = await apiRequest(`${baseAuth}/oauth2/token`, {
       method: "POST",

@@ -64,6 +64,7 @@ on:
       - docs/deployment/IAC.md
       - scripts/component-release-record.mjs
       - scripts/push-app-lifecycle*.mjs
+      - scripts/push-auth-lifecycle-oidc.mjs
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]

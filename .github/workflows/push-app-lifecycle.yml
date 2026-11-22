@@ -31,12 +31,16 @@ on:
       - deploy/ansible/host-validate.yml
       - deploy/ansible/base-*.yml
       - deploy/ansible/deploy*.yml
+      - deploy/ansible/auth-runtime*
+      - deploy/ansible/bootstrap-auth-registration.sh
+      - deploy/ansible/test-push-*-lifecycle.sh
       - deploy/ansible/push-deployment-recover.sh
       - deploy/ansible/requirements.txt
       - deploy/backup/**
       - deploy/quadlet/**
       - deploy/update-compatibility.json
       - scripts/push-app-lifecycle*.mjs
+      - scripts/push-auth-lifecycle-oidc.mjs
       - scripts/push-deployment-contract.test.mjs
       - scripts/push-deployment-documentation.test.mjs
       - scripts/verify-backend-artifacts.mjs
@@ -79,7 +83,8 @@ jobs:
           import json, os
           keys = ['first_activation', 'same_digest_reapply', 'compatible_update', 'failed_candidate_rollback',
                   'durable_interruption_recovery', 'database_volume_writer_quadlet_release_continuity',
-                  'backup_remote_filesystem', 'fixture_cleanup']
+                  'backup_remote_filesystem', 'better_auth_activation', 'better_auth_same_digest',
+                  'better_auth_compatible_update', 'better_auth_rollback', 'fixture_cleanup']
           value = {'schemaVersion': 1, 'sourceSha': os.environ['SOURCE_SHA'],
                    'runId': int(os.environ['GITHUB_RUN_ID']), 'runAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
                    'status': 'NOT_CHECKED', 'detail': 'workflow bootstrap; lifecycle fixture has not started',
@@ -131,7 +136,7 @@ jobs:
             record_unavailable 'runner could not provision required disposable host packages'
             exit 78
           fi
-          if ! sudo apt-get install -y --no-install-recommends podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session age sshfs fuse3 python3-venv jq acl ca-certificates lsb-release iproute2 openssh-client curl >>"$setup_log" 2>&1; then
+          if ! sudo apt-get install -y --no-install-recommends podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session age sshfs fuse3 python3-venv jq acl ca-certificates lsb-release iproute2 openssh-client curl openssl >>"$setup_log" 2>&1; then
             record_unavailable 'runner could not install required disposable host and SSHFS capabilities'
             exit 78
           fi
@@ -145,7 +150,8 @@ jobs:
           fi
           rm -f "$setup_log"
           echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" >> "$GITHUB_ENV"
-          bash -n deploy/ansible/test-push-app-lifecycle.sh
+          for script in deploy/ansible/test-push-{app,auth}-lifecycle.sh; do bash -n "$script"; done
+          node --check scripts/push-auth-lifecycle-oidc.mjs
       - name: Run exact-source image selection and real app lifecycle fixture
         env:
           GH_TOKEN: ${{ github.token }}

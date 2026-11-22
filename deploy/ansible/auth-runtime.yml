@@ -23,7 +23,10 @@
       - codexia_oidc_issuer != codexia_public_origin + '/api/auth'
       - codexia_oidc_client_id is string and codexia_oidc_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
       - codexia_oauth_introspection_client_id is string and codexia_oauth_introspection_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
-      - codexia_oauth_owner_subject is string and codexia_oauth_owner_subject is match('^[a-zA-Z0-9._@:/|+-]+$')
+      - (codexia_auth_registration_pending | default(false)) is boolean
+      - (codexia_auth_registration_pending | default(false)) or (codexia_oauth_owner_subject | default('')) is match('^[a-zA-Z0-9._@:/|+-]+$')
+      - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_owner_subject is not defined
+      - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_owner_client_ids.split(',') | length == 2
       - codexia_oauth_owner_client_ids is string and codexia_oauth_owner_client_ids is match('^[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$')
       - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
     fail_msg: Better Auth provisioning requires explicit approval, the rootless Codexia account, protected secret files and validated public configuration.
@@ -82,7 +85,8 @@
       - codexia_auth_database_parts.fragment == ''
       - codexia_auth_secret_value | length >= 32 and codexia_auth_secret_value is match('^[!-~]+$')
       - codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$')
-      - codexia_oauth_introspection_client_secret_value | length >= 16 and codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
+      - codexia_oauth_introspection_client_secret_value | length >= (32 if codexia_auth_registration_pending | default(false) else 16)
+      - codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
     fail_msg: The Better Auth URL must target codexia_auth_runtime on the existing codexia database; secret inputs must be nonempty printable values.
   no_log: true
 
@@ -245,6 +249,15 @@
     owner: "{{ codexia_service_user }}"
     group: "{{ codexia_service_group | default(codexia_service_user) }}"
     mode: '0600'
+
+- name: Install the isolated Better Auth registration launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/bootstrap-auth-registration.sh"
+    dest: "{{ home }}/.local/bin/codexia-register-auth"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+  when: codexia_auth_registration_pending | default(false)
 
 - name: Report staged auth role, schema and environment without enabling runtime
   ansible.builtin.debug:

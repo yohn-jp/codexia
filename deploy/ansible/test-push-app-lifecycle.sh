@@ -41,7 +41,8 @@ NODE
 mark_fixture_unavailable() {
   local reason=$1 key
   for key in first_activation same_digest_reapply compatible_update failed_candidate_rollback \
-    durable_interruption_recovery database_volume_writer_quadlet_release_continuity backup_remote_filesystem; do
+    durable_interruption_recovery database_volume_writer_quadlet_release_continuity backup_remote_filesystem \
+    better_auth_activation better_auth_same_digest better_auth_compatible_update better_auth_rollback; do
     set_state "$key" CAPABILITY_UNAVAILABLE "$reason"
   done
   set_state fixture_cleanup PASS 'no remaining fixture resources required cleanup'
@@ -134,7 +135,7 @@ rootless_podman() { rootless /usr/bin/podman "$@"; }
 rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
-  local log_name=${4:-deploy-$key-$RANDOM}
+  local log_name=${4:-deploy-$key-$RANDOM} auth_mode=${5:-token} activation_approved=${6:-false}
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -146,12 +147,14 @@ codexia_backup_destination: "$fixture_home/.local/state/codexia-backup-mount"
 codexia_backup_recipient: "$backup_recipient"
 codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
+codexia_auth_mode: $auth_mode
+codexia_better_auth_activation_approved: $activation_approved
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
   run_playbook "$tmp/deploy-vars.yml" "$log_name"
 }
 observe_runtime() {
-  local key=$1
+  local key=$1 role=$2
   local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container api_count sentinel
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
@@ -179,16 +182,15 @@ observe_runtime() {
     [[ "$sentinel" == f ]] || return 1
     sentinel=not-created
   fi
-  test "$api_health" = healthy && test "$api_unit" = active && test "$api_count" = 1
   rootless_podman exec codexia-api node -e 'fetch("http://127.0.0.1:3000/health/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null
-  node - "$report" "$key" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" \
+  node - "$report" "$key" "$role" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" \
     "$pg_volume" "$pg_mount" "$pg_created" "$data_volume" "$data_mount" "$data_created" "$history_volume" "$history_mount" "$history_created" "$api_count" "$sentinel" <<'NODE'
 const fs=require('node:fs');
-const [path,key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
+const [path,key,role,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
 const report=JSON.parse(fs.readFileSync(path,'utf8'));
 const evidence=JSON.parse(fs.readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,'utf8'));
-const role=['first-activation','same-digest-reapply'].includes(key)?'head':'compatible';
-const expectedImageId=evidence.candidates[role].imageId;
+const expectedImageId=evidence.candidates[role]?.imageId;
+if(apiHealth!=='healthy'||apiUnit!=='active'||Number(apiCount)!==1)throw new Error('The checkpoint requires exactly one healthy active API writer');
 if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API writer image ID differs from the run-bound ${role} candidate`);
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
 report.observations ||= {}; const observations=report.observations.continuity ||= []; const previous=observations.at(-1);
@@ -196,10 +198,10 @@ if(previous){
   if(dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
   if(JSON.stringify({postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}})!==JSON.stringify(previous.volumes))throw new Error(`${key}: persistent volume identity changed`);
 }
-if(key==='same-digest-reapply'&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
-if(key==='compatible-update'&&(quadletSha===previous.quadletSha||releaseSha===previous.releaseSha))throw new Error('Compatible image update did not update the Quadlet and release record');
-if(key==='failed-candidate-rollback'&&apiContainer===previous.apiContainer)throw new Error('Failed candidate rollback did not recreate the previous API writer');
-if(key==='failed-candidate-rollback'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Failed candidate rollback did not restore the prior Quadlet and release record');
+if(['same-digest-reapply','better-auth-same-digest'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
+if(['compatible-update','better-auth-compatible-update'].includes(key)&&(quadletSha===previous.quadletSha||releaseSha===previous.releaseSha))throw new Error('Compatible image update did not update the Quadlet and release record');
+if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&apiContainer===previous.apiContainer)throw new Error('Failed candidate rollback did not recreate the previous API writer');
+if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Failed candidate rollback did not restore the prior Quadlet and release record');
 if(key==='interrupted-recovery'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Interrupted transaction recovery did not preserve the previous Quadlet and release record');
 observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,
   volumes:{postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}},apiWriterCount:Number(apiCount),databaseSentinel:sentinel});
@@ -217,7 +219,7 @@ cleanup() {
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
     rootless_systemctl stop codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
     local name rc
-    for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs; do
+    for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs codexia-auth-registration codexia-lifecycle-proxy; do
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman rm -f "$name" >/dev/null 2>&1 || true; fi
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
@@ -235,7 +237,8 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+    for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+      codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
@@ -300,7 +303,7 @@ cleanup() {
   fi
   rm -rf -- "$tmp" || cleanup_failed "$LINENO"
   node - "$report" "$status" "$cleanup_status" <<'NODE'
-const fs=require('node:fs');const [path,status,cleanup]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(path,'utf8'));r.cleanup={status:Number(cleanup)===0?'PASS':'FAIL',exitCode:Number(cleanup)};r.states ||= {};if(Number(cleanup)===0)r.states.fixture_cleanup={status:'PASS',detail:'fixture resources removed'};else r.states.fixture_cleanup={status:'FAIL',detail:'fixture cleanup left a resource or mount'};if(Number(status)!==0&&r.states.backup_remote_filesystem?.status==='IN_PROGRESS')r.states.backup_remote_filesystem={status:'NOT_CHECKED',detail:'deployment did not reach backup artifact creation'};r.logs=fs.readdirSync(require('node:path').dirname(path)).filter(name=>name.endsWith('-bounded.log')).map(name=>({file:name,redacted:true}));if(Number(cleanup)!==0)r.status='FAIL';else if(Number(status)===78)r.status='NOT_CHECKED';else if(Number(status)!==0)r.status=r.status==='NOT_CHECKED'?'NOT_CHECKED':'FAIL';else {const required=['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','fixture_cleanup'];r.status=required.every(key=>r.states[key]?.status==='PASS')?'PASS':'NOT_CHECKED';}fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});}catch{}
+const fs=require('node:fs');const [path,status,cleanup]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(path,'utf8'));r.cleanup={status:Number(cleanup)===0?'PASS':'FAIL',exitCode:Number(cleanup)};r.states ||= {};if(Number(cleanup)===0)r.states.fixture_cleanup={status:'PASS',detail:'fixture resources removed'};else r.states.fixture_cleanup={status:'FAIL',detail:'fixture cleanup left a resource or mount'};if(Number(status)!==0&&r.states.backup_remote_filesystem?.status==='IN_PROGRESS')r.states.backup_remote_filesystem={status:'NOT_CHECKED',detail:'deployment did not reach backup artifact creation'};r.logs=fs.readdirSync(require('node:path').dirname(path)).filter(name=>name.endsWith('-bounded.log')).map(name=>({file:name,redacted:true}));if(Number(cleanup)!==0)r.status='FAIL';else if(Number(status)===78)r.status='NOT_CHECKED';else if(Number(status)!==0)r.status=r.status==='NOT_CHECKED'?'NOT_CHECKED':'FAIL';else {const required=['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback','fixture_cleanup'];r.status=required.every(key=>r.states[key]?.status==='PASS')?'PASS':'NOT_CHECKED';}fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});}catch{}
 NODE
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
   exit "$status"
@@ -309,7 +312,7 @@ trap cleanup EXIT
 
 mkdir -p "$(dirname "$report")"
 node - "$report" "$source_sha" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'NODE'
-const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);const states={};for(const key of ['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','fixture_cleanup'])states[key]={status:'NOT_CHECKED'};fs.mkdirSync(require('node:path').dirname(path),{recursive:true,mode:0o700});fs.writeFileSync(path,JSON.stringify({schemaVersion:1,sourceSha:sha,runId:Number(run),runAttempt:Number(attempt),status:'IN_PROGRESS',states,images:[],observations:{},logs:[],capabilities:{},createdAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
+const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);const states={};for(const key of ['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback','fixture_cleanup'])states[key]={status:'NOT_CHECKED'};fs.mkdirSync(require('node:path').dirname(path),{recursive:true,mode:0o700});fs.writeFileSync(path,JSON.stringify({schemaVersion:1,sourceSha:sha,runId:Number(run),runAttempt:Number(attempt),status:'IN_PROGRESS',states,images:[],observations:{},logs:[],capabilities:{},createdAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
 NODE
 trap 'record_failure "$?" "${BASH_LINENO[0]:-0}" "$BASH_COMMAND"' ERR
 set_state first_activation NOT_CHECKED 'runtime fixture not started'
@@ -606,7 +609,7 @@ IMAGE_INVENTORY
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
 run_deploy head true
-observe_runtime first-activation
+observe_runtime first-activation head
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
@@ -617,7 +620,7 @@ BACKUP_EVIDENCE
 set_state first_activation PASS 'fresh schema and API readiness verified on real rootless Podman and PostgreSQL'
 
 run_deploy head false
-observe_runtime same-digest-reapply
+observe_runtime same-digest-reapply head
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
@@ -625,7 +628,7 @@ CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT N
 INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
 SENTINEL_SQL
 run_deploy compatible false
-observe_runtime compatible-update
+observe_runtime compatible-update compatible
 set_state compatible_update PASS 'certified compatible Full image became the sole healthy API writer'
 
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
@@ -657,7 +660,7 @@ if ! grep -Eq 'Deployment transaction failed during candidate API (startup|readi
   exit 1
 fi
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-observe_runtime failed-candidate-rollback
+observe_runtime failed-candidate-rollback compatible
 [[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'
 
@@ -678,10 +681,12 @@ sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/sy
 if run_deploy head false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
 rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 run_deploy compatible false
-observe_runtime interrupted-recovery
+observe_runtime interrupted-recovery compatible
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
+source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
+run_better_auth_lifecycle
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE

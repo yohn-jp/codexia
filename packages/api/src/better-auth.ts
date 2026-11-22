@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
@@ -10,7 +10,7 @@ import {
   verifyOAuthQueryParams,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
-import { decodeProtectedHeader } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
@@ -29,6 +29,7 @@ export interface BetterAuthRuntimeConfig {
   readonly authSecret: string;
   readonly oauthIntrospectionClientId: string;
   readonly oauthIntrospectionClientSecret: string;
+  readonly ownerSubject?: string;
   readonly apiAudience?: string;
   readonly ownerClientIds: readonly string[];
   readonly mcpClientIds?: readonly string[];
@@ -43,7 +44,99 @@ export interface OAuthConsentContext {
 }
 
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
+const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
+
+export interface BetterAuthClientRegistry {
+  getOwner(ownerSubject: string): Promise<unknown | null | undefined>;
+  getClient(clientId: string): Promise<unknown | null | undefined>;
+  getClientResources(clientId: string): Promise<readonly unknown[]>;
+}
+
+export interface BetterAuthClientRegistrationConfig {
+  readonly audience: string;
+  readonly ownerSubject: string;
+  readonly ownerClientIds: readonly string[];
+  readonly mcpClientIds?: readonly string[];
+  readonly introspectionClientId: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** Verify the configured owner, MCP, and introspection clients against Better Auth's persisted registry. */
+export async function assertBetterAuthClientRegistrations(
+  config: BetterAuthClientRegistrationConfig,
+  registry: BetterAuthClientRegistry,
+): Promise<void> {
+  if (!config.ownerSubject.trim() || config.ownerSubject !== config.ownerSubject.trim() || !await registry.getOwner(config.ownerSubject)) {
+    throw new Error("Configured Better Auth owner subject is not registered");
+  }
+  const ownerClientIds = [...new Set(config.ownerClientIds)];
+  const mcpClientIds = [...new Set(config.mcpClientIds ?? [])];
+  if (ownerClientIds.length === 0 || ownerClientIds.length !== config.ownerClientIds.length ||
+      ownerClientIds.some((id) => !id.trim() || id !== id.trim())) {
+    throw new Error("Better Auth owner client registration is required");
+  }
+  if (mcpClientIds.length !== (config.mcpClientIds ?? []).length || mcpClientIds.some((id) => !id.trim() || id !== id.trim()) ||
+      !config.introspectionClientId.trim() || config.introspectionClientId !== config.introspectionClientId.trim() ||
+      ownerClientIds.some((id) => mcpClientIds.includes(id)) ||
+      [...ownerClientIds, ...mcpClientIds].includes(config.introspectionClientId)) {
+    throw new Error("Better Auth owner, MCP, and introspection client registrations must be disjoint");
+  }
+
+  const assertLinkedToAudience = async (clientId: string): Promise<void> => {
+    const resources = await registry.getClientResources(clientId);
+    if (!resources.some((resource) => asRecord(resource)?.resourceId === config.audience)) {
+      throw new Error(`Registered Better Auth client ${clientId} is not linked to the configured API audience`);
+    }
+  };
+  const assertPublicClient = async (clientId: string, requiredScopes: readonly string[], kind: "owner" | "MCP"): Promise<void> => {
+    const client = asRecord(await registry.getClient(clientId));
+    if (!client) throw new Error(`Registered Better Auth ${kind} client is missing: ${clientId}`);
+    if (client.disabled !== false || client.tokenEndpointAuthMethod !== "none" ||
+        !stringList(client.grantTypes).includes("authorization_code") ||
+        !stringList(client.grantTypes).includes("refresh_token") ||
+        !stringList(client.responseTypes).includes("code") || client.requirePKCE !== true) {
+      throw new Error(`Registered Better Auth ${kind} client is disabled or does not require Authorization Code with PKCE: ${clientId}`);
+    }
+    const scopes = stringList(client.scopes);
+    if (!requiredScopes.every((scope) => scopes.includes(scope))) {
+      throw new Error(`Registered Better Auth ${kind} client is missing required scopes: ${clientId}`);
+    }
+    const allowedScopes = kind === "owner" ? OWNER_PUBLIC_SCOPES : ["openid", ...CODEXIA_MCP_SCOPES];
+    if (scopes.some((scope) => !(allowedScopes as readonly string[]).includes(scope))) {
+      throw new Error(`Registered Better Auth ${kind} client has an unsupported scope: ${clientId}`);
+    }
+    await assertLinkedToAudience(clientId);
+  };
+
+  for (const clientId of ownerClientIds) {
+    await assertPublicClient(clientId, ["openid", CODEXIA_OWNER_SCOPE], "owner");
+  }
+  for (const clientId of mcpClientIds) {
+    await assertPublicClient(clientId, ["openid"], "MCP");
+    const client = asRecord(await registry.getClient(clientId));
+    const scopes = stringList(client?.scopes);
+    if (!scopes.some((scope) => (CODEXIA_MCP_SCOPES as readonly string[]).includes(scope))) {
+      throw new Error(`Registered Better Auth MCP client is missing a limited MCP scope: ${clientId}`);
+    }
+  }
+
+  const introspectionClient = asRecord(await registry.getClient(config.introspectionClientId));
+  if (!introspectionClient) throw new Error(`Registered Better Auth confidential introspection client is missing: ${config.introspectionClientId}`);
+  if (introspectionClient.disabled !== false ||
+      !(CONFIDENTIAL_TOKEN_AUTH_METHODS as readonly string[]).includes(String(introspectionClient.tokenEndpointAuthMethod)) ||
+      typeof introspectionClient.clientSecret !== "string" || introspectionClient.clientSecret.length === 0) {
+    throw new Error(`Better Auth introspection ID must identify an enabled confidential registered client: ${config.introspectionClientId}`);
+  }
+  await assertLinkedToAudience(config.introspectionClientId);
+}
 
 /**
  * Better Auth 1.7.x only advertises public clients when dynamic registration or
@@ -95,7 +188,12 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
   return values[0];
 }
 
-export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
+interface BetterAuthBootstrapRegistration {
+  readonly ownerOidcSubject: string;
+  readonly nextClientId: () => string;
+}
+
+export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstrap?: BetterAuthBootstrapRegistration) {
   let databaseUrl: URL;
   try { databaseUrl = new URL(config.databaseUrl); }
   catch { throw new Error("CODEXIA_AUTH_DATABASE_URL must be an absolute PostgreSQL URL without query or fragment"); }
@@ -137,6 +235,16 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
         clientSecret: config.oidcClientSecret,
         discoveryUrl: `${oidcIssuer}/.well-known/openid-configuration`,
         requireIdTokenVerification: true,
+        ...(bootstrap ? {
+          accountSubject({ tokens }) {
+            // Better Auth verifies the signature, audience, expiry, and nonce before calling this resolver.
+            const claims = tokens.idToken && decodeJwt(tokens.idToken);
+            if (!claims || claims.iss !== config.oidcIssuer || claims.sub !== bootstrap.ownerOidcSubject) {
+              throw new Error("OIDC identity is outside the approved bootstrap account");
+            }
+            return claims.sub;
+          },
+        } : {}),
         pkce: true,
         scopes: ["openid", "email", "profile"],
       }] }),
@@ -163,6 +271,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
           token_endpoint_auth_methods_supported: ["none", ...CONFIDENTIAL_TOKEN_AUTH_METHODS],
         },
         clientRegistrationRequirePKCE: true,
+        ...(bootstrap ? {
+          generateClientId: bootstrap.nextClientId,
+          generateClientSecret: () => config.oauthIntrospectionClientSecret,
+        } : {}),
       }),
     ],
   });
@@ -193,6 +305,36 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
   return {
     auth,
     pool,
+    async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ""): Promise<void> {
+      const context = await auth.$context;
+      await assertBetterAuthClientRegistrations({
+        audience,
+        ownerSubject,
+        ownerClientIds: config.ownerClientIds,
+        mcpClientIds,
+        introspectionClientId: config.oauthIntrospectionClientId,
+      }, {
+        async getOwner(ownerSubject) {
+          return context.adapter.findOne({ model: "user", where: [{ field: "id", value: ownerSubject }] });
+        },
+        async getClient(clientId) {
+          return context.adapter.findOne({ model: "oauthClient", where: [{ field: "clientId", value: clientId }] });
+        },
+        async getClientResources(clientId) {
+          return context.adapter.findMany({ model: "oauthClientResource", where: [{ field: "clientId", value: clientId }] });
+        },
+      });
+    },
+    async verifyIntrospectionCredentials(): Promise<void> {
+      const result = await auth.api.oauth2Introspect({
+        body: {
+          token: randomBytes(32).toString("base64url"),
+          client_id: config.oauthIntrospectionClientId,
+          client_secret: config.oauthIntrospectionClientSecret,
+        },
+      });
+      if (result.active !== false) throw new Error("Unable to verify Better Auth introspection credentials");
+    },
     issuer,
     audience,
     toHeaders: fromNodeHeaders,

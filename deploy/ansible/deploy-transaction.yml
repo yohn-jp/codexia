@@ -1,6 +1,17 @@
 - name: Prepare shared push deployment state and helpers
   ansible.builtin.include_tasks: deploy-prepare.yml
 
+- name: Resolve the authentication mode for the shared transaction
+  ansible.builtin.set_fact:
+    codexia_deployment_auth_mode: "{{ codexia_auth_mode | default('token') }}"
+
+- name: Require a valid authentication mode and activation approval
+  ansible.builtin.assert:
+    that:
+      - codexia_deployment_auth_mode is string and codexia_deployment_auth_mode in ['token', 'better-auth']
+      - (codexia_better_auth_activation_approved | default(false)) is boolean
+    fail_msg: Push deployment requires token or better-auth mode and a boolean transition approval.
+
 - name: Recover an interrupted push deployment before examining the active API
   ansible.builtin.command:
     argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
@@ -138,24 +149,62 @@
     fail_msg: The API unit exists without a running container; recover the recorded release before starting a first activation.
   when: codexia_current_container_exists.rc == 1
 
+- name: Read the prior API Quadlet for image and authentication admission
+  ansible.builtin.slurp:
+    src: "{{ quadlet_dir }}/codexia-api.container"
+  register: codexia_current_api_unit_content
+  when: codexia_current_container_exists.rc == 0
+  no_log: true
+
+- name: Resolve the prior API authentication mode without guessing from partial Better Auth state
+  ansible.builtin.set_fact:
+    codexia_current_auth_mode_lines: "{{ codexia_current_api_unit_content.content | b64decode | regex_findall('(?m)^Environment=CODEXIA_AUTH_MODE=([^\r\n]*)$') }}"
+    codexia_admitted_api_unit_sha256: "{{ (codexia_current_api_unit_content.content | b64decode) | hash('sha256') }}"
+    codexia_current_api_unit_images: "{{ codexia_current_api_unit_content.content | b64decode | regex_findall('(?m)^Image=([^\r\n]*)$') }}"
+    codexia_current_api_unit_text: "{{ codexia_current_api_unit_content.content | b64decode }}"
+  when: codexia_current_container_exists.rc == 0
+  no_log: true
+
+- name: Classify a pre-mode canonical unit as token mode only when it has no Better Auth inputs
+  ansible.builtin.set_fact:
+    codexia_current_auth_mode: "{{ codexia_current_auth_mode_lines[0] if codexia_current_auth_mode_lines | length == 1 else 'token' if codexia_current_auth_mode_lines | length == 0 and 'Environment=CODEXIA_AUTH_TOKEN_FILE=' in codexia_current_api_unit_text and 'codexia-auth-database-url' not in codexia_current_api_unit_text and 'codexia-auth/runtime' not in codexia_current_api_unit_text else 'unknown' }}"
+  when: codexia_current_container_exists.rc == 0
+
+- name: Reject auth mode drift, implicit Better Auth enablement and downgrade
+  ansible.builtin.assert:
+    that:
+      - not codexia_current_api_unit.stat.exists or codexia_current_auth_mode_lines | length <= 1
+      - not codexia_current_api_unit.stat.exists or codexia_current_auth_mode in ['token', 'better-auth']
+      - not (codexia_current_api_unit.stat.exists and codexia_current_auth_mode == 'better-auth' and codexia_deployment_auth_mode == 'token')
+      - not (codexia_deployment_auth_mode == 'better-auth' and not codexia_current_api_unit.stat.exists)
+      - not (codexia_deployment_auth_mode == 'better-auth' and codexia_current_api_unit.stat.exists and codexia_current_auth_mode == 'token') or codexia_better_auth_activation_approved | default(false) | bool
+    fail_msg: Better Auth requires an approved token-to-Better-Auth transition with an existing healthy token API; mode ambiguity or downgrade is refused.
+
+- name: Observe the running API container and image identities together
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}}{% endraw %}", codexia-api]
+  register: codexia_current_api_observation
+  changed_when: false
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require an actual running API container before admission
+  ansible.builtin.assert:
+    that:
+      - codexia_current_api_observation.stdout.split() | length == 4
+      - codexia_current_api_observation.stdout.split()[3] == 'true'
+    fail_msg: The installed API admission requires a running container and its exact image identity.
+  when: codexia_current_container_exists.rc == 0
+
+- name: Record the exact immutable image reference used by the running API container
+  ansible.builtin.set_fact:
+    codexia_current_api_image_name:
+      stdout: "{{ codexia_current_api_observation.stdout.split()[2] }}"
+  when: codexia_current_container_exists.rc == 0
+
 - name: Require a healthy current API writer before a compatible update
   ansible.builtin.command:
-    argv: [podman, exec, codexia-api, cat, /app/update-identity.json]
+    argv: [podman, exec, "{{ codexia_current_api_observation.stdout.split()[0] }}", cat, /app/update-identity.json]
   register: codexia_current_identity_result
-  changed_when: false
-  when: codexia_current_container_exists.rc == 0
-
-- name: Observe the image content identity currently running in the API container
-  ansible.builtin.command:
-    argv: [podman, inspect, --format, "{% raw %}{{.Image}}{% endraw %}", codexia-api]
-  register: codexia_current_api_image_id
-  changed_when: false
-  when: codexia_current_container_exists.rc == 0
-
-- name: Observe the exact immutable image reference used by the running API container
-  ansible.builtin.command:
-    argv: [podman, inspect, --format, "{% raw %}{{.ImageName}}{% endraw %}", codexia-api]
-  register: codexia_current_api_image_name
   changed_when: false
   when: codexia_current_container_exists.rc == 0
 
@@ -167,7 +216,7 @@
       - inspect
       - --format
       - "{% raw %}{{json .RepoDigests}}{% endraw %}"
-      - "{{ codexia_current_api_image_id.stdout }}"
+      - "{{ codexia_current_api_observation.stdout.split()[1] }}"
   register: codexia_current_api_repo_digests
   changed_when: false
   when: codexia_current_container_exists.rc == 0
@@ -192,6 +241,16 @@
   when:
     - codexia_current_container_exists.rc == 0
     - codexia_lifecycle_fixture | default(false) | bool
+
+- name: Bind the admitted prior Quadlet digest to the running API image
+  ansible.builtin.assert:
+    that:
+      - codexia_current_api_unit_images | length == 1
+      - codexia_current_api_unit_images[0] is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_current_api_unit_images[0] == codexia_current_api_image_name.stdout
+      - codexia_lifecycle_fixture | default(false) | bool or codexia_current_api_unit_images[0] in (codexia_current_api_repo_digests.stdout | from_json)
+    fail_msg: A deployment must retain the exact admitted running API image in the regular prior Quadlet for rollback.
+  when: codexia_current_container_exists.rc == 0
 
 - name: Admit the published candidate against installed API and deployed UI identities
   ansible.builtin.command:
@@ -235,10 +294,101 @@
     fail_msg: A fresh activation requires a separately initialized and verified database plus explicit approval.
   when: codexia_current_container_exists.rc == 1
 
+- name: Inspect staged Better Auth runtime settings without following links
+  ansible.builtin.stat:
+    path: "{{ home }}/.config/codexia-auth/runtime.env"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: codexia_auth_runtime_settings_file
+  when: codexia_deployment_auth_mode == 'better-auth'
+
+- name: Require private staged Better Auth settings before activation
+  ansible.builtin.assert:
+    that:
+      - codexia_auth_runtime_settings_file.stat.exists
+      - codexia_auth_runtime_settings_file.stat.isreg | default(false)
+      - not (codexia_auth_runtime_settings_file.stat.islnk | default(false))
+      - codexia_auth_runtime_settings_file.stat.pw_name == 'codexia'
+      - codexia_auth_runtime_settings_file.stat.mode == '0600'
+    fail_msg: Better Auth activation requires the private auth-runtime settings file; run the approved auth-runtime stage first.
+  when: codexia_deployment_auth_mode == 'better-auth'
+
+- name: Read staged Better Auth runtime settings
+  ansible.builtin.slurp:
+    src: "{{ home }}/.config/codexia-auth/runtime.env"
+  register: codexia_auth_runtime_settings_content
+  when: codexia_deployment_auth_mode == 'better-auth'
+  no_log: true
+
+- name: Hash and validate staged nonsecret Better Auth configuration
+  ansible.builtin.set_fact:
+    codexia_auth_runtime_settings_text: "{{ codexia_auth_runtime_settings_content.content | b64decode }}"
+    codexia_auth_settings_sha256: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | hash('sha256') }}"
+    codexia_auth_owner_client_ids: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_CLIENT_IDS=([^\r\n]*)$') | first | default('') | split(',') }}"
+    codexia_auth_introspection_client_id: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=([^\r\n]*)$') | first | default('') }}"
+  when: codexia_deployment_auth_mode == 'better-auth'
+  no_log: true
+
+- name: Require complete public Better Auth settings without secret material in the environment file
+  ansible.builtin.assert:
+    that:
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_PUBLIC_ORIGIN=https://[^/\s]+$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=https://[^\s]+$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_SUBJECT=[a-zA-Z0-9._@:/|+-]+$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_CLIENT_IDS=[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$') | length == 1
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^(?!#|$).+$') | length == codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_[A-Z0-9_]+=[!-~]*$') | length
+      - (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | unique | list | length) == (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | length)
+      - (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | difference(['CODEXIA_PUBLIC_ORIGIN', 'CODEXIA_OIDC_ISSUER', 'CODEXIA_OIDC_CLIENT_ID', 'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID', 'CODEXIA_OAUTH_OWNER_SUBJECT', 'CODEXIA_OAUTH_OWNER_CLIENT_IDS', 'CODEXIA_API_AUDIENCE'])) | length == 0
+      - >-
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_API_AUDIENCE=') | length) ==
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_API_AUDIENCE=https://[^/\s]+/api$') | length)
+      - codexia_auth_owner_client_ids | unique | list | length == codexia_auth_owner_client_ids | length
+      - codexia_auth_introspection_client_id not in codexia_auth_owner_client_ids
+      - codexia_auth_runtime_settings_text is not search('(?m)^CODEXIA_(AUTH_DATABASE_URL|AUTH_SECRET|OIDC_CLIENT_SECRET|OAUTH_INTROSPECTION_CLIENT_SECRET)=')
+    fail_msg: Better Auth runtime settings are incomplete or include secret values; activation fails closed.
+  when: codexia_deployment_auth_mode == 'better-auth'
+  no_log: true
+
+- name: Preserve the exact settings for each Better Auth Quadlet
+  ansible.builtin.copy:
+    content: "{{ codexia_auth_runtime_settings_text }}"
+    dest: "{{ home }}/.config/codexia-auth/runtime-{{ codexia_auth_settings_sha256 }}.env"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0600'
+  when: codexia_deployment_auth_mode == 'better-auth'
+
+- name: Verify every staged Better Auth Podman secret exists before activation
+  ansible.builtin.command:
+    argv: [podman, secret, exists, "{{ item }}"]
+  loop:
+    - codexia-auth-database-url
+    - codexia-auth-secret
+    - codexia-oidc-client-secret
+    - codexia-oauth-introspection-client-secret
+  register: codexia_auth_runtime_secret_checks
+  changed_when: false
+  failed_when: codexia_auth_runtime_secret_checks.rc != 0
+  when: codexia_deployment_auth_mode == 'better-auth'
+  no_log: true
+
+- name: Use the token mode candidate without an auth settings digest
+  ansible.builtin.set_fact:
+    codexia_auth_settings_sha256: none
+  when: codexia_deployment_auth_mode == 'token'
+
+- name: Name the candidate Quadlet by digest, mode and nonsecret auth settings identity
+  ansible.builtin.set_fact:
+    codexia_candidate_unit_filename: "candidate-{{ codexia_image.split('sha256:')[-1] }}-{{ codexia_deployment_auth_mode }}-{{ codexia_auth_settings_sha256 }}.container"
+
 - name: Render a digest-specific candidate Quadlet outside the active unit path
   ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-api.container') | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) }}"
-    dest: "{{ home }}/.local/state/codexia-deploy/candidate-{{ codexia_image.split('sha256:')[-1] }}.container"
+    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + ('codexia-api.better-auth.container.example' if codexia_deployment_auth_mode == 'better-auth' else 'codexia-api.container')) | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) | replace('/home/codexia/.config/codexia-auth/runtime-', home + '/.config/codexia-auth/runtime-') | replace('AUTH_SETTINGS_DIGEST_PLACEHOLDER', codexia_auth_settings_sha256) }}"
+    dest: "{{ home }}/.local/state/codexia-deploy/{{ codexia_candidate_unit_filename }}"
     owner: codexia
     group: "{{ codexia_service_group | default('codexia') }}"
     mode: '0600'
@@ -253,18 +403,124 @@
       wants_dir="$unit_dir/default.target.wants"
       api_wants_link="$wants_dir/codexia-api.service"
       tunnel_wants_link="$wants_dir/codexia-tunnel.service"
-      candidate_unit={{ (home + '/.local/state/codexia-deploy/candidate-' + codexia_image.split('sha256:')[-1] + '.container') | quote }}
+      candidate_unit={{ (home + '/.local/state/codexia-deploy/' + codexia_candidate_unit_filename) | quote }}
       backup_program={{ (home + '/.local/bin/codexia-backup') | quote }}
       backup_destination={{ codexia_backup_destination | quote }}
       backup_recipient={{ codexia_backup_recipient | quote }}
       candidate_image={{ codexia_image | quote }}
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
+      auth_mode={{ codexia_deployment_auth_mode | quote }}
+      prior_auth_mode={{ (codexia_current_auth_mode if codexia_current_container_exists.rc == 0 else '') | quote }}
+      auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
+      auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
+      admitted_container={{ (codexia_current_api_observation.stdout if codexia_current_container_exists.rc == 0 else '') | quote }}
+      admitted_unit_sha256={{ (codexia_admitted_api_unit_sha256 if codexia_current_container_exists.rc == 0 else '') | quote }}
+      admitted_unit_image={{ (codexia_current_api_unit_images[0] if codexia_current_container_exists.rc == 0 else '') | quote }}
       release_state="$state_dir/deployed-release.json"
       transaction_intent="$state_dir/deploy-transaction.json"
       lock_file="$state_dir/host.lock"
       mkdir -p "$state_dir" "$unit_dir"
       exec 9>"$lock_file"
       flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
+      stale_admission(){
+        echo "Stale deployment admission: $1; rerun admission against the active release" >&2
+        exit 1
+      }
+      [[ ! -e "$transaction_intent" && ! -L "$transaction_intent" ]] || stale_admission 'a deployment transaction needs recovery'
+      current_container=''
+      current_image=''
+      if podman container exists codexia-api; then
+        current_container="$(podman inspect --format '{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}}{% endraw %}' codexia-api)" ||
+          stale_admission 'the API container could not be inspected'
+      elif [[ "$?" != 1 ]]; then
+        stale_admission 'the API container state could not be determined'
+      fi
+      [[ "$current_container" == "$admitted_container" ]] || stale_admission 'the running API container or image changed'
+      had_unit=false
+      rollback_image=''
+      if [[ -n "$admitted_unit_sha256" ]]; then
+        [[ -f "$active_unit" && ! -L "$active_unit" ]] || stale_admission 'the prior API Quadlet is no longer a regular file'
+        unit_sha256="$(sha256sum < "$active_unit")" || stale_admission 'the prior API Quadlet could not be hashed'
+        [[ "$unit_sha256" == "$admitted_unit_sha256  -" ]] || stale_admission 'the prior API Quadlet changed'
+        mapfile -t rollback_images < <(sed -n 's/^Image=//p' "$active_unit")
+        [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] ||
+          stale_admission 'the prior API Quadlet no longer has a unique immutable image'
+        rollback_image="${rollback_images[0]}"
+        read -r current_container_id _ current_image current_running <<< "$current_container"
+        [[ "$rollback_image" == "$admitted_unit_image" && "$current_image" == "$rollback_image" && "$current_running" == true ]] ||
+          stale_admission 'the running API image and prior Quadlet no longer agree'
+        if ! systemctl --user is-active --quiet codexia-api.service ||
+           ! podman inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' "$current_container_id" | grep -Fxq healthy; then
+          stale_admission 'the admitted API is no longer healthy'
+        fi
+        had_unit=true
+      elif [[ -e "$active_unit" || -L "$active_unit" ]]; then
+        stale_admission 'an API Quadlet appeared after first-activation admission'
+      fi
+      release_present=false
+      if [[ -e "$release_state" || -L "$release_state" ]]; then
+        [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
+        release_present=true
+        if [[ "$had_unit" == true ]]; then
+          if ! recorded_image="$(node - "$release_state" "$active_unit" <<'NODE'
+      const fs = require('node:fs');
+      const [releasePath, unitPath] = process.argv.slice(2);
+      const value = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+      const unit = fs.readFileSync(unitPath, 'utf8');
+      const modes = [...unit.matchAll(/^Environment=CODEXIA_AUTH_MODE=([^\r\n]*)$/gm)].map(match => match[1]);
+      const mode = modes.length === 1 ? modes[0] : modes.length === 0 && unit.includes('Environment=CODEXIA_AUTH_TOKEN_FILE=') &&
+        !unit.includes('codexia-auth-database-url') && !unit.includes('codexia-auth/runtime') ? 'token' : '';
+      if (value.authMode !== undefined && value.authMode !== mode) process.exit(2);
+      if (value.authSettingsSha256 !== undefined) {
+        if (!/^([a-f0-9]{64}|none)$/.test(value.authSettingsSha256)) process.exit(2);
+        const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([a-f0-9]{64}|none)$/gm)].map(match => match[1]);
+        const unitDigest = digests[0] ?? (mode === 'token' ? 'none' : '');
+        if (digests.length > 1 || unitDigest !== value.authSettingsSha256) process.exit(2);
+      }
+      process.stdout.write(typeof value.image === 'string' ? value.image : '');
+      NODE
+          )" || [[ "$recorded_image" != "$rollback_image" ]]; then
+            echo 'Prior deployment record does not match its Quadlet image or authentication settings' >&2
+            exit 1
+          fi
+        fi
+      fi
+      run_auth_cli(){
+        local script="$1"; shift
+        podman run --rm --network codexia-data \
+          --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
+          --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
+          --secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET \
+          --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET \
+          --env-file "$auth_settings_file" --entrypoint=node "$candidate_image" "$script" "$@"
+      }
+      verify_auth_settings(){
+        local file="$1" digest="$2"
+        [[ -f "$file" && ! -L "$file" && -O "$file" && "$(stat -c %a -- "$file")" == 600 ]] &&
+          [[ "$(sha256sum < "$file")" == "$digest  -" ]]
+      }
+      if [[ "$auth_mode" == better-auth ]] && ! verify_auth_settings "$auth_settings_file" "$auth_settings_digest"; then
+        echo 'Candidate Better Auth settings snapshot is invalid' >&2
+        exit 1
+      fi
+      if [[ "$prior_auth_mode" == better-auth ]]; then
+        prior_auth_settings_digest="$(sed -n 's/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=//p' "$active_unit")"
+        prior_auth_settings_file="$(dirname -- "$auth_settings_file")/runtime-$prior_auth_settings_digest.env"
+        if [[ ! "$prior_auth_settings_digest" =~ ^[a-f0-9]{64}$ ]] ||
+           ! grep -Fxq "EnvironmentFile=$prior_auth_settings_file" "$active_unit" ||
+           ! verify_auth_settings "$prior_auth_settings_file" "$prior_auth_settings_digest"; then
+          echo 'Prior Better Auth settings snapshot is invalid' >&2
+          exit 1
+        fi
+      fi
+      unchanged=false
+      if [[ "$current_image" == "$candidate_image" && "$had_unit" == true ]] && cmp -s -- "$candidate_unit" "$active_unit"; then
+        unchanged=true
+      fi
+      if [[ "$prior_auth_mode" == better-auth ]] && ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
+        echo 'Better Auth schema or registered clients failed verification before service changes' >&2
+        exit 1
+      fi
       mkdir -p "$wants_dir"
       api_link_created=false
       tunnel_link_created=false
@@ -283,11 +539,7 @@
         ensure_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
         tunnel_present=true
       fi
-      current_image=''
-      if podman container exists codexia-api; then
-        current_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api)"
-      fi
-      if [[ "$current_image" == "$candidate_image" && -f "$active_unit" && ! -L "$active_unit" ]] && cmp -s -- "$candidate_unit" "$active_unit"; then
+      if [[ "$unchanged" == true ]]; then
         systemctl --user daemon-reload
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
@@ -295,43 +547,13 @@
         echo "UNCHANGED $candidate_image"
         exit 0
       fi
-      had_unit=false
-      if [[ -f "$active_unit" && ! -L "$active_unit" ]]; then
+      if [[ "$had_unit" == true ]]; then
         cp --preserve=mode,ownership "$active_unit" "$state_dir/rollback-api.container"
-        had_unit=true
       fi
       tunnel_was_active=false
       if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
-      release_present=false
-      if [[ -e "$release_state" || -L "$release_state" ]]; then
-        [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
+      if [[ "$release_present" == true ]]; then
         cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
-        release_present=true
-      fi
-      rollback_image=''
-      if [[ "$had_unit" == true ]]; then
-        mapfile -t rollback_images < <(sed -n 's/^Image=//p' "$state_dir/rollback-api.container")
-        [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || {
-          echo 'Prior API Quadlet has no unique immutable image identity; deployment stopped before changing services' >&2
-          exit 1
-        }
-        rollback_image="${rollback_images[0]}"
-        if [[ "$release_present" == true ]]; then
-          recorded_image="$(node - "$state_dir/rollback-release.json" <<'NODE'
-      const fs = require('node:fs');
-      const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-      process.stdout.write(typeof value.image === 'string' ? value.image : '');
-      NODE
-          )"
-          [[ "$recorded_image" == "$rollback_image" ]] || {
-            echo 'Prior deployment record does not match its Quadlet image; deployment stopped before changing services' >&2
-            exit 1
-          }
-        fi
-        if [[ -n "$current_image" && "$current_image" != "$rollback_image" ]]; then
-          echo 'Running API image does not match its prior Quadlet; deployment stopped before changing services' >&2
-          exit 1
-        fi
       fi
       if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" <<'NODE'
       const fs = require('node:fs');
@@ -400,6 +622,20 @@
         echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
         exit 1
       fi
+      if [[ "$auth_mode" == better-auth && "$prior_auth_mode" == token ]]; then
+        if ! run_auth_cli /app/node_modules/@codexia/api/dist/migrate-auth.js --apply; then
+          restore_previous || echo 'Previous API recovery failed after Better Auth migration failure' >&2
+          echo 'Better Auth migrations failed; auth schema state was retained and deployment remains pending if rollback is unverified' >&2
+          exit 1
+        fi
+      fi
+      if [[ "$auth_mode" == better-auth ]]; then
+        if ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
+          restore_previous || echo 'Previous API recovery failed after Better Auth registration verification failure' >&2
+          echo 'Better Auth schema or registered clients failed verification; deployment remains pending if rollback is unverified' >&2
+          exit 1
+        fi
+      fi
       if [[ "$had_unit" != true ]]; then
         if ! podman run --rm --network codexia-data \
           --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
@@ -448,9 +684,11 @@
           exit 1
         fi
       fi
-      if ! node - "$candidate_image" "$current_image" "$candidate_identity" > "$release_state.tmp" <<'NODE'
-      const [image, previousImage, identity] = process.argv.slice(2);
-      process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage, identity: JSON.parse(identity)}) + '\n');
+      if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_mode" "$auth_settings_digest" > "$release_state.tmp" <<'NODE'
+      const [image, previousImage, identity, authMode, authSettingsSha256] = process.argv.slice(2);
+      if (!['token', 'better-auth'].includes(authMode) || !/^([a-f0-9]{64}|none)$/.test(authSettingsSha256)) process.exit(2);
+      process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage,
+        identity: JSON.parse(identity), authMode, authSettingsSha256}) + '\n');
       NODE
       then
         restore_previous || echo 'Previous API recovery failed after release record failure' >&2
@@ -490,6 +728,10 @@
     msg: >-
       Deployment transaction failed during
       {{ 'host lock admission' if 'Another Codexia deployment or backup holds the host lock' in (codexia_deploy_transaction.stderr | default('')) else
+         'stale admission' if 'Stale deployment admission' in (codexia_deploy_transaction.stderr | default('')) else
+         'Better Auth settings snapshot' if 'Better Auth settings snapshot is invalid' in (codexia_deploy_transaction.stderr | default('')) else
+         'Better Auth migration' if 'Better Auth migrations failed' in (codexia_deploy_transaction.stderr | default('')) else
+         'Better Auth client registration verification' if 'Better Auth schema or registered clients failed verification' in (codexia_deploy_transaction.stderr | default('')) else
          'encrypted backup' if 'Encrypted off-VM backup failed' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API startup' if 'Candidate API failed to start' in (codexia_deploy_transaction.stderr | default('')) else

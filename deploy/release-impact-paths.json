@@ -110,6 +110,7 @@
     "docs/deployment/PUSH-DEPLOYMENT.md",
     "docs/deployment/IAC.md",
     "scripts/component-release-record.mjs",
-    "scripts/push-app-lifecycle*.mjs"
+    "scripts/push-app-lifecycle*.mjs",
+    "scripts/push-auth-lifecycle-oidc.mjs"
   ]
 }
