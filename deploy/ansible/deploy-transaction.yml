@@ -21,6 +21,10 @@
   register: codexia_deploy_recovery
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
 
+- name: Reuse the canonical rootless base admission before production activation
+  ansible.builtin.include_tasks: verify-deploy-base-runtime.yml
+  when: not (codexia_lifecycle_fixture | default(false) | bool)
+
 - name: Create the private encrypted backup directory on the target host
   ansible.builtin.file:
     path: "{{ codexia_backup_destination }}"
@@ -451,6 +455,14 @@
         echo 'Deployment base runtime requires the rootless Tunnel Quadlet' >&2
         exit 1
       fi
+      if [[ "$require_tunnel" == true ]]; then
+        db_source="$(systemctl --user show --property=SourcePath --value codexia-db.service)" || db_source=''
+        tunnel_source="$(systemctl --user show --property=SourcePath --value codexia-tunnel.service)" || tunnel_source=''
+        if [[ "$db_source" != "$unit_dir/codexia-db.container" || "$tunnel_source" != "$unit_dir/codexia-tunnel.container" ]]; then
+          echo 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units' >&2
+          exit 1
+        fi
+      fi
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
@@ -757,6 +769,7 @@
          'base runtime admission (history volume)' if 'Deployment base runtime requires the rootless history volume' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (PostgreSQL)' if 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (Tunnel)' if 'Deployment base runtime requires the rootless Tunnel Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (generated units)' if 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units' in (codexia_deploy_transaction.stderr | default('')) else
          'encrypted backup' if 'Encrypted backup failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API startup' if 'Candidate API failed to start' in (codexia_deploy_transaction.stderr | default('')) else
