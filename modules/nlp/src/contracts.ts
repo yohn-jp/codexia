@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import type { MorphologyAnalysis } from "./tokenizer/types.js";
 import type { SnapshotId } from "@codexia/contracts";
 
@@ -8,7 +9,10 @@ export const NLP_TOKEN_COUNTER_CAPABILITY = "nlp.token-counter";
 export const NLP_TOKEN_COUNTER_CAPABILITY_VERSION = "1.0.0";
 export const NLP_MODEL_ID = "lindera-wasm-nodejs-ipadic";
 export const NLP_MODEL_VERSION = "2.0.0";
-export const NLP_TOKENIZER_ENGINE_VERSION = "3.8.1";
+const manifest = createRequire(import.meta.url)("../package.json") as {
+  dependencies: { "@huggingface/transformers": string };
+};
+export const NLP_TOKENIZER_ENGINE_VERSION = manifest.dependencies["@huggingface/transformers"];
 export const NLP_APPROX_TOKEN_COUNTER_VERSION = "source-approx-v1";
 
 export interface NlpTokenizerCapability {

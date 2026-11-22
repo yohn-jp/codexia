@@ -66,30 +66,34 @@ test("provider selection defaults to NONE and does not perform a network request
   });
 });
 
-test("source feature presets resolve model purpose and sampling without exposing secrets", async () => {
+test("quality and bulk features select distinct configured models without exposing provider auth", async () => {
   await withEnv(
     {
       ...noProviderEnv,
       ARCADIA_LLM_PROVIDER: "anthropic",
+      ARCADIA_ANTHROPIC_MODEL_QUALITY: "fixture/long-form-model",
+      ARCADIA_ANTHROPIC_MODEL_BULK: "fixture/fast-model",
       ANTHROPIC_API_KEY: "private-test-key",
     },
     () => {
-      const rewrite = resolveAssistantModel("rewrite");
-      assert.deepEqual(rewrite, {
-        provider: "anthropic",
-        model: "deepseek-ai/DeepSeek-V4-Pro",
-        purpose: "quality",
-        sampling: { temperature: 0.35, topP: 0.8, repetitionPenalty: 1.05 },
-      });
-      assert.equal(JSON.stringify(rewrite).includes("private-test-key"), false);
-
-      const summary = resolveAssistantModel("scene-summary");
-      assert.deepEqual(summary, {
-        provider: "anthropic",
-        model: "Qwen/Qwen3-4B-Instruct-2507",
-        purpose: "bulk",
-        sampling: { temperature: 0, topP: 0.1, presencePenalty: 0, frequencyPenalty: 0 },
-      });
+      const preferences: AssistantModelPreferences = {
+        defaultPresetId: "use-environment",
+        presets: [{ id: "use-environment", model: "" }],
+        featurePresetIds: { rewrite: "use-environment", "scene-summary": "use-environment" },
+      };
+      const rewrite = resolveAssistantModel("rewrite", preferences);
+      const summary = resolveAssistantModel("scene-summary", preferences);
+      assert.equal(rewrite?.provider, "anthropic");
+      assert.equal(summary?.provider, "anthropic");
+      assert.equal(rewrite?.purpose, "quality");
+      assert.equal(summary?.purpose, "bulk");
+      assert.equal(rewrite.model, "fixture/long-form-model");
+      assert.equal(summary.model, "fixture/fast-model");
+      const rewriteDefault = resolveAssistantModel("rewrite");
+      const summaryDefault = resolveAssistantModel("scene-summary");
+      assert.notEqual(rewriteDefault?.model, summaryDefault?.model);
+      assert.ok(Number(rewriteDefault?.sampling?.temperature) > Number(summaryDefault?.sampling?.temperature));
+      assert.doesNotMatch(JSON.stringify([rewrite, summary]), /private-test-key/u);
     },
   );
 });

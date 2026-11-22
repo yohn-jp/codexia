@@ -163,11 +163,12 @@ test("Story actions preserve review, linked-project, concurrency, and recovery b
     assert.equal(retried.proposalStatus.proposal.id, originalZukanProposal.id);
     assert.equal(retried.proposalStatus.proposal.snapshot.projectVersion, createdResult.proposals[0].snapshot.projectVersion);
     assert.equal(retriedResult.proposals, undefined, "a retry never rebases the old operation onto the newer PostgreSQL snapshot");
-    const changedMeaning = assertAction(await invoke(workProject.id, "story.zukan-suggestions.create", {
+    const changedMeaning = await invoke(workProject.id, "story.zukan-suggestions.create", {
       ...zukanInput,
       proposedText: "Changed meaning under the same operation identity.",
-    }).then((result) => { assert.equal(result.ok, false); return { ...result, ok: true, data: result.error }; }), "changed Zukan retry");
-    assert.equal(changedMeaning.code, "suggestion_identity_conflict");
+    });
+    assert.equal(changedMeaning.ok, false);
+    assert.equal(changedMeaning.error?.code, "suggestion_identity_conflict");
 
     await work.applyFiles({ "meta/scriptorium/modules/story/zukan-suggestions.jsonl": "" });
     const newZukanResult = await invoke(workProject.id, "story.zukan-suggestions.create", {
@@ -225,7 +226,7 @@ test("Story actions preserve review, linked-project, concurrency, and recovery b
     const submitted = assertAction(submittedResult, "story.changes.propose");
     assert.equal(submitted.replayed, false);
     assert.equal(submitted.dependencies["create-scene"]?.[0], "create-garden", "the scene precondition includes the preceding virtual Bible write");
-    assert.equal(submittedResult.proposals?.length, 1, "the complete source change set becomes one atomic Core proposal");
+    assert.equal(submittedResult.proposals?.length, 1, "the complete source change set becomes one Core proposal");
     const coreProposalId = submitted.data?.coreProposalId ?? submitted.coreProposalId;
     const persistedProposal = await store.getProposal(workProject.id, coreProposalId);
     assert.equal(persistedProposal?.proposal.id, coreProposalId);
@@ -244,11 +245,12 @@ test("Story actions preserve review, linked-project, concurrency, and recovery b
     const replayed = assertAction(await invoke(workProject.id, "story.changes.propose", changeSet), "story.changes.propose exact retry");
     assert.equal(replayed.replayed, true);
     assert.equal(replayed.coreProposalId, coreProposalId);
-    const changedChangeSet = assertAction(await invoke(workProject.id, "story.changes.propose", {
+    const changedChangeSet = await invoke(workProject.id, "story.changes.propose", {
       ...changeSet,
       goal: `${changeSet.goal} with a changed meaning`,
-    }).then((result) => { assert.equal(result.ok, false); return { ...result, ok: true, data: result.error }; }), "changed Story changeset retry");
-    assert.equal(changedChangeSet.code, "change_set_identity_conflict");
+    });
+    assert.equal(changedChangeSet.ok, false);
+    assert.equal(changedChangeSet.error?.code, "change_set_identity_conflict");
 
     await store.approve(workProject.id, { proposalId: coreProposalId, operationIds: [coreOperations[0].id], authorScope: "story-production-acceptance-owner" });
     await store.apply(workProject.id, coreOperations[0]);
@@ -288,8 +290,10 @@ test("Story actions preserve review, linked-project, concurrency, and recovery b
     await store.approve(workProject.id, { proposalId: guardProposal.id, operationIds: [guardOperation.id], authorScope: "story-production-acceptance-owner" });
     const currentPark = await (await store.reader(workProject.id)).read("bible/locations/loc-park.yaml");
     await work.applyFiles({ "bible/locations/loc-park.yaml": `${currentPark.content}\n# changed after author approval\n` });
-    await assert.rejects(store.apply(workProject.id, guardOperation), (error) => ["conflict", "revision_conflict"].includes(error?.code));
-    assert.equal((await store.getProposal(workProject.id, guardProposal.id))?.state, "approved", "a stale approved operation remains unapplied and reviewable");
+    await assert.rejects(store.apply(workProject.id, guardOperation), { status: 409, code: "revision_conflict" });
+    const stale = await store.getProposal(workProject.id, guardProposal.id);
+    assert.equal(stale?.state, "approved", "a stale approved operation remains unapplied and reviewable");
+    assert.deepEqual(stale?.applications, [], "a rejected apply must not emit a receipt");
 
     const workVersionBeforeRestart = (await store.observe(workProject.id)).snapshot.projectVersion;
     const bibleVersionBeforeRestart = (await store.observe(bibleProject.id)).snapshot.projectVersion;

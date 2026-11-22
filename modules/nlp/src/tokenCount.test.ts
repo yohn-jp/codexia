@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { NLP_TOKENIZER_ENGINE_VERSION } from "./contracts.js";
 import {
   isSafeHuggingFaceModelId,
   resolveTokenCountConfiguration,
@@ -47,4 +48,9 @@ test("token count batches accept their resource limits and reject the first exce
   assert.equal(validateTokenCountTexts(itemLimit).length, 128);
   assert.throws(() => validateTokenCountTexts([...itemLimit, "駅"]), /between 1 and/);
   assert.throws(() => validateTokenCountTexts([]), /between 1 and/);
+});
+
+test("the declared token counter engine version matches the installed Transformers library", async () => {
+  const { env } = await import("@huggingface/transformers");
+  assert.equal(NLP_TOKENIZER_ENGINE_VERSION, env.version);
 });
