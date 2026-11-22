@@ -9,6 +9,10 @@ const OIDC_METADATA_PATH = '/.well-known/openid-configuration/api/auth';
 const MCP_PATH = '/mcp';
 const PROTECTED_API_PATH = '/api/projects';
 const PROTECTED_UI_PATH = '/desktop';
+const AUTH_METHODS_PATH = '/api/auth/codexia/auth-methods';
+const AUTH_SESSION_PATH = '/api/auth/get-session';
+const OAUTH_LOGIN_PATH = '/oauth/login';
+const OAUTH_CONSENT_PATH = '/oauth/consent';
 
 function assertOrigin(value) {
   let origin;
@@ -82,6 +86,41 @@ export async function probePublicOAuthEdge({ origin: inputOrigin, fetchImpl = fe
     return readJson(response, path);
   }
 
+  async function readPublicOAuthPage(path) {
+    const response = await request(path, { accept: 'text/html' });
+    requireStatus(response, 200, path);
+    if (!(response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`${path} did not return the dedicated OAuth HTML document (${evidence(response)}).`);
+    }
+    const html = await response.text();
+    if (!/<html\b/iu.test(html)) throw new Error(`${path} did not return an HTML document.`);
+    const references = [...html.matchAll(/\b(?:src|href)=["']([^"']+)["']/giu)].map((match) => match[1]);
+    if (references.length === 0) throw new Error(`${path} has no dedicated OAuth assets.`);
+
+    const assets = new Set();
+    for (const reference of references) {
+      let assetUrl;
+      try { assetUrl = new URL(reference, origin); }
+      catch { throw new Error(`${path} contains an invalid asset reference.`); }
+      if (assetUrl.origin !== origin.origin || !assetUrl.pathname.startsWith('/oauth/assets/') || assetUrl.search || assetUrl.hash) {
+        throw new Error(`${path} references an asset outside the dedicated /oauth/assets/ prefix.`);
+      }
+      assets.add(assetUrl.pathname);
+    }
+
+    for (const assetPath of assets) {
+      const assetResponse = await request(assetPath, { accept: '*/*' });
+      requireStatus(assetResponse, 200, assetPath);
+      if ((assetResponse.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
+        await assetResponse.body?.cancel().catch(() => undefined);
+        throw new Error(`${assetPath} returned HTML instead of a static asset (${evidence(assetResponse)}).`);
+      }
+      await assetResponse.body?.cancel().catch(() => undefined);
+    }
+    return { status: response.status, assets: assets.size };
+  }
+
   const resource = await readPublicJson(PROTECTED_RESOURCE_PATH);
   if (resource?.resource !== expectedResource ||
       !Array.isArray(resource.authorization_servers) ||
@@ -114,6 +153,11 @@ export async function probePublicOAuthEdge({ origin: inputOrigin, fetchImpl = fe
   }
   const jwks = await readPublicJson(jwksUrl.pathname);
   if (!Array.isArray(jwks.keys) || jwks.keys.length === 0) throw new Error('The public JWKS document contains no signing keys.');
+
+  await readPublicJson(AUTH_METHODS_PATH);
+  await readPublicJson(AUTH_SESSION_PATH);
+  const oauthLogin = await readPublicOAuthPage(OAUTH_LOGIN_PATH);
+  const oauthConsent = await readPublicOAuthPage(OAUTH_CONSENT_PATH);
 
   const mcp = await request(MCP_PATH, { accept: 'application/json, text/event-stream' });
   requireStatus(mcp, 401, MCP_PATH);
@@ -152,6 +196,9 @@ export async function probePublicOAuthEdge({ origin: inputOrigin, fetchImpl = fe
     mcpUnauthorizedStatus: mcp.status,
     protectedApiUnauthorizedStatus: dataApi.status,
     uiAccessBoundaryStatus: ui.status,
+    oauthLoginStatus: oauthLogin.status,
+    oauthConsentStatus: oauthConsent.status,
+    oauthStaticAssetCount: oauthLogin.assets + oauthConsent.assets,
   };
 }
 
@@ -159,7 +206,7 @@ async function main() {
   const origin = process.env.CODEXIA_PUBLIC_ORIGIN;
   if (!origin) throw new Error('Set CODEXIA_PUBLIC_ORIGIN to the HTTPS production origin. No credentials are needed.');
   const result = await probePublicOAuthEdge({ origin });
-  console.log(`Verified public OAuth metadata/JWKS, MCP ${result.mcpUnauthorizedStatus} challenge, API ${result.protectedApiUnauthorizedStatus} denial, and UI Access boundary (${result.uiAccessBoundaryStatus}).`);
+  console.log(`Verified public OAuth metadata/JWKS, dedicated login/consent HTML and ${result.oauthStaticAssetCount} OAuth assets, MCP ${result.mcpUnauthorizedStatus} challenge, API ${result.protectedApiUnauthorizedStatus} denial, and UI Access boundary (${result.uiAccessBoundaryStatus}).`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

@@ -59,6 +59,16 @@
     "path": "/api/auth/jwks",
     "tunnelPath": "^/api/auth/jwks$"
   },
+  "oauth_auth_methods": {
+    "name": "Codexia OAuth sign-in method availability",
+    "path": "/api/auth/codexia/auth-methods",
+    "tunnelPath": "^/api/auth/codexia/auth-methods$"
+  },
+  "auth_session": {
+    "name": "Codexia OAuth login session check",
+    "path": "/api/auth/get-session",
+    "tunnelPath": "^/api/auth/get-session$"
+  },
   "passkey_authentication_options": {
     "name": "Codexia Passkey authentication options",
     "path": "/api/auth/passkey/generate-authenticate-options",
@@ -88,5 +98,20 @@
     "name": "Codexia owner-configured OIDC callback",
     "path": "/api/auth/sso/callback/codexia-owner-oidc",
     "tunnelPath": "^/api/auth/sso/callback/codexia-owner-oidc$"
+  },
+  "oauth_login_page": {
+    "name": "Codexia OAuth login page",
+    "path": "/oauth/login",
+    "tunnelPath": null
+  },
+  "oauth_consent_page": {
+    "name": "Codexia OAuth consent page",
+    "path": "/oauth/consent",
+    "tunnelPath": null
+  },
+  "oauth_static_assets": {
+    "name": "Codexia OAuth UI static assets",
+    "path": "/oauth/assets/*",
+    "tunnelPath": null
   }
 }

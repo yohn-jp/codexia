@@ -173,12 +173,17 @@ assert.deepEqual(publicEndpointPaths, {
   oauth_consent: '/api/auth/oauth2/consent',
   oauth_consent_context: '/api/auth/oauth2/consent-context',
   oauth_jwks: '/api/auth/jwks',
+  oauth_auth_methods: '/api/auth/codexia/auth-methods',
+  auth_session: '/api/auth/get-session',
   passkey_authentication_options: '/api/auth/passkey/generate-authenticate-options',
   passkey_authentication_verify: '/api/auth/passkey/verify-authentication',
   oidc_sign_in: '/api/auth/sign-in/social',
   oidc_callback: '/api/auth/callback/workspace-oidc',
   sso_sign_in: '/api/auth/sign-in/sso',
   sso_callback: '/api/auth/sso/callback/codexia-owner-oidc',
+  oauth_login_page: '/oauth/login',
+  oauth_consent_page: '/oauth/consent',
+  oauth_static_assets: '/oauth/assets/*',
 });
 for (const endpoint of Object.values(publicProtocolPaths)) {
   assert.equal(typeof endpoint.name, 'string');
@@ -191,8 +196,14 @@ for (const endpoint of Object.values(publicProtocolPaths)) {
     assert.ok(!matcher.test(endpoint.path + '/unexpected'), `${endpoint.path} must not admit nested routes`);
   }
 }
-assert.ok(Object.values(publicProtocolPaths).every((endpoint) => endpoint.tunnelPath !== null),
-  'the public protocol app contains only API/Tunnel paths and leaves frontend routes under Access');
+assert.deepEqual(Object.values(publicProtocolPaths).filter((endpoint) => endpoint.tunnelPath === null).map((endpoint) => endpoint.path),
+  ['/oauth/login', '/oauth/consent', '/oauth/assets/*'],
+  'only the dedicated OAuth pages and their isolated static asset prefix bypass Access outside the Tunnel');
+assert.ok(!Object.values(publicProtocolPaths).some((endpoint) => endpoint.path === '/assets/*'),
+  'the generic UI asset bundle must remain under the parent Access boundary');
+assert.ok(Object.values(publicProtocolPaths).filter((endpoint) => endpoint.tunnelPath === null)
+  .every((endpoint) => !uiRoutes.originRoutes.some((route) => endpoint.path.startsWith(route.replace(/\*$/u, '')))),
+  'static OAuth pages and assets must continue to be served by the existing static Worker route');
 assert.deepEqual(Object.values(publicProtocolPaths).filter((endpoint) => endpoint.path.startsWith('/api/auth/passkey/')).map((endpoint) => endpoint.path), [
   '/api/auth/passkey/generate-authenticate-options',
   '/api/auth/passkey/verify-authentication',
@@ -224,6 +235,8 @@ assert.match(publicAccess, /cloudflare_zero_trust_tunnel_cloudflared_config\.cod
 const publicIngress = terraformMain.split('for _, endpoint in local.public_tunnel_paths')[1].split('for key, probe in local.identity_probes')[0];
 assert.match(publicIngress, /path\s+=\s+endpoint\.tunnelPath/u);
 assert.doesNotMatch(publicIngress, /access\s*=/u, 'public protocol ingress must not require an Access JWT at the origin');
+assert.match(terraformMain, /public_tunnel_paths\s*=\s*\{[\s\S]*?if endpoint\.tunnelPath != null/u,
+  'static OAuth pages and assets must receive Access overrides without Tunnel ingress entries');
 assert.match(ingress, /access\s*=\s*\{\s*required\s+=\s+true/u,
   'identity probes and the catch-all must keep Tunnel Access JWT validation');
 assert.match(terraformMain, /resource "cloudflare_zero_trust_access_application" "public_protocol"[\s\S]*?cloudflare_zero_trust_tunnel_cloudflared_config\.codexia/u,

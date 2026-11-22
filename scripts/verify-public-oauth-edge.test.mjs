@@ -22,6 +22,9 @@ const response = (body, status = 200, headers = {}) => new Response(body === nul
   status,
   headers: { 'content-type': 'application/json', ...headers },
 });
+const htmlResponse = (assets) => new Response(`<!doctype html><html><head><link rel="icon" href="/oauth/assets/icon.svg"><link rel="stylesheet" href="/oauth/assets/styles.css"></head><body><script type="module" src="${assets}"></script></body></html>`, {
+  headers: { 'content-type': 'text/html; charset=utf-8' },
+});
 
 function fixtureFetch(overrides = {}) {
   const calls = [];
@@ -40,6 +43,14 @@ function fixtureFetch(overrides = {}) {
       case '/.well-known/oauth-authorization-server/api/auth': return response(authorizationServer);
       case '/.well-known/openid-configuration/api/auth': return response(openIdConfiguration);
       case '/api/auth/jwks': return response({ keys: [{ kid: 'public-key' }] });
+      case '/api/auth/codexia/auth-methods': return response({ passkey: true, oidc: false });
+      case '/api/auth/get-session': return new Response('null', { headers: { 'content-type': 'application/json' } });
+      case '/oauth/login': return htmlResponse('/oauth/assets/login.js');
+      case '/oauth/consent': return htmlResponse('/oauth/assets/consent.js');
+      case '/oauth/assets/login.js': return new Response('login asset', { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
+      case '/oauth/assets/consent.js': return new Response('consent asset', { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
+      case '/oauth/assets/styles.css': return new Response('body{}', { headers: { 'content-type': 'text/css; charset=utf-8' } });
+      case '/oauth/assets/icon.svg': return new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } });
       case '/mcp': return response({ error: 'UNAUTHORIZED' }, 401, {
         'www-authenticate': `Bearer resource_metadata="${resourceUrl}", scope="mcp:read mcp:compute mcp:propose"`,
       });
@@ -60,12 +71,25 @@ test('public OAuth edge probe checks protocol metadata, MCP challenge, API denia
     mcpUnauthorizedStatus: 401,
     protectedApiUnauthorizedStatus: 401,
     uiAccessBoundaryStatus: 302,
+    oauthLoginStatus: 200,
+    oauthConsentStatus: 200,
+    oauthStaticAssetCount: 6,
   });
   assert.deepEqual(calls.map(({ url, init }) => [url.pathname, init.method]), [
     ['/.well-known/oauth-protected-resource/api', 'GET'],
     ['/.well-known/oauth-authorization-server/api/auth', 'GET'],
     ['/.well-known/openid-configuration/api/auth', 'GET'],
     ['/api/auth/jwks', 'GET'],
+    ['/api/auth/codexia/auth-methods', 'GET'],
+    ['/api/auth/get-session', 'GET'],
+    ['/oauth/login', 'GET'],
+    ['/oauth/assets/icon.svg', 'GET'],
+    ['/oauth/assets/styles.css', 'GET'],
+    ['/oauth/assets/login.js', 'GET'],
+    ['/oauth/consent', 'GET'],
+    ['/oauth/assets/icon.svg', 'GET'],
+    ['/oauth/assets/styles.css', 'GET'],
+    ['/oauth/assets/consent.js', 'GET'],
     ['/mcp', 'GET'],
     ['/api/projects', 'GET'],
     ['/desktop', 'GET'],
@@ -94,6 +118,32 @@ test('public OAuth probe rejects incorrect resource metadata and missing MCP bea
     '/mcp': () => response({ error: 'unauthorized' }, 401),
   });
   await assert.rejects(probePublicOAuthEdge({ origin, fetchImpl: missingChallenge }), /expected OAuth protected-resource challenge/u);
+});
+
+test('public OAuth probe requires dedicated auth pages and never opens the generic UI asset prefix', async () => {
+  const { fetchImpl: accessBlocked } = fixtureFetch({
+    '/oauth/login': () => response(null, 302, { location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/example' }),
+  });
+  await assert.rejects(probePublicOAuthEdge({ origin, fetchImpl: accessBlocked }), /Access redirect or edge challenge/u);
+
+  const { fetchImpl: genericAssets } = fixtureFetch({
+    '/oauth/login': () => new Response('<html><script src="/assets/app.js"></script></html>', { headers: { 'content-type': 'text/html' } }),
+  });
+  await assert.rejects(probePublicOAuthEdge({ origin, fetchImpl: genericAssets }), /outside the dedicated \/oauth\/assets\//u);
+
+  const { fetchImpl: blockedAsset } = fixtureFetch({
+    '/oauth/assets/login.js': () => response(null, 302, { location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/example' }),
+  });
+  await assert.rejects(probePublicOAuthEdge({ origin, fetchImpl: blockedAsset }), /Access redirect or edge challenge/u);
+});
+
+test('public OAuth probe requires the exact auth-method and session endpoints without Access', async () => {
+  for (const path of ['/api/auth/codexia/auth-methods', '/api/auth/get-session']) {
+    const { fetchImpl: accessBlocked } = fixtureFetch({
+      [path]: () => response(null, 302, { location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/example' }),
+    });
+    await assert.rejects(probePublicOAuthEdge({ origin, fetchImpl: accessBlocked }), /Access redirect or edge challenge/u);
+  }
 });
 
 test('public OAuth probe rejects anonymous data access and a public UI entry', async () => {
