@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DocumentSource, SnapshotId, SnapshotReader } from "@codexia/contracts";
-import { isSearchableDocumentPath, SnapshotIndexCache, type DocumentSourceFactory } from "./index-cache.js";
+import { SnapshotIndexCache, type DocumentSourceFactory } from "./index-cache.js";
 
 type StoredFile = { content: string; revision: string };
-type TestSnapshot = SnapshotId & { files: Map<string, StoredFile>; failChanges?: boolean; failRead?: boolean };
+type TestSnapshot = SnapshotId & { files: Map<string, StoredFile>; failChanges?: boolean };
 
-function snapshot(repositoryId: string, projectVersion: number, files: Record<string, string>, updatedVersion?: number): TestSnapshot {
-  const id: SnapshotId = {
-    projectId: repositoryId,
+function snapshot(projectId: string, projectVersion: number, files: Record<string, string>): TestSnapshot {
+  return {
+    projectId,
     projectVersion,
-    ...(updatedVersion ? { projectVersion: updatedVersion } : {}),
+    files: new Map(Object.entries(files).map(([path, content]) => [path, { content, revision: contentRevision(content) }])),
   };
-  return Object.assign(id, { files: new Map(Object.entries(files).map(([path, content]) => [path, { content, revision: contentRevision(content) }])) });
 }
 
 function contentRevision(content: string): string {
@@ -37,7 +36,6 @@ function sourceFactory(counters: { enumerate: number; changes: number; readPaths
           .map(([path, file]) => ({ path, revision: file.revision }));
       },
       async readMany(paths) {
-        if (current.failRead) throw new Error("read failed");
         counters.readPaths.push(...paths);
         return paths.map((path) => ({ path, ...current.files.get(path)! }));
       },
@@ -59,6 +57,8 @@ test("index cache filters project data to canonical textual document roots", asy
   const first = snapshot("repo-a", 11, {
     "manuscript/v1/c1/s1.md": "Moonlit harbor",
     "documents/pg-scene-1.md": "A submerged brass archive",
+    "documents/.hidden/secret.md": "hidden text",
+    "documents/pg-scene-1.png": "binary",
     "plot/v1/c1/s1.yaml": "name: harbor",
     "bible/places/harbor.yaml": "description: moonlit",
     "meta/scratch/notes.md": "local note",
@@ -74,53 +74,57 @@ test("index cache filters project data to canonical textual document roots", asy
   assert.deepEqual([...indexed.documents.keys()].sort(), [
     "bible/places/harbor.yaml", "documents/pg-scene-1.md", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
   ]);
-  assert.equal(counters.readPaths.some((path) => path.startsWith("meta/scriptorium/")), false);
-  assert.equal(counters.readPaths.some((path) => path.startsWith("attachments/")), false);
-  assert.equal(isSearchableDocumentPath("meta/scriptorium/modules/search/terms.json"), false);
-  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.md"), true);
-  assert.equal(isSearchableDocumentPath("documents/.hidden/secret.md"), false);
-  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.png"), false);
+  assert.deepEqual(counters.readPaths.toSorted(), [...indexed.documents.keys()].toSorted());
 });
 
 test("unchanged snapshots reuse the index and changed revisions update and remove only their entries", async () => {
   const first = snapshot("repo-a", 11, {
     "manuscript/v1/c1/s1.md": "old harbor",
     "manuscript/v1/c1/s2.md": "remove me",
+    "manuscript/v1/c1/kept.md": "keep without another read",
   });
   const second = snapshot("repo-a", 12, {
     "manuscript/v1/c1/s1.md": "new harbor",
     "manuscript/v1/c1/s3.md": "new scene",
+    "manuscript/v1/c1/kept.md": "keep without another read",
   });
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const initial = await cache.get(reader(first), new AbortController().signal);
+  const scans = counters.enumerate;
+  const reads = counters.readPaths.length;
   const repeated = await cache.get(reader(first), new AbortController().signal);
   assert.equal(repeated, initial);
-  assert.equal(counters.enumerate, 5);
-  assert.equal(counters.readPaths.length, 2);
+  assert.equal(counters.enumerate, scans);
+  assert.equal(counters.changes, 0);
+  assert.equal(counters.readPaths.length, reads);
   const updated = await cache.get(reader(second), new AbortController().signal);
-  assert.equal(counters.changes, 5);
-  assert.deepEqual([...updated.documents.keys()].sort(), ["manuscript/v1/c1/s1.md", "manuscript/v1/c1/s3.md"]);
+  assert.equal(counters.enumerate, scans);
+  assert.ok(counters.changes > 0);
+  assert.deepEqual([...updated.documents.keys()].sort(), [
+    "manuscript/v1/c1/kept.md",
+    "manuscript/v1/c1/s1.md",
+    "manuscript/v1/c1/s3.md",
+  ]);
   assert.equal(updated.documents.get("manuscript/v1/c1/s1.md")?.content, "new harbor");
   assert.equal(updated.documents.has("manuscript/v1/c1/s2.md"), false);
-  assert.deepEqual(counters.readPaths.slice(2), ["manuscript/v1/c1/s1.md", "manuscript/v1/c1/s3.md"]);
+  assert.deepEqual(counters.readPaths.slice(reads).toSorted(), ["manuscript/v1/c1/s1.md", "manuscript/v1/c1/s3.md"]);
 });
 
-test("overlay and repository identity isolate index cache entries", async () => {
+test("project identity and revision isolate index cache entries", async () => {
   const base = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "base" });
-  const overlay = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "checkpoint overlay" }, 12);
+  const nextRevision = snapshot("repo-a", 12, { "manuscript/v1/c1/s1.md": "next revision" });
   const other = snapshot("repo-b", 11, { "manuscript/v1/c1/s1.md": "other repository" });
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const baseIndex = await cache.get(reader(base), new AbortController().signal);
-  const overlayIndex = await cache.get(reader(overlay), new AbortController().signal);
+  const nextIndex = await cache.get(reader(nextRevision), new AbortController().signal);
   const otherIndex = await cache.get(reader(other), new AbortController().signal);
-  assert.notEqual(baseIndex, overlayIndex);
+  assert.notEqual(baseIndex, nextIndex);
   assert.notEqual(baseIndex, otherIndex);
-  assert.equal(overlayIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "checkpoint overlay");
+  assert.equal(baseIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "base");
+  assert.equal(nextIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "next revision");
   assert.equal(otherIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "other repository");
-  assert.equal(counters.enumerate, 10);
-  assert.equal(counters.changes, 5);
 });
 
 test("failed refresh never projects an older index as the requested snapshot", async () => {
@@ -151,8 +155,8 @@ test("aborted indexing does not cache a partial snapshot", async () => {
   });
   await assert.rejects(cache.get(reader(first), controller.signal), (error: unknown) => (error as { name?: string }).name === "AbortError");
   const retried = await cache.get(reader(first), new AbortController().signal);
-  assert.equal(retried.documents.size, 1);
-  assert.equal(counters.enumerate, 6);
+  assert.equal(retried.documents.get("manuscript/v1/c1/s1.md")?.content, "first");
+  assert.deepEqual(counters.readPaths, ["manuscript/v1/c1/s1.md"]);
 });
 
 test("disabled module disposal cannot let an unfinished read repopulate the cache", async () => {
@@ -252,8 +256,8 @@ test("cancelling one shared requester leaves another active request on the same 
   assert.equal((await active).documents.size, 1);
 });
 
-test("document sources must bind to the exact requested snapshot including checkpoint overlay", async () => {
-  const expected = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "expected" }, 12);
+test("document sources must bind to the exact requested project revision", async () => {
+  const expected = snapshot("repo-a", 12, { "manuscript/v1/c1/s1.md": "expected" });
   const wrong = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "wrong" });
   const cache = new SnapshotIndexCache((rawReader) => {
     const source = sourceFactory({ enumerate: 0, changes: 0, readPaths: [] })(rawReader);
