@@ -27,7 +27,7 @@ Normative architecture for PostgreSQL-backed reads and derived computation. [Cor
 
 HTTP and MCP reuse the same domain operations. Do not introduce a second snapshot authority or generic read service.
 
-Workspace module initialization uses the pinned snapshot identity and the active document path and revision hash from `GET /api/projects/{projectId}/snapshot?projection=editor`. This view resolves at most one canonical document path through Core's snapshot reader. The bulk endpoint retains its file count and UTF-8 response limits for clients requesting the full file projection. A frontend paired with an earlier compatible backend can still select the same path and hash from its bulk response.
+Workspace module initialization uses the pinned snapshot identity and the active document path and revision hash from `GET /api/projects/{projectId}/snapshot?projection=editor`. This view resolves at most one canonical document path through Core's snapshot reader. The bulk endpoint retains its file count and UTF-8 response limits for clients requesting the full file projection.
 
 ## Snapshot materialization and reuse
 
