@@ -1,0 +1,51 @@
+# Keep default secret rules and narrowly exclude reviewed, non-secret historical fixtures.
+# Never exempt provider-specific token rules or production source files.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Historical benchmark evidence carries commit/tree/SHA256 IDs, not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^docs/verification/HOSTED-ARTIFACTS-008d5c4\.json$''',
+  '''^docs/performance/results/core64-payload/verification-evidence\.json$''',
+  '''^docs/performance/results/core64-lifecycle/2026-10-21-C52-C55-after-fix\.json$''',
+]
+regexTarget = "line"
+regexes = [
+  '''^\s*"[^"]+"\s*:\s*"[a-f0-9]{40,64}",?\s*$''',
+  '''^\s*"hostSourceBinding"\s*:\s*"commit=[a-f0-9]{40}.*''',
+]
+
+[[allowlists]]
+description = "Mermaid arrows in archived CI workflow documentation"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/verification/CI-CD\.md$''']
+regexTarget = "line"
+regexes = ['''^\s*[A-Z]{1,4}\s*-->\s*[A-Z]{1,4}\[.*''']
+
+[[allowlists]]
+description = "WebCrypto feature-detection examples refer to public algorithms"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^\.agents/skills/modern-web-guidance/guides/security/client-side-encryption\.md$''']
+regexTarget = "line"
+regexes = ['''SubtleCrypto\.supports\(''']
+
+[[allowlists]]
+description = "Deleted Ansible lifecycle test carried a synthetic hex credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/ansible/test-lifecycle-contract\.sh$''']
+regexTarget = "line"
+regexes = ['''(?i)(preflight|rotation|password|token).*[a-f0-9]{64}''']
+
+[[allowlists]]
+description = "Deleted maintenance test contained a fixed repeating password fixture"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^scripts/standalone-maintenance\.test\.mjs$''']
+regexTarget = "line"
+regexes = ['''1234567890abcdef''']
