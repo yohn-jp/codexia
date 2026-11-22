@@ -240,10 +240,21 @@ SELECT value FROM codexia_auth.acceptance_probe WHERE id=1;
 SQL
 )" = durable-auth-fixture
 
+# A Passkey-only apply omits all three OIDC inputs and does not require the OIDC Podman secret.
+podman secret rm codexia-oidc-client-secret >/dev/null
+sed -i '/codexia_oidc_client_secret_file:/d; /codexia_oidc_issuer:/d; /codexia_oidc_client_id:/d' "$tmp/auth-inventory.yml"
+apply_stage > "$tmp/auth-passkey-only.log" 2>&1 || { cat "$tmp/auth-passkey-only.log"; exit 1; }
+if as_service grep -Eq '^CODEXIA_OIDC_(ISSUER|CLIENT_ID)=' "$runtime_env"; then
+  echo 'Passkey-only auth staging retained upstream OIDC settings' >&2
+  exit 1
+fi
+rc=0; podman secret exists codexia-oidc-client-secret || rc=$?
+test "$rc" = 1
+
 for secret_value in 'Auth%40fixture%3Asecret-3981' 'fixture-auth-signing-key-value-39017' 'fixture-oidc-client-secret-39017' 'fixture-introspection-client-secret-39017'; do
   if grep -Fq "$secret_value" "$tmp"/*.log; then
     echo 'Synthetic secret material appeared in Ansible output' >&2
     exit 1
   fi
 done
-printf '%s\n' 'Verified real rootless auth secret injection, partial initial retry, isolated role/schema permissions, current_schema, repeat convergence, secret drift denial, and no runtime activation.'
+printf '%s\n' 'Verified rootless auth secret injection, partial initial retry, isolated role/schema permissions, current_schema, repeat convergence, secret drift denial, OIDC-free settings staging, and no runtime activation.'
