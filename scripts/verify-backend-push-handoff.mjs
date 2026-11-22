@@ -44,8 +44,8 @@ export function backendReleaseValidationEnvironment(env, run) {
   return { ...env, GITHUB_RUN_ID: String(run.id), GITHUB_RUN_NUMBER: String(run.run_number) };
 }
 
-function certificateArtifactPattern(run, attempt = run.run_attempt) {
-  return new RegExp(`^codexia-backend-deployment-certificate-([a-f0-9]{40})-run-${run.id}-attempt-${attempt}$`, 'u');
+function certificateArtifactPattern(run) {
+  return new RegExp(`^codexia-backend-deployment-certificate-([a-f0-9]{40})-run-${run.id}-attempt-${run.run_attempt}$`, 'u');
 }
 
 export function selectPushDeploymentCertificateArtifact(artifacts, run, { sourceSha } = {}) {
@@ -161,7 +161,7 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
   const publishers = jobs.filter(job => job?.name === 'Publish immutable GHCR image');
   assert.equal(publishers.length, 1, 'Expected exactly one backend publication job');
   if (publisherSkippedRelease(publishers[0])) {
-    const pattern = certificateArtifactPattern(run, '[1-9][0-9]*');
+    const pattern = certificateArtifactPattern(run);
     assert.equal(artifacts.filter(artifact => typeof artifact?.name === 'string' && pattern.test(artifact.name)).length,
       0, 'A skipped publication cannot emit a deployment certificate');
     return { skipped: true, publisherRunId: run.id };
