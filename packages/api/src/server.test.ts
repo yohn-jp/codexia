@@ -2775,6 +2775,23 @@ describe("Codexia HTTP boundary", () => {
     assert.throws(() => createServer({ store, authToken: "too-short", persistence: admissionPersistence(store) }), /at least 32/u);
   });
 
+  it("rejects invalid browser CORS origins before opening a listener", () => {
+    const store = makeStore();
+    const persistence = admissionPersistence(store);
+    for (const origins of [
+      ["http://web.example.test"],
+      ["https://*.example.test"],
+      ["https://web.example.test/path"],
+      ["https://web.example.test", "https://web.example.test"],
+    ]) {
+      assert.throws(
+        () => createServer({ store, authToken: ACCESS_TOKEN, persistence, corsAllowedOrigins: origins }),
+        /exact normalized HTTPS origins/u,
+        origins.join(", "),
+      );
+    }
+  });
+
   it("fails API readiness and persistence status while PostgreSQL is unavailable", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-postgres-ready-"));
     tempDirs.push(staticDir);
