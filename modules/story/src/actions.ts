@@ -1363,7 +1363,9 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.graph.query", read, objectSchema, async (input, context) => {
       if (input.types !== undefined && (!Array.isArray(input.types) || !input.types.every((type) => typeof type === "string"))) throw new TypeError("types must be a string array");
-      const graph = getGraphData({ ...await readStorySnapshot(context.reader), types: input.types as StoryEntityType[] | undefined }).data;
+      const types = input.types as StoryEntityType[] | undefined;
+      const story = await readStorySnapshot(context.reader, { includeNativeDocuments: types === undefined || types.includes("manuscript") });
+      const graph = getGraphData({ ...story, types }).data;
       const maxNodes = typeof input.maxNodes === "number" && Number.isInteger(input.maxNodes) ? Math.max(1, Math.min(2000, input.maxNodes)) : 1000;
       const nodes = graph.nodes.slice(0, maxNodes);
       const nodeIds = new Set(nodes.map((node) => node.id));

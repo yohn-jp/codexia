@@ -395,12 +395,44 @@ test("snapshot materialization reads each pinned Story snapshot without proposin
   assert.deepEqual(secondProposals, []);
 });
 
-test("graph query accepts the browser string-array filter and rejects scalar filters", async () => {
-  const context = makeActionContext(makeReader(fixtureFiles()));
-  const graph = await invoke<{ nodes: Array<{ id: string; type: string }>; edges: unknown[] }>(
-    "story.graph.query", { types: ["character"] }, context,
-  );
-  assert.deepEqual(graph.data.nodes.map((node) => node.type), ["character"]);
+test("graph query keeps native documents for manuscript graphs and skips them for explicit non-manuscript types", async () => {
+  const noteId = "22222222-2222-4222-8222-222222222222";
+  const notePath = `documents/${noteId}.md`;
+  const reader = makeReader(fixtureFiles({
+    [notePath]: "---\ntitle: Author note\n---\nAn editable author document.\n",
+    "manuscript/source-entity.yaml": yaml({ id: "char-source", type: "character", name: "Source character" }),
+  }), "repo-graph", { [notePath]: "note" });
+  const documentsRead: string[] = [];
+  const context = makeActionContext({
+    ...reader,
+    async list(prefix) {
+      if (prefix === "documents") documentsRead.push(prefix);
+      return reader.list(prefix);
+    },
+    async read(path) {
+      if (path.startsWith("documents/")) documentsRead.push(path);
+      return reader.read(path);
+    },
+  });
+  type Graph = { nodes: Array<{ id: string; type: string; name: string }>; edges: Array<{ from: string; to: string; kind: string }> };
+  const graph = await invoke<Graph>("story.graph.query", { types: ["character"] }, context);
+  assert.deepEqual(graph.data.nodes, [
+    { id: "char-uma", type: "character", name: "Uma" },
+    { id: "char-source", type: "character", name: "Source character" },
+  ]);
+  assert.deepEqual(graph.snapshot, reader.snapshot);
+  const empty = await invoke<Graph>("story.graph.query", { types: [] }, context);
+  assert.deepEqual(empty.data, { nodes: [], edges: [] });
+  assert.deepEqual(documentsRead, [], "a graph with these explicit types does not need native document bodies");
+
+  const defaults = await invoke<Graph>("story.graph.query", {}, context);
+  assert.deepEqual(defaults.data.nodes.map(({ id }) => id), ["char-uma", "loc-cafe", "char-source"]);
+  const manuscripts = await invoke<Graph>("story.graph.query", { types: ["scene", "manuscript"] }, context);
+  assert.ok(manuscripts.data.nodes.some(({ id, name }) => id === `doc-ms-${noteId}` && name === "Author note"));
+  assert.ok(manuscripts.data.nodes.some(({ id }) => id === "ms-vol-main-ch-main-1-sc-1"));
+  assert.ok(manuscripts.data.edges.some(({ from, to, kind }) =>
+    from === "sc-1" && to === "ms-vol-main-ch-main-1-sc-1" && kind === "manuscript"));
+  assert.ok(documentsRead.includes(notePath));
   const invalid = await actionById("story.graph.query").invoke({ types: "character" }, context);
   assert.equal(invalid.ok, false);
   if (!invalid.ok) {

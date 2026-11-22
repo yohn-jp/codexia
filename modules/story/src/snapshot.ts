@@ -172,12 +172,21 @@ function parseStoryEntity(file: StoryFile): StoryEntity | null {
   return raw ? entityFromMetadata(file.path, raw, raw.id, inferType(file.path, raw)) : null;
 }
 
+interface StorySnapshotOptions {
+  includeManuscripts?: boolean;
+  includeNativeDocuments?: boolean;
+}
+
 async function readFiles(
   reader: SnapshotReader,
-  includeManuscripts: boolean,
+  options: StorySnapshotOptions,
   nativeByPath: ReadonlyMap<string, NativeStoryDocument>,
 ): Promise<Map<string, StoryFile>> {
-  const prefixes = includeManuscripts ? ["bible", "plot", "meta", "manuscript", "documents"] : ["bible", "plot", "meta"];
+  const prefixes = ["bible", "plot", "meta"];
+  if (options.includeManuscripts !== false) {
+    prefixes.push("manuscript");
+    if (options.includeNativeDocuments !== false) prefixes.push("documents");
+  }
   const listed = await Promise.all(prefixes.map((prefix) => reader.list(prefix)));
   const pathSet = new Set(listed.flat().filter((filePath) =>
     (filePath.startsWith("documents/") ? NATIVE_DOCUMENT_PATH.test(filePath) :
@@ -223,10 +232,10 @@ function parseNativeStoryEntity(document: NativeStoryDocument): StoryEntity | nu
 /** Read one pinned Core snapshot, using its typed hierarchy and projected author data. */
 export async function readStorySnapshot(
   reader: SnapshotReader,
-  options: { includeManuscripts?: boolean } = {},
+  options: StorySnapshotOptions = {},
 ): Promise<LoadedStorySnapshot> {
   const nativeByPath = new Map((reader.nativeStoryDocuments ?? []).map((document) => [document.metadataPath, document]));
-  const files = await readFiles(reader, options.includeManuscripts !== false, nativeByPath);
+  const files = await readFiles(reader, options, nativeByPath);
   const entities = new Map<string, StoryEntity>();
   const filePathsById = new Map<string, string[]>();
   const links: StoryLink[] = [];
