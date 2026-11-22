@@ -590,7 +590,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
               {current.status === "applied" && detail?.receipt && <section className="native-review-receipt" aria-label="適用receipt">
                 <div className="native-review-section-heading"><h4>適用receipt</h4><span>{detail.receipt.replayed ? "再確認" : "適用結果"}</span></div>
                 <p>正本への適用結果をサーバーのreceiptで確認しました。</p>
-                <pre role="region" aria-label="適用receiptのJSON" tabIndex={0}>{JSON.stringify(detail.receipt, null, 2)}</pre>
+                <pre role="region" aria-label="receiptの詳細JSON" tabIndex={0}>{JSON.stringify(detail.receipt, null, 2)}</pre>
               </section>}
               {current.status === "applied" && !detail?.receipt && <p className="native-review-unknown" role="status">適用済みの状態を確認しましたが、receiptを取得できませんでした。最新状態を再確認してください。</p>}
               <div className="proposal-actions native-review-actions">
