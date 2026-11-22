@@ -384,9 +384,11 @@ export class CoreStore implements MutationCoordinator {
       if (record) publishingRecords[key] = { value: record.value, version: record.version };
     }
     const files: Record<string,StoredFile> = {};
-    const add = (key: string, content: string, encoding: "utf8"|"base64" = "utf8", documentId?: string, metadata?: boolean) => {
+    const add = (key: string, content: string, {
+      encoding = "utf8", documentId, metadata, revision = hash(Buffer.from(content, encoding)),
+    }: Partial<Omit<StoredFile, "content">> = {}) => {
       safePath(key); if (files[key]) fail(409,"duplicate_document_path","Project contains duplicate document paths");
-      const file = {content,encoding,revision:hash(Buffer.from(content,encoding)),...(documentId ? {documentId}:{}),...(metadata ? {metadata:true}:{})};
+      const file = { content, encoding, revision, ...(documentId ? { documentId } : {}), ...(metadata ? { metadata: true } : {}) };
       files[key] = file;
       return file;
     };
@@ -415,18 +417,20 @@ export class CoreStore implements MutationCoordinator {
         }
       }
       const projectedMetadata = {...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})};
-      add(metadataPath,YAML.stringify(projectedMetadata),"utf8",document.id,true);
+      add(metadataPath, YAML.stringify(projectedMetadata), { documentId: document.id, metadata: true });
       if (document.headRevisionId) {
         const revision = revisionsByHead.get(JSON.stringify([document.id, document.headRevisionId]));
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
-        if (document.kind !== "volume" && document.kind !== "chapter") add(manuscriptPath,revision.markdown,"utf8",document.id);
+        if (document.kind !== "volume" && document.kind !== "chapter") {
+          add(manuscriptPath, revision.markdown, { documentId: document.id, revision: revision.sha256 });
+        }
       }
     }
     for (const record of artifacts) {
       if (record.value.deleted === true || record.key === RETIRED_PROJECT_SETTINGS_PATH ||
           record.key === RETIRED_KNOWLEDGE_CONTEXT_PATH || isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
-      add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
+      add(record.key, record.value.content, { encoding: record.value.encoding === "base64" ? "base64" : "utf8" });
     }
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
     const snapshot = { projectId, projectVersion: project.version };

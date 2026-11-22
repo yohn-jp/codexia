@@ -293,7 +293,29 @@ test("mapped hierarchy preserves logical IDs and ignores conflicting stored pare
   assert.equal(YAML.parse((await first.read(path))!.content).chapter, "c1");
 });
 
-test("immutable pinned readers survive edits and Core process replacement",async()=>{const p=await hierarchy(),reader=await core.reader(p.id);const path="manuscript/v1/c1/s1.md",original=await reader.read(path);await accept(p.id,operation(reader.snapshot,path,"Changed",original!.revision));assert.equal((await reader.read(path))?.content,"Text 😀\n");const restarted=new CoreStore({persistence});assert.equal((await (await restarted.reader(p.id,reader.snapshot)).read(path))?.content,"Text 😀\n");assert.equal((await core.readScene(p.id,"s1")).text,"Changed");});
+test("immutable pinned readers preserve exact manuscript bytes and hashes across edits and Core restart", async () => {
+  const p = await hierarchy();
+  const reader = await core.reader(p.id);
+  const path = "manuscript/v1/c1/s1.md";
+  const bytes = Buffer.from("Text 😀\n", "utf8");
+  const expectedHash = createHash("sha256").update(bytes).digest("hex");
+  const original = await reader.read(path);
+  assert.ok(original);
+  assert.equal(original.content, "Text 😀\n");
+  assert.equal(original.revision, expectedHash);
+  const originalHead = await persistence.read(async tx => {
+    const scene = (await tx.listDocuments(p.id)).find(document => document.kind === "scene")!;
+    return tx.getRevision(p.id, scene.id, scene.headRevisionId!);
+  });
+  assert.equal(originalHead?.sha256, expectedHash);
+  const receipt = await accept(p.id, operation(reader.snapshot, path, "Changed", original.revision));
+  assert.deepEqual(receipt.revisions, [{ path, revision: createHash("sha256").update("Changed").digest("hex") }]);
+  const restarted = new CoreStore({ persistence });
+  const pinned = await restarted.reader(p.id, reader.snapshot);
+  assert.deepEqual(await pinned.read(path, "base64"), { ...original, content: bytes.toString("base64") });
+  assert.deepEqual(await pinned.listRevisions?.(path), [{ path, revision: expectedHash }]);
+  assert.equal((await core.readScene(p.id, "s1")).text, "Changed");
+});
 test("pinned Knowledge projection retains original identity and anchored quote after Knowledge and body edits",async()=>{
   const p=await hierarchy(),documents=await persistence.read(r=>r.listDocuments(p.id)),scene=documents.find(document=>document.kind==="scene")!,revision=scene.headRevisionId!;
   const nodeId=randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId,evidenceId=randomUUID() as import("@codexia/persistence-contracts").EvidenceId;
