@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { CoreStore } from "@codexia/core";
 import {
   PersistenceError,
   type AssertionId,
@@ -223,6 +224,12 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       return version;
     };
     const suffix = projectPath[2] ?? "";
+    if (suffix === "review-feed" && input.method === "GET") {
+      await input.requireAuthor();
+      const limit = requestLimit(url.searchParams.get("limit"), 50, 200);
+      const items = await new CoreStore({ persistence }).listAuthorReviews(projectId, limit);
+      return { status: 200, body: { items } };
+    }
     const changeSetPath = suffix.match(/^changesets(?:\/([^/]+)(?:\/(approve|reject|apply))?)?$/u);
     if (changeSetPath) {
       const changeSetId = changeSetPath[1] ? decoded(changeSetPath[1], "ChangeSet id") as import("@codexia/persistence-contracts").ChangeSetId : undefined;

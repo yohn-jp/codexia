@@ -21,6 +21,22 @@ async function proposeNode(page: Page, projectId: string, label: string, id = cr
   return { id, changeSetId: result.changeSet.id };
 }
 
+async function proposeCoreMetadata(page: Page, projectId: string, message: string) {
+  const snapshotResponse = await page.request.get(`/api/projects/${projectId}/snapshot`);
+  expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
+  const { snapshot } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
+  const id = crypto.randomUUID();
+  const operation = {
+    id: crypto.randomUUID(), generation: 0, projectId, baseProjectVersion: snapshot.projectVersion,
+    effect: "metadata", reads: [], writes: [{ path: `meta/review-feed/${id}.yaml`, revision: null, content: "status: proposed\n" }], message,
+  };
+  const response = await page.request.post(`/api/projects/${projectId}/proposals`, {
+    headers: { Origin: new URL(page.url()).origin }, data: { id, snapshot, operations: [operation] },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  return id;
+}
+
 async function proposeMerge(page: Page, projectId: string) {
   const sourceId = crypto.randomUUID();
   const targetId = crypto.randomUUID();
@@ -155,6 +171,24 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   expect(latest.changeSet.status).toBe("approved");
   expect(latest.receipt).toBeUndefined();
   await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeEnabled();
+});
+
+test("author review page reads Core proposals and native ChangeSets from the unified feed", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project } = await createWritingFixture(page, "desktop", "Unified author review feed");
+  const coreProposalId = await proposeCoreMetadata(page, project.id, "Core feed proposal");
+  const native = await proposeNode(page, project.id, "Native feed proposal");
+  await openReview(page, "desktop");
+  const feed = page.getByRole("region", { name: "Core提案の承認と適用状況" });
+  await expect(feed).toContainText("Core feed proposal");
+  await expect(feed).toContainText("承認待ち");
+  await feed.getByText("保存済みの承認状態とreceipt").click();
+  await expect(feed).toContainText(coreProposalId);
+  const nativeCard = page.locator(".native-changeset-card");
+  await expect(nativeCard).toContainText(native.changeSetId);
+  await expect(nativeCard).toContainText("提案");
+  await expect(page.getByRole("button", { name: "承認する" })).toBeEnabled();
 });
 
 for (const mode of ["desktop", "mobile"] as const) {
