@@ -499,6 +499,23 @@ test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binar
   assert.deepEqual(await zip.file("OEBPS/images/cover.jpg")!.async("nodebuffer"), cover);
 });
 
+test("EPUB export uses the specified cover path exactly", async () => {
+  const coverPath = "meta/scriptorium/modules/publishing/assets/cover.jpg";
+  const cover = Buffer.from([0xff, 0xd8, 0x81, 0xff, 0xd9]);
+  const files = fixtureFiles();
+  files.set(coverPath, cover);
+  const context = actionContext(new MemoryReader(files), []);
+  const publishing = await createPublishing();
+  const exportWithCover = async (coverPath: string) => {
+    const result = await invokeAction(publishing, "publishing.export.epub", { scope: "all", coverPath }, context);
+    const zip = await JSZip.loadAsync(Buffer.from(String(result.contentBase64), "base64"));
+    return zip.file("OEBPS/images/cover.jpg");
+  };
+
+  assert.deepEqual(await (await exportWithCover(coverPath))?.async("nodebuffer"), cover);
+  assert.equal(await exportWithCover(".arcadia/cover.jpg"), null);
+});
+
 test("EPUB bible reader keeps source flat character entities and typed lore/location YAML", async () => {
   const reader = new MemoryReader(new Map([
     ["bible/characters/char-flat.yaml", "id: char-flat\ntype: character\nname: 古い人物\n"],

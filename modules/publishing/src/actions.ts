@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
 import { readEpubBibleEntries } from "./bible.js";
-import { buildEpubExport, DEFAULT_EPUB_COVER_PATH, type EpubExportOptions } from "./epub.js";
+import { buildEpubExport, type EpubExportOptions } from "./epub.js";
 import { readEpisodeMap, mergeEpisodeMap, EPISODES_PATH } from "./episodes.js";
 import {
   createShareGrant,
@@ -153,11 +153,8 @@ export function createPublishingActions(): ModuleAction[] {
 
   actions.push(defineAction(valueSchema(parseEpubInput), "publishing.export.epub", "compute", async (input, context) => {
     const project = await readPublishingProjectFromCore(context);
-    const options = { ...input, ...(input.coverPath ? {} : {}) };
-    // The legacy import moves .arcadia/cover.jpg to the module-owned path.
-    if (input.coverPath === ".arcadia/cover.jpg") options.coverPath = DEFAULT_EPUB_COVER_PATH;
     const bibleEntries = input.includeBibleAppendix ? await readEpubBibleEntries(context.reader) : [];
-    const exported = await buildEpubExport(project, options, context.reader, bibleEntries);
+    const exported = await buildEpubExport(project, input, context.reader, bibleEntries);
     return { filename: exported.filename, mediaType: "application/epub+zip", contentBase64: exported.buffer.toString("base64") };
   }));
 
