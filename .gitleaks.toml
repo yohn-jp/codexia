@@ -24,7 +24,10 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^docs/verification/CI-CD\.md$''']
 regexTarget = "line"
-regexes = ['''^\s*[A-Z]{1,4}\s*-->\s*[A-Z]{1,4}\[.*''']
+regexes = [
+  '''^\s*[A-Z]{1,4}\s*-->\s*[A-Z]{1,4}\[.*''',
+  '''^\s*- Frontend: build and verify the exact Full assets, validate actual running backend profile and API epoch via the protected origin,''',
+]
 
 [[allowlists]]
 description = "WebCrypto feature-detection examples refer to public algorithms"
