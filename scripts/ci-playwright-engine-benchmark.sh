@@ -41,7 +41,8 @@ PNSH
   test "${service_url%/codexia_test}" != "$service_url"
   start=$(date +%s%N)
   for suite in auth-recovery oauth-web ui-v1 webkit; do
-    CODEXIA_E2E_DATABASE_URL="$service_url" db_name=$(node scripts/ci-playwright-benchmark-db.mjs)
+    export CODEXIA_E2E_DATABASE_URL="$service_url"
+    db_name=$(node scripts/ci-playwright-benchmark-db.mjs)
     export CODEXIA_E2E_DATABASE_URL="${service_url%/codexia_test}/$db_name"
     echo "::group::REAL_BROWSER_SUITE profile=$CODEXIA_PROFILE suite=$suite"
     suite_start=$(date +%s%N)
