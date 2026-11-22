@@ -38,6 +38,37 @@ test("external MCP never registers the frozen Assistant rewrite tool", () => {
   assert.deepEqual(calls, []);
 });
 
+test("MCP read results honor the UTF-8 JSON limit for generic and named tools", async () => {
+  const data = { results: [{ excerpt: "街".repeat(3 * 1024 * 1024) }] };
+  const { tools, calls } = setup([descriptor("search.query", "search", "read")], () => ({ ok: true, snapshot, data }));
+  const extra = { signal: new AbortController().signal };
+  const generic = await tools.get("invoke_action")!.handler({ action_id: "search.query", input: { query: "街" } }, extra);
+  const named = await tools.get("search_lexical")!.handler({ query: "街" }, extra);
+  const error = { code: "RESULT_TOO_LARGE", message: "MCP tool result exceeds the 8 MiB JSON limit" };
+  const expected = { isError: true, structuredContent: { error }, content: [{ type: "text", text: JSON.stringify(error) }] };
+  assert.deepEqual(generic, expected);
+  assert.deepEqual(named, expected);
+  assert.equal(calls.length, 2);
+});
+
+test("oversized MCP proposal results retain durable proposal identities", async () => {
+  const actionId = "story.scenario.save";
+  const proposalId = "retained-proposal";
+  const { tools, calls } = setup([descriptor(actionId, "story", "propose")], () => ({
+    ok: true, snapshot,
+    data: { preview: "街".repeat(3 * 1024 * 1024) },
+    proposals: [{ id: proposalId, snapshot, operations: [], source: "mcp" }],
+  }));
+  const result = await tools.get("invoke_action")!.handler({ action_id: actionId, input: {} }, { signal: new AbortController().signal });
+  const error = {
+    code: "RESULT_TOO_LARGE",
+    message: "MCP tool result exceeds the 8 MiB JSON limit. The listed proposals remain available for review",
+    details: { proposalIds: [proposalId] },
+  };
+  assert.deepEqual(result, { isError: true, structuredContent: { error }, content: [{ type: "text", text: JSON.stringify(error) }] });
+  assert.equal(calls.length, 1);
+});
+
 test("search_lexical works without Semantic and delegates bounded non-semantic search", async () => {
   const { tools, calls } = setup([descriptor("search.query", "search")], () => ({
     ok: true, snapshot, data: { results: [], semanticResults: [], warnings: [] },
