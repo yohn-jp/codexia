@@ -945,7 +945,7 @@ test("duplicate approved proposals share one manuscript application and settle o
   assert.equal((await core.readScene(p.id, "s1")).text, "One new manuscript revision");
 });
 
-test("pinned manuscript history never includes or restores a future revision", async () => {
+test("pinned manuscript history excludes future revisions and rejects their body reads", async () => {
   const p = await hierarchy();
   const old = await core.reader(p.id);
   const path = "manuscript/v1/c1/s1.md";
@@ -964,7 +964,6 @@ test("pinned manuscript history never includes or restores a future revision", a
   assert.deepEqual((await core.listManuscriptSnapshots(p.id, "s1", undefined, old.snapshot)).snapshots, initial);
   assert.equal((await core.readManuscriptSnapshot(p.id, initial[0]!.id, "s1", undefined, old.snapshot)).manuscriptSnapshot.body, "Text 😀\n");
   await assert.rejects(core.readManuscriptSnapshot(p.id, future.id, "s1", undefined, old.snapshot), {code:"revision_not_found"});
-  await assert.rejects(core.buildRestoreOperation(p.id, {sceneId:"s1",snapshotId:future.id}, undefined, old.snapshot), {code:"revision_not_found"});
   assert.ok(!(await core.history(p.id, old.snapshot)).some(item => item.hash === future.id));
 });
 

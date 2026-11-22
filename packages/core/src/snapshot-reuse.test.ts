@@ -134,12 +134,8 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
   }
 });
 
-test("hierarchy and restore builders read each resolved manifest only once", async () => {
+test("hierarchy create and delete each read the resolved manifest only once", async () => {
   const project = await createProject();
-  const { document } = await persistence.transaction(tx => tx.createDocument({
-    projectId: project.id, kind: "scene", parentId: null, title: "Scene", orderKey: "1",
-    markdown: "本文", authorId: "author", idempotencyKey: randomUUID(),
-  }));
   const volume = await persistence.transaction(tx => tx.createDocument({
     projectId: project.id, kind: "volume", parentId: null, title: "Volume", orderKey: "1",
     markdown: "", authorId: "author", idempotencyKey: randomUUID(),
@@ -157,7 +153,6 @@ test("hierarchy and restore builders read each resolved manifest only once", asy
     for (const build of [
       () => store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot),
       () => store.buildDeleteHierarchyOperation(project.id, { kind: "volume", id: volume.document.id }, snapshot),
-      () => store.buildRestoreOperation(project.id, document.id, document.headRevisionId!, snapshot),
     ]) {
       const before = tracked.counts.manifestReads!;
       const built = await build();

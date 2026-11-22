@@ -1263,10 +1263,6 @@ export class CoreStore implements MutationCoordinator {
       return proposal;
     });
   }
-  async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);
-    const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(manifest.snapshot,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision");
-  }
   async listManuscriptSnapshots(projectId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;snapshots:ManuscriptSnapshotMeta[]}>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=document.headRevisionId ? await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId!)) : {revisions:[]};return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(manuscriptBody(revision.markdown)).length,source:"postgres"}))};
   }
