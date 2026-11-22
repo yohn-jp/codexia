@@ -1,7 +1,7 @@
 {
   "buildPath": "code",
   "hook": {
-    "enabled": false,
+    "enabled": true,
     "limits": {
       "maxFindings": 5,
       "maxChars": 8000
