@@ -67,7 +67,7 @@ After initial schema creation, image-only `deploy` supports only an unchanged mi
 
 ## Coordinated API epoch cutover
 
-The standalone OAuth cutover requires API epoch 2 for both the Full backend and the static frontend. Persistence format 1 applies to this cutover. The frontend gate rejects an epoch 2 frontend against an epoch 1 backend. Backend admission likewise rejects an epoch 2 backend against an epoch 1 frontend or installed API. Keep these gates in place until a separately reviewed and approved maintenance procedure can switch both components together.
+The standalone OAuth cutover requires API epoch 2 for both the Full backend and the static frontend. Persistence format 1 applies to this cutover. The frontend gate rejects an epoch 2 frontend against an epoch 1 backend. Backend admission likewise rejects an epoch 2 backend against an epoch 1 frontend or installed API. These gates remain in force. Switching both components together requires a separately reviewed and approved maintenance procedure.
 
 Before cutover, record the prior certified backend digest, frontend artifact and approved authentication configuration. Quiesce the application and make a verified encrypted PostgreSQL and private history backup on independent storage. Rehearse restoration before relying on the backup. With public ingress closed, validate the new pair, including matching Full profile and epoch identities, database readiness, owner sign-in and denial of unauthorized access. Reopen ingress after both artifacts have switched and those checks have passed.
 
