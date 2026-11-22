@@ -128,6 +128,30 @@ async function verifyVerifyRun(runId, certificate, token, fetchImpl) {
   assertVerificationJobs(jobs);
 }
 
+function publisherSkippedRelease(publisher) {
+  assert.equal(publisher.status, 'completed', 'Backend publication job is incomplete');
+  if (publisher.conclusion === 'skipped') return true;
+  assert.equal(publisher.conclusion, 'success', 'Backend publication job failed');
+  const steps = publisher.steps ?? [];
+  assert.ok(Array.isArray(steps), 'Backend publication step inventory is invalid');
+  const freshness = steps.filter(step => step?.name === 'Require complete exact-source main verification');
+  assert.ok(freshness.length === 1 && freshness[0].status === 'completed' && freshness[0].conclusion === 'success',
+    'Missing or unsuccessful backend publication freshness gate');
+
+  const publication = [
+    steps.filter(step => step?.name === 'Publish commit-addressed image'),
+    steps.filter(step => step?.name === 'Record independent backend release'),
+    steps.filter(step => step?.name === 'Create certified Core and Full push handoff'),
+    steps.filter(step => typeof step?.name === 'string' && /^Run actions\/upload-artifact@\S+$/u.test(step.name)),
+  ];
+  assert.ok(publication.every(matches => matches.length === 1 && matches[0].status === 'completed'),
+    'Incomplete deployment publication step inventory');
+  if (publication.every(([step]) => step.conclusion === 'skipped')) return true;
+  assert.ok(publication.every(([step]) => step.conclusion === 'success'),
+    'Incomplete deployment publication: publishing, release recording and certificate upload must agree');
+  return false;
+}
+
 async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = fetch }) {
   const runId = run.id;
   const [jobs, artifacts] = await Promise.all([
@@ -136,14 +160,12 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
   ]);
   const publishers = jobs.filter(job => job?.name === 'Publish immutable GHCR image');
   assert.equal(publishers.length, 1, 'Expected exactly one backend publication job');
-  if (publishers[0].status === 'completed' && publishers[0].conclusion === 'skipped') {
+  if (publisherSkippedRelease(publishers[0])) {
     const pattern = certificateArtifactPattern(run, '[1-9][0-9]*');
     assert.equal(artifacts.filter(artifact => typeof artifact?.name === 'string' && pattern.test(artifact.name)).length,
       0, 'A skipped publication cannot emit a deployment certificate');
     return { skipped: true, publisherRunId: run.id };
   }
-  assert.equal(publishers[0].status, 'completed', 'Backend publication job is incomplete');
-  assert.equal(publishers[0].conclusion, 'success', 'Backend publication job failed');
   const artifact = selectPushDeploymentCertificateArtifact(artifacts, run);
   const sourceSha = certificateArtifactPattern(run).exec(artifact.name)[1];
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });

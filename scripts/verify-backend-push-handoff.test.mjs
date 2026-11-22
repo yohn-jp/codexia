@@ -36,6 +36,15 @@ const cert = profile => ({ format: 'codexia-backend-deployment-certificate/v1', 
 const artifact = (run = buildRun()) => ({ id: 303, name: `codexia-backend-deployment-certificate-${mainSha}-run-${run.id}-attempt-${run.run_attempt}`,
   digest: digest('1'), size_in_bytes: 500, expired: false,
   workflow_run: { id: run.id, head_sha: run.head_sha } });
+const publicationSteps = conclusion => [
+  { name: 'Require complete exact-source main verification', status: 'completed', conclusion: 'success' },
+  ...[
+    'Publish commit-addressed image',
+    'Record independent backend release',
+    'Create certified Core and Full push handoff',
+    'Run actions/upload-artifact@v7.0.2',
+  ].map(name => ({ name, status: 'completed', conclusion })),
+];
 
 test('accepts only the completed successful main backend publisher run with exact repository and source', () => {
   assert.equal(assertTrustedBackendPublicationRun(buildRun(), { id: 100, attempt: 2, runNumber: 773, headSha: mainSha }).id, 100);
@@ -156,7 +165,8 @@ test('handoff validates the certified ancestor and its own Verify run in a histo
   }
   execFileSync('zip', ['-q', 'certificates.zip', 'core.json', 'full.json'], { cwd: assets });
   const bytes = await readFile(path.join(assets, 'certificates.zip'));
-  const publisher = { name: 'Publish immutable GHCR image', status: 'completed', conclusion: 'success' };
+  const publisher = { name: 'Publish immutable GHCR image', status: 'completed', conclusion: 'success',
+    steps: publicationSteps('success') };
   const jobs = [
     { name: 'Resolve verified backend promotion', status: 'completed', conclusion: 'success' },
     { name: 'Build and test backend OCI image (core)', status: 'completed', conclusion: 'success' },
@@ -210,4 +220,43 @@ test('handoff validates the certified ancestor and its own Verify run in a histo
   assert.equal(releaseRead.mock.callCount(), 1);
   const changed = await commit('packages/api/src/server.ts', 'newer backend change');
   await assert.rejects(run(changed, certifiedSha), /newer backend change superseded/u);
+});
+
+test('a successful freshness gate that skipped every publication step emits no deployment handoff', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-no-backend-release-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const output = path.join(root, 'output');
+  await writeFile(output, '');
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const run = { ...buildRun(), head_sha: head };
+  const env = { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_EVENT_NAME: 'workflow_run',
+    GITHUB_REF: 'refs/heads/main', CODEXIA_PUBLISHER_RUN_ID: '100', GH_TOKEN: 'fixture-read',
+    RUNNER_TEMP: root, GITHUB_OUTPUT: output };
+  const invoke = async (steps, artifacts = [], conclusion = 'success') => verifyBackendPushHandoff({
+    env,
+    payload: { workflow_run: run },
+    fetchImpl: async input => {
+      switch (new URL(input).pathname) {
+        case '/repos/yohn-jp/codexia/actions/runs/100':
+          return Response.json(run);
+        case '/repos/yohn-jp/codexia/actions/runs/100/jobs':
+          return Response.json({ total_count: 1, jobs: [{
+            name: 'Publish immutable GHCR image', status: 'completed', conclusion, steps,
+          }] });
+        case '/repos/yohn-jp/codexia/actions/runs/100/artifacts':
+          return Response.json({ total_count: artifacts.length, artifacts });
+        default:
+          assert.fail('A skipped publication must not read artifacts or release records');
+      }
+    },
+  });
+  const skipped = publicationSteps('skipped');
+  assert.deepEqual(await invoke(skipped), { skipped: true, publisherRunId: 100 });
+  assert.equal(await readFile(output, 'utf8'), '');
+  await assert.rejects(invoke(skipped, [artifact(run)]), /cannot emit a deployment certificate/u);
+  await assert.rejects(invoke(skipped.map(step => step.name === 'Publish commit-addressed image'
+    ? { ...step, conclusion: 'success' } : step)), /Incomplete deployment publication/u);
+  await assert.rejects(invoke(skipped.slice(1)), /freshness gate/u);
+  await assert.rejects(invoke(skipped, [], 'failure'), /publication job failed/u);
+  assert.equal(await readFile(output, 'utf8'), '');
 });
