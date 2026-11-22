@@ -215,7 +215,7 @@ export function validateVerificationPlan(plan) {
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 function assertTaskInputReuse(plan, reuse) {
   if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
-  if (!['codexia-ci-task-input-reuse/v1', 'codexia-ci-task-input-reuse/v2'].includes(reuse.format)) throw new Error('Unknown task input reuse format');
+  if (reuse.format !== 'codexia-ci-task-input-reuse/v2') throw new Error('Unknown task input reuse format');
   if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
   const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
@@ -247,11 +247,6 @@ function assertTaskInputReuse(plan, reuse) {
       if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
     }
   };
-  if (reuse.format === 'codexia-ci-task-input-reuse/v1') {
-    if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
-    assertReceipt(reuse.coverage, 'coverage');
-    return;
-  }
   if (Object.keys(reuse).some(key => !['format', 'coverage', 'omitted'].includes(key))) throw new Error('Unsupported task input proof task');
   if (reuse.coverage !== undefined) assertReceipt(reuse.coverage, 'coverage');
   const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');

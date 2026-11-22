@@ -72,7 +72,7 @@ async function main() {
       console.log(`Exact-base task proof set accepted for all ${omitted.length} omitted validations.`);
     } else {
       const coverage = await resolveExactMainCoverageProof({ plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN });
-      plan = validateVerificationPlan({ ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage } });
+      plan = validateVerificationPlan({ ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v2', coverage, omitted: {} } });
       console.log(`Exact-base static coverage proof selected from main run ${coverage.workflowRunId}, artifact ${coverage.artifactId}.`);
     }
   } catch (error) {
@@ -88,7 +88,7 @@ async function main() {
   if (planDigest(plan) !== planDigest(selectedPlan) && !plan.forceFull) throw new Error('Task proof metadata changed the canonical plan digest');
   await publishPlan(plan, planPath);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY,
-    plan.taskInputReuse?.omitted
+    plan.mode === 'affected' && plan.taskInputReuse?.omitted
       ? `Reused ${Object.keys(plan.taskInputReuse.omitted).length} omitted task proofs from first-parent main after all seven input dimensions matched.\n`
       : plan.taskInputReuse?.coverage
         ? `Static coverage input proof candidate: main run ${plan.taskInputReuse.coverage.workflowRunId}, attempt ${plan.taskInputReuse.coverage.workflowAttempt}, artifact ${plan.taskInputReuse.coverage.artifactId} (${plan.taskInputReuse.coverage.artifactDigest}).\n`
