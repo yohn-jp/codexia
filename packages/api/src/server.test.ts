@@ -3261,10 +3261,29 @@ describe("Codexia HTTP boundary", () => {
       projectId: project.id, kind: "scene", title: "Opening", orderKey: "0001",
       markdown: "First revision", authorId: "owner", idempotencyKey: randomUUID(),
     }));
+    const missingDocumentId = randomUUID();
+    const missingPath = `documents/${missingDocumentId}.md`;
+    const nestedAssetPath = missingPath + "/preview.txt";
+    await persistence.transaction(tx => tx.saveModuleRecord({
+      projectId: project.id, moduleId: "core.artifacts", key: nestedAssetPath,
+      value: { content: "An asset under the same prefix is not the requested document." }, expectedVersion: null,
+    }));
     const openSnapshot = store.reader.bind(store);
     store.reader = async (...args) => {
       const reader = await openSnapshot(...args);
-      return { ...reader, list: async () => assert.fail("Editor snapshots must avoid project-wide file enumeration") };
+      const listRevisions = reader.listRevisions?.bind(reader);
+      assert.ok(listRevisions, "the PostgreSQL reader exposes revision-only lookup");
+      return {
+        ...reader,
+        read: async () => assert.fail("Editor snapshots must avoid fetching document contents"),
+        list: async () => assert.fail("Editor snapshots must avoid project-wide file enumeration"),
+        listRevisions: async (prefix) => {
+          assert.ok([`documents/${created.document.id}.md`, missingPath].includes(prefix));
+          const revisions = await listRevisions(prefix);
+          if (prefix === missingPath) assert.deepEqual(revisions.map(({ path }) => path), [nestedAssetPath]);
+          return revisions;
+        },
+      };
     };
     const apiServer = await startCustomApi(store, staticDir, { persistence });
     t.after(apiServer.close);
@@ -3289,7 +3308,7 @@ describe("Codexia HTTP boundary", () => {
     const noDocument = await fetch(`${endpoint}?projection=editor`, auth);
     assert.equal(noDocument.status, 200);
     assert.deepEqual(await noDocument.json(), { snapshot, document: null });
-    const missing = await fetch(`${endpoint}?projection=editor&documentId=${randomUUID()}`, auth);
+    const missing = await fetch(`${endpoint}?projection=editor&documentId=${missingDocumentId}`, auth);
     assert.equal(missing.status, 200);
     assert.deepEqual(await missing.json(), { snapshot, document: null });
 

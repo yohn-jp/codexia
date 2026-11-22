@@ -2185,9 +2185,16 @@ export function createServer(options: ApiServerOptions): Server {
           throw httpFailure(400, "INVALID_ID", "Use a canonical PostgreSQL document identifier");
         }
         const reader = await freshReader(projectId, selected.pinned);
-        const path = documentId === null ? null : `documents/${documentId}.md`;
-        const file = path === null ? null : await reader.read(path);
-        sendJson(response, 200, { snapshot: reader.snapshot, document: path && file ? { path, revision: file.revision } : null });
+        if (documentId === null) {
+          sendJson(response, 200, { snapshot: reader.snapshot, document: null });
+          return;
+        }
+        if (!reader.listRevisions) {
+          throw httpFailure(503, "SNAPSHOT_REVISIONS_UNAVAILABLE", "Editor document revisions are unavailable");
+        }
+        const path = `documents/${documentId}.md`;
+        const entry = (await reader.listRevisions(path)).find((candidate) => candidate.path === path);
+        sendJson(response, 200, { snapshot: reader.snapshot, document: entry ? { path, revision: entry.revision } : null });
         return;
       }
       if (suffix === "history" && method === "GET") { sendJson(response, 200, await options.store.history(projectId, optionalSnapshot(query, projectId).pinned)); return; }
