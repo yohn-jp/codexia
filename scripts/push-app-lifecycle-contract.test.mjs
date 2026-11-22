@@ -198,7 +198,7 @@ test('Better Auth checkpoints identify their exact installed image, including th
   ]);
 });
 
-test('image selection binds the PR Full artifact and fails closed without a compatible verified release', () => {
+test('image selection binds the exact-source Full artifact and verified publication proof', () => {
   const source = readFileSync(new URL('./push-app-lifecycle.mjs', import.meta.url), 'utf8');
   const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   assert.match(source, /selectBackendArtifacts/u);

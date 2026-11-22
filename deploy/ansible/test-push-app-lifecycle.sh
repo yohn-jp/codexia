@@ -602,7 +602,22 @@ const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,ssh
 IMAGE_INVENTORY
 
 run_application_lifecycle() {
-  local failed_image compatible_image
+  local failed_image compatible_image compatible_key historical_image historical_status=0
+  compatible_key=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).compatibleCandidateKey')
+  [[ "$compatible_key" == compatible || "$compatible_key" == auth-update ]]
+  compatible_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates[process.argv[1]].image' "$compatible_key")
+  if [[ "$compatible_key" == auth-update ]]; then
+    historical_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates["historical-token"].image')
+    set_state historical_token_release IN_PROGRESS
+    # Isolate the known retired image from the database and all credentials.
+    # It is never passed to the Ansible lifecycle candidate allowlist.
+    rootless_podman run --rm --pull=never --network=none --env CODEXIA_AUTH_MODE=better-auth "$historical_image" \
+      >"$tmp/historical-token-boot.log" 2>&1 || historical_status=$?
+    redact_log "$tmp/historical-token-boot.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/historical-token-boot-bounded.log"
+    [[ "$historical_status" == 1 ]]
+    grep -Fxq 'CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters' "$tmp/historical-token-boot.log"
+    set_state historical_token_release PASS 'publication-verified pre-cutover image rejected OAuth-only startup in a network-isolated container without credentials'
+  fi
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
@@ -625,9 +640,9 @@ rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets
 CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT NULL);
 INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
 SENTINEL_SQL
-run_deploy compatible false
-observe_runtime compatible-update compatible
-set_state compatible_update PASS 'certified compatible Full image became the sole healthy API writer'
+run_deploy "$compatible_key" false
+observe_runtime compatible-update "$compatible_key"
+set_state compatible_update PASS "run-bound $compatible_key Full image became the sole healthy API writer"
 
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
 failed_context="$build_context/failed"
@@ -638,7 +653,6 @@ FROM ${BASE_IMAGE}
 ENTRYPOINT ["/bin/false"]
 DOCKERFILE
 sudo install -o codexia -g codexia -m 0644 "$tmp/failed.Dockerfile" "$failed_context/Dockerfile"
-compatible_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates.compatible.image')
 rootless_podman build --build-arg "BASE_IMAGE=$compatible_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
 failed_tag="localhost:5000/yohn-jp/codexia-backend:lifecycle-failed-$source_sha"
 rootless_podman tag codexia-backend-lifecycle-fail "$failed_tag"
@@ -658,7 +672,7 @@ if ! grep -Eq 'Deployment transaction failed during candidate API (startup|readi
   exit 1
 fi
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-observe_runtime failed-candidate-rollback compatible
+observe_runtime failed-candidate-rollback "$compatible_key"
 [[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'
 
@@ -678,8 +692,8 @@ FAULT_SYSTEMCTL
 sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/systemctl"
 if run_deploy head false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
 rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-run_deploy compatible false
-observe_runtime interrupted-recovery compatible
+run_deploy "$compatible_key" false
+observe_runtime interrupted-recovery "$compatible_key"
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
