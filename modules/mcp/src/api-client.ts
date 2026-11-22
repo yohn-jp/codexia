@@ -170,7 +170,7 @@ export class ApiClient implements McpActionClient {
     );
     if (validProjects(value)) return { projects: value, nextCursor: null };
     if (!isRecord(value) || !validProjects(value.projects) ||
-        !(value.nextCursor === null || (typeof value.nextCursor === "string" && value.nextCursor.length <= 512))) {
+        !(value.nextCursor === null || (typeof value.nextCursor === "string" && value.nextCursor.length >= 1 && value.nextCursor.length <= 512))) {
       throw new McpApiError(502, "INVALID_RESPONSE", "Project page response is invalid");
     }
     return { projects: value.projects, nextCursor: value.nextCursor };
