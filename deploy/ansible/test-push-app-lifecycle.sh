@@ -606,8 +606,9 @@ run_application_lifecycle() {
   compatible_key=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).compatibleCandidateKey')
   [[ "$compatible_key" == compatible || "$compatible_key" == auth-update ]]
   compatible_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates[process.argv[1]].image' "$compatible_key")
-  if [[ "$compatible_key" == auth-update ]]; then
-    historical_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates["historical-token"].image')
+  historical_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates["historical-token"]?.image ?? ""')
+  if [[ -n "$historical_image" ]]; then
+    [[ "$compatible_key" == auth-update ]]
     set_state historical_token_release IN_PROGRESS
     # Isolate the known retired image from the database and all credentials.
     # It is never passed to the Ansible lifecycle candidate allowlist.

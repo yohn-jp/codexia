@@ -228,7 +228,7 @@ async function certifiedCompatibleCandidate(head) {
         CODEXIA_VERIFY_RUN_ID: String(metadata.publication.verifyRunId), GH_TOKEN: token, RUNNER_TEMP: tempRoot,
         ...(fullCertificate.producer.event === 'pull_request' ? { CODEXIA_BACKEND_PROMOTION_DIR: scratch } : { CODEXIA_BACKEND_ARTIFACT_MANIFEST: receiptPath }),
       };
-      await verifyExistingBackendRelease({ env: releaseEnv, args: [fullCertificate.image, metadata.sourceSha,
+      await verifyExistingBackendRelease({ env: releaseEnv, usePublishedSourceCompatibility: true, args: [fullCertificate.image, metadata.sourceSha,
         fullCertificate.producer.sourceSha, fullCertificate.identity.version, 'full', fullCertificate.producer.event] });
       check(fullCertificate.identity.profile === 'full', 'Historical certificate does not bind a Full image');
       if (authOnlyBoot && (fullCertificate.identity.apiEpoch !== head.identity.apiEpoch ||
@@ -244,7 +244,7 @@ async function certifiedCompatibleCandidate(head) {
     } catch (error) { failures.push(`${release.tag_name}: ${publicError(error)}`); }
     finally { if (scratch) await rm(scratch, { recursive: true, force: true }); }
   }
-  throw new Error(`No compatible verified Full image is available; the update scenario is NOT_CHECKED. ${failures.slice(0, 3).join(' | ')}`);
+  throw new Error(`No usable, verified Full publication is available. ${failures.slice(0, 3).join(' | ')}`);
 }
 function pushIntoDisposableRegistry(candidate, name) {
   const sourceTag = `localhost:5000/yohn-jp/codexia-backend:lifecycle-${name}-${sourceSha}`;
@@ -274,27 +274,33 @@ async function prepareImages() {
   report.status = 'IN_PROGRESS';
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   const head = await loadExactSourceFullCandidate();
-  const published = await certifiedCompatibleCandidate(head);
-  // Reject malformed remote artifact/release metadata before writing private CI evidence.
   validateImageIdentity(head.identity, sourceSha);
-  validateImageIdentity(published.identity, published.sourceSha);
-  check(shaPattern.test(published.sourceSha || ''), 'Published candidate must bind a source SHA');
   check(digestPattern.test(head.artifactDigest || ''), 'Head candidate must bind an immutable artifact digest');
-  check(digestPattern.test(published.certificateArtifactDigest || ''), 'Publication certificate must bind an immutable artifact digest');
-  check(/^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(published.releaseTag || ''),
-    'Published release must use a canonical version tag');
-  const releaseRole = published.authOnlyBoot ? 'compatible' : 'historical-token';
+  let published;
+  try {
+    const candidate = await certifiedCompatibleCandidate(head);
+    validateImageIdentity(candidate.identity, candidate.sourceSha);
+    check(digestPattern.test(candidate.certificateArtifactDigest || ''), 'Publication certificate must bind an immutable artifact digest');
+    check(/^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(candidate.releaseTag || ''),
+      'Published release must use a canonical version tag');
+    published = candidate;
+  } catch (error) {
+    // Publication proof is independent of the exact-source disposable update.
+    report.states ||= {};
+    report.states.historical_token_release = { status: 'NOT_CHECKED', detail: publicError(error) };
+  }
+  const releaseRole = published && (published.authOnlyBoot ? 'compatible' : 'historical-token');
   const prepared = { format: 'codexia-push-app-lifecycle-prepared/v1', sourceSha, runId, runAttempt: attempt, head, published };
   // codeql[js/http-to-file-access] Only verified immutable GitHub artifact identities are persisted to this private runner file.
   await writeFile(preparedPath, JSON.stringify(prepared, null, 2) + '\n', { mode: 0o600 });
   report.images = [
     { role: 'head', sourceSha: head.identity.sourceSha, identity: head.identity, producerRunId: head.producerRunId, artifactId: head.artifactId, artifactDigest: head.artifactDigest, certificateResult: 'NOT_USED_SOURCE_ARTIFACT_IDENTITY_VERIFIED' },
-    { role: releaseRole, sourceSha: published.identity.sourceSha, identity: published.identity, releaseTag: published.releaseTag, certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' },
   ];
+  if (published) report.images.push({ role: releaseRole, sourceSha: published.identity.sourceSha, identity: published.identity, releaseTag: published.releaseTag, certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' });
   report.status = 'IMAGES_VERIFIED_WAITING_FOR_DISPOSABLE_REGISTRY';
   // codeql[js/http-to-file-access] Verified source metadata is recorded as inert 0600 JSON, never executed.
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
-  console.log(JSON.stringify({ preparedPath, reportPath, publishedRelease: published.releaseTag, releaseRole }, null, 2));
+  console.log(JSON.stringify({ preparedPath, reportPath, publishedRelease: published?.releaseTag, releaseRole }, null, 2));
 }
 async function mirrorPreparedImages() {
   check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
@@ -303,30 +309,30 @@ async function mirrorPreparedImages() {
   check(prepared.format === 'codexia-push-app-lifecycle-prepared/v1' && prepared.sourceSha === sourceSha &&
     prepared.runId === runId && prepared.runAttempt === attempt, 'Prepared image evidence belongs to another workflow run');
   const { head, published } = prepared;
-  check(typeof published.authOnlyBoot === 'boolean', 'Published lifecycle evidence has no authentication classification');
-  const releaseRole = published.authOnlyBoot ? 'compatible' : 'historical-token';
+  check(published === undefined || typeof published.authOnlyBoot === 'boolean', 'Published lifecycle evidence has no authentication classification');
+  const releaseRole = published && (published.authOnlyBoot ? 'compatible' : 'historical-token');
   const headRef = pushIntoDisposableRegistry(head, 'head');
-  const publishedRef = pushIntoDisposableRegistry(published, releaseRole);
+  const publishedRef = published && pushIntoDisposableRegistry(published, releaseRole);
   const evidence = { format: 'codexia-push-app-lifecycle-evidence/v1', sourceSha, runId, runAttempt: attempt,
     backendProducer: { runId: head.producerRunId, attempt: head.producerAttempt, artifactId: head.artifactId,
       artifactDigest: head.artifactDigest, workflow: head.producerWorkflow, event: head.producerEvent,
       conclusion: head.producerConclusion },
-    candidates: { head: headRef, [releaseRole]: publishedRef },
-    compatibleCandidateKey: published.authOnlyBoot ? 'compatible' : 'auth-update',
-    publishedRelease: { role: releaseRole, tag: published.releaseTag, sourceSha: published.sourceSha, publicationRunId: published.publicationRunId,
-      certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateVerified: true },
+    candidates: { head: headRef, ...(publishedRef ? { [releaseRole]: publishedRef } : {}) },
+    compatibleCandidateKey: releaseRole === 'compatible' ? 'compatible' : 'auth-update',
+    ...(published && { publishedRelease: { role: releaseRole, tag: published.releaseTag, sourceSha: published.sourceSha, publicationRunId: published.publicationRunId,
+      certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateVerified: true } }),
     imageChecks: { sourceArtifactDigest: head.artifactDigest, sourceArtifactIdentityVerified: true, sourceArtifactEvent: head.producerEvent,
-      publishedCertificateVerified: true, fullProfile: true, platform: 'linux/amd64' } };
+      publishedCertificateVerified: Boolean(publishedRef), fullProfile: true, platform: 'linux/amd64' } };
   await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 });
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   report.images = [
     { role: 'head', image: headRef.image, digest: headRef.digest, imageId: headRef.imageId, repoDigests: headRef.repoDigests, sourceSha: head.identity.sourceSha, identity: head.identity, producerRunId: head.producerRunId, producerEvent: head.producerEvent, artifactId: head.artifactId, artifactDigest: head.artifactDigest, certificateResult: 'NOT_USED_SOURCE_ARTIFACT_IDENTITY_VERIFIED' },
-    { role: releaseRole, image: publishedRef.image, digest: publishedRef.digest, imageId: publishedRef.imageId, repoDigests: publishedRef.repoDigests, sourceSha: published.identity.sourceSha, identity: published.identity, releaseTag: published.releaseTag, certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' },
   ];
+  if (publishedRef) report.images.push({ role: releaseRole, image: publishedRef.image, digest: publishedRef.digest, imageId: publishedRef.imageId, repoDigests: publishedRef.repoDigests, sourceSha: published.identity.sourceSha, identity: published.identity, releaseTag: published.releaseTag, certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' });
   report.imageEvidence = { path: evidencePath, format: evidence.format, productionAdmissionUsed: false };
   report.status = 'PREPARED';
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
-  console.log(JSON.stringify({ evidencePath, reportPath, headImage: headRef.image, publishedImage: publishedRef.image, releaseRole }, null, 2));
+  console.log(JSON.stringify({ evidencePath, reportPath, headImage: headRef.image, publishedImage: publishedRef?.image, releaseRole }, null, 2));
 }
 async function recordFailedCandidate(image) {
   check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
@@ -390,11 +396,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await mkdir(path.dirname(reportPath), { recursive: true, mode: 0o700 });
       const prior = JSON.parse(await readFile(reportPath, 'utf8').catch(() => '{}'));
       prior.sourceSha = sourceSha; prior.runId = runId; prior.runAttempt = attempt;
-      if (/No compatible verified Full image is available/u.test(bounded)) {
-        prior.status = 'NOT_CHECKED';
-        prior.states ||= {};
-        prior.states.compatible_update = { status: 'NOT_CHECKED', detail: bounded };
-      } else prior.status = 'FAIL';
+      prior.status = 'FAIL';
       prior.failure = bounded; prior.updatedAt = new Date().toISOString();
       await writeFile(reportPath, JSON.stringify(prior, null, 2) + '\n', { mode: 0o600 });
     } catch {}
