@@ -47,6 +47,14 @@
 .native-review-toolbar [role="status"] { flex: 1 1 100%; }
 .native-review-refresh { min-height: 2.5rem; padding: 0.35rem 0.7rem; border-color: var(--line); color: var(--ink); background: var(--paper); font-size: 0.82rem; }
 .native-review-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--surface-selected); }
+.native-review-core-feed { margin: 0.9rem 0; padding: 0.8rem; border: 1px solid var(--line); border-radius: 0.45rem; background: var(--paper-dark); }
+.native-review-core-feed > p { margin: 0.4rem 0 0.65rem; color: var(--muted); font-size: 0.8rem; line-height: 1.55; }
+.native-review-core-feed > ul { display: grid; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
+.native-review-core-feed .proposal-card { margin: 0; padding: 0.7rem; }
+.native-review-core-feed .native-review-detail-meta { display: flex; justify-content: space-between; gap: 0.6rem; }
+.native-review-core-feed .native-review-detail-meta strong { color: var(--ink); font-size: 0.84rem; letter-spacing: normal; overflow-wrap: anywhere; }
+.native-review-core-feed article > p { margin: 0.35rem 0; color: var(--muted); font-size: 0.77rem; line-height: 1.5; }
+.native-review-core-feed pre { max-width: 100%; max-height: 18rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; }
 .native-review-message,
 .native-review-unknown {
   padding: 0.75rem 0.9rem;

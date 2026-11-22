@@ -3,6 +3,7 @@ import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-con
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -128,6 +129,35 @@ export class CoreError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = "CoreError"; }
 }
 export interface CoreStoreOptions { persistence: Persistence }
+/**
+ * A review-feed projection over the two durable proposal authorities.
+ * The discriminant and protocol fields intentionally preserve their distinct
+ * approval granularity and receipt semantics.
+ */
+export type AuthorReviewItem =
+  | {
+      kind: "core-proposal";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ProposalStatus["state"];
+      approvalModel: "per-operation";
+      applicationModel: "per-operation";
+      status: ProposalStatus;
+      receipts: ProposalStatus["applications"];
+      stale: boolean;
+    }
+  | {
+      kind: "native-change-set";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ChangeSet["status"];
+      approvalModel: "whole-change-set";
+      applicationModel: "transaction";
+      changeSet: ChangeSet;
+      receipt: ChangeSetApplicationResult | null;
+    };
 type StoredFile = { content: string; encoding: "utf8" | "base64"; revision: string; documentId?: string; metadata?: boolean };
 type Manifest = { snapshot: SnapshotId; files: Record<string, StoredFile>; documents: Document[]; project: Project };
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
@@ -587,6 +617,54 @@ export class CoreStore implements MutationCoordinator {
         const status = record.value as unknown as ProposalStatus;
         return { projectId: record.projectId, proposal: { ...status, stale: status.proposal.snapshot.projectVersion !== projectVersion } };
       }) };
+    });
+  }
+  /**
+   * Read both durable review authorities into one author-facing feed. This is
+   * a projection only: Core proposals keep per-operation approval/application,
+   * while native ChangeSets keep their single transactional receipt.
+   */
+  async listAuthorReviews(projectId: string, limit = 50): Promise<AuthorReviewItem[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("Author review page size must be between 1 and 200");
+    return this.persistence.read(async (reader) => {
+      const project = await reader.getProject(pid(projectId));
+      if (!project) fail(404, "project_not_found", "Project not found");
+      const [proposalQueue, changeSets] = await Promise.all([
+        reader.listProposalReviewQueue([pid(projectId)], AUTHORITY, limit),
+        reader.listChangeSets(pid(projectId), limit),
+      ]);
+      const coreItems: AuthorReviewItem[] = proposalQueue.records
+        .filter(({ record }) => record.key.startsWith("proposal:"))
+        .map(({ record, projectVersion }) => {
+          const status = record.value as unknown as ProposalStatus;
+          return {
+            kind: "core-proposal",
+            id: status.proposal.id,
+            projectId,
+            createdAt: record.createdAt,
+            state: status.state,
+            approvalModel: "per-operation",
+            applicationModel: "per-operation",
+            status,
+            receipts: status.applications,
+            stale: status.proposal.snapshot.projectVersion !== projectVersion,
+          };
+        });
+      const nativeItems: AuthorReviewItem[] = await Promise.all(changeSets.map(async (changeSet) => ({
+        kind: "native-change-set",
+        id: changeSet.id,
+        projectId,
+        createdAt: changeSet.createdAt,
+        state: changeSet.status,
+        approvalModel: "whole-change-set",
+        applicationModel: "transaction",
+        changeSet,
+        receipt: changeSet.status === "applied"
+          ? await reader.getChangeSetReceipt(pid(projectId), changeSet.id) ?? null
+          : null,
+      })));
+      return [...coreItems, ...nativeItems]
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
     });
   }
   async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async reader => {

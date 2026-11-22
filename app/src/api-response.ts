@@ -2,6 +2,7 @@ import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type Chan
 import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
+import type { AuthorReviewFeedItem } from "./api";
 
 export type ResponseGuard<T> = (value: unknown) => value is T;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -24,6 +25,21 @@ const proposal: ResponseGuard<ChangeProposal> = (v): v is ChangeProposal => {
   return v.evidence === undefined || (Array.isArray(v.evidence) && v.evidence.every(e => record(e) && text(e.id) && snapshot(e.snapshot) && oneOf(e.module, BUILTIN_MODULE_IDS) && text(e.kind) && Array.isArray(e.paths) && e.paths.every(fileRevision)));
 };
 const proposalStatus: ResponseGuard<ProposalStatus> = (v): v is ProposalStatus => record(v) && proposal(v.proposal) && oneOf(v.state, ["proposed", "partially_approved", "approved", "applied"]) && strings(v.approvedOperationIds) && array(application)(v.applications) && strings(v.appliedOperationIds) && bool(v.stale) && optional(v.payloadComplete, bool) && optional(v.originalDigest, text) && optional(v.operationIds, strings);
+const authorReviewFeedItem: ResponseGuard<AuthorReviewFeedItem> = (v): v is AuthorReviewFeedItem => {
+  if (!record(v) || !text(v.id) || !text(v.projectId) || !text(v.createdAt)) return false;
+  if (v.kind === "core-proposal") {
+    return v.approvalModel === "per-operation" && v.applicationModel === "per-operation" && proposalStatus(v.status)
+      && v.status.proposal.id === v.id && v.status.proposal.snapshot.projectId === v.projectId && v.status.state === v.state
+      && array(application)(v.receipts) && JSON.stringify(v.receipts) === JSON.stringify(v.status.applications) && bool(v.stale);
+  }
+  if (v.kind !== "native-change-set" || v.approvalModel !== "whole-change-set" || v.applicationModel !== "transaction"
+    || !oneOf(v.state, ["proposed", "approved", "applied", "rejected"]) || !record(v.changeSet)) return false;
+  const nativeSet = v.changeSet;
+  return changeSet(nativeSet) && nativeSet.id === v.id && nativeSet.projectId === v.projectId && nativeSet.status === v.state
+    && nativeSet.createdAt === v.createdAt
+    && (v.receipt === null || changeSetApplication(v.receipt)
+      && v.receipt.changeSet.id === v.id && v.receipt.changeSet.projectId === v.projectId);
+};
 const scene: ResponseGuard<Scene> = (v): v is Scene => record(v) && [v.id, v.title, v.text, v.revision].every(text);
 const document: ResponseGuard<FileDocument> = (v): v is FileDocument => record(v) && text(v.path) && text(v.content) && nullableText(v.revision);
 const tree: ResponseGuard<Tree> = (v): v is Tree => record(v) && text(v.title) && Array.isArray(v.volumes) && v.volumes.every(volume => record(volume) && text(volume.id) && text(volume.title) && Array.isArray(volume.chapters) && volume.chapters.every(chapter => record(chapter) && text(chapter.id) && text(chapter.title) && Array.isArray(chapter.scenes) && chapter.scenes.every(item => record(item) && text(item.id) && text(item.title))));
@@ -96,6 +112,7 @@ export const responseContracts = {
   recentActivity: (v: unknown): v is RecentActivityResponse => record(v) && Array.isArray(v.items) && v.items.every(i => record(i) && text(i.sceneId) && nullableInteger(i.sentenceOffset) && optional(i.pageIndex, nullableInteger) && oneOf(i.deviceType, ["desktop", "mobile"]) && text(i.updatedAt)),
   proposal,
   proposals: (v: unknown): v is { proposals: ProposalStatus[] } => record(v) && array(proposalStatus)(v.proposals),
+  authorReviewFeed: (v: unknown): v is { items: AuthorReviewFeedItem[] } => record(v) && array(authorReviewFeedItem)(v.items),
   jobs: array(job), job,
   inbox: (v: unknown): v is InboxListResponse => record(v) && array(inbox)(v.items) && integer(v.unreadCount),
   inboxItem: (v: unknown): v is { item: InboxItem } => record(v) && inbox(v.item),
