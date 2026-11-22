@@ -29,7 +29,8 @@ test("journal keys isolate author scopes and retain each operation generation", 
 });
 
 test("project document keys cannot collide across projects or paths", () => {
-  assert.equal(projectKey(projectId), projectKey("project-1"));
+  assert.throws(() => projectKey(""), /project identity/u);
+  assert.notEqual(projectKey(projectId), projectKey("project-2"));
   assert.notEqual(documentKey(projectId, "a"), documentKey("project-2", "a"));
   assert.notEqual(documentKey(projectId, "a"), documentKey(projectId, "b"));
 });
