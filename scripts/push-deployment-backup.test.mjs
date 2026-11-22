@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -55,6 +56,46 @@ function invokeBackup(fixture, { activeUnits = '', approved = true } = {}) {
     },
   });
 }
+
+function invokeValidation(fixture, operation, artifactPath) {
+  return spawnSync('bash', [backupProgram, operation, artifactPath], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: fixture.home,
+      XDG_STATE_HOME: path.join(fixture.home, '.local/state'),
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+    },
+  });
+}
+
+test('encrypted backup verification accepts read-only artifacts without weakening destination writes', async () => {
+  const fixture = await createFixture();
+  const archive = path.join(fixture.backupDestination, 'read-only-archive');
+  await mkdir(archive);
+  try {
+    const items = [
+      ['database.dump.age', 'ciphertext-database'],
+      ['history.tar.age', 'ciphertext-history'],
+      ['manifest.age', 'ciphertext-manifest'],
+    ];
+    for (const [name, contents] of items) await writeFile(path.join(archive, name), contents);
+    await writeFile(path.join(archive, 'SHA256SUMS'), items.map(([name, contents]) =>
+      `${createHash('sha256').update(contents).digest('hex')}  ${name}\n`).join(''));
+    await chmod(archive, 0o500);
+    const verified = invokeValidation(fixture, 'validate-artifact', archive);
+    assert.equal(verified.status, 0, verified.stderr);
+    assert.match(verified.stdout, /^[a-f0-9]{64}\n$/u);
+    if (process.getuid?.() !== 0) {
+      const unwritable = invokeValidation(fixture, 'validate-destination', archive);
+      assert.notEqual(unwritable.status, 0, 'Creating a backup still requires a writable destination');
+      assert.match(unwritable.stderr, /not writable/u);
+    }
+  } finally {
+    await chmod(archive, 0o700);
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
 
 test('push backup requires a quiesced API and Tunnel', async () => {
   const fixture = await createFixture();
