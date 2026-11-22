@@ -1977,22 +1977,6 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, persistenceResponse.status, persistenceResponse.body);
       return;
     }
-    if (routePath === "/api/nlp/features" && method === "GET") {
-      const modules = await enabledStatuses();
-      const nlpModules = modules.filter((module) => ["nlp", "semantic", "speaker", "assistant"].includes(module.id));
-      sendJson(response, 200, {
-        providerKind: "none",
-        features: nlpModules.map((module) => ({
-          id: module.id,
-          label: module.id,
-          locality: module.id === "assistant" ? "external" : "local",
-          ...(module.id === "assistant" ? { enabled: false } : {}),
-        })),
-        settings: { externalEnabled: {} },
-        modules: nlpModules,
-      });
-      return;
-    }
     if (routePath === "/api/session" && method === "GET") {
       sendJson(response, 200, {
         authenticated: true,

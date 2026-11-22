@@ -2947,9 +2947,6 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await legacyGitView.json() as { code: string }).code, "INVALID_SNAPSHOT");
     const retiredSceneViews = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one/views?projectVersion=1`, { headers: auth });
     assert.equal(retiredSceneViews.status, 404, "the two-view Git reader route has been retired");
-    assert.equal((await fetch(`${apiServer.base}/api/nlp/features`)).status, 401);
-    const providerNone = await fetch(`${apiServer.base}/api/nlp/features`, { headers: auth });
-    assert.equal((await providerNone.json() as { providerKind: string }).providerKind, "none");
     const modules = await fetch(`${apiServer.base}/api/projects/project-1/modules`, { headers: auth });
     assert.equal(modules.status, 200);
     assert.ok((await modules.json() as Array<{ id: string; availability: string }>).some(({ id, availability }) => id === "mcp" && availability === "not-included"));
