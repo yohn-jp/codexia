@@ -34,7 +34,8 @@ const speakerWorker = fileURLToPath(new URL("../../speaker/dist/worker.js", impo
 
 const synonymsPath = "meta/scriptorium/modules/nlp/synonyms.yaml";
 const ignoredPath = "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml";
-const featureSettingsPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+const consentKey = "feature-settings";
+const consentAuthor = "p06-synthetic-owner";
 const lintConfigPath = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
 const firstScenePath = "manuscript/vol-one/ch-one/sc-one.md";
 
@@ -77,10 +78,6 @@ function syntheticFiles() {
     groups: [{ id: "source-group-1", words: ["強い", "力強い"], context: "positive", ownerNote: "preserve-synonym-group" }],
   });
   putYaml(ignoredPath, { ownerNote: "preserve-ignore-root", ignored: ["既存語"] });
-  putText(featureSettingsPath, `${JSON.stringify({
-    externalEnabled: { "setting-qa": false, rewrite: false },
-    ownerNote: "preserve-feature-settings",
-  }, null, 2)}\n`);
   putYaml(lintConfigPath, {
     ownerNote: "preserve-diagnostics-config",
     rules: [{
@@ -144,6 +141,18 @@ function actionHost(store, projectId, reader) {
         source: "module",
         ...(evidence ? { evidence } : {}),
       });
+    },
+    async readOwnModuleRecord(scope, key) {
+      assert.equal(scope.moduleId, "nlp");
+      assert.equal(key, consentKey);
+      assert.deepEqual(scope.snapshot, reader.snapshot);
+      return store.readNlpFeatureSettingsSnapshotRecord(projectId, scope.snapshot);
+    },
+    async proposeOwnModuleRecord(scope, input) {
+      assert.equal(scope.moduleId, "nlp");
+      assert.equal(input.key, consentKey);
+      assert.deepEqual(scope.snapshot, reader.snapshot);
+      return store.proposeNlpFeatureSettingsSnapshotRecord(projectId, scope.snapshot, input, consentAuthor);
     },
   };
 }
@@ -252,6 +261,19 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     const project = fixture.project;
     runtime = await createRuntime(join(root, "runtime-cache-before"));
     let reader = await currentReader(store, project.id);
+    const initialConsent = await store.proposeNlpFeatureSettingsSnapshotRecord(project.id, reader.snapshot, {
+      key: consentKey, expectedVersion: null, idempotencyKey: randomUUID(),
+      value: { externalEnabled: { "setting-qa": false, rewrite: false }, ownerNote: "preserve-feature-settings" },
+    }, consentAuthor);
+    const seed = await fixture.persistence.read(tx => tx.getChangeSet(project.id, initialConsent.id));
+    assert.ok(seed);
+    const approvedSeed = await fixture.persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: seed.id, expectedVersion: seed.version, approvedBy: consentAuthor,
+    }));
+    await fixture.persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: seed.id, expectedVersion: approvedSeed.version,
+    }));
+    reader = await currentReader(store, project.id);
     let host = actionHost(store, project.id, reader);
 
     assert.equal(runtime.status("nlp").availability, "enabled-idle");
@@ -448,16 +470,33 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     const consentResult = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", {
       externalEnabled: { "setting-qa": true },
     }, host);
-    actionData(consentResult, "nlp.updateExternalConsent", reader);
-    const consentProposal = proposalFor(consentResult, "nlp.updateExternalConsent");
-    await assertCurrentUnchanged([featureSettingsPath], reader);
-    proposals.push(consentProposal);
-    appliedReceipts.push(...await approveAndApply(store, project.id, consentProposal));
+    const { changeSet } = actionData(consentResult, "nlp.updateExternalConsent", reader);
+    assert.equal(changeSet.projectId, project.id);
+    assert.deepEqual(consentResult.proposals ?? [], []);
+    const pinnedConsent = reader.snapshot;
+    const currentConsent = async () => {
+      const current = await currentReader(store, project.id);
+      const result = await runtime.invokeAction("nlp", "nlp.features", {}, actionHost(store, project.id, current));
+      return actionData(result, "nlp.features", current).features.find(feature => feature.id === "setting-qa")?.enabled;
+    };
+    const proposedConsent = await fixture.persistence.read(tx => tx.getChangeSet(project.id, changeSet.id));
+    assert.equal(proposedConsent?.status, "proposed");
+    assert.equal(await currentConsent(), false);
+    const approvedConsent = await fixture.persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: proposedConsent.version, approvedBy: consentAuthor,
+    }));
+    assert.equal(await currentConsent(), false);
+    const consentReceipt = await fixture.persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: approvedConsent.version,
+    }));
+    assert.equal(consentReceipt.changeSet.status, "applied");
+    assert.equal(await currentConsent(), true);
+    assert.equal((await store.readNlpFeatureSettingsSnapshotRecord(project.id, pinnedConsent)).value.externalEnabled["setting-qa"], false);
     reader = await currentReader(store, project.id);
     host = actionHost(store, project.id, reader);
 
-    assert.equal(proposals.length, 6);
-    assert.equal(appliedReceipts.length, 6);
+    assert.equal(proposals.length, 5);
+    assert.equal(appliedReceipts.length, 5);
     const proposalStatuses = await store.listProposals(project.id);
     for (const proposal of proposals) assert.equal(proposalStatuses.find((status) => status.proposal.id === proposal.id)?.state, "applied");
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "all NLP and diagnostics workers have exited before Core reconnect");
@@ -478,7 +517,8 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     assert.equal(committedIgnored.ownerNote, "preserve-ignore-root");
     assert.ok(committedIgnored.ignored.includes("既存語"));
     assert.ok(committedIgnored.ignored.includes(ignoredTerm));
-    const committedFeatures = JSON.parse((await committedReader.read(featureSettingsPath)).content);
+    assert.equal(await committedReader.read("meta/scriptorium/modules/nlp/feature-settings.json"), null);
+    const committedFeatures = (await store.readNlpFeatureSettingsSnapshotRecord(project.id, committedReader.snapshot)).value;
     assert.equal(committedFeatures.ownerNote, "preserve-feature-settings");
     assert.equal(committedFeatures.externalEnabled["setting-qa"], true);
     const committedManuscript = (await committedReader.read(firstScenePath)).content;
