@@ -85,6 +85,14 @@ test("native document snapshots expose authoritative chapter and scene parent id
   assert.equal(sceneMeta.volume, volume.id);
   assert.equal(sceneMeta.chapter, chapter.id);
   assert.equal(sceneMeta.manuscript, `documents/${scene.id}.md`);
+  const nativeScene = reader.nativeStoryDocuments?.find(document => document.id === scene.id);
+  assert.deepEqual({ id: nativeScene?.id, kind: nativeScene?.kind, title: nativeScene?.title, orderKey: nativeScene?.orderKey, metadataPath: nativeScene?.metadataPath }, {
+    id: scene.id, kind: "scene", title: "Scene", orderKey: scene.orderKey, metadataPath: scenePath,
+  });
+  assert.equal(nativeScene?.metadataRevision, (await reader.read(scenePath))?.revision);
+  assert.equal(reader.nativeStoryDocuments?.length, 3);
+  const historical = await core.reader(p.id, reader.snapshot);
+  assert.deepEqual(historical.nativeStoryDocuments, reader.nativeStoryDocuments, "pinned typed projections retain the exact historical Story identity");
   assert.equal((await reader.read(sceneMeta.manuscript))?.content, "本文😀");
   assert.equal((await reader.read(sceneMeta.manuscript))?.documentKind, "scene", "native scene body reads expose their canonical PostgreSQL document kind");
   assert.equal((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes[0]?.id, scene.id);

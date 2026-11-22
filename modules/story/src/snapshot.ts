@@ -1,6 +1,6 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import YAML from "yaml";
-import { assertProjectPath, type SnapshotReader } from "@codexia/contracts";
+import { assertProjectPath, type NativeStoryDocument, type SnapshotReader } from "@codexia/contracts";
 import type { StoryEntity, StoryGraphInput, StoryLink } from "./domain/index.js";
 
 const ENTITY_DIRS: ReadonlyArray<[string, StoryEntity["type"]]> = [
@@ -130,6 +130,23 @@ function manuscriptId(filePath: string): string | null {
   return filePath.replace(/^manuscript\//, "ms-").replace(/\//g, "-").replace(/\.md$/, "");
 }
 
+function entityFromMetadata(filePath: string, raw: Record<string, unknown>): StoryEntity | null {
+  const type = inferType(filePath, raw);
+  if (typeof raw.id !== "string" || !type) return null;
+  return {
+    id: raw.id,
+    type,
+    name: typeof raw.name === "string" ? raw.name : undefined,
+    aliases: Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined,
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
+    keywords: Array.isArray(raw.keywords) ? raw.keywords.filter((keyword): keyword is string => typeof keyword === "string") : undefined,
+    resolution: typeof raw.resolution === "string" ? raw.resolution : undefined,
+    filePath,
+    raw,
+  };
+}
+
 function parseStoryEntity(file: StoryFile): StoryEntity | null {
   const id = manuscriptId(file.path);
   if (id !== null) {
@@ -147,29 +164,17 @@ function parseStoryEntity(file: StoryFile): StoryEntity | null {
   }
   if (!file.path.endsWith(".yaml") && !file.path.endsWith(".yml")) return null;
   const raw = asRecord(YAML.parse(file.content));
-  if (!raw || typeof raw.id !== "string") return null;
-  const type = inferType(file.path, raw);
-  if (!type) return null;
-  return {
-    id: raw.id,
-    type,
-    name: typeof raw.name === "string" ? raw.name : undefined,
-    aliases: Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined,
-    status: typeof raw.status === "string" ? raw.status : undefined,
-    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
-    keywords: Array.isArray(raw.keywords) ? raw.keywords.filter((keyword): keyword is string => typeof keyword === "string") : undefined,
-    resolution: typeof raw.resolution === "string" ? raw.resolution : undefined,
-    filePath: file.path,
-    raw,
-  };
+  return raw ? entityFromMetadata(file.path, raw) : null;
 }
 
-async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): Promise<Map<string, StoryFile>> {
+async function readFiles(reader: SnapshotReader, includeManuscripts: boolean, nativeDocuments: readonly NativeStoryDocument[]): Promise<Map<string, StoryFile>> {
   const prefixes = includeManuscripts ? ["bible", "plot", "meta", "manuscript", "documents"] : ["bible", "plot", "meta"];
   const listed = await Promise.all(prefixes.map((prefix) => reader.list(prefix)));
-  const paths = [...new Set(listed.flat().filter((filePath) =>
+  const pathSet = new Set(listed.flat().filter((filePath) =>
     (filePath.startsWith("documents/") ? NATIVE_DOCUMENT_PATH.test(filePath) :
-      filePath.endsWith(".yaml") || filePath.endsWith(".yml") || manuscriptId(filePath) !== null)))].sort();
+      filePath.endsWith(".yaml") || filePath.endsWith(".yml") || manuscriptId(filePath) !== null)));
+  for (const document of nativeDocuments) pathSet.add(document.metadataPath);
+  const paths = [...pathSet].sort();
   for (const filePath of paths) assertProjectPath(filePath);
 
   const files = new Map<string, StoryFile>();
@@ -190,19 +195,26 @@ async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): P
   return files;
 }
 
+function parseNativeStoryEntity(document: NativeStoryDocument): StoryEntity | null {
+  return entityFromMetadata(document.metadataPath, document.metadata);
+}
+
 /** Read the canonical project YAML and Markdown formats from one pinned Core snapshot. */
 export async function readStorySnapshot(
   reader: SnapshotReader,
   options: { includeManuscripts?: boolean } = {},
 ): Promise<LoadedStorySnapshot> {
-  const files = await readFiles(reader, options.includeManuscripts !== false);
+  const nativeDocuments = reader.nativeStoryDocuments ?? [];
+  const files = await readFiles(reader, options.includeManuscripts !== false, nativeDocuments);
+  const nativeByPath = new Map(nativeDocuments.map((document) => [document.metadataPath, document]));
   const entities = new Map<string, StoryEntity>();
   const filePathsById = new Map<string, string[]>();
   const links: StoryLink[] = [];
   const documentOrderByEntityId = new Map<string, number>();
 
   for (const file of files.values()) {
-    const entity = parseStoryEntity(file);
+    const native = nativeByPath.get(file.path);
+    const entity = native ? parseNativeStoryEntity(native) : parseStoryEntity(file);
     if (!entity) continue;
     entities.set(entity.id, entity);
     if (file.documentOrder !== undefined) documentOrderByEntityId.set(entity.id, file.documentOrder);
