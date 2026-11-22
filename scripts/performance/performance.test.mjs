@@ -119,12 +119,37 @@ test('node interception counts Git through sync and async process APIs while pre
   await assert.rejects(run('git', ['--invalid-benchmark-argument']), error => error.code !== 0 && typeof error.stderr === 'string');
   assert.equal(counts.gitProcesses, before + 5);
 });
-test('worker timeout retains completed evidence without claiming completion', async () => {
+const realDelay = promisify(setTimeout);
+
+async function runUntilWorkerReports(testContext, worker, output) {
+  const timeoutMs = 500;
+  testContext.mock.timers.enable({ apis: ['setTimeout'] });
+  const running = runWorker(worker, [output], output, timeoutMs);
+  try {
+    const deadline = performance.now() + 10_000;
+    for (;;) {
+      try {
+        await lstat(output);
+        break;
+      } catch (error) {
+        if (error.code !== 'ENOENT' || performance.now() >= deadline) throw error;
+      }
+      await realDelay(20);
+    }
+  } finally {
+    testContext.mock.timers.tick(timeoutMs);
+    testContext.mock.timers.reset();
+    await running;
+  }
+  return running;
+}
+
+test('worker timeout retains completed evidence without claiming completion', async (testContext) => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-worker-'));
   try {
     const worker = join(root, 'hang.mjs'), output = join(root, 'result.json');
-    await writeFile(worker, `import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], JSON.stringify({status:'running',samples:[{name:'completed',status:'complete',ms:12,appWallMs:12}]})); setInterval(()=>{},1000);`);
-    const result = await runWorker(worker, [output], output, 500);
+    await writeFile(worker, `import { renameSync, writeFileSync } from 'node:fs'; const output=process.argv[2]; writeFileSync(output+'.tmp', JSON.stringify({status:'running',samples:[{name:'completed',status:'complete',ms:12,appWallMs:12}]})); renameSync(output+'.tmp', output); setInterval(()=>{},1000);`);
+    const result = await runUntilWorkerReports(testContext, worker, output);
     assert.equal(result.status, 'NOT_CHECKED'); assert.equal(result.execution.timeout, true);
     assert.equal(result.samples[0].ms, 12);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -146,12 +171,12 @@ test('browser summaries distinguish completed strict writes from pending or abor
   assert.equal(result.inputs[0].reads.returnedRecords, 3);
 });
 
-test('worker timeout also terminates a detached descendant', { skip: process.platform !== 'linux' }, async () => {
+test('worker timeout also terminates a detached descendant', { skip: process.platform !== 'linux' }, async (testContext) => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-detached-'));
   try {
     const worker = join(root, 'worker.mjs'), output = join(root, 'result.json');
-    await writeFile(worker, `import { spawn } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); writeFileSync(process.argv[2],JSON.stringify({status:'running',samples:[],descendantPid:child.pid})); setInterval(()=>{},1000);`);
-    const result = await runWorker(worker, [output], output, 500);
+    await writeFile(worker, `import { spawn } from 'node:child_process'; import { renameSync, writeFileSync } from 'node:fs'; const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); const output=process.argv[2]; writeFileSync(output+'.tmp',JSON.stringify({status:'running',samples:[],descendantPid:child.pid})); renameSync(output+'.tmp', output); setInterval(()=>{},1000);`);
+    const result = await runUntilWorkerReports(testContext, worker, output);
     assert.equal(result.status, 'NOT_CHECKED');
     assert.equal(result.execution.timeout, true);
     assert.equal(result.execution.cleanupError, undefined, 'cleanup must be confirmed before returning');

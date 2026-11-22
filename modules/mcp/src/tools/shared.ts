@@ -1,7 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ActionResult } from "@codexia/contracts";
+import type { ActionResult, ChangeProposal } from "@codexia/contracts";
 import { McpApiError, type McpActionClient } from "../api-client.js";
 import { McpWritingContextInputError } from "../context-manifest.js";
+
+const MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024;
 
 export type JsonRecord = Record<string, unknown>;
 type ToolResponse = {
@@ -35,9 +37,9 @@ export async function unavailableModuleAction(client: McpActionClient, moduleId:
     : `Enable the ${moduleId} module to use ${toolName}`);
 }
 
-export function outputResult(data: unknown, snapshot?: unknown, proposals?: unknown[]) {
+export function outputResult(data: unknown, snapshot?: unknown, proposals?: ChangeProposal[]): ToolResponse {
   const output = { ...(snapshot === undefined ? {} : { snapshot }), data, ...(proposals?.length ? { proposals } : {}) };
-  return { structuredContent: output, content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }] };
+  return structuredRecord(output, proposals?.map(({ id }) => id));
 }
 
 export function actionResult(result: ActionResult) {
@@ -104,6 +106,14 @@ export async function invoke(client: McpActionClient, actionId: string, input: u
   return actionResult(await client.invoke(actionId, input));
 }
 
-export function structuredRecord(record: Record<string, unknown>) {
-  return { structuredContent: record, content: [{ type: "text" as const, text: JSON.stringify(record, null, 2) }] };
+export function structuredRecord(record: Record<string, unknown>, proposalIds?: readonly string[]): ToolResponse {
+  const serialized = JSON.stringify(record, null, 2);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_TOOL_RESULT_BYTES) {
+    const retainedIds = proposalIds?.slice(0, 50).filter((id) => id.length <= 128);
+    const message = "MCP tool result exceeds the 8 MiB JSON limit";
+    return retainedIds?.length
+      ? errorResult("RESULT_TOO_LARGE", `${message}. The listed proposals remain available for review`, { proposalIds: retainedIds })
+      : errorResult("RESULT_TOO_LARGE", message);
+  }
+  return { structuredContent: record, content: [{ type: "text", text: serialized }] };
 }

@@ -525,7 +525,7 @@ export function registerLegacyTools(server: McpServer, baseClient: McpActionClie
       if (!record || !isRecord(record.changeSet) || record.changeSet.id !== change_set.id) {
         return errorResult("INVALID_RESPONSE", "Core did not return the submitted source ChangeSet record");
       }
-      return structuredRecord(record);
+      return structuredRecord(record, [coreProposalId]);
     }),
   );
 
@@ -915,12 +915,15 @@ export function registerLegacyTools(server: McpServer, baseClient: McpActionClie
       if (proposal === null && proposalId !== null) {
         return errorResult("INVALID_RESPONSE", "Formatter returned a proposal ID without a proposal");
       }
-      return outputResult({
-        action_id: "format-manuscript",
-        result_id: result.data.resultId,
-        proposal_id: proposalId,
-        proposal,
-      }, result.snapshot);
+      return structuredRecord({
+        snapshot: result.snapshot,
+        data: {
+          action_id: "format-manuscript",
+          result_id: result.data.resultId,
+          proposal_id: proposalId,
+          proposal,
+        },
+      }, proposalId === null ? undefined : [proposalId]);
     }),
   );
 }
