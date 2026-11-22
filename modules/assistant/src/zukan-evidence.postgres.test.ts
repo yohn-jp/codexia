@@ -37,7 +37,7 @@ test("Zukan resolves real Semantic lexical manuscript hits through the Core snap
   const providerCapabilityRequests: string[] = [];
   try {
     const reader = await fixture.store.reader(fixture.project.id);
-    const semanticContext = { projectId: fixture.project.id, reader, signal: new AbortController().signal } as ModuleActionContext;
+    const semanticContext = { projectId: fixture.project.id, reader, signal: new AbortController().signal } as unknown as ModuleActionContext;
     const semanticModuleContext = {
       async acquireCapability(id: string) { throw Object.assign(new Error(`Unavailable in lexical fallback: ${id}`), { code: "not_available" }); },
     } as unknown as ModuleContext;
