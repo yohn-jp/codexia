@@ -490,14 +490,15 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}` });
   await documentListResponse;
   await knowledgeRequestStarted;
+  const knowledgeFailureResponse = page.waitForResponse((response) =>
+    nodesUrl(new URL(response.url())) && response.status() === 503);
   releaseKnowledgeFailure();
-  await page.waitForResponse((response) => nodesUrl(new URL(response.url())));
+  await knowledgeFailureResponse;
 
   await expect(page.locator(`.pg-document-list [data-document-id="${document.id}"]`)).toBeVisible();
-  const manuscript = editor(page);
-  await expect(manuscript).toContainText("初期本文。");
+  await expectMarkdown(page, "初期本文。");
   const draft = "Knowledge一覧が使えなくても編集して保存できる。";
-  await manuscript.fill(draft);
+  await replaceManuscript(page, draft);
   await expect.poll(() => persistedMarkdown(author, project.id, document.id)).toBe(draft);
 
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
@@ -508,7 +509,7 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await expect(knowledge.getByRole("alert")).toContainText("Knowledge一覧を利用できません。");
   await knowledge.getByRole("button", { name: "再試行", exact: true }).click();
   await expect(knowledge.getByRole("alert")).toHaveCount(0);
-  await expect(manuscript).toContainText(draft);
+  await expectMarkdown(page, draft);
 });
 
 test("same-named scenes show their chapter in the desktop and mobile writing headers", async ({ page, authorizeAuthor }) => {
