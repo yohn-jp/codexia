@@ -236,11 +236,6 @@ async function authenticatePasskey(page: Page, persistedCredentialId: string): P
     if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status };
     const options = await optionsResponse.json();
     const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(options);
-    const binaryId = atob(persistedCredentialId.replaceAll("-", "+").replaceAll("_", "/"));
-    publicKey.allowCredentials = [{
-      type: "public-key",
-      id: Uint8Array.from(binaryId, (character) => character.charCodeAt(0)).buffer,
-    }];
     const allowedCredentialIds = publicKey.allowCredentials?.map(({ id }) => {
       let binary = "";
       const bytes = id instanceof ArrayBuffer
@@ -249,6 +244,14 @@ async function authenticatePasskey(page: Page, persistedCredentialId: string): P
       for (const byte of bytes) binary += String.fromCharCode(byte);
       return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
     }) ?? [];
+    // Select the persisted credential only when the server allows discovery.
+    if (allowedCredentialIds.length === 0) {
+      const binaryId = atob(persistedCredentialId.replaceAll("-", "+").replaceAll("_", "/"));
+      publicKey.allowCredentials = [{
+        type: "public-key",
+        id: Uint8Array.from(binaryId, (character) => character.charCodeAt(0)).buffer,
+      }];
+    }
     const credential = await navigator.credentials.get({ publicKey });
     if (!(credential instanceof PublicKeyCredential)) throw new Error("Virtual authenticator did not return a credential");
     const response = await fetch("/api/auth/passkey/verify-authentication", {
@@ -734,8 +737,11 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
     method: "POST", credentials: "same-origin",
   })).status);
   assert.equal(signout, 200);
-  const signedOut = await winnerPage.evaluate(async () => (await fetch("/api/auth/get-session", { credentials: "same-origin" })).status);
-  assert.equal(signedOut, 200);
+  const signedOut = await winnerPage.evaluate(async () => {
+    const response = await fetch("/api/auth/get-session", { credentials: "same-origin" });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.deepEqual(signedOut, { status: 200, body: null });
   assert.ok(persistedCredentialId);
   const signin = await authenticatePasskey(winnerPage, persistedCredentialId);
   assert.equal(signin.optionsStatus, 200);
