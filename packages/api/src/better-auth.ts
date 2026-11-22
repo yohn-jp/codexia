@@ -266,7 +266,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
   }
   if (config.passkeyBootstrap && (!config.passkeyBootstrap.ownerId.trim() || !config.passkeyBootstrap.ownerEmail.trim() ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(config.passkeyBootstrap.ownerEmail) || !config.passkeyBootstrap.ownerName.trim())) {
-    throw new Error("Passkey owner bootstrap requires a long operator grant, stable owner ID, email, and display name");
+    throw new Error("Passkey owner bootstrap requires a stable owner ID, valid email, and display name");
   }
   const mcpClientIds = [...new Set((config.mcpClientIds ?? []).map((id) => id.trim()).filter(Boolean))];
   if (mcpClientIds.some((id) => config.ownerClientIds.includes(id))) {
