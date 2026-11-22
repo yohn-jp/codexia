@@ -12,10 +12,13 @@ const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E
 const externalServer = Boolean(configuredBaseURL);
 const selfHostedAuthFixture = [
   "job-inbox.acceptance.spec.ts",
+  "modular-workspace.acceptance.spec.ts",
   "native-review.acceptance.spec.ts",
   "oauth-web.acceptance.spec.ts",
   "outline-headings.acceptance.spec.ts",
   "recent-activity.acceptance.spec.ts",
+  "redesign-visual.acceptance.spec.ts",
+  "review-contributions.acceptance.spec.ts",
   "ui-v1.acceptance.spec.ts",
 ].includes(selectedTestFile ?? "");
 const legacyServer = !externalServer && !selfHostedAuthFixture;
