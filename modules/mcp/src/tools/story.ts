@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v3";
 import type { McpActionClient } from "../api-client.js";
-import { actionResult, byteLength, errorResult, guarded, invoke, scopedClient, unavailableModuleAction } from "./shared.js";
+import { actionResult, byteLength, errorResult, guarded, invoke, outputResult, scopedClient, unavailableModuleAction } from "./shared.js";
 
 const projectIdSchema = z.string().min(1).max(256).optional().describe("Registered project ID");
 const sceneIdSchema = z.string().min(1).max(256).refine(value => value.trim().length > 0);
@@ -59,7 +59,7 @@ export function registerStoryTools(server: McpServer, baseClient: McpActionClien
     });
     if (!result.ok) return actionResult(result);
     // Keep producer fields intact so this adapter remains forward-compatible.
-    return { structuredContent: { snapshot: result.snapshot, data: result.data }, content: [{ type: "text" as const, text: JSON.stringify({ snapshot: result.snapshot, data: result.data }, null, 2) }] };
+    return outputResult(result.data, result.snapshot);
   }));
 
   server.tool("story.narrative.review", "Review narrative findings for the selected scene or project snapshot", {

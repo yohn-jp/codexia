@@ -40,15 +40,18 @@ test("external MCP never registers the frozen Assistant rewrite tool", () => {
 
 test("MCP read results honor the UTF-8 JSON limit for generic and named tools", async () => {
   const data = { results: [{ excerpt: "街".repeat(3 * 1024 * 1024) }] };
-  const { tools, calls } = setup([descriptor("search.query", "search", "read")], () => ({ ok: true, snapshot, data }));
+  const { tools, calls } = setup([descriptor("search.query", "search", "read"), descriptor("story.context.package", "story", "read")],
+    () => ({ ok: true, snapshot, data }));
   const extra = { signal: new AbortController().signal };
   const generic = await tools.get("invoke_action")!.handler({ action_id: "search.query", input: { query: "街" } }, extra);
   const named = await tools.get("search_lexical")!.handler({ query: "街" }, extra);
+  const story = await tools.get("story.context.package")!.handler({ scene_id: "scene-1", scope: "reader" }, extra);
   const error = { code: "RESULT_TOO_LARGE", message: "MCP tool result exceeds the 8 MiB JSON limit" };
   const expected = { isError: true, structuredContent: { error }, content: [{ type: "text", text: JSON.stringify(error) }] };
   assert.deepEqual(generic, expected);
   assert.deepEqual(named, expected);
-  assert.equal(calls.length, 2);
+  assert.deepEqual(story, expected);
+  assert.equal(calls.length, 3);
 });
 
 test("oversized MCP proposal results retain durable proposal identities", async () => {
