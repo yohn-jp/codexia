@@ -1,7 +1,16 @@
 locals {
-  ui_routes       = jsondecode(file("${path.module}/../ui-routes.json")).routes
-  origin_routes   = jsondecode(file("${path.module}/../ui-routes.json")).originRoutes
-  identity_probes = jsondecode(file("${path.module}/../identity-probes.json"))
+  ui_routes             = jsondecode(file("${path.module}/../ui-routes.json")).routes
+  origin_routes         = jsondecode(file("${path.module}/../ui-routes.json")).originRoutes
+  identity_probes       = jsondecode(file("${path.module}/../identity-probes.json"))
+  public_protocol_paths = jsondecode(file("${path.module}/../public-protocol-paths.json"))
+  public_access_paths = {
+    for key, endpoint in local.public_protocol_paths : key => endpoint
+    if var.public_oauth_edge_enabled
+  }
+  public_tunnel_paths = {
+    for key, endpoint in local.public_access_paths : key => endpoint
+    if endpoint.tunnelPath != null
+  }
 }
 
 # The account administrator owns the shared reusable policy.
@@ -56,6 +65,20 @@ resource "cloudflare_zero_trust_access_application" "identity_probe" {
   }
 }
 
+# Public protocol routes remain disabled until an operator confirms that the
+# Passkey-first Better Auth runtime and its remote OAuth acceptance are ready.
+resource "terraform_data" "public_oauth_edge_readiness" {
+  count = var.public_oauth_edge_enabled ? 1 : 0
+  input = var.passkey_oauth_runtime_ready
+
+  lifecycle {
+    precondition {
+      condition     = var.passkey_oauth_runtime_ready
+      error_message = "Set passkey_oauth_runtime_ready only after the Passkey-first Better Auth runtime and remote MCP OAuth acceptance are verified."
+    }
+  }
+}
+
 resource "cloudflare_zero_trust_tunnel_cloudflared" "codexia" {
   account_id = var.account_id
   name       = "codexia"
@@ -74,8 +97,21 @@ resource "cloudflare_dns_record" "codexia" {
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "codexia" {
   account_id = var.account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.codexia.id
+  depends_on = [terraform_data.public_oauth_edge_readiness]
   config = {
     ingress = concat(
+      [
+        for _, endpoint in local.public_tunnel_paths : {
+          hostname = var.app_hostname
+          path     = endpoint.tunnelPath
+          service  = var.origin_service
+          origin_request = {
+            http_host_header = var.app_hostname
+            # Access is bypassed only by the matching, exact-path app below.
+            # Do not validate a Cloudflare Access assertion at the private origin.
+          }
+        }
+      ],
       [
         for key, probe in local.identity_probes : {
           hostname = var.app_hostname
@@ -111,6 +147,33 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "codexia" {
       ]
     )
   }
+}
+
+# Cloudflare's more-specific app path replaces the parent Access policy for
+# just this protocol endpoint. The API still authenticates OAuth/MCP requests.
+# The tunnel update is ordered first: while enabling, the parent Access app
+# remains the guard until the Bypass app exists; while disabling, origin Access
+# validation returns before the Bypass app is removed.
+resource "cloudflare_zero_trust_access_application" "public_protocol" {
+  for_each             = local.public_access_paths
+  account_id           = var.account_id
+  name                 = each.value.name
+  domain               = "${var.app_hostname}${each.value.path}"
+  type                 = "self_hosted"
+  app_launcher_visible = false
+  policies = [{
+    name       = each.value.name
+    decision   = "bypass"
+    precedence = 1
+    include = [{
+      everyone = {}
+    }]
+  }]
+
+  depends_on = [
+    terraform_data.public_oauth_edge_readiness,
+    cloudflare_zero_trust_tunnel_cloudflared_config.codexia,
+  ]
 }
 
 # Scriptless exclusions win over the static catch-all, including query-string URLs.

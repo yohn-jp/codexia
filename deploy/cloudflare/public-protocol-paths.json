@@ -1,0 +1,92 @@
+{
+  "mcp": {
+    "name": "Codexia public MCP endpoint",
+    "path": "/mcp",
+    "tunnelPath": "^/mcp$"
+  },
+  "protected_resource_metadata": {
+    "name": "Codexia OAuth protected resource metadata",
+    "path": "/.well-known/oauth-protected-resource/api",
+    "tunnelPath": "^/\\.well-known/oauth-protected-resource/api$"
+  },
+  "authorization_server_metadata": {
+    "name": "Codexia OAuth authorization server metadata",
+    "path": "/.well-known/oauth-authorization-server/api/auth",
+    "tunnelPath": "^/\\.well-known/oauth-authorization-server/api/auth$"
+  },
+  "openid_configuration": {
+    "name": "Codexia OpenID configuration",
+    "path": "/.well-known/openid-configuration/api/auth",
+    "tunnelPath": "^/\\.well-known/openid-configuration/api/auth$"
+  },
+  "oauth_authorize": {
+    "name": "Codexia OAuth authorization endpoint",
+    "path": "/api/auth/oauth2/authorize",
+    "tunnelPath": "^/api/auth/oauth2/authorize$"
+  },
+  "oauth_token": {
+    "name": "Codexia OAuth token endpoint",
+    "path": "/api/auth/oauth2/token",
+    "tunnelPath": "^/api/auth/oauth2/token$"
+  },
+  "oauth_introspect": {
+    "name": "Codexia OAuth introspection endpoint",
+    "path": "/api/auth/oauth2/introspect",
+    "tunnelPath": "^/api/auth/oauth2/introspect$"
+  },
+  "oauth_revoke": {
+    "name": "Codexia OAuth revocation endpoint",
+    "path": "/api/auth/oauth2/revoke",
+    "tunnelPath": "^/api/auth/oauth2/revoke$"
+  },
+  "oauth_userinfo": {
+    "name": "Codexia OAuth userinfo endpoint",
+    "path": "/api/auth/oauth2/userinfo",
+    "tunnelPath": "^/api/auth/oauth2/userinfo$"
+  },
+  "oauth_consent": {
+    "name": "Codexia OAuth consent endpoint",
+    "path": "/api/auth/oauth2/consent",
+    "tunnelPath": "^/api/auth/oauth2/consent$"
+  },
+  "oauth_consent_context": {
+    "name": "Codexia OAuth consent context endpoint",
+    "path": "/api/auth/oauth2/consent-context",
+    "tunnelPath": "^/api/auth/oauth2/consent-context$"
+  },
+  "oauth_jwks": {
+    "name": "Codexia OAuth signing keys",
+    "path": "/api/auth/jwks",
+    "tunnelPath": "^/api/auth/jwks$"
+  },
+  "passkey_authentication_options": {
+    "name": "Codexia Passkey authentication options",
+    "path": "/api/auth/passkey/generate-authenticate-options",
+    "tunnelPath": "^/api/auth/passkey/generate-authenticate-options$"
+  },
+  "passkey_authentication_verify": {
+    "name": "Codexia Passkey authentication response",
+    "path": "/api/auth/passkey/verify-authentication",
+    "tunnelPath": "^/api/auth/passkey/verify-authentication$"
+  },
+  "oidc_sign_in": {
+    "name": "Codexia upstream OIDC sign-in",
+    "path": "/api/auth/sign-in/social",
+    "tunnelPath": "^/api/auth/sign-in/social$"
+  },
+  "oidc_callback": {
+    "name": "Codexia upstream OIDC callback",
+    "path": "/api/auth/callback/workspace-oidc",
+    "tunnelPath": "^/api/auth/callback/workspace-oidc$"
+  },
+  "sso_sign_in": {
+    "name": "Codexia owner-configured OIDC sign-in",
+    "path": "/api/auth/sign-in/sso",
+    "tunnelPath": "^/api/auth/sign-in/sso$"
+  },
+  "sso_callback": {
+    "name": "Codexia owner-configured OIDC callback",
+    "path": "/api/auth/sso/callback/codexia-owner-oidc",
+    "tunnelPath": "^/api/auth/sso/callback/codexia-owner-oidc$"
+  }
+}

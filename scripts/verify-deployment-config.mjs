@@ -11,6 +11,7 @@ const workerConfig = JSON.parse(await read('edge/frontend/wrangler.jsonc'));
 const edgePackage = JSON.parse(await read('edge/frontend/package.json'));
 const edgeLock = JSON.parse(await read('edge/frontend/package-lock.json'));
 const uiRoutes = JSON.parse(await read('deploy/cloudflare/ui-routes.json'));
+const publicProtocolPaths = JSON.parse(await read('deploy/cloudflare/public-protocol-paths.json'));
 const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs] = await Promise.all([
   read('edge/frontend/static/_headers'),
   read('edge/frontend/static/_redirects'),
@@ -29,6 +30,11 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('docs/deployment/IAC.md'),
   read('deploy/ansible/README.md'),
   read('docs/deployment/BACKUP.md'),
+]);
+const [terraformProviderLock, terraformWorkflow, terraformExample] = await Promise.all([
+  read('deploy/cloudflare/terraform/.terraform.lock.hcl'),
+  read('.github/workflows/deployment-config.yml'),
+  read('deploy/cloudflare/terraform/terraform.tfvars.example'),
 ]);
 
 assert.equal(workerConfig.name, 'codexia-frontend');
@@ -137,8 +143,11 @@ for (const probe of Object.values(identityProbes)) {
   assert.ok(!matcher.test(probe.path + '/other'));
 }
 assert.ok(uiRoutes.originRoutes.includes('/api*'));
+assert.ok(uiRoutes.originRoutes.includes('/mcp*'));
+assert.ok(uiRoutes.originRoutes.includes('/.well-known/*'));
 assert.ok(!uiRoutes.originRoutes.some(pattern => identityProbes.frontend.path.startsWith(pattern.replace(/\*$/u, ''))));
 assert.match(terraformMain, /identity-probes\.json/u);
+assert.match(terraformMain, /public-protocol-paths\.json/u);
 assert.match(terraformMain, /domain\s+=\s+"\$\{var\.app_hostname\}\$\{each\.value\.path\}"/u);
 const parentAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "codexia"')[1].split('resource "cloudflare_zero_trust_access_application" "identity_probe"')[0];
 assert.doesNotMatch(parentAccess, /access_ci_policy_id/u, 'CI Service Auth must never be attached to the author app');
@@ -150,6 +159,75 @@ assert.match(terraformMain, /path\s+=\s+probe\.tunnelPath/u);
 const ingress = terraformMain.split('ingress = concat(')[1].split('# Scriptless exclusions')[0];
 assert.match(ingress, /for key, probe in local\.identity_probes[\s\S]*?aud_tag = \[\s*cloudflare_zero_trust_access_application\.identity_probe\[key\]\.aud,\s*cloudflare_zero_trust_access_application\.codexia\.aud\s*\][\s\S]*?aud_tag\s+=\s+\[cloudflare_zero_trust_access_application\.codexia\.aud\][\s\S]*?http_status:404/u);
 assert.match(terraformVariables, /variable "access_ci_policy_id"/u);
+const publicEndpointPaths = Object.fromEntries(Object.entries(publicProtocolPaths).map(([key, endpoint]) => [key, endpoint.path]));
+assert.deepEqual(publicEndpointPaths, {
+  mcp: '/mcp',
+  protected_resource_metadata: '/.well-known/oauth-protected-resource/api',
+  authorization_server_metadata: '/.well-known/oauth-authorization-server/api/auth',
+  openid_configuration: '/.well-known/openid-configuration/api/auth',
+  oauth_authorize: '/api/auth/oauth2/authorize',
+  oauth_token: '/api/auth/oauth2/token',
+  oauth_introspect: '/api/auth/oauth2/introspect',
+  oauth_revoke: '/api/auth/oauth2/revoke',
+  oauth_userinfo: '/api/auth/oauth2/userinfo',
+  oauth_consent: '/api/auth/oauth2/consent',
+  oauth_consent_context: '/api/auth/oauth2/consent-context',
+  oauth_jwks: '/api/auth/jwks',
+  passkey_authentication_options: '/api/auth/passkey/generate-authenticate-options',
+  passkey_authentication_verify: '/api/auth/passkey/verify-authentication',
+  oidc_sign_in: '/api/auth/sign-in/social',
+  oidc_callback: '/api/auth/callback/workspace-oidc',
+  sso_sign_in: '/api/auth/sign-in/sso',
+  sso_callback: '/api/auth/sso/callback/codexia-owner-oidc',
+});
+for (const endpoint of Object.values(publicProtocolPaths)) {
+  assert.equal(typeof endpoint.name, 'string');
+  assert.ok(endpoint.name.startsWith('Codexia '));
+  if (endpoint.tunnelPath !== null) {
+    assert.equal(endpoint.tunnelPath.startsWith('^') && endpoint.tunnelPath.endsWith('$'), true,
+      `${endpoint.path} must be an exact Tunnel ingress match`);
+    const matcher = new RegExp(endpoint.tunnelPath, 'u');
+    assert.ok(matcher.test(endpoint.path), `${endpoint.path} must match its Tunnel rule`);
+    assert.ok(!matcher.test(endpoint.path + '/unexpected'), `${endpoint.path} must not admit nested routes`);
+  }
+}
+assert.ok(Object.values(publicProtocolPaths).every((endpoint) => endpoint.tunnelPath !== null),
+  'the public protocol app contains only API/Tunnel paths and leaves frontend routes under Access');
+assert.deepEqual(Object.values(publicProtocolPaths).filter((endpoint) => endpoint.path.startsWith('/api/auth/passkey/')).map((endpoint) => endpoint.path), [
+  '/api/auth/passkey/generate-authenticate-options',
+  '/api/auth/passkey/verify-authentication',
+], 'only unauthenticated Passkey sign-in endpoints may be exposed');
+assert.ok(!Object.values(publicProtocolPaths).some((endpoint) => /(?:registration|register|admin|provider|passkey\/(?:add|list|update|delete))/u.test(endpoint.path)),
+  'OAuth client registration, admin, provider management, and Passkey management stay behind the author boundary');
+assert.match(terraformVariables, /variable "public_oauth_edge_enabled"[\s\S]*?default\s+=\s+false/u,
+  'public protocol edge access must be disabled by default');
+assert.match(terraformVariables, /variable "passkey_oauth_runtime_ready"[\s\S]*?default\s+=\s+false/u,
+  'Better Auth runtime readiness must require explicit operator confirmation');
+assert.match(terraformExample, /^public_oauth_edge_enabled\s+=\s+false$/mu);
+assert.match(terraformExample, /^passkey_oauth_runtime_ready\s+=\s+false$/mu);
+assert.match(terraformProviderLock, /provider "registry\.terraform\.io\/cloudflare\/cloudflare"\s*\{\s*version\s+=\s+"5\.29\.0"/u,
+  'Cloudflare Terraform provider version must remain locked to the schema tested here');
+assert.match(terraformWorkflow, /terraform-provider-cloudflare\/releases\/assets\/737220880/u);
+assert.match(terraformWorkflow, /800cf3c99cb3a40132eb73295cea67b99b8133162e464de58775332854b41a41/u);
+assert.match(terraformWorkflow, /cloudflare\/cloudflare\/5\.29\.0\/linux_amd64/u,
+  'The official release-asset fallback must match the locked provider version');
+assert.doesNotMatch(terraformWorkflow, /5\.24\.0|528010301/u);
+assert.match(terraformMain, /resource "terraform_data" "public_oauth_edge_readiness"[\s\S]*?precondition[\s\S]*?condition\s+=\s+var\.passkey_oauth_runtime_ready/u);
+const publicAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "public_protocol"')[1];
+assert.match(publicAccess, /for_each\s+=\s+local\.public_access_paths/u);
+assert.match(publicAccess, /domain\s+=\s+"\$\{var\.app_hostname\}\$\{each\.value\.path\}"/u);
+assert.match(publicAccess, /decision\s+=\s+"bypass"/u);
+assert.match(publicAccess, /everyone\s*=\s*\{\}/u);
+assert.match(publicAccess, /app_launcher_visible\s+=\s+false/u);
+assert.match(publicAccess, /cloudflare_zero_trust_tunnel_cloudflared_config\.codexia/u,
+  'Access path bypass is applied only after exact Tunnel routing is staged');
+const publicIngress = terraformMain.split('for _, endpoint in local.public_tunnel_paths')[1].split('for key, probe in local.identity_probes')[0];
+assert.match(publicIngress, /path\s+=\s+endpoint\.tunnelPath/u);
+assert.doesNotMatch(publicIngress, /access\s*=/u, 'public protocol ingress must not require an Access JWT at the origin');
+assert.match(ingress, /access\s*=\s*\{\s*required\s+=\s+true/u,
+  'identity probes and the catch-all must keep Tunnel Access JWT validation');
+assert.match(terraformMain, /resource "cloudflare_zero_trust_access_application" "public_protocol"[\s\S]*?cloudflare_zero_trust_tunnel_cloudflared_config\.codexia/u,
+  'Tunnel Access validation is staged before removing public protocol app Bypass on rollback');
 const release = await read('.github/workflows/frontend-release.yml');
 const preflight = await read('.github/workflows/production-preflight.yml');
 assert.match(release, /needs: \[source, preflight, build\]/u);
