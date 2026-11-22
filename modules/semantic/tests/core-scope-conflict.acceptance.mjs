@@ -12,7 +12,6 @@ const ownerPath = "bible/characters/owner/profile.yaml";
 const plotPath = "plot/volumes/v/chapters/c/scenes/extra.yaml";
 const dismissalPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
 const files = {
-  "meta/project.yaml": "id: semantic-scope-fixture\ntitle: Semantic scope fixture\n",
   [ownerPath]: "id: char-owner\ntype: character\nname: Owner\naliases: [Owner]\n",
   "bible/characters/thief/profile.yaml": "id: char-thief\ntype: character\nname: Thief\naliases: [Thief]\n",
   "plot/volumes/v/volume.yaml": "id: vol-v\ntype: volume\norder: 0\n",
