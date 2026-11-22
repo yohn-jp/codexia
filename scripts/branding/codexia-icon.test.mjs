@@ -14,7 +14,7 @@ for (const [size, expectedBox] of [[16,'16'],[20,'16'],[24,'24'],[32,'32'],[48,'
     const out = renderIcon({size,accessible:false});
     assert.match(out,new RegExp('width="'+size+'" height="'+size+'" viewBox="0 0 '+expectedBox+' '+expectedBox+'"'));
     assert.ok(!/<(?:image|foreignObject|script)\b/i.test(out));
-    assert.ok(!/https?:\/\/(?!www\.w3\.org\/2000\/svg)/i.test(out));
+    assert.ok(!/(?:^|[\s"'=])https?:\/\/(?!www\.w3\.org\/2000\/svg(?:[\s"'<>]|$))[^\s"'<>]+/i.test(out));
   });
 }
 
