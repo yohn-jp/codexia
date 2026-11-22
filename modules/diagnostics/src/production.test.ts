@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import YAML from "yaml";
 import type { ChangeOperation, ChangeProposal, NativeStoryDocument, SnapshotId } from "@codexia/contracts";
-import { ModuleRuntime } from "@codexia/module-runtime";
+import { ModuleRuntime, type ActionHostContext } from "@codexia/module-runtime";
 import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
 import { evaluateLintRules } from "./linter/rulesEvaluator.js";
@@ -21,7 +21,6 @@ const initialFiles = new Map<string, { content: string; revision: string; docume
   ["manuscript/v1/scene-1.md", { content: "---\ntitle: 遺跡\n---\n「……」\n星野は古い遺跡へ走った。黒い霧が道を塞ぐ。\n", revision: "manuscript-r1" }],
   ["meta/scriptorium/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
   ["meta/scriptorium/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
-  ["meta/scriptorium/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
 ]);
 
 async function createRuntime(files: Map<string, { content: string; revision: string; documentKind?: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
@@ -335,6 +334,25 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
   files.set("manuscript/v1/scene-2.md", { content: "---\ntitle: 帰路\n---\n前日、旅人は遺物を手にした。", revision: "manuscript-2-r1" });
   const proposals: ChangeProposal[] = [];
   const { runtime, host } = await createRuntime(files, proposals);
+  const consentHost: ActionHostContext = {
+    ...host,
+    access: "owner",
+    caller: "author",
+    async readOwnModuleRecord(scope, key) {
+      assert.equal(scope.moduleId, "nlp");
+      assert.equal(key, "feature-settings");
+      assert.deepEqual(scope.snapshot, snapshot);
+      return { version: 4, value: { externalEnabled: { "setting-qa": false } } };
+    },
+    async proposeOwnModuleRecord(scope, request) {
+      assert.equal(scope.caller, "author");
+      assert.equal(scope.effect, "propose");
+      assert.equal(request.key, "feature-settings");
+      assert.equal(request.expectedVersion, 4);
+      assert.deepEqual(request.value, { externalEnabled: { "setting-qa": true } });
+      return { id: "proposed-consent", projectId: snapshot.projectId };
+    },
+  };
   try {
     const dictionary = await runtime.invokeAction("nlp", "nlp.dictionary", { term: "強い" }, host);
     assert.equal(dictionary.ok, true, JSON.stringify(dictionary));
@@ -355,7 +373,7 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /既存語/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /新候補/u);
 
-    const features = await runtime.invokeAction("nlp", "nlp.features", {}, host);
+    const features = await runtime.invokeAction("nlp", "nlp.features", {}, consentHost);
     assert.equal(features.ok, true, JSON.stringify(features));
     if (features.ok) {
       const featureData = features.data as { features: Array<{ id: string; locality: "local" | "external"; enabled: boolean }>; settings: { externalEnabled: Record<string, boolean> } };
@@ -377,11 +395,11 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     assert.ok(operation.writes[0].content?.startsWith("---\ntitle: 遺跡\n---\n"));
     assert.equal(files.get("manuscript/v1/scene-1.md")?.content, initialFiles.get("manuscript/v1/scene-1.md")?.content);
 
-    const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, host);
+    const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, consentHost);
     assert.equal(consent.ok, true, JSON.stringify(consent));
-    assert.equal(proposals.length, 4);
-    assert.equal(proposals[3].operations[0].writes[0].path, "meta/scriptorium/modules/nlp/feature-settings.json");
-    const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, host);
+    assert.deepEqual((consent.data as { changeSet: unknown }).changeSet, { id: "proposed-consent", projectId: snapshot.projectId });
+    assert.equal(proposals.length, 3, "consent does not add a file proposal");
+    const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, consentHost);
     assert.equal(consentBeforeApproval.ok, true, JSON.stringify(consentBeforeApproval));
     if (consentBeforeApproval.ok) {
       const feature = (consentBeforeApproval.data as { features: Array<{ id: string; enabled: boolean }> }).features.find((item) => item.id === "setting-qa");
