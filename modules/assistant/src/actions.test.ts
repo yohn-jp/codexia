@@ -884,6 +884,10 @@ test("manuscript and sandbox Zukan suggestions are grounded before Story receive
     JSON.stringify({ suggestions: [{ kind: "fact", targetEntityId: "char-zukan", blockPath: "lead.0", proposedText: "透明な魔法の杖を持つ。", evidenceQuote: "好きな紅茶を飲む。", confidence: "high" }] }),
     JSON.stringify({ suggestions: [{ kind: "habit", targetEntityId: "char-zukan", blockPath: "lead.0", proposedText: "好きな紅茶を飲む。", evidenceQuote: "好きな紅茶を飲む。", confidence: "high" }] }),
   ];
+  const manuscriptOutputs = [
+    JSON.stringify({ blockPath: "lead.0", proposedText: "未知の魔法の杖を持つ。", evidence: [{ sceneId: "sc-zukan", quote: "アリスは赤い剣を拾った。" }] }),
+    JSON.stringify({ blockPath: "lead.0", proposedText: "赤い剣を拾った。", evidence: [{ sceneId: "sc-zukan", quote: "アリスは赤い剣を拾った。" }] }),
+  ];
   const server = createServer((request, response) => {
     const requestChunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => requestChunks.push(chunk));
@@ -892,7 +896,7 @@ test("manuscript and sandbox Zukan suggestions are grounded before Story receive
       const prompt = typeof body.prompt === "string" ? body.prompt : JSON.stringify(body.messages ?? body);
       const content = prompt.includes("sketchId (sourceSessionId):")
         ? sandboxOutputs.shift()
-        : JSON.stringify({ blockPath: "lead.0", proposedText: "未知の魔法の杖を持つ。", evidence: [{ sceneId: "sc-zukan", quote: "アリスは赤い剣を拾った。" }] });
+        : manuscriptOutputs.shift();
       assert.ok(content, "one local model response is expected per action");
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "keep-alive" });
       const chunk = {
@@ -932,11 +936,14 @@ test("manuscript and sandbox Zukan suggestions are grounded before Story receive
   const nestedCreates: Record<string, unknown>[] = [];
   const childProposal: ChangeProposal = { id: "story-zukan-proposal", snapshot, operations: [], source: "module" };
   const action = getAction(createAssistantActions(moduleContext(usageStore)), "assistant.zukan.suggestions");
-  const makeContext = () => context({
+  const makeContext = (searchSnapshot = snapshot) => context({
     files,
     async invoke(actionId, input) {
       if (actionId === "nlp.features") return { ok: true, snapshot, data: { features: [{ id: "zukan-proposal", locality: "external", enabled: true }] } };
-      if (actionId === "semantic.search") return { ok: true, snapshot, data: { results: [{ sceneId: "sc-zukan", snippet: "アリスは赤い剣を拾った。" }] } };
+      if (actionId === "semantic.search") return { ok: true, snapshot, data: { results: [
+        { sceneId: "char-zukan", entityId: "char-zukan", type: "character", filePath: "bible/characters/char-zukan/profile.yaml", snippet: "アリス" },
+        { sceneId: "ms-vol-main-ch-zukan-sc-zukan", entityId: "ms-vol-main-ch-zukan-sc-zukan", type: "manuscript", filePath: "manuscript/vol-main/ch-zukan/sc-zukan.md", snippet: "アリスは赤い剣を拾った。" },
+      ] }, ...(searchSnapshot === snapshot ? {} : { snapshot: searchSnapshot }) };
       if (actionId === "story.zukan-suggestions.create") {
         nestedCreates.push(input as Record<string, unknown>);
         return { ok: true, snapshot, data: { suggestion: { id: `suggestion-${nestedCreates.length}` }, created: true, staledPendingCount: 0 }, proposals: [childProposal] };
@@ -951,20 +958,37 @@ test("manuscript and sandbox Zukan suggestions are grounded before Story receive
     if (!manuscript.ok) assert.equal(manuscript.error.code, "assistant_output_ungrounded");
     assert.equal(nestedCreates.length, 0, "ungrounded manuscript text must never reach Story");
 
+    const groundedManuscript = await action.invoke({ entityId: "char-zukan", source: "manuscript" }, makeContext());
+    assert.equal(groundedManuscript.ok, true);
+    if (groundedManuscript.ok) {
+      const data = groundedManuscript.data as Record<string, unknown>;
+      assert.deepEqual(data.citations, [{
+        path: "manuscript/vol-main/ch-zukan/sc-zukan.md", revision, quote: "アリスは赤い剣を拾った。",
+        sceneId: "sc-zukan", label: "Zukan evidence",
+      }]);
+    }
+    assert.equal(nestedCreates.length, 1, "only a grounded source reaches Story");
+    assert.deepEqual(nestedCreates[0]?.evidence, [{ sceneId: "sc-zukan", quote: "アリスは赤い剣を拾った。" }]);
+
+    const staleSearch = await action.invoke({ entityId: "char-zukan", source: "manuscript" }, makeContext({ ...snapshot, projectVersion: snapshot.projectVersion + 1 }));
+    assert.equal(staleSearch.ok, false);
+    if (!staleSearch.ok) assert.equal(staleSearch.error.code, "stale_source");
+    assert.equal(usageEvents.length, 2, "stale Semantic results must be rejected before model usage or proposal creation");
+
     const sandbox = await action.invoke({ source: "sandbox", sourceSessionId: "ds-zukan", turnRange: { start: 0, end: 0 } }, makeContext());
     assert.equal(sandbox.ok, true);
     if (sandbox.ok) assert.equal((sandbox.data as Record<string, unknown>).createdCount, 0);
-    assert.equal(nestedCreates.length, 0, "ungrounded sandbox text must never reach Story");
+    assert.equal(nestedCreates.length, 1, "ungrounded sandbox text must never reach Story");
 
     const accepted = await action.invoke({ source: "sandbox", sourceSessionId: "ds-zukan", turnRange: { start: 0, end: 0 } }, makeContext());
     assert.equal(accepted.ok, true);
-    assert.equal(nestedCreates.length, 1);
-    assert.deepEqual(nestedCreates[0], {
+    assert.equal(nestedCreates.length, 2);
+    assert.deepEqual(nestedCreates[1], {
       entityId: "char-zukan", proposedText: "好きな紅茶を飲む。", evidence: [{ quote: "好きな紅茶を飲む。" }],
       source: "sandbox", sourceSessionId: "ds-zukan", sourceTurnRange: { start: 0, end: 0 },
       blockPath: "lead.0", kind: "habit", confidence: "high",
     });
-    assert.equal(usageEvents.length, 3, "each completed model call is recorded in durable host usage history");
+    assert.equal(usageEvents.length, 4, "each completed model call is recorded in durable host usage history");
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
