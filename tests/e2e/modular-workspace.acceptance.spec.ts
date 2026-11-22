@@ -806,13 +806,58 @@ test("desktop preset sizing updates the live split without replacing the editor 
   const savedEditorShare = await editorShare();
 
   const layoutMenu = workspace.locator(".st-workspace-move-menu");
-  const editorPanelTop = await editorPanel.evaluate((element) => element.getBoundingClientRect().top);
-  await layoutMenu.locator("summary").click();
+  const layoutSummary = layoutMenu.locator("summary");
+  const closedEditorPanelTop = await editorPanel.evaluate((element) => element.getBoundingClientRect().top);
+  await layoutSummary.click();
   await expect(layoutMenu.locator(".st-workspace-move-controls")).toBeVisible();
-  expect(await editorPanel.evaluate((element) => element.getBoundingClientRect().top)).toBe(editorPanelTop);
-  await layoutMenu.locator("summary").click();
+  const openGeometry = await page.evaluate(() => {
+    const controls = document.querySelector<HTMLElement>(".st-workspace-move-controls");
+    const editor = document.querySelector<HTMLElement>('[data-workspace-panel="editor"]');
+    if (!controls || !editor) throw new Error("Workspace controls or editor panel are missing");
+    return { controlsBottom: controls.getBoundingClientRect().bottom, editorTop: editor.getBoundingClientRect().top };
+  });
+  expect(openGeometry.editorTop).toBeGreaterThan(closedEditorPanelTop);
+  expect(openGeometry.controlsBottom).toBeLessThanOrEqual(openGeometry.editorTop);
 
-  await toolbar.getByRole("button", { name: "調査", exact: true }).click();
+  const saveStatus = editorPanel.locator(".pg-save-state");
+  await expect(saveStatus).toHaveAttribute("open", "");
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus).not.toHaveAttribute("open", "");
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus.locator(".pg-save-state-detail")).toBeVisible();
+  await saveStatus.locator("summary").click();
+  await expect(saveStatus.locator(".pg-save-state-detail")).not.toBeVisible();
+  await layoutSummary.click();
+  await expect.poll(() => editorPanel.evaluate((element) => element.getBoundingClientRect().top)).toBe(closedEditorPanelTop);
+
+  const writingPreset = toolbar.getByRole("button", { name: "執筆", exact: true });
+  const researchPreset = toolbar.getByRole("button", { name: "調査", exact: true });
+  await writingPreset.focus();
+  await page.keyboard.press("Tab");
+  await expect(researchPreset).toBeFocused();
+  const focusGeometry = await researchPreset.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const workspaceBounds = element.closest<HTMLElement>(".st-workspace")?.getBoundingClientRect();
+    if (!workspaceBounds) throw new Error("Workspace clipping bounds are missing");
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    return {
+      visible: element.matches(":focus-visible"),
+      outlineStyle: style.outlineStyle,
+      outlineWidth,
+      outlineOffset,
+      outlineTop: bounds.top - outlineWidth - outlineOffset,
+      workspaceTop: workspaceBounds.top,
+    };
+  });
+  expect(focusGeometry.visible).toBe(true);
+  expect(focusGeometry.outlineStyle).toBe("solid");
+  expect(focusGeometry.outlineWidth).toBe(3);
+  expect(focusGeometry.outlineOffset).toBe(2);
+  expect(focusGeometry.outlineTop).toBeGreaterThanOrEqual(focusGeometry.workspaceTop);
+
+  await researchPreset.click();
   await expect(workspace).toHaveAttribute("data-preset", "research");
   await expect(workspace.locator('[data-workspace-panel="inspector"]')).toBeVisible();
   await expect.poll(editorShare).toBeGreaterThan(0.6);
