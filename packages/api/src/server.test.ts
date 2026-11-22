@@ -329,7 +329,7 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
     actions: [{
       id: "analyze", effect: "compute", inputSchema: schema, outputSchema: schema,
       async invoke(_input, context): Promise<ActionResult> {
-        const nested = await context.invoke("core.hierarchy.create", { kind: "volume", id: "blocked", title: "Blocked" });
+        const nested = await context.invoke("core.hierarchy.create", { kind: "volume", id: "blocked", title: "Blocked", idempotencyKey: "blocked-action" });
         return { ok: true, snapshot: context.reader.snapshot, data: { nested } };
       },
     }],
@@ -4169,7 +4169,7 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   assert.equal(appliedResult.data.changeSet.status, "applied");
 });
 
-it("replays Core hierarchy creation and native deletion through authenticated PostgreSQL HTTP", async (t) => {
+it("replays native hierarchy creation and deletion through authenticated PostgreSQL HTTP", async (t) => {
   const native = await nativeProject(t, "Core proposal action replay");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
@@ -4185,83 +4185,57 @@ it("replays Core hierarchy creation and native deletion through authenticated Po
   }));
 
   const headers = client.ownerHeaders();
-  const invoke = async <Data = unknown>(actionId: string, input: unknown, snapshot: SnapshotId, credentials = headers): Promise<ActionResult<Data>> => {
+  const invoke = async <Data = unknown>(actionId: string, input: unknown, snapshot?: SnapshotId, credentials = headers): Promise<ActionResult<Data>> => {
     const response = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${actionId}`, {
       method: "POST", headers: credentials, body: JSON.stringify({ input, snapshot }),
     });
     assert.equal(response.status, 200);
     return await response.json() as ActionResult<Data>;
   };
-  const concurrentInput = { kind: "volume", id: "parallel-volume", title: "Parallel volume", proposalId: randomUUID() };
-  const concurrentSnapshot = (await native.store.observe(projectId)).snapshot;
-  const originalGetProposal = native.store.getProposal.bind(native.store);
-  let proposalLookups = 0;
-  let releaseProposalLookups!: () => void;
-  const bothProposalLookups = new Promise<void>((resolveLookups) => { releaseProposalLookups = resolveLookups; });
-  native.store.getProposal = async (selectedProjectId, proposalId) => {
-    const existing = await originalGetProposal(selectedProjectId, proposalId);
-    if (proposalId === concurrentInput.proposalId) {
-      proposalLookups += 1;
-      if (proposalLookups === 2) releaseProposalLookups();
-      await bothProposalLookups;
-    }
-    return existing;
-  };
-  let concurrentResults: ActionResult[];
-  try {
-    concurrentResults = await Promise.all([
-      invoke("core.hierarchy.create", concurrentInput, concurrentSnapshot),
-      invoke("core.hierarchy.create", concurrentInput, concurrentSnapshot),
-    ]);
-  } finally {
-    native.store.getProposal = originalGetProposal;
-  }
-  assert.ok(concurrentResults[0]?.ok && concurrentResults[1]?.ok, JSON.stringify(concurrentResults));
-  assert.deepEqual(concurrentResults[1], concurrentResults[0], "overlapping first POSTs return the same proposal");
-  const proposalOf = (result: ActionResult): ChangeProposal => {
-    if (!result.ok) throw new Error(`Expected proposal action success, received ${JSON.stringify(result.error)}`);
-    return (result.data as { proposal: ChangeProposal }).proposal;
-  };
-  const approveApplyAndReplay = async (actionId: string, input: Record<string, unknown>, snapshot: SnapshotId, result: ActionResult) => {
-    const proposal = proposalOf(result);
-    assert.equal(proposal.operations.length, 1);
-    const operation = proposal.operations[0]!;
-    const approval = await fetch(`${apiServer.base}/api/projects/${projectId}/approvals`, {
-      method: "POST", headers, body: JSON.stringify({ proposalId: proposal.id, operationIds: [operation.id] }),
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const postDecision = (id: string, decision: "approve" | "apply", expectedVersion: number, credentials = headers) =>
+    fetch(`${apiServer.base}${nativePath}/changesets/${id}/${decision}`, {
+      method: "POST", headers: credentials, body: JSON.stringify({ expectedVersion }),
     });
-    assert.equal(approval.status, 204, await approval.text());
-    const applyOperation = async () => {
-      const response = await fetch(`${apiServer.base}/api/projects/${projectId}/apply`, {
-        method: "POST", headers, body: JSON.stringify(operation),
-      });
-      const body = await response.text();
-      assert.equal(response.status, 201, body);
-      return JSON.parse(body) as { operationId: string; generation: number; projectVersion: number; revisions: unknown[] };
-    };
-    const receipt = await applyOperation();
-    assert.equal(receipt.operationId, operation.id);
-    assert.deepEqual(await applyOperation(), receipt, "a repeated apply returns the original receipt");
-    assert.deepEqual(await invoke(actionId, input, snapshot), result, "the original action response remains replayable after apply");
+  const apply = async (id: string, version: number) => {
+    const response = await postDecision(id, "apply", version);
+    assert.equal(response.status, 200);
+    return await response.json() as ChangeSetApplicationResult;
   };
-
-  const createSnapshot = (await native.store.observe(projectId)).snapshot;
-  assert.ok(createSnapshot.projectVersion > 1);
-  const createInput = { kind: "volume", id: "retry-volume", title: "Retry volume", proposalId: randomUUID() };
-  const created = await invoke("core.hierarchy.create", createInput, createSnapshot);
-  const originalProposal = proposalOf(created);
-  const repeatedCreate = await invoke("core.hierarchy.create", createInput, createSnapshot);
-  assert.deepEqual(repeatedCreate, created, "the same create input returns the original proposal and operation ID");
-  assert.deepEqual(proposalOf(repeatedCreate), originalProposal);
-
-  const changedCreate = await invoke("core.hierarchy.create", { ...createInput, title: "Different title" }, createSnapshot);
-  assert.equal(changedCreate.ok, false);
-  if (!changedCreate.ok) assert.equal(changedCreate.error.code, "proposal_identity_conflict");
-  const staleCreate = await invoke("core.hierarchy.create", createInput, staleSnapshot);
-  assert.equal(staleCreate.ok, false);
-  if (!staleCreate.ok) assert.equal(staleCreate.error.code, "proposal_identity_conflict");
-  await approveApplyAndReplay("core.hierarchy.create", createInput, createSnapshot, created);
 
   const readDocuments = () => native.persistence.read(reader => reader.listDocuments(projectId));
+  const createAction = "core.hierarchy.create";
+  const createSnapshot = (await native.store.observe(projectId)).snapshot;
+  const createInput = { kind: "volume", id: "retry-volume", title: "Retry volume", idempotencyKey: randomUUID() };
+  const proposeCreation = (input = createInput, snapshot?: SnapshotId) => invoke<ChangeSetResult>(createAction, input, snapshot);
+  const legacyCreate = await invoke(createAction, { ...createInput, proposalId: randomUUID() }, createSnapshot);
+  assert.ok(!legacyCreate.ok && legacyCreate.error.code === "invalid_action_input", JSON.stringify(legacyCreate));
+  const staleCreate = await proposeCreation(createInput, staleSnapshot);
+  assert.ok(!staleCreate.ok && staleCreate.error.code === "conflict", JSON.stringify(staleCreate));
+  const [creation, concurrent] = await Promise.all([
+    proposeCreation(createInput, createSnapshot),
+    proposeCreation(createInput, createSnapshot),
+  ]);
+  assert.ok(creation.ok && concurrent.ok, JSON.stringify({ creation, concurrent }));
+  assert.deepEqual(creation.snapshot, createSnapshot);
+  assert.deepEqual(concurrent.data.changeSet, creation.data.changeSet);
+  assert.deepEqual([creation.data.replayed, concurrent.data.replayed].sort(), [false, true]);
+  const createSet = creation.data.changeSet;
+  assert.equal(createSet.status, "proposed");
+  assert.deepEqual(createSet.operations.map(operation => operation.type), ["document.create"]);
+
+  const changedCreate = await proposeCreation({ ...createInput, title: "Different title" }, createSnapshot);
+  assert.ok(!changedCreate.ok && changedCreate.error.code === "idempotency_conflict", JSON.stringify(changedCreate));
+  assert.equal((await postDecision(createSet.id, "apply", createSet.version)).status, 409);
+  assert.equal((await postDecision(createSet.id, "approve", createSet.version)).status, 200);
+  assert.ok(!(await readDocuments()).some(document => document.title === createInput.title));
+  const createdReceipt = await apply(createSet.id, createSet.version + 1);
+  assert.equal(createdReceipt.changeSet.status, "applied");
+  assert.deepEqual(await apply(createSet.id, createSet.version + 1), { ...createdReceipt, replayed: true });
+  const repinnedCreate = await proposeCreation();
+  assert.ok(repinnedCreate.ok && repinnedCreate.data.replayed, JSON.stringify(repinnedCreate));
+  assert.notDeepEqual(repinnedCreate.snapshot, createSnapshot);
+  assert.deepEqual(repinnedCreate.data.changeSet, createdReceipt.changeSet);
   const committed = (await readDocuments()).find(document => document.title === createInput.title);
   assert.ok(committed, "the newly created volume must exist before testing deletion");
   const deleteSnapshot = (await native.store.observe(projectId)).snapshot;
@@ -4289,31 +4263,19 @@ it("replays Core hierarchy creation and native deletion through authenticated Po
   assert.ok(retry.ok && retry.data.replayed);
   assert.deepEqual(retry.data.changeSet, changeSet);
 
-  const nativePath = `/api/v1/persistence/projects/${projectId}`;
   const review = await fetch(apiServer.base + nativePath + "/review-feed", { headers });
   assert.equal(review.status, 200);
   const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
   assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
-  const postDecision = (decision: "approve" | "apply", expectedVersion: number, credentials = headers) => {
-    const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
-    return fetch(`${apiServer.base}${changeSetPath}/${decision}`, {
-      method: "POST", headers: credentials, body: JSON.stringify({ expectedVersion }),
-    });
-  };
-  assert.equal((await postDecision("approve", changeSet.version, external)).status, 403);
-  assert.equal((await postDecision("apply", changeSet.version)).status, 409);
-  const approval = await postDecision("approve", changeSet.version);
+  assert.equal((await postDecision(changeSet.id, "approve", changeSet.version, external)).status, 403);
+  assert.equal((await postDecision(changeSet.id, "apply", changeSet.version)).status, 409);
+  const approval = await postDecision(changeSet.id, "approve", changeSet.version);
   assert.equal(approval.status, 200, await approval.text());
   assert.ok((await readDocuments()).some(document => document.id === committed.id));
-  const apply = async () => {
-    const response = await postDecision("apply", changeSet.version + 1);
-    assert.equal(response.status, 200);
-    return await response.json() as ChangeSetApplicationResult;
-  };
-  const receipt = await apply();
+  const receipt = await apply(changeSet.id, changeSet.version + 1);
   assert.equal(receipt.changeSet.status, "applied");
   assert.ok(!(await readDocuments()).some(document => document.id === committed.id));
-  assert.deepEqual(await apply(), { ...receipt, replayed: true });
+  assert.deepEqual(await apply(changeSet.id, changeSet.version + 1), { ...receipt, replayed: true });
   const afterApply = await proposeDeletion();
   assert.ok(afterApply.ok && afterApply.data.replayed);
   assert.deepEqual(afterApply.data.changeSet, receipt.changeSet);

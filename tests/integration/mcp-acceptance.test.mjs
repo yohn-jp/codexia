@@ -917,10 +917,12 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
   const proposal = success(await stdio.client.callTool({
     name: "invoke_action",
     arguments: { project_id: projectId, action_id: "core.hierarchy.create", input: {
-      kind: "volume", id: "mcp-proposed-volume", title: "Proposed volume", proposalId: "mcp-admission-proposal",
+      kind: "volume", id: "mcp-proposed-volume", title: "Proposed volume", idempotencyKey: "mcp-admission-proposal",
     } },
   }), "MCP Core proposal");
-  assert.equal(proposal.data.proposal.source, "mcp");
+  assert.equal(proposal.data.changeSet.status, "proposed");
+  assert.equal(proposal.data.changeSet.provenance.details.origin, "external-agent");
+  assert.deepEqual(proposal.data.changeSet.operations.map(({ type }) => type), ["document.create"]);
   assert.equal(providerProbe.callCount(), 0, "MCP dispatch and direct bearer paths must not call the configured model provider");
   const usage = await ownerAction(host, projectId, "assistant.usage.read", { limit: 200 });
   assert.deepEqual(usage.data.events, [], "denied Assistant requests must not create provider usage records");

@@ -6,7 +6,7 @@ import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
 import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -62,30 +62,6 @@ const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_FILES = 1000;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
-const CORE_ACTION_OPERATION_ID_PREFIX = "core_action_v1_";
-
-function coreActionOperationId(
-  projectId: string,
-  actionId: string,
-  snapshot: SnapshotId,
-  proposalId: string,
-  input: unknown,
-): string {
-  const identity = JSON.stringify({
-    version: 1,
-    projectId,
-    actionId,
-    projectVersion: snapshot.projectVersion,
-    proposalId,
-    input,
-  });
-  if (identity === undefined) throw new Error("Core action input must be JSON serializable");
-  return CORE_ACTION_OPERATION_ID_PREFIX + createHash("sha256").update(identity, "utf8").digest("hex");
-}
-
-function isCoreActionOperationId(operationId: string): boolean {
-  return /^core_action_v1_[0-9a-f]{64}$/u.test(operationId);
-}
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const MAX_SCRATCH_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const API_DRAIN_TIMEOUT_MS = 5_000;
@@ -847,23 +823,21 @@ export function createServer(options: ApiServerOptions): Server {
       if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be an integer from 1 to 100");
       return { query: value.query, limit };
     } };
-    const optionalProposalId = (value: Record<string, unknown>): string | undefined => {
-      if (value.proposalId === undefined) return undefined;
-      if (typeof value.proposalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(value.proposalId)) throw new Error("proposalId must contain 1 to 128 letters, numbers, underscores, or hyphens");
-      return value.proposalId;
-    };
     const hierarchyCreateInput: ValueSchema = { parse(value: unknown) {
       if (!isRecord(value) || typeof value.kind !== "string" || !["volume", "chapter", "scene"].includes(value.kind) ||
           typeof value.id !== "string" || typeof value.title !== "string") throw new Error("kind, id, and title are required for hierarchy creation");
-      const proposalId = optionalProposalId(value);
-      if (value.kind === "volume") return { kind: value.kind, id: value.id, title: value.title, ...(proposalId ? { proposalId } : {}) };
+      const { idempotencyKey } = value;
+      if ("proposalId" in value || typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200) {
+        throw new Error("A native hierarchy creation requires an idempotencyKey of 1 to 200 characters");
+      }
+      if (value.kind === "volume") return { kind: value.kind, id: value.id, title: value.title, idempotencyKey };
       if (typeof value.volumeId !== "string") throw new Error("volumeId is required for chapter or scene creation");
-      if (value.kind === "chapter") return { kind: value.kind, id: value.id, title: value.title, volumeId: value.volumeId, ...(proposalId ? { proposalId } : {}) };
+      if (value.kind === "chapter") return { kind: value.kind, id: value.id, title: value.title, volumeId: value.volumeId, idempotencyKey };
       if (typeof value.chapterId !== "string" || (value.manuscriptBody !== undefined && typeof value.manuscriptBody !== "string")) {
         throw new Error("chapterId and an optional string manuscriptBody are required for scene creation");
       }
       return { kind: value.kind, id: value.id, title: value.title, volumeId: value.volumeId, chapterId: value.chapterId,
-        ...(typeof value.manuscriptBody === "string" ? { manuscriptBody: value.manuscriptBody } : {}), ...(proposalId ? { proposalId } : {}) };
+        ...(typeof value.manuscriptBody === "string" ? { manuscriptBody: value.manuscriptBody } : {}), idempotencyKey };
     } };
     const hierarchyDeleteInput: ValueSchema = { parse(value: unknown) {
       if (!isRecord(value) || !isRecord(value.target) || typeof value.target.kind !== "string" ||
@@ -941,55 +915,6 @@ export function createServer(options: ApiServerOptions): Server {
         }
       },
     });
-    const makeProposal = (
-      id: string,
-      inputSchema: ValueSchema,
-      build: (context: ModuleActionContext, input: unknown, existingProposal: ChangeProposal | null) => Promise<{ snapshot: SnapshotId; operation: ChangeOperation }>,
-    ): ModuleAction => ({
-      id,
-      effect: "propose",
-      inputSchema,
-      outputSchema: jsonSchema,
-      async invoke(input, context) {
-        const failAction = (code: string, message: string, retryable = false): ActionResult => ({
-          ok: false, snapshot: context.reader.snapshot, error: { code, message: message.slice(0, 512), retryable },
-        });
-        try {
-          if (context.signal.aborted) return failAction("action_cancelled", "Action was cancelled");
-          const proposalId = isRecord(input) && typeof input.proposalId === "string" ? input.proposalId : undefined;
-          const existing = proposalId && coreStore.getProposal
-            ? await coreStore.getProposal(projectId, proposalId)
-            : null;
-          if (existing && existing.proposal.id !== proposalId) {
-            return failAction("proposal_identity_invalid", "Core returned a mismatched proposal identity");
-          }
-          const built = await build(context, input, existing?.proposal ?? null);
-          if (context.signal.aborted) return failAction("action_cancelled", "Action was cancelled");
-          if (snapshotKey(built.snapshot) !== snapshotKey(context.reader.snapshot)) {
-            return failAction("snapshot_changed", "The proposed operation was built from a different snapshot", true);
-          }
-          const operationId = proposalId
-            ? coreActionOperationId(projectId, id, built.snapshot, proposalId, input)
-            : built.operation.id;
-          const existingOperationId = existing?.proposal.operations.length === 1
-            ? existing.proposal.operations[0]!.id
-            : undefined;
-          const operation = {
-            ...built.operation,
-            id: existingOperationId && !isCoreActionOperationId(existingOperationId) ? existingOperationId : operationId,
-          };
-          const proposal = await context.propose([operation], undefined, proposalId);
-          return { ok: true, snapshot: context.reader.snapshot, data: { proposal } };
-        } catch (error) {
-          const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown; status?: unknown };
-          return failAction(
-            typeof candidate?.code === "string" ? candidate.code : "core_proposal_failed",
-            typeof candidate?.message === "string" ? candidate.message : "Core could not build the requested proposal",
-            candidate?.retryable === true || candidate?.status === 502,
-          );
-        }
-      },
-    });
     const nativeCoreProposal = <Input>(
       id: string,
       inputSchema: ValueSchema,
@@ -1032,6 +957,10 @@ export function createServer(options: ApiServerOptions): Server {
       },
     });
     const nativeProposals = resolveNativeProposalActor === undefined ? [] : [
+      nativeCoreProposal<CreateHierarchyInput>("core.hierarchy.create", hierarchyCreateInput,
+        (input, { snapshot, ...options }) => coreStore.proposeHierarchyCreate(projectId, input, {
+          ...options, projectVersion: snapshot.projectVersion,
+        }), resolveNativeProposalActor),
       nativeCoreProposal<{ target: HierarchyTarget }>("core.hierarchy.delete", hierarchyDeleteInput,
         ({ target }, { snapshot, ...options }) => coreStore.proposeHierarchyDelete(projectId, target, {
           ...options, projectVersion: snapshot.projectVersion,
@@ -1044,13 +973,6 @@ export function createServer(options: ApiServerOptions): Server {
         (input, options) => coreStore.proposeManuscriptRestore(projectId, input, options), resolveNativeProposalActor),
     ];
     return [
-      { module: "core", action: makeProposal("core.hierarchy.create", hierarchyCreateInput, (context, input, existingProposal) =>
-        options.store.buildCreateHierarchyOperation(
-          projectId,
-          input as CreateHierarchyInput,
-          context.reader.snapshot,
-          existingProposal !== null && snapshotKey(existingProposal.snapshot) === snapshotKey(context.reader.snapshot),
-        )) },
       ...nativeProposals.map(action => ({ module: "core" as const, action })),
       { module: "core", action: make("core.status", emptyInput, async () => options.store.status(projectId)) },
       { module: "core", action: make("core.history", emptyInput, async (context) => options.store.history(projectId, context.reader.snapshot)) },
