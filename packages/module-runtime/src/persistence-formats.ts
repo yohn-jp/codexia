@@ -77,7 +77,6 @@ export const MODULE_PERSISTENCE_FORMATS: readonly ModulePersistenceFormat[] = [
   format("publishing", "share-grants", "meta/scriptorium/modules/publishing/share-grants.jsonl", "jsonl", true, true),
   format("publishing", "cover", "meta/scriptorium/modules/publishing/assets/cover.jpg", "binary", true, false),
   preserved("publishing", "legacy-files", "meta/scriptorium/modules/publishing/legacy/files/"),
-  format("publishing", "legacy-share-grants", "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl", "jsonl", true, false),
 
   format("semantic", "settings", "meta/scriptorium/modules/semantic/settings.json", "json", true, true),
   format("semantic", "contradiction-dismissals", "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl", "jsonl", true, true),
