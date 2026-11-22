@@ -23,6 +23,8 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
   assert.equal(workflow.jobs.lifecycle.needs, undefined);
   assert.ok(workflow.jobs.lifecycle.steps.some(step => step.run === 'bash deploy/ansible/test-push-app-lifecycle.sh'));
   assert.ok(workflow.jobs.lifecycle.steps.some(step => step.uses?.startsWith('actions/upload-artifact@')));
+  assert.match(workflow.jobs.lifecycle.steps.find(step => step.name === 'Install disposable host and filesystem capabilities').run, /docker info --format/u,
+    'the disposable fixture must verify the host Docker builder before use');
 });
 
 test('runtime verification uses a separate proof stage and shares the production transaction implementation', () => {
@@ -60,10 +62,13 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /Last Ansible log .* redacted tail/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
   assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
-    'the SSHFS image must use a base without Ubuntu 26.04 container ACL failures');
-  assert.ok(/rootless_podman pull docker\.io\/library\/debian:stable-slim/u.test(fixture));
-  assert.ok(/if rootless_podman build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1; then\n  :\nelse\n  build_status=\$\?\n  record_failure "\$build_status" "\$LINENO" 'SSHFS fixture image build'/u.test(fixture),
-    'a failed SSHFS image build must report the redacted build log before stopping');
+    'the SSHFS fixture image must be built without interactive package setup');
+  assert.ok(/docker pull docker\.io\/library\/debian:stable-slim/u.test(fixture));
+  assert.ok(/if docker build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1; then/u.test(fixture),
+    'the SSHFS helper image must build outside rootless Podman overlayfs');
+  assert.match(fixture, /rootless_podman load --input "\$tmp\/sshfs-fixture\.tar"/u,
+    'the SSHFS helper image must run from the disposable rootless Podman store');
+  assert.match(fixture, /docker save --output "\$tmp\/sshfs-fixture\.tar" codexia-sshfs-fixture/u);
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });

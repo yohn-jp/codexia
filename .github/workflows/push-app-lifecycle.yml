@@ -139,6 +139,10 @@ jobs:
             record_unavailable 'runner could not provision the Ansible deployment capability'
             exit 78
           fi
+          if ! docker info --format '{{.ServerVersion}}' >>"$setup_log" 2>&1; then
+            record_unavailable 'runner rootful Docker builder is unavailable for preparing the isolated SSHFS fixture image'
+            exit 78
+          fi
           rm -f "$setup_log"
           echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" >> "$GITHUB_ENV"
           bash -n deploy/ansible/test-push-app-lifecycle.sh
