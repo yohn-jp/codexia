@@ -2,21 +2,17 @@
    The shared workspace remains mounted; only its presentation changes by route. */
 .mobile-shell {
   --mobile-ink: #30352f;
-  --mobile-muted: #72766d;
+  --mobile-muted: var(--muted);
   --mobile-paper: #fbfaf6;
   --mobile-stage: #f1f0e9;
   --mobile-line: #deded4;
-  --mobile-accent: #5b6f56;
+  --mobile-accent: var(--accent);
   --page-bg: var(--mobile-stage);
   --paper: var(--mobile-paper);
   --ink: var(--mobile-ink);
-  --muted: var(--mobile-muted);
   --line: var(--mobile-line);
-  --accent: var(--mobile-accent);
-  --accent-strong: var(--mobile-accent);
   --surface-hover: #eceee6;
   --surface-selected: #e5e9de;
-  --surface-selected-border: #a7b39e;
   --ion-background-color: var(--mobile-stage);
   --ion-text-color: var(--mobile-ink);
   --ion-border-color: var(--mobile-line);
@@ -24,34 +20,28 @@
   --ion-toolbar-background: var(--mobile-paper);
   --ion-tab-bar-background: var(--mobile-paper);
   --ion-tab-bar-color: var(--mobile-muted);
-  --ion-tab-bar-color-selected: var(--mobile-accent);
+  --ion-tab-bar-color-selected: var(--accent);
   color-scheme: light;
   background: var(--mobile-stage);
 }
 :root[data-zp-theme="dark"] .mobile-shell {
   --mobile-ink: #e4e7df;
-  --mobile-muted: #a8afa4;
   --mobile-paper: #1a201d;
   --mobile-stage: #121714;
   --mobile-line: #343b35;
-  --mobile-accent: #a8c39e;
   --surface-hover: #262e28;
   --surface-selected: #29362b;
-  --surface-selected-border: #647d63;
-  --ion-color-primary-rgb: 168, 195, 158;
-  --ion-color-primary-contrast-rgb: 18, 23, 20;
+  --ion-color-primary-rgb: 125, 175, 159;
+  --ion-color-primary-contrast-rgb: 8, 18, 15;
   color-scheme: dark;
 }
 :root[data-zp-theme="paper"] .mobile-shell {
   --mobile-ink: #38352e;
-  --mobile-muted: #726958;
   --mobile-paper: #f8f3e8;
   --mobile-stage: #ebe4d6;
   --mobile-line: #d8cfbf;
-  --mobile-accent: #695d46;
   --surface-hover: #eee6d7;
   --surface-selected: #e8ddca;
-  --surface-selected-border: #b6a589;
   color-scheme: light;
 }
 
@@ -66,23 +56,34 @@
   box-shadow: none;
 }
 .mobile-shell-identity-bar {
+  display: flex;
+  align-items: center;
   min-height: 56px;
   gap: 8px;
-  padding: 3px max(12px, env(safe-area-inset-left, 0px)) 3px max(12px, env(safe-area-inset-right, 0px));
+  padding-block: 3px;
+  padding-inline-start: max(12px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(12px, env(safe-area-inset-right, 0px));
   border: 0;
   background: var(--mobile-paper);
 }
 .mobile-shell .mobile-shell-back {
-  min-width: 40px;
-  width: 40px;
+  min-width: 44px;
+  width: 44px;
   min-height: 44px;
-  flex-basis: 40px;
+  flex-basis: 44px;
   color: var(--mobile-muted);
   font-size: 27px;
 }
 .mobile-shell-current-title {
+  display: block;
+  min-width: 0;
   color: var(--mobile-ink);
   font: 550 15px/1.35 var(--manuscript-serif);
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-wrap: pretty;
+  white-space: normal;
 }
 .mobile-shell-context {
   color: var(--mobile-muted);
@@ -436,15 +437,15 @@
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-scroller {
   font-family: var(--editor-font-family, var(--manuscript-serif));
-  font-size: var(--editor-font-size, 18px);
-  line-height: var(--editor-line-height, 1.9);
+  font-size: var(--editor-font-size, 16px);
+  line-height: var(--editor-line-height, 1.8);
   letter-spacing: var(--editor-letter-spacing, normal);
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-content {
   max-width: min(100%, var(--reader-max-width, 960px));
   margin-inline: auto;
   padding: 12px 2px 8rem;
-  line-height: var(--editor-line-height, 1.9);
+  line-height: var(--editor-line-height, 1.8);
   text-wrap: pretty;
 }
 
@@ -595,14 +596,49 @@
 .mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-message,
 .mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-storage-state { display: none !important; }
 .mobile-shell .mobile-shell-reference-modal {
-  --height: 100%;
+  --height: 100dvh;
   --border-radius: 18px 18px 0 0;
   --background: var(--mobile-paper);
 }
 .mobile-shell .mobile-shell-reference-content { --background: var(--mobile-paper); }
-.mobile-shell .mobile-shell-reference-top { padding: max(12px, env(safe-area-inset-top, 0px)) 16px 8px; }
+.mobile-shell .mobile-shell-reference-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 3;
+  border-block-end: 1px solid var(--mobile-line);
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-reference-top {
+  padding-block-start: max(12px, env(safe-area-inset-top, 0px));
+  padding-block-end: 8px;
+  padding-inline-start: max(16px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 0;
+}
+.mobile-shell .mobile-shell-reference-switch {
+  padding-block: 4px 8px;
+  padding-inline-start: max(16px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(16px, env(safe-area-inset-right, 0px));
+}
+.mobile-shell .mobile-shell-reference-switch button { position: relative; }
+.mobile-shell .mobile-shell-reference-switch button[aria-selected="true"]::after {
+  position: absolute;
+  inset-inline: 10px;
+  inset-block-end: 3px;
+  border-block-end: 3px solid var(--button-foreground);
+  content: "";
+}
 .mobile-shell .mobile-shell-reference-switch button { min-height: 44px; }
-.mobile-shell .mobile-shell-reference-pane { padding: 12px 16px max(24px, env(safe-area-inset-bottom, 0px)); }
+.mobile-shell .mobile-shell-reference-pane {
+  padding-block: 12px max(24px, env(safe-area-inset-bottom, 0px));
+  padding-inline-start: max(16px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(16px, env(safe-area-inset-right, 0px));
+}
+.mobile-shell .mobile-shell-reference-hint {
+  padding-inline-start: max(16px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(16px, env(safe-area-inset-right, 0px));
+  padding-block-end: max(25px, env(safe-area-inset-bottom, 0px));
+}
 .mobile-shell .mobile-shell-reference-pane > .mobile-shell-status {
   position: static;
   inset: auto;
@@ -675,8 +711,7 @@
   min-height: 44px;
   gap: 0;
   padding: 6px 10px;
-  border: 0;
-  border-inline-start: 2px solid transparent;
+  border: 1px solid transparent;
   border-radius: 4px;
   color: var(--mobile-ink);
   background: transparent;
@@ -685,7 +720,7 @@
 }
 .mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document.is-selected,
 .mobile-shell .mobile-shell-reference-pane .pg-outline-document.is-selected {
-  border-inline-start-color: var(--mobile-accent);
+  border-color: var(--surface-selected-border);
   background: var(--surface-selected);
   font-weight: 650;
 }
@@ -723,6 +758,10 @@
 .mobile-shell .mobile-shell-settings-card p { color: var(--mobile-muted); line-height: 1.65; }
 .mobile-shell :is(button, ion-button, a, [role="tab"], select, input, summary):focus-visible,
 .mobile-shell ion-button::part(native):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.mobile-shell .st-workspace-panel[tabindex="-1"]:focus {
+  /* The panel is a programmatic route target, not the active editor control. */
+  outline: none;
+}
 
 @media (min-width: 640px) {
   .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column { padding-inline: clamp(24px, 7vw, 64px); }
