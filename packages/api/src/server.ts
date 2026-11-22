@@ -1664,6 +1664,13 @@ export function createServer(options: ApiServerOptions): Server {
       fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
       return;
     }
+    if (options.betterAuth && routePath === "/api/auth/oauth2/get-consents" && method === "GET") {
+      if (crossOrigin) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent listing requires a same-origin request"); return; }
+      const result = await options.betterAuth.listOwnerOAuthConsents(options.betterAuth.toHeaders(request.headers));
+      if (result.status === 200) sendJson(response, 200, result.consents);
+      else fail(response, result.status, "OAUTH_CONSENT_LIST_DENIED", "OAuth consent listing requires the owner session");
+      return;
+    }
     if (options.betterAuth && routePath.startsWith("/api/auth/")) {
       const host = request.headers.host ?? "localhost";
       const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;

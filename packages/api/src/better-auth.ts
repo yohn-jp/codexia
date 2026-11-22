@@ -308,6 +308,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     database: pool,
     baseURL: issuer,
     secret: config.authSecret,
+    disabledPaths: ["/oauth2/get-consent", "/oauth2/get-consents", "/oauth2/update-consent", "/oauth2/delete-consent"],
     account: { accountLinking: { enabled: false } },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -654,6 +655,24 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     },
     authorizationServerMetadata: oauthProviderAuthServerMetadata(auth),
     openIdConfigMetadata: oauthProviderOpenIdConfigMetadata(auth),
+    async listOwnerOAuthConsents(headers: Headers) {
+      if (headers.has("authorization") || !headers.has("cookie")) return { status: 401 } as const;
+      const session = await auth.api.getSession({ headers });
+      if (!session) return { status: 401 } as const;
+      if (!config.ownerSubject || session.user.id !== config.ownerSubject) return { status: 403 } as const;
+      const context = await auth.$context;
+      const consents = await context.adapter.findMany<{
+        id: string;
+        clientId: string;
+        scopes: string[];
+        createdAt?: Date;
+        updatedAt?: Date;
+      }>({ model: "oauthConsent", where: [{ field: "userId", value: session.user.id }] });
+      return {
+        status: 200,
+        consents: consents.map(({ id, clientId, scopes, createdAt, updatedAt }) => ({ id, clientId, scopes, createdAt, updatedAt })),
+      } as const;
+    },
     async getConsentContext(headers: Headers, oauthQuery: string): Promise<OAuthConsentContext> {
       const session = await auth.api.getSession({ headers });
       if (!session) throw new Error("An active Codexia login is required to consent");
