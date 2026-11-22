@@ -12,17 +12,27 @@ run_better_auth_lifecycle() {
     rootless_podman exec -i codexia-lifecycle-proxy node /fixture/push-auth-lifecycle-oidc.mjs "$@"
   }
   build_auth_candidate() {
-    local scenario=$1 tag digest immutable
+    local scenario=$1 tag digest immutable digest_file recipe
     tag="localhost:5000/yohn-jp/codexia-backend:$scenario-$source_sha"
+    digest_file="$auth_context/$scenario.digest"
+    recipe="$auth_context/$scenario.Dockerfile"
+    rootless cp "$auth_context/Dockerfile" "$recipe" || return
     if [[ "$scenario" == auth-failed ]]; then
-      rootless sh -c 'printf "%s\n" "ENTRYPOINT [\"/bin/false\"]" >> "$1"' sh "$auth_context/Dockerfile"
+      rootless sh -c 'printf "%s\n" "ENTRYPOINT [\"/bin/false\"]" >> "$1"' sh "$recipe" || return
     fi
-    rootless_podman build --pull=never --build-arg "BASE_IMAGE=$base_image" --build-arg "SCENARIO=$scenario" \
-      -t "$tag" "$auth_context" >"$tmp/$scenario-build.log" 2>&1
-    rootless_podman push --digestfile "$auth_context/digest" "$tag" >"$tmp/$scenario-push.log" 2>&1
-    digest=$(rootless cat "$auth_context/digest")
+    rootless_podman build --no-cache --pull=never --build-arg "BASE_IMAGE=$base_image" \
+      --label "org.codexia.lifecycle-scenario=$scenario" --file "$recipe" \
+      -t "$tag" "$auth_context" >"$tmp/$scenario-build.log" 2>&1 || {
+        redact_log "$tmp/$scenario-build.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$scenario-build-bounded.log"
+        return 1
+      }
+    rootless_podman push --digestfile "$digest_file" "$tag" >"$tmp/$scenario-push.log" 2>&1 || {
+      redact_log "$tmp/$scenario-push.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$scenario-push-bounded.log"
+      return 1
+    }
+    digest=$(rootless cat "$digest_file") || return
     immutable="ghcr.io/yohn-jp/codexia-backend@$digest"
-    node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth "$scenario" "$immutable"
+    node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth "$scenario" "$immutable" || return
     printf '%s\n' "$immutable"
   }
   observe_auth() {
@@ -71,8 +81,6 @@ NODE
   cat >"$tmp/auth.Dockerfile" <<'DOCKERFILE'
 ARG BASE_IMAGE
 FROM $BASE_IMAGE
-ARG SCENARIO
-LABEL org.codexia.lifecycle-scenario=$SCENARIO
 COPY tls.crt /fixture-ca.crt
 ENV NODE_EXTRA_CA_CERTS=/fixture-ca.crt
 DOCKERFILE
