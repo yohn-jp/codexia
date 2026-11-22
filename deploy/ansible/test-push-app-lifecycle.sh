@@ -373,14 +373,15 @@ if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
   echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
   exit 1
 fi
-podman_version=$(rootless_podman info --format '{{.Host.Version}}|{{.Host.Security.Rootless}}')
+podman_version=$(rootless_podman --version | awk '{print $3}')
+podman_rootless=$(rootless_podman info --format '{{.Host.Security.Rootless}}')
 systemd_version=$(rootless_systemctl --version | head -n 1)
 postgres_version=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -U codexia_admin -d codexia -c "SHOW server_version"')
 postgres_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-db)
-test "${podman_version##*|}" = true
+test "$podman_rootless" = true
 test "$postgres_health" = healthy
-node - "$report" "$podman_version" "$systemd_version" "$postgres_version" "$postgres_health" <<'CAPABILITIES'
-const fs=require('node:fs');const [path,podman,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman.split('|')[0],rootless:podman.split('|')[1]==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+node - "$report" "$podman_version" "$podman_rootless" "$systemd_version" "$postgres_version" "$postgres_health" <<'CAPABILITIES'
+const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 CAPABILITIES
 
 # Use a dedicated rootless SSHFS server container. Its IP is distinct from host
