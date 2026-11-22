@@ -24,7 +24,10 @@ if [[ "$engine" == native ]]; then
     # The Actions Node 24 toolcache is mounted read-only into host-launched images.
     # Provide a writable pnpm shim without modifying that toolcache.
     mkdir -p /tmp/codexia-bench-bin
-    printf '#!/bin/sh\\nexec corepack pnpm "$@"\\n' > /tmp/codexia-bench-bin/pnpm
+    cat > /tmp/codexia-bench-bin/pnpm <<'PNSH'
+#!/bin/sh
+exec corepack pnpm "$@"
+PNSH
     chmod +x /tmp/codexia-bench-bin/pnpm
     export PATH="/tmp/codexia-bench-bin:$PATH"
   else
