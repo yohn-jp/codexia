@@ -146,9 +146,9 @@ cleanup() {
   local status=$?
   trap - EXIT
   set +e
-  if [[ "$backup_mounted" == true ]] || mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" 2>/dev/null; then
+  if [[ "$backup_mounted" == true ]] || rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" 2>/dev/null; then
     rootless fusermount3 -u "$fixture_home/.local/state/codexia-backup-mount" || cleanup_status=1
-    mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_status=1
+    rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_status=1
   fi
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
     rootless_systemctl stop codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
@@ -441,7 +441,7 @@ if ! rootless sshfs backup@codexia-backup-fixture:/backups "$fixture_home/.local
   exit 1
 fi
 backup_mounted=true
-mountpoint -q "$fixture_home/.local/state/codexia-backup-mount"
+rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount"
 set_state backup_remote_filesystem IN_PROGRESS 'isolated SSHFS container mounted; waiting for the canonical deployment backup'
 age-keygen -o "$tmp/age-identity" >/dev/null
 backup_recipient=$(sed -n 's/^# public key: //p' "$tmp/age-identity")
