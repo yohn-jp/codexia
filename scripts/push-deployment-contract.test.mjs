@@ -448,6 +448,20 @@ test('the isolated registration launcher admits only complete OIDC or Passkey bo
   }
 });
 
+test('the recovery launcher audits sanitized counts without sending its one-use grant to the host journal', () => {
+  const launcher = readFileSync(new URL('../deploy/ansible/grant-passkey-owner-recovery.sh', import.meta.url), 'utf8');
+  const projection = launcher.match(/jq -ce '([^']+)'/u)?.[1];
+  assert.ok(projection, 'the launcher must project a dedicated host audit event');
+  assert.match(projection, /event:"passkey-owner-recovery"/u);
+  assert.match(projection, /ownerId|owner_id/u);
+  assert.match(projection, /sessionsRevoked/u);
+  assert.match(projection, /accessGrantsRevoked/u);
+  assert.match(projection, /refreshGrantsRevoked/u);
+  assert.doesNotMatch(projection, /recoveryToken|\.token|token:/u, 'the journal projection must omit the one-use grant');
+  assert.match(launcher, /logger --tag codexia-passkey-recovery/u);
+  assert.match(launcher, /durably recorded in PostgreSQL/u);
+});
+
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
   assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
   const job = tailscale.jobs.connectivity;
