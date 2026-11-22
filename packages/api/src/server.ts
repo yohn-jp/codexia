@@ -60,7 +60,6 @@ export { importLegacyRecentActivity, type LegacyRecentActivityImportOptions, typ
 const RUNTIME_CONTROL_CENSUS_TIMEOUT_MS = 3_500;
 const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
-const MAX_SNAPSHOT_FILES = 1000;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const MAX_SCRATCH_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -2123,31 +2122,19 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
       if (suffix === "snapshot" && method === "GET") {
+        const projection = query.getAll("projection");
+        if (projection.length !== 1 || projection[0] !== "editor") {
+          throw httpFailure(400, "INVALID_PROJECTION", "Select the editor snapshot projection");
+        }
         const selected = optionalSnapshot(query, projectId);
-        const editorProjection = query.get("projection") === "editor";
-        const documentId = editorProjection ? query.get("documentId") : null;
+        const documentId = query.get("documentId");
         if (documentId !== null && !isPostgresRevisionId(documentId)) {
           throw httpFailure(400, "INVALID_ID", "Use a canonical PostgreSQL document identifier");
         }
         const reader = await freshReader(projectId, selected.pinned);
-        if (editorProjection) {
-          const path = documentId === null ? null : `documents/${documentId}.md`;
-          const file = path === null ? null : await reader.read(path);
-          sendJson(response, 200, { snapshot: reader.snapshot, document: path && file ? { path, revision: file.revision } : null });
-          return;
-        }
-        const paths = await reader.list("");
-        if (paths.length > MAX_SNAPSHOT_FILES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", `Snapshot contains more than ${MAX_SNAPSHOT_FILES} files`);
-        let total = 0;
-        const files = [];
-        for (const filePath of paths) {
-          const file = await reader.read(filePath);
-          if (!file) continue;
-          total += Buffer.byteLength(file.content, "utf8");
-          if (total > MAX_SNAPSHOT_BYTES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", "Snapshot exceeds the allowed response size");
-          files.push({ path: filePath, content: file.content, revision: file.revision });
-        }
-        sendJson(response, 200, { snapshot: reader.snapshot, files });
+        const path = documentId === null ? null : `documents/${documentId}.md`;
+        const file = path === null ? null : await reader.read(path);
+        sendJson(response, 200, { snapshot: reader.snapshot, document: path && file ? { path, revision: file.revision } : null });
         return;
       }
       if (suffix === "history" && method === "GET") { sendJson(response, 200, await options.store.history(projectId, optionalSnapshot(query, projectId).pinned)); return; }
