@@ -1,39 +1,49 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { runBounded, runDependencyBuilds } from './ci-parallel.mjs';
 import { browserFixtureSettings } from './ci-browser-fixture.mjs';
 
 test('bounded execution preserves input order, failure evidence and exclusive barriers', async () => {
-  let active = 0, peak = 0;
-  const completed = [];
+  const started = [];
   const tasks = ['a', 'b', 'exclusive', 'c', 'd'];
-  const results = await runBounded(tasks, async item => {
-    if (item === 'exclusive') {
-      assert.equal(active, 0);
-      assert.deepEqual(new Set(completed), new Set(['a','b']));
-    }
-    if (item === 'c' || item === 'd') assert.ok(completed.includes('exclusive'));
-    active++;
-    peak = Math.max(peak, active);
-    try {
-      await delay(item === 'a' ? 15 : 5);
-      if (item === 'b') throw new Error('injected failure');
-      return item;
-    } finally { active--; completed.push(item); }
+  const gates = new Map(tasks.map(task => [task, Promise.withResolvers()]));
+  const running = runBounded(tasks, item => {
+    started.push(item);
+    return gates.get(item).promise;
   }, { limit: 2, exclusive: item => item === 'exclusive' });
-  assert.equal(peak, 2);
-  assert.deepEqual(results.map(item => item.status), ['fulfilled','rejected','fulfilled','fulfilled','fulfilled']);
-  assert.equal(results[4].value, 'd');
-  assert.match(String(results[1].reason), /injected failure/);
-  assert.equal(active, 0);
+  try {
+    await nextTurn();
+    assert.deepEqual(new Set(started), new Set(['a', 'b']));
+    assert.equal(started.length, 2);
+    gates.get('b').reject(new Error('injected failure'));
+    await nextTurn();
+    assert.equal(started.length, 2);
+    gates.get('a').resolve('first');
+    await nextTurn();
+    assert.deepEqual(started.slice(2), ['exclusive']);
+    gates.get('exclusive').resolve('barrier');
+    await nextTurn();
+    assert.deepEqual(new Set(started.slice(3)), new Set(['c', 'd']));
+    assert.equal(started.length, tasks.length);
+    gates.get('d').resolve('last');
+    gates.get('c').resolve('third');
+
+    const results = await running;
+    assert.deepEqual(results.map(result => result.value), ['first', undefined, 'barrier', 'third', 'last']);
+    assert.equal(results[1].status, 'rejected');
+    assert.match(String(results[1].reason), /injected failure/);
+  } finally {
+    for (const gate of gates.values()) gate.resolve();
+    await running;
+  }
 });
 
 test('serial limit runs every task without overlap', async () => {
   let active = 0;
   const results = await runBounded([1,2,3], async item => {
     assert.equal(active++, 0);
-    await delay(1);
+    await nextTurn();
     active--;
     return item;
   }, { limit: 1 });

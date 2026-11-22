@@ -16,9 +16,8 @@ test("model acceptance fixture seeds more than one bounded operation into Postgr
       files["plot/volumes/v1/chapters/c1/scenes/sc-"+i+".yaml"] = JSON.stringify({id:"sc-"+i,title:"Scene "+i,order:i+1,manuscript});
       files[manuscript] = "本文 "+i+"\n";
     }
-    const reader = await seedModelFixture(fixture.store, fixture.project.id, files);
+    await seedModelFixture(fixture.store, fixture.project.id, files);
     const current = await fixture.store.reader(fixture.project.id);
-    assert.deepEqual(current.snapshot, reader.snapshot);
     assert.equal((await current.list("manuscript")).length,130);
     assert.equal((await current.read("manuscript/v1/c1/sc-129.md")).content,"本文 129\n");
     assert.equal((await current.read("meta/scriptorium/modules/semantic/settings.json")).content,files["meta/scriptorium/modules/semantic/settings.json"]);

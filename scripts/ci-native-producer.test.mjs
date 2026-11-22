@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {test} from 'node:test';
 import {createVerificationPlan,planDigest} from './ci-impact.mjs';
 import {assertNativeArtifactEvidence,sealProducer,validateNativeProducer} from './ci-native-producer.mjs';
@@ -13,7 +14,15 @@ const artifact={id:12,name:'ci-evidence-'+jobName,created_at:'2026-01-01T00:01:0
 const job={name:jobName,head_sha:sha,run_id:123,run_attempt:1,status:'completed',conclusion:'success',started_at:'2026-01-01T00:00:00Z',completed_at:'2026-01-01T00:02:00Z'};
 test('native producer evidence binds an actual successful catalog report to exact source and toolchain',()=>{
   const sealed=sealProducer(execution,bytes,identity,plan);
-  assert.deepEqual(validateNativeProducer(sealed,bytes,identity,plan),sealed.nativeProducer);
+  const expectedSeal = {
+    identity,
+    reportSha256: createHash('sha256').update(bytes).digest('hex'),
+    runtimeBaseDigest: digest(1),
+    buildKitDigest: digest(2),
+  };
+  assert.deepEqual(sealed.nativeProducer, expectedSeal);
+  assert.deepEqual(validateNativeProducer({...execution, nativeProducer: expectedSeal}, bytes, identity, plan), expectedSeal);
+  assert.throws(() => validateNativeProducer(sealed, Buffer.concat([bytes, Buffer.from('\n')]), identity, plan), /evidence mismatch/);
   assert.throws(()=>validateNativeProducer(sealed,bytes,{...identity,producerAttempt:2},plan),/evidence mismatch/);
   assert.throws(()=>validateNativeProducer(sealed,Buffer.from(JSON.stringify({...native,buildKitDigest:digest(7)})),identity,plan),/evidence mismatch/);
   for(const update of [{selection:'core'},{sourceSha:'e'.repeat(40)},{publication:true},{runtimeBaseDigest:'bad'},{dockerfileSha256:'bad'}]){
