@@ -32,6 +32,10 @@ all:
         codexia_oauth_introspection_client_id: codexia-resource-server
         codexia_oauth_owner_subject: owner-subject-from-provider
         codexia_oauth_owner_client_ids: codexia-web,codexia-ios
+        # Optional after owner enrollment, for separately registered MCP clients.
+        # codexia_oauth_mcp_client_ids: approved-mcp-client
+        # codexia_oauth_mcp_project_assignments:
+        #   approved-mcp-client: [00000000-0000-4000-8000-000000000001]
         # Optional: match the API resource URI registered with the provider.
         # codexia_api_audience: https://codexia.example.invalid/api
         # Required only for explicitly approved base-secret convergence.
@@ -40,6 +44,6 @@ all:
         codexia_postgres_app_password_file: /private/postgres-app-password
         # Protected push-deployment parameters are supplied at execution,
         # not stored as credentials or production values in this inventory.
-        # These approvals let the first deploy initialize only a pristine
-        # application schema after backup; they are not migration bypasses.
+        # First activation uses these approvals to verify and start on the
+        # separately initialized application database.
         codexia_initial_install_approved: false

@@ -40,6 +40,36 @@
       - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
     fail_msg: Better Auth provisioning requires explicit approval, the rootless Codexia account, protected secret files and validated public configuration.
 
+- name: Require a complete optional MCP client and project configuration
+  ansible.builtin.assert:
+    that:
+      - (codexia_oauth_mcp_client_ids is defined) == (codexia_oauth_mcp_project_assignments is defined)
+      - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_mcp_client_ids is not defined
+    fail_msg: Configure registered MCP clients and explicit project assignments together after owner enrollment.
+
+- name: Restrict MCP clients to their own registrations and explicit project assignments
+  ansible.builtin.assert:
+    that:
+      - codexia_oauth_mcp_client_ids is string and codexia_oauth_mcp_client_ids is match('^[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$')
+      - codexia_auth_mcp_client_ids | unique(case_sensitive=true) | list | length == codexia_auth_mcp_client_ids | length
+      - codexia_auth_mcp_client_ids | intersect(codexia_oauth_owner_client_ids.split(',') + [codexia_oauth_introspection_client_id]) | length == 0
+      - codexia_oauth_mcp_project_assignments is mapping
+      - codexia_auth_mcp_client_ids | symmetric_difference(codexia_oauth_mcp_project_assignments.keys() | list) | length == 0
+    fail_msg: MCP project assignments must match the unique registered MCP client IDs, separate from owner and introspection clients.
+  vars:
+    codexia_auth_mcp_client_ids: "{{ codexia_oauth_mcp_client_ids.split(',') }}"
+  when: codexia_oauth_mcp_client_ids is defined
+
+- name: Require each configured MCP client to have unique assigned project UUIDs
+  ansible.builtin.assert:
+    that:
+      - item.value is sequence and item.value is not string and item.value is not mapping and item.value | length > 0
+      - item.value | unique(case_sensitive=true) | list | length == item.value | length
+      - >-
+        item.value | select('match', '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') | list | length == item.value | length
+    fail_msg: Each configured MCP client requires at least one unique PostgreSQL project UUID.
+  loop: "{{ codexia_oauth_mcp_project_assignments | default({}) | dict2items }}"
+
 - name: Verify the declared rootless Codexia service identity
   ansible.builtin.command:
     argv: [getent, passwd, "{{ codexia_service_user }}"]

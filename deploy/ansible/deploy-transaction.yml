@@ -342,9 +342,18 @@
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length == 1
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_SUBJECT=[a-zA-Z0-9._@:/|+-]+$') | length == 1
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_CLIENT_IDS=[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$') | length == 1
+      - >-
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_CLIENT_IDS=') | length) ==
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS=') | length)
+      - >-
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_CLIENT_IDS=') | length) ==
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_CLIENT_IDS=[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$') | length)
+      - >-
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS=') | length) ==
+        (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS=[{][!-~]+[}]$') | length)
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^(?!#|$).+$') | length == codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_[A-Z0-9_]+=[!-~]*$') | length
       - (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | unique | list | length) == (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | length)
-      - (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | difference(['CODEXIA_PUBLIC_ORIGIN', 'CODEXIA_OIDC_ISSUER', 'CODEXIA_OIDC_CLIENT_ID', 'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID', 'CODEXIA_OAUTH_OWNER_SUBJECT', 'CODEXIA_OAUTH_OWNER_CLIENT_IDS', 'CODEXIA_API_AUDIENCE'])) | length == 0
+      - (codexia_auth_runtime_settings_text | regex_findall('(?m)^([A-Z][A-Z0-9_]*)=') | difference(['CODEXIA_PUBLIC_ORIGIN', 'CODEXIA_OIDC_ISSUER', 'CODEXIA_OIDC_CLIENT_ID', 'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID', 'CODEXIA_OAUTH_OWNER_SUBJECT', 'CODEXIA_OAUTH_OWNER_CLIENT_IDS', 'CODEXIA_OAUTH_MCP_CLIENT_IDS', 'CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS', 'CODEXIA_API_AUDIENCE'])) | length == 0
       - >-
         (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_API_AUDIENCE=') | length) ==
         (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_API_AUDIENCE=https://[^/\s]+/api$') | length)
