@@ -37,8 +37,12 @@ PNSH
   git --version
   test "$(node --version)" = 'v24.22.3'
   test "$(node -p 'require("./node_modules/@playwright/test/package.json").version')" = '1.65.1'
+  service_url="$CODEXIA_E2E_DATABASE_URL"
+  test "${service_url%/codexia_test}" != "$service_url"
   start=$(date +%s%N)
   for suite in auth-recovery oauth-web ui-v1 webkit; do
+    CODEXIA_E2E_DATABASE_URL="$service_url" db_name=$(node scripts/ci-playwright-benchmark-db.mjs)
+    export CODEXIA_E2E_DATABASE_URL="${service_url%/codexia_test}/$db_name"
     echo "::group::REAL_BROWSER_SUITE profile=$CODEXIA_PROFILE suite=$suite"
     suite_start=$(date +%s%N)
     export CODEXIA_CI_REPORT_DIR="$PWD/tests/e2e/test-results/benchmark-$suite"
@@ -95,7 +99,7 @@ host_node_prefix="${host_node%/bin/node}"
 test -x "$host_node_prefix/bin/node"
 test "$("$host_node_prefix/bin/node" --version)" = 'v24.22.3'
 runtime_start=$(date +%s%N)
-"$engine" run --rm --pull=never --init --ipc=host --network host \
+"$engine" run --rm --pull=never --init --ipc=host --network host --add-host postgres:127.0.0.1 \
   --volume "$GITHUB_WORKSPACE:/work" --volume "$host_node_prefix:/opt/codexia-node:ro" --workdir /work \
   --env PATH="/opt/codexia-node/bin:/usr/local/bin:/usr/bin:/bin" \
   --env CODEXIA_BENCH_NODE_MOUNT=1 \
