@@ -219,6 +219,17 @@ export type ActionResult<T = unknown> = { ok: true; snapshot: SnapshotId; data: 
 /** Optional host-owned history for a source domain task; never grants author approval. */
 export interface DomainJobDescriptor { type: string }
 export interface ActionDescriptor { id: string; module: ModuleId | "core"; effect: "read" | "propose" | "compute"; job?: DomainJobDescriptor }
+export type ModuleRecordJsonValue = null | string | number | boolean | ModuleRecordJsonValue[] | ModuleRecordJsonObject;
+export type ModuleRecordJsonObject = { [key: string]: ModuleRecordJsonValue };
+export interface OwnModuleRecord { value: ModuleRecordJsonObject; version: number }
+export interface OwnModuleRecordProposal {
+  key: string;
+  value: ModuleRecordJsonObject;
+  expectedVersion: number | null;
+  idempotencyKey: string;
+}
+export interface NativeChangeSetReference { id: string; projectId: string }
+export { PUBLISHING_SHARE_GRANTS_KEY, parsePublishingShareGrantIndex, convertPublishingShareGrantJsonl, type PublishingShareGrant } from "./publishing-share-grants.js";
 export interface ModuleActionContext {
   projectId: string;
   reader: SnapshotReader;
@@ -234,6 +245,10 @@ export interface ModuleActionContext {
   reportProgress?(progress: number): Promise<void>;
   /** Only proposes; approval remains an authenticated author action. */
   propose(operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, signal?: AbortSignal): Promise<ChangeProposal>;
+  /** Read a record owned by this module at the enclosing snapshot. */
+  readOwnModuleRecord?(key: string): Promise<OwnModuleRecord | undefined>;
+  /** Propose an update to this module's own record under the existing author approval boundary. */
+  proposeOwnModuleRecord?(input: OwnModuleRecordProposal): Promise<NativeChangeSetReference>;
   runJob<T = unknown>(request: JobRequest, signal?: AbortSignal): Promise<JobOutcome<T>>;
 }
 export interface ModuleAction {

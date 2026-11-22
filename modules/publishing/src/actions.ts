@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PUBLISHING_SHARE_GRANTS_KEY } from "@codexia/contracts";
 import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport, type EpubExportOptions } from "./epub.js";
@@ -7,8 +8,6 @@ import {
   createShareGrant,
   readShareGrants,
   safeShareGrant,
-  serializeShareGrants,
-  SHARE_GRANTS_PATH,
   type ShareGrant,
 } from "./grants.js";
 import { buildPlaintextExport, type PlaintextOptions } from "./plaintext.js";
@@ -137,8 +136,14 @@ function makeMetadataOperation(context: ModuleActionContext, path: string, revis
   };
 }
 
-function sortedGrantContent(grants: ShareGrant[]): string {
-  return serializeShareGrants([...grants].sort((left, right) => left.id.localeCompare(right.id)));
+async function proposeShareGrants(context: ModuleActionContext, grants: ShareGrant[], expectedVersion: number | null) {
+  if (!context.proposeOwnModuleRecord) throw new Error("Publishing share proposals are unavailable");
+  return context.proposeOwnModuleRecord({
+    key: PUBLISHING_SHARE_GRANTS_KEY,
+    value: { version: 1, grants: [...grants].sort((left, right) => left.id.localeCompare(right.id)) },
+    expectedVersion,
+    idempotencyKey: randomUUID(),
+  });
 }
 
 export function createPublishingActions(): ModuleAction[] {
@@ -196,7 +201,7 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.shares.list", "read", async (_input, context) => {
-    const { grants } = await readShareGrants(context.reader);
+    const { grants } = await readShareGrants(context);
     const now = Date.now();
     return { shares: grants.map((grant) => ({ ...safeShareGrant(grant), active: !grant.revokedAt && Date.parse(grant.expiresAt) > now })) };
   }));
@@ -204,21 +209,20 @@ export function createPublishingActions(): ModuleAction[] {
   actions.push(defineAction(valueSchema(parseShareCreateInput), "publishing.shares.create", "propose", async (input, context) => {
     const project = await readPublishingProjectFromCore(context);
     resolveShareScope(project, input.scope);
-    const { grants, content, revision } = await readShareGrants(context.reader);
+    const { grants, version } = await readShareGrants(context);
     const { grant, rawToken } = createShareGrant(input);
-    const next = [...grants, grant];
-    const operation = makeMetadataOperation(context, SHARE_GRANTS_PATH, revision, sortedGrantContent(next), content ? "Create read-only publication share" : "Create read-only publication share index");
-    const proposal = await context.propose([operation]);
+    const changeSet = await proposeShareGrants(context, [...grants, grant], version);
     return {
       share: safeShareGrant(grant),
       token: rawToken,
-      proposalId: proposal.id,
+      proposalId: changeSet.id,
+      changeSet,
       activation: "This link becomes readable only after author approval and PostgreSQL apply.",
     };
   }));
 
   actions.push(defineAction(valueSchema(parseShareRevokeInput), "publishing.shares.revoke", "propose", async (input, context) => {
-    const existing = await readShareGrants(context.reader);
+    const existing = await readShareGrants(context);
     const index = existing.grants.findIndex((grant) => grant.id === input.id);
     if (index < 0) throw new Error("Share grant not found");
     const prior = existing.grants[index]!;
@@ -230,9 +234,8 @@ export function createPublishingActions(): ModuleAction[] {
         revokedAt: new Date().toISOString(),
       };
     }
-    const operation = makeMetadataOperation(context, SHARE_GRANTS_PATH, existing.revision, sortedGrantContent(existing.grants), "Revoke read-only publication share");
-    const proposal = await context.propose([operation]);
-    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: proposal.id, activation: "Revocation reaches public readers after the change is approved and applied." };
+    const changeSet = await proposeShareGrants(context, existing.grants, existing.version);
+    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: changeSet.id, changeSet, activation: "Revocation reaches public readers after the change is approved and applied." };
   }));
 
   return actions;

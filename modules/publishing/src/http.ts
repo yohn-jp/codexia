@@ -1,5 +1,5 @@
 import type { HttpContribution, ModuleActionContext } from "@codexia/contracts";
-import { grantIsActive, hashShareToken, constantTimeHashMatches, normalizeShareScope, readShareGrants } from "./grants.js";
+import { grantIsActive, hashShareToken, constantTimeHashMatches, readShareGrants } from "./grants.js";
 import { readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
 
 const NOT_FOUND = { error: "Share link is unavailable" };
@@ -56,15 +56,12 @@ function safeTree(project: Awaited<ReturnType<typeof readPublishingProject>>, sc
 }
 
 async function readPublicShare(request: Request, context: ModuleActionContext): Promise<Response> {
-  // The host binds public contributions to a freshly fetched remote snapshot. Never
-  // serve checkpoint-only proposals if a host accidentally supplies one here.
   const parts = routeParts(request);
   if (!parts) return json(NOT_FOUND, 404);
-  const { grants } = await readShareGrants(context.reader);
+  const { grants } = await readShareGrants(context);
   const grant = activeGrant(grants, parts.token);
   if (!grant) return json(NOT_FOUND, 404);
-  const scope = normalizeShareScope(grant.scope);
-  if (!scope) return json(NOT_FOUND, 404);
+  const scope = { kind: grant.scope.kind, id: grant.scope.id };
 
   let project;
   let scopedScenes: PublishingScene[];
