@@ -55,8 +55,6 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
-  assert.equal(ansible.env.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED, "${{ vars.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED || 'false' }}");
-  assert.match(ansible.run, /codexia_better_auth_activation_approved:process\.env\.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_initial_install_approved:process\.env\.CODEXIA_INITIAL_INSTALL_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_database_initialization_approved:process\.env\.CODEXIA_DATABASE_INITIALIZATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_stage: deploy/u);
@@ -79,9 +77,10 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   const activeUnit = transactionTasks.find(task => task.name === 'Require the existing API unit before an image-only update');
   assert.ok(activeUnit, 'image-only updates must retain a concrete prior unit for rollback');
   assert.equal(activeUnit.when, 'codexia_current_container_exists.rc == 0');
-  const recovery = transactionTasks.find(task => task.name === 'Recover an interrupted push deployment before examining the active API');
-  assert.ok(recovery, 'a retry must recover interrupted transactions before health preconditions');
-  assert.match(recovery['ansible.builtin.command'].argv[0], /codexia-deploy-recover$/u);
+  assert.equal(transactionTasks[0]['ansible.builtin.include_tasks'], 'deploy-prepare.yml');
+  const prepare = parse(readFileSync(new URL('../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
+  assert.match(prepare[0]['ansible.builtin.command'].stdin, /push-deployment-recover\.sh/u,
+    'recovery must run before helpers or target state are changed');
   const recoveryScript = readFileSync(new URL('../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
   assert.match(recoveryScript, /deploy-transaction\.json/u);
   assert.match(recoveryScript, /rollback-api\.container/u);
@@ -305,12 +304,11 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
 });
 
 test('Better Auth activation uses protected staged settings on a fresh or existing API', () => {
-  const transition = transactionTasks.find(task => task.name === 'Refuse ambiguous prior authentication or unapproved retirement of a token API');
-  assert.ok(transition, 'retiring an installed token API still requires explicit approval');
-  assert.ok(transition['ansible.builtin.assert'].that.some(item => item.includes('codexia_better_auth_activation_approved')));
+  const installedAuth = transactionTasks.find(task => task.name === 'Require an installed Better Auth API for image-only updates');
+  assert.equal(installedAuth.when, 'codexia_current_container_exists.rc == 0');
   const staging = transactionTasks.find(task => task.name === 'Require private staged Better Auth settings before activation');
   assert.equal(staging.when, undefined);
-  assert.ok(transactionTasks.indexOf(transition) < transactionTasks.indexOf(staging));
+  assert.ok(transactionTasks.indexOf(installedAuth) < transactionTasks.indexOf(staging));
   assert.ok(transactionTasks.some(task => task.name === 'Require complete public Better Auth settings without secret material in the environment file'));
   assert.ok(transactionTasks.some(task => task.name === 'Verify every staged Better Auth Podman secret exists before activation'));
   const candidate = transactionTasks.find(task => task.name === 'Render a digest-specific candidate Quadlet outside the active unit path');
@@ -347,18 +345,13 @@ test('Better Auth activation uses protected staged settings on a fresh or existi
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
-  const authMigration = shell.indexOf('/app/node_modules/@codexia/api/dist/migrate-auth.js --apply');
-  const verifyClients = shell.indexOf('/app/node_modules/@codexia/api/dist/verify-auth-clients.js', authMigration);
+  const verifyClients = shell.indexOf('/app/node_modules/@codexia/api/dist/verify-auth-clients.js', backup);
   const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
-  assert.ok(backup >= 0 && authMigration > backup && verifyClients > authMigration && installCandidate > verifyClients,
-    'Better Auth migration and client checks must follow encrypted backup and precede the API mode switch');
-  assert.match(shell, /\[\[ "\$prior_auth_mode" == token \]\]/u);
+  assert.ok(backup >= 0 && verifyClients > backup && installCandidate > verifyClients,
+    'Better Auth client checks must follow encrypted backup and precede candidate installation');
   assert.match(shell, /authSettingsSha256/u);
   assert.match(shell, /restore_previous/u);
 
-  const recovery = readFileSync(new URL('../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
-  assert.match(recovery, /authMode !== unitAuthMode/u);
-  assert.match(recovery, /authSettingsSha256 !== unitDigest/u);
   const betterAuthUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
   assert.doesNotMatch(betterAuthUnit, /CODEXIA_AUTH_TOKEN|codexia-auth-token/u);
   assert.match(betterAuthUnit, /^Environment=CODEXIA_AUTH_MODE=better-auth$/mu);

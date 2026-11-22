@@ -55,15 +55,6 @@
 - name: Prepare shared push deployment state and helpers
   ansible.builtin.include_tasks: deploy-prepare.yml
 
-- name: Recover interrupted disposable deployment before examining the active API
-  ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
-  environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
-    CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
-  register: codexia_deploy_recovery
-  changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
-
 - name: Verify the isolated SSHFS destination before changing services
   ansible.builtin.command:
     argv: ["{{ home }}/.local/bin/codexia-backup", validate-destination, "{{ codexia_backup_destination }}"]
