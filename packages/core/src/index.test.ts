@@ -254,6 +254,59 @@ test("unapproved and cross-project operations cannot change canonical records",a
 test("stale proposal cannot overwrite a newer canonical body",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path),a=operation(reader.snapshot,path,"A",old!.revision),b=operation(reader.snapshot,path,"B",old!.revision);const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[b],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[b.id],authorScope:"owner"});await accept(p.id,a);await assert.rejects(core.apply(p.id,b));assert.equal((await core.readScene(p.id,"s1")).text,"A");});
 test("disjoint operations approved together can apply in sequence",async()=>{const p=await project(),reader=await core.reader(p.id),a=operation(reader.snapshot,"bible/a.yaml","A"),b=operation(reader.snapshot,"bible/b.yaml","B"),proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[a,b],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[a.id,b.id],authorScope:"owner"});await core.apply(p.id,a);await core.apply(p.id,b);assert.equal((await (await core.reader(p.id)).read("bible/b.yaml"))?.content,"B");});
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
+test("approved operations cannot change preserved module artifacts, and applied receipts remain replayable", async () => {
+  const p = await project();
+  const archivePath = "meta/scriptorium/modules/story/legacy/files/bible/locations/harbor.yaml";
+  const livePath = "meta/scriptorium/modules/story/locations/harbor.yaml";
+  const preserved = "id: harbor\nname: Preserved harbor\n";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: "core.artifacts", key: archivePath,
+    value: { content: preserved, encoding: "utf8" }, expectedVersion: null,
+  }));
+  const reader = await core.reader(p.id);
+  const { snapshot } = reader;
+  const prior = await reader.read(archivePath);
+  assert.ok(prior);
+  const readArtifact = (path: string) => persistence.read(source => source.getModuleRecord(p.id, "core.artifacts", path));
+  const before = await readArtifact(archivePath);
+  for (const [path, content, revision] of [
+    [archivePath, "replacement", prior.revision],
+    [archivePath, null, prior.revision],
+    ["meta/scriptorium/modules/nlp/legacy/files/new.txt", "new archive", null],
+  ] as const) {
+    const pending = operation(snapshot, path, content, revision);
+    pending.reads.unshift({ path: livePath, revision: null });
+    pending.writes.unshift({ path: livePath, revision: null, content: "live edit" });
+    const proposal = await approve(p.id, { snapshot, operation: pending });
+    await assert.rejects(core.apply(p.id, pending), { status: 409, code: "preservation_archive_read_only" });
+    assert.equal(await readArtifact(livePath), undefined);
+    assert.deepEqual(await readArtifact(archivePath), before);
+    if (path !== archivePath) assert.equal(await readArtifact(path), undefined);
+    assert.equal((await core.getProposal(p.id, proposal.id))?.state, "approved");
+    assert.deepEqual((await core.getProposal(p.id, proposal.id))?.applications, []);
+    assert.deepEqual((await core.observe(p.id)).snapshot, snapshot);
+  }
+
+  const archived = operation(snapshot, archivePath, preserved, prior.revision);
+  const proposal = await approve(p.id, { snapshot, operation: archived });
+  const authority = "core.authority.proposals";
+  const key = `proposal:${proposal.id}`;
+  const record = await persistence.read(source => source.getModuleRecord(p.id, authority, key));
+  assert.ok(record);
+  const receipt = {
+    operationId: archived.id, generation: archived.generation, projectVersion: snapshot.projectVersion,
+    revisions: [{ path: archivePath, revision: prior.revision }],
+  };
+  const applied = await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: authority, key, expectedVersion: record.version,
+    value: { ...record.value, state: "applied", appliedOperationIds: [archived.id], applications: [receipt] },
+  }));
+  assert.deepEqual(await core.apply(p.id, archived), receipt);
+  assert.deepEqual(await persistence.read(source => source.getModuleRecord(p.id, authority, key)), applied);
+  assert.deepEqual(await readArtifact(archivePath), before);
+  await accept(p.id, operation(snapshot, livePath, "live edit"));
+  assert.equal((await readArtifact(livePath))?.value.content, "live edit");
+});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
 test("recursive deletion after native reorder preserves manuscript revision history", async () => {
   const p = await hierarchy();

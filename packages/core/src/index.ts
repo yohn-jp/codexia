@@ -179,6 +179,7 @@ function projectionProofKey(version: number): string {
 }
 const ARTIFACTS = "core.artifacts";
 const PATHS = "core.document-paths";
+const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
 const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -1023,6 +1024,10 @@ export class CoreStore implements MutationCoordinator {
       };
       const replay = approved.map(({ status }) => applicationFor(status)).find((receipt) => receipt !== undefined);
       if (replay) return recordApplication(replay);
+
+      if (operation.writes.some(({ path }) => PRESERVATION_ARCHIVE_PATH.test(path))) {
+        fail(409, "preservation_archive_read_only", "Module preservation archives are read-only");
+      }
 
       // These persisted reorders lack a sibling-membership precondition.
       if (!operation.readDocumentSets?.length && operation.effect === "structure" &&
