@@ -193,15 +193,16 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         currentAuthorizationFlow?.cancel()
         currentAuthorizationFlow = nil
         let refreshToken = loadRefreshToken(for: config)
-        deleteRefreshToken(for: config)
+        let localCredentialsCleared = deleteRefreshToken(for: config)
         accessToken = nil
         accessTokenExpiresAt = nil
         finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
         guard let refreshToken else {
-            call.resolve(["revoked": true])
+            // The Keychain entry is gone, so the server-side outcome can no longer be checked here.
+            call.resolve(["localCredentialsCleared": localCredentialsCleared, "revoked": false])
             return
         }
-        revoke(refreshToken, config: config, call: call)
+        revoke(refreshToken, config: config, localCredentialsCleared: localCredentialsCleared, call: call)
     }
 
     private func approvedApiPath(_ url: URL, rawURL: String) -> Bool {
@@ -433,7 +434,7 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    private func revoke(_ refreshToken: String, config: NativeAuthConfig, call: CAPPluginCall) {
+    private func revoke(_ refreshToken: String, config: NativeAuthConfig, localCredentialsCleared: Bool, call: CAPPluginCall) {
         var request = URLRequest(url: config.revocationURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -455,7 +456,7 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             defer { session.finishTasksAndInvalidate() }
             let status = (response as? HTTPURLResponse)?.statusCode
             DispatchQueue.main.async {
-                call.resolve(["revoked": error == nil && status == 200])
+                call.resolve(["localCredentialsCleared": localCredentialsCleared, "revoked": error == nil && status == 200])
             }
         }.resume()
     }
@@ -494,8 +495,10 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         return String(data: data, encoding: .utf8)
     }
 
-    private func deleteRefreshToken(for config: NativeAuthConfig) {
-        SecItemDelete(keychainQuery(for: config) as CFDictionary)
+    @discardableResult
+    private func deleteRefreshToken(for config: NativeAuthConfig) -> Bool {
+        let status = SecItemDelete(keychainQuery(for: config) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }
 

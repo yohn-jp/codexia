@@ -26,7 +26,10 @@ export function createNativeAuth(config, { apiRequest, nativePlugin } = {}) {
     fetchRequest,
     async signOut() {
       const result = await (await getPlugin()).signOut(config);
-      return { revoked: result?.revoked === true };
+      return {
+        localCredentialsCleared: result?.localCredentialsCleared === true,
+        revoked: result?.revoked === true,
+      };
     },
   });
 }
