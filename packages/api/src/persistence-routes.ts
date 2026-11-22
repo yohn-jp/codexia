@@ -30,6 +30,8 @@ export interface PersistenceRouteInput {
   url: string;
   body: unknown;
   requestHeaders: import("node:http").IncomingHttpHeaders;
+  /** Derived by the host from the authenticated review authority. */
+  canReviewPrivateChangeSets?: boolean;
   /** Resolve an authenticated human author and enforce the existing write policy. */
   requireAuthor: () => Promise<string>;
 }
@@ -227,7 +229,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       const action = changeSetPath[2];
       if (!changeSetId && input.method === "GET") {
         const limit = requestLimit(url.searchParams.get("limit"), 50, 200);
-        return { status: 200, body: { changeSets: await listNativeChangeSets(persistence, projectId, limit) } };
+        return { status: 200, body: { changeSets: await listNativeChangeSets(persistence, projectId, limit, input.canReviewPrivateChangeSets) } };
       }
       if (!changeSetId && input.method === "POST") {
         const actorId = await input.requireAuthor();
@@ -239,7 +241,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         return { status: 201, body: result };
       }
       if (changeSetId && !action && input.method === "GET") {
-        const result = await getNativeChangeSet(persistence, projectId, changeSetId);
+        const result = await getNativeChangeSet(persistence, projectId, changeSetId, input.canReviewPrivateChangeSets);
         return result ? { status: 200, body: result } : { status: 404, body: { error: "ChangeSet was not found", code: "PERSISTENCE_NOT_FOUND" } };
       }
       if (changeSetId && action && input.method === "POST") {

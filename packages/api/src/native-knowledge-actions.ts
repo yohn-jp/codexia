@@ -13,6 +13,7 @@ export interface NativeKnowledgeActionHost {
   projectId: ProjectId;
   actorId: ActorId;
   origin: "author" | "external-agent";
+  canReviewPrivateChangeSets?: boolean;
   authorizeProposal: () => Promise<void>;
 }
 
@@ -64,6 +65,7 @@ function failure(context: ModuleActionContext, error: unknown): ActionResult {
 /** Host-owned Core catalog for native PostgreSQL Knowledge, Evidence, and ChangeSet state. */
 export function createNativeKnowledgeActions(host: NativeKnowledgeActionHost): ModuleAction[] {
   const { persistence, projectId } = host;
+  const canReviewPrivateChangeSets = host.origin === "author" && host.canReviewPrivateChangeSets === true;
   const read = (id: string, schema: ValueSchema, execute: (value: Record<string, unknown>, context: ModuleActionContext) => Promise<unknown>): ModuleAction => ({
     id, effect: "read", inputSchema: schema, outputSchema: output,
     async invoke(raw, context) {
@@ -88,9 +90,9 @@ export function createNativeKnowledgeActions(host: NativeKnowledgeActionHost): M
     read("core.evidence.node.list", input(["nodeId", "projectVersion", "limit"], ["nodeId"]), (v, c) => listNativeEvidenceForNode(persistence, projectId, id<KnowledgeNodeId>(v.nodeId, "nodeId"), positive(v.limit, 200), version(v, c))),
     read("core.evidence.assertion.get", input(["assertionId", "projectVersion", "evidenceLimit"], ["assertionId"]), (v, c) => getNativeAssertion(persistence, projectId, id(v.assertionId, "assertionId"), version(v, c), positive(v.evidenceLimit, 500))),
     read("core.evidence.assertion.list", input(["assertionId", "projectVersion", "limit"], ["assertionId"]), (v, c) => listNativeEvidenceForAssertion(persistence, projectId, id(v.assertionId, "assertionId"), version(v, c), positive(v.limit, 500))),
-    read("core.changesets.list", input(["limit"]), async v => ({ current: true, changeSets: await listNativeChangeSets(persistence, projectId, Math.min(100, positive(v.limit, 50))) })),
+    read("core.changesets.list", input(["limit"]), async v => ({ current: true, changeSets: await listNativeChangeSets(persistence, projectId, Math.min(100, positive(v.limit, 50)), canReviewPrivateChangeSets) })),
     read("core.changeset.get", input(["changeSetId"], ["changeSetId"]), async v => {
-      const result = await getNativeChangeSet(persistence, projectId, id<ChangeSetId>(v.changeSetId, "changeSetId"));
+      const result = await getNativeChangeSet(persistence, projectId, id<ChangeSetId>(v.changeSetId, "changeSetId"), canReviewPrivateChangeSets);
       return result ? { current: true, ...result } : undefined;
     }),
     {

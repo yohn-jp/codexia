@@ -996,9 +996,13 @@ class PostgresTransaction implements PersistenceTransaction {
     return row ? mapChangeSet(row) : undefined;
   }
 
-  async listChangeSets(projectId: ProjectId, limit = 50): Promise<readonly ChangeSet[]> {
+  async listChangeSets(projectId: ProjectId, limit = 50, { excludeSources = [] }: { excludeSources?: readonly string[] } = {}): Promise<readonly ChangeSet[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("ChangeSet page size must be between 1 and 200");
-    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2", [projectId, limit]);
+    const result = await this.query(
+      `SELECT * FROM change_set WHERE project_id = $1 AND COALESCE(provenance->>'source', '') <> ALL($2::text[])
+       ORDER BY created_at DESC, id LIMIT $3`,
+      [projectId, excludeSources, limit],
+    );
     return result.rows.map(mapChangeSet);
   }
 
