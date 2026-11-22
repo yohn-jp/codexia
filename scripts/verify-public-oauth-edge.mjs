@@ -205,8 +205,8 @@ export async function probePublicOAuthEdge({ origin: inputOrigin, fetchImpl = fe
 async function main() {
   const origin = process.env.CODEXIA_PUBLIC_ORIGIN;
   if (!origin) throw new Error('Set CODEXIA_PUBLIC_ORIGIN to the HTTPS production origin. No credentials are needed.');
-  const result = await probePublicOAuthEdge({ origin });
-  console.log(`Verified public OAuth metadata/JWKS, dedicated login/consent HTML and ${result.oauthStaticAssetCount} OAuth assets, MCP ${result.mcpUnauthorizedStatus} challenge, API ${result.protectedApiUnauthorizedStatus} denial, and UI Access boundary (${result.uiAccessBoundaryStatus}).`);
+  await probePublicOAuthEdge({ origin });
+  console.log('Verified public OAuth metadata/JWKS, dedicated login/consent HTML and assets, MCP challenge, protected API denial, and UI Access boundary.');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
