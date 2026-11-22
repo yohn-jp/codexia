@@ -394,7 +394,7 @@ async function backendSmoke(webClientId, ownerSubject) {
       body: JSON.stringify({ title }),
     }), "Owner project creation", 201);
     requireCondition(typeof project.id === "string" && project.id.length > 0, "Owner project creation returned no project ID");
-    expectStatus(await httpsRequest(apiOrigin + "/api/projects/" + encodeURIComponent(project.id) + "/snapshot", {
+    expectStatus(await httpsRequest(apiOrigin + "/api/projects/" + encodeURIComponent(project.id) + "/snapshot?projection=editor", {
       headers: { authorization },
     }), 200, "Owner snapshot read");
     return project.id;
