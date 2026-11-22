@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { NLP_FEATURE_SETTINGS_KEY } from "@codexia/contracts";
+import { NLP_FEATURE_SETTINGS_KEY, SNAPSHOT_READ_MANY_LIMIT } from "@codexia/contracts";
 import type { SnapshotReader } from "@codexia/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -38,6 +38,7 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
     transactions: 0,
     listDocuments: 0,
     getDocumentHeadRevisions: 0,
+    getDocumentHeadRevisionHashes: 0,
     listModuleRecords: 0,
     snapshotMisses: 0,
   };
@@ -59,7 +60,8 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
                   return record;
                 };
               }
-              if (readerProperty === "listDocuments" || readerProperty === "getDocumentHeadRevisions" || readerProperty === "listModuleRecords") {
+              if (readerProperty === "listDocuments" || readerProperty === "getDocumentHeadRevisions" ||
+                  readerProperty === "getDocumentHeadRevisionHashes" || readerProperty === "listModuleRecords") {
                 return (...args: unknown[]) => {
                   const key = String(readerProperty);
                   counts[key] = (counts[key] ?? 0) + 1;
@@ -109,7 +111,7 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
   const beforeWarm = { ...instrumented.counts };
   assert.deepEqual(await store.readTreeSnapshot(project.id), concurrent[0]);
   assert.equal((await store.writingStatsSnapshot(project.id)).stats.totalCharCount, 0);
-  for (const key of ["transactions", "listDocuments", "getDocumentHeadRevisions", "listModuleRecords"] as const) {
+  for (const key of ["transactions", "listDocuments", "getDocumentHeadRevisions", "getDocumentHeadRevisionHashes", "listModuleRecords"] as const) {
     assert.equal(instrumented.counts[key], beforeWarm[key], "warm current reads must not repeat " + key);
   }
 
@@ -127,6 +129,69 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
     const restartedStore = new CoreStore({ persistence: restartedPersistence });
     assert.deepEqual(await restartedStore.readTreeSnapshot(project.id, concurrent[0]!.snapshot), concurrent[0]);
     assert.deepEqual(await restartedStore.readTreeSnapshot(project.id), current);
+  } finally {
+    await restartedPersistence.close();
+  }
+});
+
+test("body references avoid cold hydration and keep old and new pins readable after soft deletion and restart", async () => {
+  const project = await createProject();
+  const archivedMarkdown = "旧固定版 😀 \r\n";
+  const currentMarkdown = "新固定版 e\u0301 😀\n";
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const { document, revision } = await persistence.transaction(tx => tx.createDocument({
+    projectId: project.id, kind: "scene", title: "Pinned", orderKey: "1", markdown: archivedMarkdown,
+    authorId: "author", idempotencyKey: randomUUID(),
+  }));
+  const path = `documents/${document.id}.md`;
+  const oldProject = await persistence.read(reader => reader.getProject(project.id));
+  assert.ok(oldProject);
+  const old = { projectId: project.id, projectVersion: oldProject.version };
+  const authority = "core.authority.snapshots";
+  const oldFiles = { [path]: { content: archivedMarkdown, encoding: "utf8", revision: digest(archivedMarkdown), documentId: document.id } };
+  const archivedRecord = await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: authority, key: `snapshot:${old.projectVersion}`, expectedVersion: null,
+    value: { snapshot: old, project: oldProject, documents: [document], files: oldFiles } as unknown as JsonObject,
+  }));
+  const changed = await persistence.transaction(tx => tx.saveDocument({
+    projectId: project.id, documentId: document.id, baseRevisionId: revision.id,
+    changes: [{ fromUtf16: 0, toUtf16: archivedMarkdown.length, insert: currentMarkdown }],
+    resultingSha256: digest(currentMarkdown), clientId: "test", idempotencyKey: randomUUID(), authorId: "author",
+  }));
+  const tracked = countSnapshotReads(persistence, async () => {});
+  const store = new CoreStore({ persistence: tracked.persistence });
+  const { snapshot } = await store.readTreeSnapshot(project.id);
+  const reader = await store.reader(project.id, snapshot);
+  assert.deepEqual(await reader.listRevisions?.(path), [{ path, revision: digest(currentMarkdown) }]);
+  assert.equal(tracked.counts.getDocumentHeadRevisionHashes, 1);
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 0);
+  const durable = await persistence.read(source => source.getModuleRecord(project.id, authority, `snapshot:${snapshot.projectVersion}`));
+  assert.ok(durable);
+  const files = durable.value.files as JsonObject;
+  assert.deepEqual(files[path], { documentId: document.id, revisionId: changed.revision.id, revision: digest(currentMarkdown) });
+
+  const result = await reader.readMany!([path, "documents/unknown.md", path], "base64");
+  const body = { content: Buffer.from(currentMarkdown).toString("base64"), revision: digest(currentMarkdown),
+    documentKind: "scene", documentOrder: 0 };
+  assert.deepEqual(result, [body, null, body]);
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 1);
+  await assert.rejects(reader.readMany!(Array(SNAPSHOT_READ_MANY_LIMIT + 1).fill(path)), { code: "invalid_snapshot_batch" });
+  await assert.rejects(reader.readMany!([path, "../unsafe"]), { code: "invalid_contract" });
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 1);
+
+  await persistence.transaction(tx => tx.deleteDocument({
+    projectId: project.id, documentId: document.id, expectedVersion: changed.document.version,
+  }));
+  const restartedPersistence = createPostgresPersistence(connectionString);
+  try {
+    const restarted = new CoreStore({ persistence: restartedPersistence });
+    assert.equal(await (await restarted.reader(project.id)).read(path), null);
+    assert.deepEqual(await (await restarted.reader(project.id, snapshot)).read(path, "base64"), body);
+    const archived = await restarted.reader(project.id, old);
+    assert.deepEqual(await archived.read(path, "base64"), {
+      ...body, content: Buffer.from(archivedMarkdown).toString("base64"), revision: digest(archivedMarkdown),
+    });
+    assert.deepEqual(await restartedPersistence.read(source => source.getModuleRecord(project.id, authority, `snapshot:${old.projectVersion}`)), archivedRecord);
   } finally {
     await restartedPersistence.close();
   }

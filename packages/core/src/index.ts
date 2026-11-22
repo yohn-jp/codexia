@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { makeKnowledgeProjection, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, snapshotScopeRevision, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, SNAPSHOT_READ_MANY_LIMIT, snapshotScopeRevision, type SnapshotFile, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
 import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, NLP_FEATURE_SETTINGS_CHANGESET_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
-import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, DocumentHeadRevisionLookup, DocumentRevisionKey, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
-import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, manuscriptCharacterCount, type SnapshotIndex } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, manuscriptCharacterCount, type InlineSnapshotFile, type SnapshotIndex, type SnapshotIndexFile } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
 export type { ProposalStatus } from "@codexia/contracts";
 export interface TreeScene {
@@ -171,7 +171,7 @@ export type AuthorReviewItem =
       changeSet: ChangeSet;
       receipt: ChangeSetApplicationResult | null;
     };
-type StoredFile = { content: string; encoding: "utf8" | "base64"; revision: string; documentId?: string; metadata?: boolean };
+type StoredFile = SnapshotIndexFile;
 type Manifest = {
   snapshot: SnapshotId;
   files: Record<string, StoredFile>;
@@ -249,7 +249,36 @@ function storyDocumentId(document: Document, metadata: JsonObject): string {
 function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
-function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly NativeStoryDocument[]): SnapshotReader {
+type LoadSnapshotRevisions = (heads: readonly DocumentRevisionKey[]) => Promise<readonly DocumentHeadRevisionLookup[]>;
+
+async function resolveSnapshotFiles(
+  projectId: string, files: readonly (StoredFile | undefined)[], loadRevisions: LoadSnapshotRevisions,
+): Promise<readonly (InlineSnapshotFile | null)[]> {
+  const heads = files.flatMap(file => file && "revisionId" in file ? [file] : []);
+  const rows = heads.length ? await loadRevisions(heads) : [];
+  let next = 0;
+  return files.map(file => {
+    if (!file) return null;
+    if (!("revisionId" in file)) return file;
+    const lookup = rows[next++];
+    const revision = lookup?.revision;
+    if (!revision || lookup.documentId !== file.documentId || lookup.revisionId !== file.revisionId ||
+        revision.projectId !== projectId || revision.documentId !== file.documentId ||
+        revision.id !== file.revisionId || revision.sha256 !== file.revision) {
+      fail(409, "snapshot_unavailable", "The immutable manuscript revision does not match its snapshot");
+    }
+    return { content: revision.markdown, encoding: "utf8", revision: file.revision, documentId: file.documentId };
+  });
+}
+
+function snapshotFile(manifest: Manifest, path: string): StoredFile | undefined {
+  safePath(path);
+  return Object.hasOwn(manifest.files, path) ? manifest.files[path] : undefined;
+}
+
+function makeReader(
+  manifest: Manifest, loadRevisions: LoadSnapshotRevisions, nativeStoryDocuments?: () => readonly NativeStoryDocument[],
+): SnapshotReader {
   const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   const documentOrder = new Map(manifest.documents.map((document, index) => [String(document.id), index]));
   const { project } = manifest;
@@ -258,6 +287,18 @@ function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly Na
   const title = [configuredTitle, settings.name]
     .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? "Project";
   const subtitle = typeof settings.subtitle === "string" ? settings.subtitle.trim() : "";
+  async function readMany(paths: readonly string[], encoding: "utf8" | "base64" = "utf8"): Promise<readonly (SnapshotFile | null)[]> {
+    if (paths.length > SNAPSHOT_READ_MANY_LIMIT) fail(400, "invalid_snapshot_batch", "Too many paths in a snapshot body batch");
+    const files = await resolveSnapshotFiles(manifest.snapshot.projectId, paths.map(path => snapshotFile(manifest, path)), loadRevisions);
+    return files.map(file => {
+      if (!file) return null;
+      const bytes = Buffer.from(file.content, file.encoding);
+      const documentKind = file.documentId ? documentKinds.get(file.documentId) : undefined;
+      const order = file.documentId ? documentOrder.get(file.documentId) : undefined;
+      return { content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {}),
+        ...(order === undefined ? {} : {documentOrder: order}) };
+    });
+  }
   return { snapshot: structuredClone(manifest.snapshot), projectPresentation: { title, ...(subtitle ? { subtitle } : {}) },
     get knowledge() {
       const knowledge = manifest.knowledge;
@@ -273,19 +314,15 @@ function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly Na
       const documents = nativeStoryDocuments?.() ?? [];
       return documents.length ? structuredClone(documents) : undefined;
     },
-    async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
-      const bytes = Buffer.from(file.content, file.encoding);
-      const documentKind = file.documentId ? documentKinds.get(file.documentId) : undefined;
-      const order = file.documentId ? documentOrder.get(file.documentId) : undefined;
-      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {}), ...(order === undefined ? {} : {documentOrder: order})}; },
+    async read(filePath, encoding = "utf8") { return (await readMany([filePath], encoding))[0] ?? null; },
+    readMany,
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }
   };
 }
 
 function manifestFileRevision(manifest: Manifest, path: string): string | null {
-  safePath(path);
-  return Object.hasOwn(manifest.files, path) ? manifest.files[path]!.revision : null;
+  return snapshotFile(manifest, path)?.revision ?? null;
 }
 
 function assertEvidenceRevisions(
@@ -329,7 +366,10 @@ export class CoreStore implements MutationCoordinator {
   async createProject(input: {title: string; settings?: JsonObject}): Promise<Project> { return this.persistence.transaction((tx) => tx.createProject(input)); }
   private nativeStoryProjection(manifest: Manifest): NativeStoryDocument[] {
     const key = snapshotKey(manifest.snapshot.projectId, manifest.snapshot.projectVersion);
-    const filesByDocument = new Map(Object.entries(manifest.files).filter(([, file]) => file.metadata && file.documentId).map(([path, file]) => [file.documentId!, { path, file }]));
+    const filesByDocument = new Map<string, { path: string; file: InlineSnapshotFile }>();
+    for (const [path, file] of Object.entries(manifest.files)) {
+      if (file.metadata && file.documentId && "content" in file) filesByDocument.set(file.documentId, { path, file });
+    }
     const sources = manifest.documents.flatMap((document, documentOrder) => {
       if (document.kind !== "volume" && document.kind !== "chapter" && document.kind !== "scene") return [];
       const source = filesByDocument.get(document.id);
@@ -383,8 +423,8 @@ export class CoreStore implements MutationCoordinator {
     const documents = [...await reader.listDocuments(pid(projectId),undefined,1000)];
     if (documents.length === 1000) fail(413,"snapshot_too_large","Project snapshot exceeds the supported document bound");
     const headKeys = documents.flatMap((document) => document.headRevisionId ? [{ documentId: document.id, revisionId: document.headRevisionId }] : []);
-    const headRevisions = await reader.getDocumentHeadRevisions(pid(projectId), headKeys);
-    const revisionsByHead = new Map(headRevisions.map((head) => [JSON.stringify([head.documentId, head.revisionId]), head.revision]));
+    const headRevisions = await reader.getDocumentHeadRevisionHashes(pid(projectId), headKeys);
+    const revisionsByHead = new Map(headRevisions.map(head => [JSON.stringify([head.documentId, head.revisionId]), head.sha256]));
     const pathRecords = await reader.listModuleRecords(pid(projectId), PATHS);
     const artifacts = await reader.listModuleRecords(pid(projectId), ARTIFACTS);
     const publishingRecords: NonNullable<Manifest["publishingRecords"]> = {};
@@ -395,19 +435,21 @@ export class CoreStore implements MutationCoordinator {
     const nlpRecord = await reader.getModuleRecord(pid(projectId), "nlp", NLP_FEATURE_SETTINGS_KEY);
     const nlpFeatureSettings = nlpRecord ? { value: nlpRecord.value, version: nlpRecord.version } : null;
     const files: Record<string,StoredFile> = {};
-    const add = (key: string, content: string, {
-      encoding = "utf8", documentId, metadata, revision = hash(Buffer.from(content, encoding)),
-    }: Partial<Omit<StoredFile, "content">> = {}) => {
+    const add = (key: string, file: StoredFile) => {
       safePath(key); if (files[key]) fail(409,"duplicate_document_path","Project contains duplicate document paths");
-      const file = { content, encoding, revision, ...(documentId ? { documentId } : {}), ...(metadata ? { metadata: true } : {}) };
       files[key] = file;
-      return file;
+    };
+    const addInline = (key: string, content: string, {
+      encoding = "utf8", documentId, metadata,
+    }: Partial<Omit<InlineSnapshotFile, "content" | "revision">> = {}) => {
+      add(key, { content, encoding, revision: hash(Buffer.from(content, encoding)),
+        ...(documentId ? { documentId } : {}), ...(metadata ? { metadata: true } : {}) });
     };
     const byId = new Map(documents.map((document) => [document.id,document]));
     const mappings = new Map(pathRecords.map((record) => [record.key, record.value]));
     const metadataFor = (document: Document) => storyMetadata(mappings.get(document.id));
     const projectedId = (document: Document) => storyDocumentId(document, metadataFor(document));
-    for (const [documentOrder, document] of documents.entries()) {
+    for (const document of documents) {
       const mapping = mappings.get(document.id);
       const parent = document.parentId ? byId.get(document.parentId) : undefined;
       const grandparent = parent?.parentId ? byId.get(parent.parentId) : undefined;
@@ -428,12 +470,12 @@ export class CoreStore implements MutationCoordinator {
         }
       }
       const projectedMetadata = {...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})};
-      add(metadataPath, YAML.stringify(projectedMetadata), { documentId: document.id, metadata: true });
+      addInline(metadataPath, YAML.stringify(projectedMetadata), { documentId: document.id, metadata: true });
       if (document.headRevisionId) {
         const revision = revisionsByHead.get(JSON.stringify([document.id, document.headRevisionId]));
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
         if (document.kind !== "volume" && document.kind !== "chapter") {
-          add(manuscriptPath, revision.markdown, { documentId: document.id, revision: revision.sha256 });
+          add(manuscriptPath, { documentId: document.id, revisionId: document.headRevisionId, revision });
         }
       }
     }
@@ -442,7 +484,7 @@ export class CoreStore implements MutationCoordinator {
           record.key === RETIRED_KNOWLEDGE_CONTEXT_PATH || record.key === NLP_LEGACY_FEATURE_SETTINGS_PATH ||
           isPrivatePublishingPath(record.key)) continue;
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
-      add(record.key, record.value.content, { encoding: record.value.encoding === "base64" ? "base64" : "utf8" });
+      addInline(record.key, record.value.content, { encoding: record.value.encoding === "base64" ? "base64" : "utf8" });
     }
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
     const snapshot = { projectId, projectVersion: project.version };
@@ -596,7 +638,13 @@ export class CoreStore implements MutationCoordinator {
   }
   async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> {
     const manifest = await this.manifest(projectId,pinned);
-    return makeReader(manifest,() => this.nativeStoryProjection(manifest));
+    return makeReader(manifest, heads => this.loadSnapshotRevisions(projectId, heads), () => this.nativeStoryProjection(manifest));
+  }
+  private loadSnapshotRevisions(projectId: string, heads: readonly DocumentRevisionKey[]) {
+    return this.persistence.read(reader => reader.getDocumentHeadRevisions(pid(projectId), heads));
+  }
+  private resolveSnapshotFiles(projectId: string, files: readonly (StoredFile | undefined)[]) {
+    return resolveSnapshotFiles(projectId, files, heads => this.loadSnapshotRevisions(projectId, heads));
   }
   async readPublishingSnapshotRecord(projectId: string, snapshot: SnapshotId, key: string): Promise<OwnModuleRecord | undefined> {
     if (!isPublishingRecordKey(key)) fail(400, "invalid_publishing_record", "Publishing record key is not supported");
@@ -701,8 +749,10 @@ export class CoreStore implements MutationCoordinator {
   async readSceneSnapshot(projectId:string,sceneId:string,pinned?:SnapshotId) {
     const manifest=await this.manifest(projectId,pinned), index=this.snapshotIndex(manifest), document=this.findDocument(manifest,sceneId,index);
     const paths=index.pathsByDocumentId.get(document.id), manuscriptPath=paths?.bodyPath, metadataPath=paths?.metadataPath;
-    const manuscript=manuscriptPath ? manifest.files[manuscriptPath] : undefined, metadata=metadataPath ? manifest.files[metadataPath] : undefined;
-    if (!manuscriptPath || !metadataPath || !manuscript || !metadata) fail(404,"scene_not_found","Scene body not found");
+    const metadata = metadataPath ? manifest.files[metadataPath] : undefined;
+    if (!manuscriptPath || !metadataPath || !metadata || !("content" in metadata)) fail(404,"scene_not_found","Scene body not found");
+    const [manuscript] = await this.resolveSnapshotFiles(projectId, [manifest.files[manuscriptPath]]);
+    if (!manuscript) fail(404,"scene_not_found","Scene body not found");
     return {snapshot:manifest.snapshot,scene:{id:this.logicalId(index,document),title:document.title,text:manuscriptBody(manuscript.content),revision:hash(metadata.content+"\0"+manuscript.content)},document:{path:manuscriptPath,content:manuscript.content,revision:manuscript.revision},metadata:{path:metadataPath,content:metadata.content,revision:metadata.revision}};
   }
   async readScene(projectId:string,sceneId:string):Promise<Scene> { return (await this.readSceneSnapshot(projectId,sceneId)).scene; }
@@ -711,38 +761,64 @@ export class CoreStore implements MutationCoordinator {
     if (typeof query!=="string" || query.length>512 || !Number.isInteger(limit) || limit<1) fail(400,"invalid_search_query","Invalid search query or limit");
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const results:LiteralSearchResult[]=[];
     const normalizedQuery=query.toLocaleLowerCase();
-    if (query) for (const document of manifest.documents) { const bodyPath=index.pathsByDocumentId.get(document.id)?.bodyPath,entry=bodyPath ? manifest.files[bodyPath] : undefined; for (const field of ["name","body"] as const) {
-      const text=field==="name" ? document.title:entry ? manuscriptBody(entry.content):""; const folded=text.toLocaleLowerCase(), match=folded.indexOf(normalizedQuery); if(match<0)continue;
-      let offset=match, end=match+normalizedQuery.length;
-      if(folded.length!==text.length) {
-        let original=0, normalized=0;
-        for(const character of text) {
-          const next=normalized+character.toLocaleLowerCase().length;
-          if(normalized<=match && match<next) offset=original;
-          if(normalized<match+normalizedQuery.length && match+normalizedQuery.length<=next) { end=original+character.length; break; }
-          original+=character.length; normalized=next;
+    for (let start = 0; query && start < manifest.documents.length; start += SNAPSHOT_READ_MANY_LIMIT) {
+      const documents = manifest.documents.slice(start, start + SNAPSHOT_READ_MANY_LIMIT);
+      const bodyPaths = documents.map(document => index.pathsByDocumentId.get(document.id)?.bodyPath);
+      const bodies = await this.resolveSnapshotFiles(projectId, bodyPaths.map(path => path ? manifest.files[path] : undefined));
+      for (const [position, document] of documents.entries()) {
+        const bodyPath = bodyPaths[position];
+        const entry = bodies[position];
+        for (const field of ["name", "body"] as const) {
+          const text = field === "name" ? document.title : entry ? manuscriptBody(entry.content) : "";
+          const folded = text.toLocaleLowerCase(), match = folded.indexOf(normalizedQuery);
+          if (match < 0) continue;
+          let offset = match, end = match + normalizedQuery.length;
+          if (folded.length !== text.length) {
+            let original = 0, normalized = 0;
+            for (const character of text) {
+              const next = normalized + character.toLocaleLowerCase().length;
+              if (normalized <= match && match < next) offset = original;
+              if (normalized < match + normalizedQuery.length && match + normalizedQuery.length <= next) {
+                end = original + character.length;
+                break;
+              }
+              original += character.length;
+              normalized = next;
+            }
+          }
+          results.push({ id: this.logicalId(index, document), type: document.kind as LiteralSearchResult["type"],
+            name: document.title, snippet: text.slice(Math.max(0,offset-48),end+48), filePath: bodyPath ?? "",
+            score: field === "name" ? 2 : 1, field, offset, length: end - offset });
         }
       }
-      results.push({id:this.logicalId(index,document),type:document.kind as LiteralSearchResult["type"],name:document.title,snippet:text.slice(Math.max(0,offset-48),end+48),filePath:bodyPath ?? "",score:field==="name"?2:1,field,offset,length:end-offset});
-    }}
+    }
     return {snapshot:manifest.snapshot,results:results.sort((a,b)=>b.score-a.score).slice(0,Math.min(limit,100))};
   }
   async writingStatsSnapshot(projectId: string, pinned?: SnapshotId): Promise<{ snapshot: SnapshotId; stats: WritingStats }> {
     const manifest = await this.manifest(projectId, pinned);
     const index = this.snapshotIndex(manifest);
     const sceneStats = new Map<string, SceneWritingStats>();
-    let totalCharCount = 0;
-    for (const document of manifest.documents) {
-      if (document.kind !== "scene") continue;
+    const scenes = manifest.documents.filter(document => document.kind === "scene").map(document => {
       const sceneId = this.logicalId(index, document);
       // A scene's logical ID can resolve to an earlier document of another kind.
-      const source = this.findDocument(manifest, sceneId, index);
-      let charCount = index.writingCharacterCountsByDocumentId.get(source.id);
-      if (charCount === undefined) {
-        const bodyPath = index.pathsByDocumentId.get(source.id)?.bodyPath;
-        charCount = bodyPath === undefined ? 0 : manuscriptCharacterCount(manifest.files[bodyPath]!.content);
-        index.writingCharacterCountsByDocumentId.set(source.id, charCount);
+      return { sceneId, sourceId: this.findDocument(manifest, sceneId, index).id };
+    });
+    const counts = index.writingCharacterCountsByDocumentId;
+    const missing = [...new Set(scenes.map(({ sourceId }) => sourceId))].filter(sourceId => !counts.has(sourceId));
+    for (let start = 0; start < missing.length; start += SNAPSHOT_READ_MANY_LIMIT) {
+      const documents = missing.slice(start, start + SNAPSHOT_READ_MANY_LIMIT);
+      const files = documents.map(sourceId => {
+        const path = index.pathsByDocumentId.get(sourceId)?.bodyPath;
+        return path ? manifest.files[path] : undefined;
+      });
+      const bodies = await this.resolveSnapshotFiles(projectId, files);
+      for (const [position, sourceId] of documents.entries()) {
+        counts.set(sourceId, manuscriptCharacterCount(bodies[position]?.content ?? ""));
       }
+    }
+    let totalCharCount = 0;
+    for (const { sceneId, sourceId } of scenes) {
+      const charCount = counts.get(sourceId) ?? 0;
       sceneStats.set(sceneId, { sceneId, charCount, pages400: Math.ceil(charCount / 400) });
       totalCharCount += charCount;
     }
@@ -1176,7 +1252,7 @@ export class CoreStore implements MutationCoordinator {
 
       const state = first.status;
       const manifest = await this.currentManifest(transaction, projectId);
-      const reader = makeReader(manifest);
+      const reader = makeReader(manifest, heads => transaction.getDocumentHeadRevisions(pid(projectId), heads));
       assertKnowledgeRevision(manifest, operation);
       assertEvidenceRevisions(manifest, state.proposal, operation);
       for (const precondition of [...operation.reads, ...operation.writes]) {

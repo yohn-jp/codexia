@@ -177,12 +177,13 @@ test("document head revisions are fetched as an ordered exact-key set within pro
   const first = await createDocument(firstProject.id, "First head");
   const second = await createDocument(firstProject.id, "Second head");
 
-  const lookups = await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [
+  const keys = [
     { documentId: second.document.id, revisionId: second.revision.id },
     { documentId: first.document.id, revisionId: second.revision.id },
     { documentId: first.document.id, revisionId: first.revision.id },
     { documentId: second.document.id, revisionId: second.revision.id },
-  ]));
+  ];
+  const lookups = await persistence.read(reader => reader.getDocumentHeadRevisions(firstProject.id, keys));
 
   assert.deepEqual(lookups.map(({ documentId, revisionId, revision }) => ({
     documentId,
@@ -198,6 +199,14 @@ test("document head revisions are fetched as an ordered exact-key set within pro
     { documentId: first.document.id, revisionId: first.revision.id },
   ])), [{ documentId: first.document.id, revisionId: first.revision.id, revision: null }]);
   assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [])), []);
+  assert.deepEqual(await persistence.read(reader => reader.getDocumentHeadRevisionHashes(firstProject.id, keys)), [
+    { ...keys[0], sha256: sha256("Second head") },
+    { ...keys[1], sha256: null },
+    { ...keys[2], sha256: sha256("First head") },
+    { ...keys[3], sha256: sha256("Second head") },
+  ]);
+  assert.deepEqual(await persistence.read(reader => reader.getDocumentHeadRevisionHashes(secondProject.id, [keys[0]!])),
+    [{ ...keys[0], sha256: null }]);
 });
 
 test("project revision history is globally bounded, metadata only and pinned to exact heads", async () => {

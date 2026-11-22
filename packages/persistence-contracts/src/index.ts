@@ -174,6 +174,10 @@ export interface DocumentHeadRevisionLookup extends DocumentRevisionKey {
   revision: DocumentRevision | null;
 }
 
+export interface DocumentHeadRevisionHash extends DocumentRevisionKey {
+  sha256: string | null;
+}
+
 export type KnowledgeNodeStatus = "proposed" | "confirmed" | "retired";
 export type KnowledgeAliasStatus = "proposed" | "confirmed" | "ambiguous" | "retired";
 export type KnowledgeRelationStatus = "proposed" | "confirmed" | "rejected" | "retired";
@@ -575,6 +579,8 @@ export interface PersistenceReader {
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined>;
   /** Resolve exact document/revision pairs in input order within the project scope. */
   getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
+  /** Resolve the hashes of exact pairs in input order without requesting revision bodies. */
+  getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]>;
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage>;
   /** Globally bounded metadata from the ancestry of the supplied immutable heads, in input-document order for timestamp ties. */
   listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;

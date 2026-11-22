@@ -25,6 +25,7 @@ import {
   type CreateProjectCommand,
   type Document,
   type DocumentHeadRevisionLookup,
+  type DocumentHeadRevisionHash,
   type DocumentId,
   type DocumentRevision,
   type DocumentRevisionKey,
@@ -662,12 +663,13 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapRevision(result.rows[0]) : undefined;
   }
 
-  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+  private async selectDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[], includeBody: boolean) {
     if (heads.length === 0) return [];
+    const fields = includeBody
+      ? "revision.project_id, revision.document_id, revision.id, revision.parent_revision_id, revision.markdown, revision.sha256, revision.author_id, revision.created_at"
+      : "revision.sha256";
     const result = await this.query(
-      `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id,
-         revision.project_id, revision.document_id, revision.id, revision.parent_revision_id,
-         revision.markdown, revision.sha256, revision.author_id, revision.created_at
+      `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id, ${fields}
        FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY
          AS requested(document_id, revision_id, request_order)
        LEFT JOIN document_revision AS revision
@@ -675,10 +677,22 @@ class PostgresTransaction implements PersistenceTransaction {
        ORDER BY requested.request_order`,
       [projectId, heads.map((head) => head.documentId), heads.map((head) => head.revisionId)],
     );
-    return result.rows.map((row) => ({
+    return result.rows;
+  }
+
+  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+    return (await this.selectDocumentHeadRevisions(projectId, heads, true)).map(row => ({
       documentId: asString(row.requested_document_id) as DocumentId,
       revisionId: asString(row.requested_revision_id) as RevisionId,
       revision: row.id === null ? null : mapRevision(row),
+    }));
+  }
+
+  async getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]> {
+    return (await this.selectDocumentHeadRevisions(projectId, heads, false)).map(row => ({
+      documentId: asString(row.requested_document_id) as DocumentId,
+      revisionId: asString(row.requested_revision_id) as RevisionId,
+      sha256: row.sha256 === null ? null : asString(row.sha256).trim(),
     }));
   }
 

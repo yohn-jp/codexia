@@ -1,14 +1,21 @@
 import YAML from "yaml";
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
-import type { Document } from "@codexia/persistence-contracts";
+import type { Document, DocumentRevisionKey } from "@codexia/persistence-contracts";
 
-export interface SnapshotIndexFile {
+export interface InlineSnapshotFile {
   content: string;
   encoding: "utf8" | "base64";
   revision: string;
   documentId?: string;
   metadata?: boolean;
 }
+
+export interface SnapshotRevisionFile extends DocumentRevisionKey {
+  revision: string;
+  metadata?: false;
+}
+
+export type SnapshotIndexFile = InlineSnapshotFile | SnapshotRevisionFile;
 
 export interface SnapshotDocumentPaths {
   bodyPath?: string;
@@ -71,7 +78,8 @@ export function createSnapshotIndex(
   for (const document of documents) {
     documentsById.set(document.id, document);
     const metadataPath = pathsByDocumentId.get(document.id)?.metadataPath;
-    const metadata = metadataPath ? YAML.parse(files[metadataPath]!.content) : null;
+    const metadataFile = metadataPath ? files[metadataPath] : undefined;
+    const metadata = metadataFile && "content" in metadataFile ? YAML.parse(metadataFile.content) : null;
     const logicalId = typeof metadata?.id === "string" ? metadata.id : document.id;
     logicalIdByDocumentId.set(document.id, logicalId);
     logicalDocumentIds.add(logicalId);
