@@ -2425,34 +2425,6 @@ export function createServer(options: ApiServerOptions): Server {
       if (suffix.startsWith("modules/") || suffix.startsWith("actions/")) throw httpFailure(404, "NOT_FOUND", "API route not found");
     }
 
-    if (routePath === "/api/search" && method === "GET") {
-      const projectId = query.get("projectId");
-      if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
-      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
-      const term = query.get("q") ?? "";
-      if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
-      const limit = boundedInt(query.get("limit"), 20, 1, 100);
-      sendJson(response, 200, await searchSnapshot(projectId, term, limit, optionalSnapshot(query, projectId)));
-      return;
-    }
-    if (routePath === "/api/writing-stats" && method === "GET") {
-      const projectId = query.get("projectId");
-      if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
-      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
-      sendJson(response, 200, await writingStatsSnapshot(projectId, optionalSnapshot(query, projectId)));
-      return;
-    }
-    if (routePath === "/api/scratch" && method === "POST") {
-      const projectId = query.get("projectId");
-      if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
-      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
-      const author = await requireAuthorSession();
-      await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
-      return;
-    }
     if (routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/")) {
       const publicMatch = routePath.match(/^\/api\/public\/projects\/([^/]+)\/modules\/([^/]+)(?:\/(.*))?$/u);
       if (!publicMatch) throw httpFailure(404, "NOT_FOUND", "Public module route not found");
