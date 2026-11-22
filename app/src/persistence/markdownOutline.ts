@@ -19,7 +19,7 @@ export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
     ? lines.findIndex((line, index) => index > 0 && (line.content === "---" || line.content === "..."))
     : -1;
   const hasMapping = closingFrontmatterLine > 0 && lines.slice(1, closingFrontmatterLine)
-    .some((line) => /^[^#\\s][^:]*:[ \\t]*(?:.*)$/u.test(line.content));
+    .some((line) => /^[^#\s][^:]*:[ \t]*(?:.*)$/u.test(line.content));
   const frontmatterEndLine = hasMapping ? closingFrontmatterLine : -1;
   let fence: { marker: string; length: number } | null = null;
 
