@@ -592,8 +592,8 @@ export interface PersistenceReader {
   listAssertions(projectId: ProjectId, limit?: number): Promise<readonly Assertion[]>;
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeRelation[]>;
-  /** Optional bounded set read for the immutable Knowledge/Evidence snapshot projection. */
-  readKnowledgeProjectionBatch?(
+  /** Bounded set read for the immutable Knowledge/Evidence snapshot projection. */
+  readKnowledgeProjectionBatch(
     projectId: ProjectId,
     nodeIds: readonly KnowledgeNodeId[],
     limits: KnowledgeProjectionBatchLimits,
