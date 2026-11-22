@@ -831,6 +831,59 @@ test("UX canon keeps explicit shells usable with long Japanese titles and enlarg
   }
 });
 
+test("guarded shell switches remember completed choices and keep the manuscript without preference storage", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page, "desktop");
+  const firstDraft = "切替前の現在の原稿を保持する。";
+  await page.evaluate(() => localStorage.setItem("scriptorium:ui-mode", "desktop"));
+  await editor(page).fill(firstDraft);
+  await expectMarkdown(page, firstDraft);
+  await expectDeviceDraft(page);
+
+  await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
+  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${scene.id}`, "u"));
+  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
+  await expectMarkdown(page, firstDraft);
+  await editor(page).dispatchEvent("compositionend", { data: "日本語" });
+
+  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await expectMarkdown(page, firstDraft);
+  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
+  await page.goto("/");
+  await expect.poll(() => new URL(page.url()).pathname.startsWith("/mobile")).toBe(true);
+  await expect(page.locator(".mobile-shell")).toBeVisible();
+
+  await page.goto(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`);
+  await expectMarkdown(page, firstDraft);
+  await page.getByRole("button", { name: "設定を開く", exact: true }).click();
+  await page.getByRole("button", { name: "Desktop版へ切り替え", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await expectMarkdown(page, firstDraft);
+  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
+  await page.goto("/");
+  await expect.poll(() => new URL(page.url()).pathname.startsWith("/desktop")).toBe(true);
+  await expect(page.locator(".st-desktop-shell")).toBeVisible();
+
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  const secondDraft = "保存先が使えなくても移動経路と原稿を保持する。";
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(secondDraft);
+  await expectMarkdown(page, secondDraft);
+  await expectDeviceDraft(page);
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string): void {
+      if (key === "scriptorium:ui-mode") throw new DOMException("Storage unavailable", "QuotaExceededError");
+      original.call(this, key, value);
+    };
+  });
+  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
+  await expectMarkdown(page, secondDraft);
+});
+
 test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page }) => {
   await createWritingFixture(page); const requests: string[] = [];
   page.on("request", (request) => { if (/terms|terminology/u.test(request.url())) requests.push(request.url()); });
