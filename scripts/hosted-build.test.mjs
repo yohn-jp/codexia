@@ -427,18 +427,40 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
     manifests.set(ui, manifest);
   }
+  async function emitOAuth() {
+    const output = path.join(directory, 'app/dist/oauth');
+    await mkdir(path.join(output, '.vite'), { recursive: true });
+    await mkdir(path.join(output, 'assets'), { recursive: true });
+    const manifest = {
+      'oauth-login.html': { file: 'assets/login-AbCd1234.js', isEntry: true, imports: ['_oauth.js'],
+        css: ['assets/styles-EfGh5678.css'] },
+      'oauth-consent.html': { file: 'assets/consent-AbCd1234.js', isEntry: true, imports: ['_oauth.js'],
+        css: ['assets/styles-EfGh5678.css'] },
+      '_oauth.js': { file: 'assets/oauth-AbCd1234.js' },
+    };
+    const files = new Set(Object.values(manifest).flatMap(({ file, css = [] }) => [file, ...css]));
+    for (const file of files) await writeFile(path.join(output, file), '/* OAuth fixture */');
+    await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
+  }
   try {
     await emit('', true);
     await emit('desktop', true);
     await emit('mobile', true);
+    await emitOAuth();
     const records = await browserArtifactRecords(directory, ['story']);
-    assert.equal(records.files.length, 9);
+    assert.equal(records.files.length, 13);
+    assert.ok(records.files.some(({ path: name }) => name === '/app/app/dist/oauth/assets/login-AbCd1234.js'));
+    assert.ok(records.files.some(({ path: name }) => name === '/app/app/dist/oauth/assets/consent-AbCd1234.js'));
     assert.equal(records.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
     const desktopAssets = path.join(directory, 'app/dist/desktop/assets');
     const unexpectedScript = path.join(desktopAssets, 'unexpected-AbCd1234.js');
     await writeFile(unexpectedScript, '/* unexpected fixture */');
     await assert.rejects(browserArtifactRecords(directory, ['story']), /outside its manifest/);
     await rm(unexpectedScript);
+    const unexpectedOAuthScript = path.join(directory, 'app/dist/oauth/assets/extra-AbCd1234.js');
+    await writeFile(unexpectedOAuthScript, '/* untracked OAuth script */');
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /outside its manifest/u);
+    await rm(unexpectedOAuthScript);
     await emit('desktop', false);
     await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
     await emit('desktop', true);
@@ -456,7 +478,7 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await emit('desktop', true, true);
     await emit('mobile', true, true);
     const modernRecords = await browserArtifactRecords(directory, ['story']);
-    assert.equal(modernRecords.files.length, 11);
+    assert.equal(modernRecords.files.length, 15);
     assert.equal(modernRecords.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
