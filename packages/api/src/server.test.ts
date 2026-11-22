@@ -1323,9 +1323,9 @@ describe("Codexia HTTP boundary", () => {
     await writeFile(resolve(staticDir, "oauth", "oauth-login.html"),
       '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>OAuth sign in</h1><link rel="stylesheet" href="/oauth/assets/styles-AbCd1234.css"><script type="module" src="/oauth/assets/login-AbCd1234.js"></script>');
     await writeFile(resolve(staticDir, "oauth", "oauth-consent.html"),
-      '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>OAuth consent</h1><link rel="stylesheet" href="/oauth/assets/styles-AbCd1234.css"><script type="module" src="/oauth/assets/consent-EfGh5678.js"></script>');
+      '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>OAuth consent</h1><link rel="stylesheet" href="/oauth/assets/styles-AbCd1234.css"><script type="module" src="/oauth/assets/consent-example-entry.js"></script>');
     await writeFile(resolve(staticDir, "oauth", "assets", "login-AbCd1234.js"), "OAuth login bundle");
-    await writeFile(resolve(staticDir, "oauth", "assets", "consent-EfGh5678.js"), "OAuth consent bundle");
+    await writeFile(resolve(staticDir, "oauth", "assets", "consent-example-entry.js"), "OAuth consent bundle");
     await writeFile(resolve(staticDir, "oauth", "assets", "styles-AbCd1234.css"), "OAuth-only styles");
     await writeFile(resolve(staticDir, "oauth", "assets", "icon-GhIj9012.svg"), "<svg></svg>");
     await symlink(resolve(staticDir, "server.test.js"), resolve(staticDir, "oauth", "assets", "leak-KlMn3456.js"));
@@ -1374,7 +1374,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
     for (const [path, heading, entry] of [
       ["/oauth/login?oauth_query=opaque", "OAuth sign in", "login-AbCd1234.js"],
-      ["/oauth/consent?oauth_query=opaque", "OAuth consent", "consent-EfGh5678.js"],
+      ["/oauth/consent?oauth_query=opaque", "OAuth consent", "consent-example-entry.js"],
     ] as const) {
       const oauthShell = await fetch(`${apiServer.base}${path}`);
       assert.equal(oauthShell.status, 200, `${path} must return its dedicated OAuth entry`);
@@ -1398,7 +1398,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(oauthLoginAsset.headers.get("cache-control"), "public, max-age=31536000, immutable");
     assert.equal((await fetch(`${apiServer.base}/oauth/assets/main-a1b2.js`)).status, 404,
       "the dedicated prefix must not expose the generic application asset directory");
-    const oauthConsentAsset = await fetch(`${apiServer.base}/oauth/assets/consent-EfGh5678.js`);
+    const oauthConsentAsset = await fetch(`${apiServer.base}/oauth/assets/consent-example-entry.js`);
     assert.equal(await oauthConsentAsset.text(), "OAuth consent bundle");
     const oauthStyles = await fetch(`${apiServer.base}/oauth/assets/styles-AbCd1234.css`);
     assert.equal(await oauthStyles.text(), "OAuth-only styles");
