@@ -202,6 +202,12 @@ export interface TreeRead {
   tree: Tree;
 }
 
+export interface EditorSnapshotRead {
+  snapshot: SnapshotId;
+  document: { path: string; revision: string } | null;
+}
+
+/** Bulk snapshot response from earlier compatible backends. */
 export interface SnapshotRead {
   snapshot: SnapshotId;
   files: FileDocument[];
@@ -594,7 +600,20 @@ export const api = {
   apply: (projectId: string, operation: ChangeOperation, signal?: AbortSignal) => request(dto.apply, projectPath(projectId, "apply"), {
     method: "POST", body: JSON.stringify(operation), ...(signal ? { signal } : {}),
   }),
-  moduleSnapshot: (projectId: string) => request(dto.snapshotRead, projectPath(projectId, "snapshot")),
+  moduleSnapshot: async (projectId: string, documentId?: string): Promise<EditorSnapshotRead> => {
+    const query = new URLSearchParams({ projection: "editor" });
+    if (documentId) query.set("documentId", documentId);
+    const result = await request(dto.moduleSnapshot, `${projectPath(projectId, "snapshot")}?${query}`);
+    const path = documentId ? `documents/${documentId}.md` : undefined;
+    if ("document" in result) {
+      if (result.document && result.document.path !== path) {
+        throw new ApiError("The server returned a different editor document", 502, "INVALID_RESPONSE");
+      }
+      return result;
+    }
+    const file = result.files.find((entry) => entry.path === path);
+    return { snapshot: result.snapshot, document: file?.revision ? { path: file.path, revision: file.revision } : null };
+  },
   modules: (projectId: string) => request(dto.modules, projectPath(projectId, "modules")),
   contributions: (projectId: string) => request(dto.contributions, projectPath(projectId, "contributions")),
   action: (projectId: string, actionId: string, input: unknown, signal?: AbortSignal, snapshot?: SnapshotId) => request(dto.action,

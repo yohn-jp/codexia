@@ -13,7 +13,7 @@ import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
 import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
-import { api, type PersistenceAnchorView } from "../api";
+import { api, type EditorSnapshotRead, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
@@ -328,7 +328,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [journalError, setJournalError] = useState("");
   const [modules, setModules] = useState<ModuleStatus[]>([]);
   const [contributions, setContributions] = useState<UiContribution[]>([]);
-  const moduleReadRef = useRef<{ snapshot: SnapshotId; files: Array<{ path: string; revision: string | null }> } | null>(null);
+  const moduleReadRef = useRef<EditorSnapshotRead | null>(null);
   const moduleSequenceRef = useRef(0);
   const [moduleSnapshot, setModuleSnapshot] = useState<SnapshotId | null>(null);
   const [proposals, setProposals] = useState<JournalProposal[]>([]);
@@ -852,8 +852,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     if (sessionBlockedRef.current || projectIdRef.current !== projectId) return;
     const sequence = ++moduleSequenceRef.current;
     if (!projectId) { moduleReadRef.current = null; setModuleSnapshot(null); setModules([]); setContributions([]); setProposals([]); return; }
+    const document = activeRef.current?.document;
+    const documentId = document?.projectId === projectId ? document.id : undefined;
     try {
-      const [statuses, catalog, read, remote] = await Promise.all([api.modules(projectId), api.contributions(projectId), api.moduleSnapshot(projectId), api.proposalStatuses(projectId)]);
+      const [statuses, catalog, read, remote] = await Promise.all([
+        api.modules(projectId), api.contributions(projectId), api.moduleSnapshot(projectId, documentId), api.proposalStatuses(projectId),
+      ]);
       if (sessionBlockedRef.current || sequence !== moduleSequenceRef.current) return;
       if (read.snapshot.projectId !== projectId) throw new Error("作品のRevisionが一致しません。");
       const currentJournal = journalRef.current;
@@ -864,11 +868,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         setProposals(localProposals);
       }
       if (sessionBlockedRef.current || sequence !== moduleSequenceRef.current || projectIdRef.current !== projectId) return;
-      moduleReadRef.current = { snapshot: read.snapshot, files: read.files };
+      moduleReadRef.current = read;
       setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
     } catch (error) { if (sequence !== moduleSequenceRef.current) return; setModuleError(error instanceof Error ? error.message : "モジュールを読み込めませんでした。"); }
   }, [projectId, authorScope]);
-  useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id, resumeEpoch, sessionBlocked]);
+  useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.document.id, active?.revision.id, resumeEpoch, sessionBlocked]);
 
   const loadOpenEvidence = useCallback(async function loadOpenEvidence(
     identity: { projectId: string; documentId: string; revisionId: string; markdown: string },
@@ -2842,7 +2846,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     const read = moduleReadRef.current;
     if (!current || !read || !moduleSnapshot || snapshotKey(read.snapshot) !== snapshotKey(moduleSnapshot) || read.snapshot.projectId !== current.document.projectId || projectIdRef.current !== current.document.projectId || sessionBlockedRef.current) return null;
     const documentPath = `documents/${current.document.id}.md`;
-    if (!read.files.some((file) => file.path === documentPath && file.revision === current.revision.sha256)) return null;
+    if (read.document?.path !== documentPath || read.document.revision !== current.revision.sha256) return null;
     return { sceneId: current.document.id, documentPath, documentRevision: current.revision.id,
       sceneRevision: current.revision.id, text: current.markdown, snapshot: read.snapshot, baseSnapshot: read.snapshot, baseSceneRevision: current.revision.id };
   };

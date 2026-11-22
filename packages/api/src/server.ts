@@ -2169,7 +2169,18 @@ export function createServer(options: ApiServerOptions): Server {
       }
       if (suffix === "snapshot" && method === "GET") {
         const selected = optionalSnapshot(query, projectId);
+        const editorProjection = query.get("projection") === "editor";
+        const documentId = editorProjection ? query.get("documentId") : null;
+        if (documentId !== null && !isPostgresRevisionId(documentId)) {
+          throw httpFailure(400, "INVALID_ID", "Use a canonical PostgreSQL document identifier");
+        }
         const reader = await freshReader(projectId, selected.pinned);
+        if (editorProjection) {
+          const path = documentId === null ? null : `documents/${documentId}.md`;
+          const file = path === null ? null : await reader.read(path);
+          sendJson(response, 200, { snapshot: reader.snapshot, document: path && file ? { path, revision: file.revision } : null });
+          return;
+        }
         const paths = await reader.list("");
         if (paths.length > MAX_SNAPSHOT_FILES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", `Snapshot contains more than ${MAX_SNAPSHOT_FILES} files`);
         let total = 0;
