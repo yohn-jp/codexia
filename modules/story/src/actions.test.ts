@@ -1500,6 +1500,27 @@ test("native Knowledge uses explicit ID, not matching names, and keeps unconfirm
   assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
 });
 
+test("Story context is a snapshot-bound action with no Assistant/provider dependency", async () => {
+  const reader = makeReader(fixtureFiles());
+  const context = makeActionContext(reader);
+  let delegated = 0;
+  context.invoke = async () => {
+    delegated++;
+    return { ok: false, snapshot: reader.snapshot, error: { code: "missing_action", message: "not wired", retryable: false } };
+  };
+  const storyActions = createStoryActions(makeModuleContext());
+  assert.ok(storyActions.some((candidate) => candidate.id === "story.context.package"));
+  assert.equal(storyActions.some((candidate) => candidate.id.startsWith("assistant.")), false);
+
+  const result = await invoke<{ sceneId: string; scope: string; parts: Array<{ kind: string }> }>(
+    "story.context.package", { sceneId: "sc-1", scope: "reader" }, context,
+  );
+  assert.deepEqual(result.snapshot, reader.snapshot);
+  assert.equal(result.data.sceneId, "sc-1");
+  assert.equal(result.data.scope, "reader");
+  assert.equal(delegated, 0);
+});
+
 test("author context maps thread relations to the target scene and matches the overview snapshot", async () => {
   const scenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-2.yaml";
   const threadPath = (id: string) => `plot/threads/${id}.yaml`;
