@@ -230,6 +230,13 @@ test("mobile route navigation commits the URL, panel and focus as one guarded tr
     await expect(editor).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.workspacePanel ?? ""))
       .toBe("outline");
+    const focusedPanel = page.locator('[data-workspace-panel="outline"]');
+    await expect(focusedPanel).toBeFocused();
+    const focusRing = await focusedPanel.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineOffset: style.outlineOffset };
+    });
+    expect(focusRing).toEqual({ outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
     expect(metrics).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 1 });
   } finally {
     await fixture.server.stop();

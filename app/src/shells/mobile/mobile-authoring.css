@@ -759,8 +759,9 @@
 .mobile-shell :is(button, ion-button, a, [role="tab"], select, input, summary):focus-visible,
 .mobile-shell ion-button::part(native):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .mobile-shell .st-workspace-panel[tabindex="-1"]:focus {
-  /* The panel is a programmatic route target, not the active editor control. */
-  outline: none;
+  /* Keep keyboard route targets identifiable; draw the ring inside the panel to avoid clipping. */
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
 }
 
 @media (min-width: 640px) {

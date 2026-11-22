@@ -601,9 +601,15 @@ test("mobile outline reveal keeps its title, tabs, and dismiss control visible a
   const editorPanelFocus = await page.locator('.st-workspace-panel[data-workspace-panel="editor"]').evaluate((element) => {
     const panel = element as HTMLElement;
     panel.focus();
-    return getComputedStyle(panel).outlineStyle;
+    const style = getComputedStyle(panel);
+    return {
+      focused: document.activeElement === panel,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
+    };
   });
-  expect(editorPanelFocus).toBe("none");
+  expect(editorPanelFocus).toEqual({ focused: true, outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
   for (const { width, height } of [{ width: 390, height: 844 }, { width: 320, height: 760 }]) {
     await page.setViewportSize({ width, height });
     await expect(currentTitle).toBeVisible();
