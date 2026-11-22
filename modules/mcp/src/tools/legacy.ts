@@ -742,21 +742,6 @@ export function registerLegacyTools(server: McpServer, baseClient: McpActionClie
   );
 
   server.tool(
-    "reload",
-    "Materialize the selected canonical project snapshot and return its entity and link counts",
-    { project_id: projectIdSchema },
-    guarded(async ({ project_id }) => {
-      const client = scopedClient(baseClient, project_id);
-      const materialize = (await client.listActions()).find((action) => action.id === "story.snapshot.materialize");
-      if (!materialize) {
-        return unavailableModuleAction(client, "story", "reload");
-      }
-      if (materialize.effect !== "read") return errorResult("ACTION_EFFECT_DENIED", "The Story snapshot materializer must be read-only");
-      return invoke(client, "story.snapshot.materialize", {});
-    }),
-  );
-
-  server.tool(
     "check_stylometric_deviations",
     "Check saved scene dialogue for source-compatible stylometric outliers",
     { project_id: projectIdSchema, scene_id: z.string().describe("Scene ID") },
