@@ -6,7 +6,9 @@ import { moduleBrowserLoaders } from "../generated/browser-modules";
 import type { BrowserJournal, JournalProposalOwnership } from "../storage/journal";
 import { discoverableContributions, workspaceContributions } from "./catalog";
 
-const PUBLISHING_REVIEW_ACTIONS = new Set(["publishing.episodes.propose", "publishing.shares.create", "publishing.shares.revoke"]);
+const NATIVE_REVIEW_REFERENCE_ACTIONS = new Set([
+  "publishing.episodes.propose", "publishing.shares.create", "publishing.shares.revoke", "nlp.updateExternalConsent",
+]);
 
 const SLOT_LABELS = {
   editor: "執筆ツール",
@@ -143,9 +145,9 @@ export function MountedContribution({
             const result = await api.action(projectId, actionId, input, controller.signal, snapshot);
             if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
             if (snapshotKey(result.snapshot) !== snapshotId) throw new Error("Action result belongs to a different project revision.");
-            const publishingReview = PUBLISHING_REVIEW_ACTIONS.has(actionId);
-            if (result.ok && (publishingReview || actionId === "core.hierarchy.reorder")) {
-              const { changeSet } = decodeResponse(result.data, publishingReview
+            const nativeReviewReference = NATIVE_REVIEW_REFERENCE_ACTIONS.has(actionId);
+            if (result.ok && (nativeReviewReference || actionId === "core.hierarchy.reorder")) {
+              const { changeSet } = decodeResponse(result.data, nativeReviewReference
                 ? responseContracts.nativeChangeSetReferenceEnvelope
                 : responseContracts.nativeChangeSetEnvelope);
               if (changeSet.projectId !== projectId) throw new Error("ChangeSet belongs to a different project.");

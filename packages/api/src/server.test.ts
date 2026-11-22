@@ -4312,6 +4312,91 @@ it("binds Publishing record ports to the requested snapshot and authenticated au
   assert.equal((await persistence.read(reader => reader.listChangeSets(project.id, 20))).length, 1);
 });
 
+it("allows scoped NLP settings proposals while reserving application for the author", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "NLP settings admission");
+  const directory = await mkdtemp(resolve(tmpdir(), "codexia-nlp-settings-admission-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = "feature-settings";
+  const moduleMetadata: ModuleManifest = {
+    id: "nlp", version: "0.1.0", contractVersion: 1,
+    dependencies: [], provides: [], requires: [], statePaths: [], locality: "local",
+  };
+  const schema: ValueSchema = { parse: value => value };
+  const runtime = new ModuleRuntime({
+    manifests: [moduleMetadata], enabled: ["nlp"], cacheDirectory: directory,
+    loaders: { nlp: async () => ({
+      manifest: moduleMetadata, ui: [], async dispose() {},
+      actions: [{
+        id: "nlp.fixture-read-settings", effect: "read", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          return { ok: true, snapshot: context.reader.snapshot, data: record?.value ?? null };
+        },
+      }, {
+        id: "nlp.fixture-propose-settings", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(input, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          const changeSet = await context.proposeOwnModuleRecord?.({
+            key: (input as { key: string }).key, value: { externalEnabled: { rewrite: true } },
+            expectedVersion: record?.version ?? null, idempotencyKey: randomUUID(),
+          });
+          return { ok: true, snapshot: context.reader.snapshot, data: { changeSet: changeSet ?? null } };
+        },
+      }],
+    }) },
+  });
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, directory, {
+    persistence, runtime, ...testClientSettings(project.id, client.publicJwks, client.isActive),
+  });
+  t.after(api.close);
+  const snapshot = (await store.reader(project.id)).snapshot;
+  const actionBase = api.base + "/api/projects/" + project.id + "/actions/nlp.fixture-";
+  const owner = client.ownerHeaders();
+  const mcp = client.mcpHeaders("mcp:propose");
+  const invoke = (action: string, headers: Record<string, string>, input: unknown = {}, selected?: SnapshotId) =>
+    fetch(actionBase + action, { method: "POST", headers, body: JSON.stringify({ input, snapshot: selected }) });
+
+  const insufficient = await invoke("propose-settings", client.mcpHeaders("mcp:read"), { key }, snapshot);
+  assert.equal(insufficient.status, 403);
+  assert.equal((await insufficient.json()).code, "OAUTH_MCP_SCOPE_REQUIRED");
+  const proposed = await invoke("propose-settings", mcp, { key }, snapshot);
+  assert.equal(proposed.status, 200);
+  const result = await proposed.json() as ActionResult<{ changeSet: { id: ChangeSetId; projectId: string } }>;
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.equal(result.data.changeSet?.projectId, project.id);
+  const stored = await persistence.read(reader => reader.getChangeSet(project.id, result.data.changeSet.id));
+  assert.equal(stored?.status, "proposed");
+  assert.equal(stored?.provenance.details.origin, "external-agent");
+  assert.equal(stored?.authorId, "owner");
+  assert.equal(await persistence.read(reader => reader.getModuleRecord(project.id, "nlp", key)), undefined);
+
+  const otherKey = await invoke("propose-settings", mcp, { key: "share-grants" }, snapshot);
+  assert.equal(otherKey.status, 200);
+  const denied = await otherKey.json() as ActionResult;
+  assert.ok(!denied.ok, JSON.stringify(denied));
+  assert.equal(denied.error.code, "NLP_RECORD_SCOPE_DENIED");
+  assert.deepEqual((await persistence.read(reader => reader.listChangeSets(project.id, 10))).map(change => change.id), [result.data.changeSet.id]);
+
+  const review = api.base + "/api/v1/persistence/projects/" + project.id + "/changesets/" + result.data.changeSet.id;
+  const transition = (action: string, headers: Record<string, string>, expectedVersion: number) =>
+    fetch(review + "/" + action, { method: "POST", headers, body: JSON.stringify({ expectedVersion }) });
+  for (const action of ["approve", "apply"]) {
+    assert.equal((await transition(action, mcp, 1)).status, 403);
+  }
+  const approved = await transition("approve", owner, 1);
+  assert.equal(approved.status, 200, await approved.text());
+  const applied = await transition("apply", owner, 2);
+  assert.equal(applied.status, 200, await applied.text());
+  const historical = await invoke("read-settings", owner, {}, snapshot);
+  assert.deepEqual(await historical.json(), { ok: true, snapshot, data: null });
+  const current = await invoke("read-settings", owner);
+  assert.deepEqual(await current.json(), {
+    ok: true, snapshot: { projectId: project.id, projectVersion: snapshot.projectVersion + 1 },
+    data: { externalEnabled: { rewrite: true } },
+  });
+});
+
 it("reorders hierarchy only by approving a version-bound native ChangeSet", async (t) => {
   const native = await nativeProject(t, "Native hierarchy reorder");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-reorder-"));

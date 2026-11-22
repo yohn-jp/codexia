@@ -16,7 +16,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
@@ -1122,16 +1122,25 @@ export function createServer(options: ApiServerOptions): Server {
       },
       access,
     };
-    const assertPublishingRecordScope = (
-      scope: Parameters<NonNullable<ActionHostContext["readOwnModuleRecord"]>>[0],
-      key: string,
-    ): void => {
-      if (scope.moduleId !== "publishing" || !isPublishingRecordKey(key) ||
-          scope.access !== access || snapshotKey(scope.snapshot) !== snapshotKey(reader.snapshot)) {
+    type RecordScope = Parameters<NonNullable<ActionHostContext["readOwnModuleRecord"]>>[0];
+    const sameRecordScope = (scope: RecordScope): boolean =>
+      scope.access === access && snapshotKey(scope.snapshot) === snapshotKey(reader.snapshot);
+    const assertPublishingRecordScope = (scope: RecordScope, key: string): void => {
+      if (scope.moduleId !== "publishing" || !isPublishingRecordKey(key) || !sameRecordScope(scope)) {
         throw httpFailure(403, "PUBLISHING_RECORD_SCOPE_DENIED", "Publishing record access is limited to the selected project snapshot");
       }
     };
+    const assertNlpRecordScope = (scope: RecordScope, key: string): void => {
+      if (access !== "owner" || key !== NLP_FEATURE_SETTINGS_KEY || !sameRecordScope(scope)) {
+        throw httpFailure(403, "NLP_RECORD_SCOPE_DENIED", "NLP settings access is limited to the selected project snapshot");
+      }
+    };
     host.readOwnModuleRecord = async (scope, key, recordSignal) => {
+      if (scope.moduleId === "nlp") {
+        assertNlpRecordScope(scope, key);
+        if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
+        return coreStore.readNlpFeatureSettingsSnapshotRecord(projectId, scope.snapshot);
+      }
       assertPublishingRecordScope(scope, key);
       if (access !== "public") {
         if (!resolvePublishingAuthor || source === "mcp") {
@@ -1142,9 +1151,23 @@ export function createServer(options: ApiServerOptions): Server {
       if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
       return coreStore.readPublishingSnapshotRecord(projectId, scope.snapshot, key);
     };
-    if (access !== "public" && source !== "mcp" && resolvePublishingAuthor) {
+    if (access === "owner" && (resolvePublishingAuthor || resolveNativeProposalActor)) {
       host.proposeOwnModuleRecord = async (scope, input, recordSignal) => {
+        if (scope.moduleId === "nlp") {
+          assertNlpRecordScope(scope, input.key);
+          if (!resolveNativeProposalActor) {
+            throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose NLP settings");
+          }
+          const actorId = await resolveNativeProposalActor();
+          if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
+          return coreStore.proposeNlpFeatureSettingsSnapshotRecord(
+            projectId, scope.snapshot, input, actorId, source === "mcp" ? "external-agent" : "author",
+          );
+        }
         assertPublishingRecordScope(scope, input.key);
+        if (!resolvePublishingAuthor || source === "mcp") {
+          throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "Publishing settings require an authenticated author");
+        }
         const authorId = await resolvePublishingAuthor();
         if (recordSignal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Action request was cancelled");
         return coreStore.proposePublishingSnapshotRecord(projectId, scope.snapshot, input, authorId);
