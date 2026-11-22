@@ -20,7 +20,13 @@ cat > "$tmp/bin/podman" <<'SH'
 printf '%s\n' "$*" >> "$INSPECT_TEST_LOG"
 case "$1 $2" in
   'info --format') printf 'true\n';;
-  'network exists'|'volume exists'|'secret exists') exit 0;;
+  'network exists'|'volume exists') exit 0;;
+  'secret exists')
+    case "$3" in
+      codexia-auth-token|codexia-tunnel-token|codexia-postgres-admin-password|codexia-postgres-app-password) exit 0;;
+      codexia-postgres-preflight-password) exit 1;;
+      *) exit 99;;
+    esac;;
   'container exists') test "$3" = codexia-api;;
   'inspect --type') printf 'true sha256:fixture example.invalid/backend@sha256:fixture\n';;
   *) exit 99;;
@@ -44,36 +50,51 @@ cat > "$tmp/inspect.yml" <<YAML
       user_dir: "$tmp/home"
   tasks:
     - ansible.builtin.include_tasks: "$(pwd)/deploy/ansible/inspect.yml"
-    - ansible.builtin.assert:
-        that:
-          - inspect_podman_available | bool
-          - inspect_secrets.results | length == 5
-          - inspect_images.results | length == 1
-          - inspect_images.results[0].item.item == 'codexia-api'
-          - inspect_images.results[0].stdout.startswith('true sha256:fixture')
 YAML
-"${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/inspect.yml" > "$tmp/inspect.log" || { cat "$tmp/inspect.log"; exit 1; }
+run_inspect() {
+  ANSIBLE_STDOUT_CALLBACK=default ANSIBLE_CALLBACK_RESULT_FORMAT=json ANSIBLE_NOCOLOR=true \
+    "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$1"
+}
+run_inspect "$tmp/inspect.yml" > "$tmp/inspect.log" || { cat "$tmp/inspect.log"; exit 1; }
 grep -q 'changed=0' "$tmp/inspect.log"
-grep -q 'secret exists codexia-tunnel-token' "$INSPECT_TEST_LOG"
+python3 - "$tmp/inspect.log" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+output = Path(sys.argv[1]).read_text()
+reports = []
+for result in re.finditer(r"^ok: \[localhost\] => (?=\{)", output, re.MULTILINE):
+    decoded, _ = json.JSONDecoder().raw_decode(output[result.end():])
+    report = decoded.get("msg")
+    if isinstance(report, dict) and "existing_images" in report:
+        reports.append(report)
+assert len(reports) == 1, "inspect must emit exactly one topology report"
+assert reports[0]["existing_images"] == {
+    "codexia-api": "true sha256:fixture example.invalid/backend@sha256:fixture",
+}, "inspect must show only the observed existing container identity"
+assert reports[0]["secrets"] == {
+    "codexia-auth-token": 0,
+    "codexia-tunnel-token": 0,
+    "codexia-postgres-admin-password": 0,
+    "codexia-postgres-app-password": 0,
+    "codexia-postgres-preflight-password": 1,
+}, "inspect must distinguish the missing preflight secret from the four present secrets"
+PY
 if grep -Eq '(^| )(create|start|stop|rm|--showsecret)( |$)' "$INSPECT_TEST_LOG"; then
   echo 'Inspection issued a mutating or secret-disclosing command' >&2; exit 1
 fi
 # A fresh account must not be created and Podman must not be contacted.
 : > "$INSPECT_TEST_LOG"
-sed '/    - ansible.builtin.assert:/,$d' "$tmp/inspect.yml" > "$tmp/absent.yml"
-cat >> "$tmp/absent.yml" <<'YAML'
-    - ansible.builtin.assert:
-        that:
-          - inspect_account.rc == 2
-          - inspect_podman_available is not defined
-YAML
-INSPECT_TEST_ACCOUNT_ABSENT=1 "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/absent.yml" > "$tmp/absent.log" || { cat "$tmp/absent.log"; exit 1; }
+INSPECT_TEST_ACCOUNT_ABSENT=1 run_inspect "$tmp/inspect.yml" > "$tmp/absent.log" || { cat "$tmp/absent.log"; exit 1; }
 grep -q 'changed=0' "$tmp/absent.log"
+grep -q 'NOT_CHECKED' "$tmp/absent.log"
 test ! -s "$INSPECT_TEST_LOG"
 # Unsupported input must fail before any Podman operation.
 : > "$INSPECT_TEST_LOG"
 sed "s/distribution_version: '26.04'/distribution_version: '24.04'/" "$tmp/inspect.yml" > "$tmp/unsupported.yml"
-if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/unsupported.yml" > "$tmp/unsupported.log"; then
+if run_inspect "$tmp/unsupported.yml" > "$tmp/unsupported.log"; then
   echo 'Unsupported baseline accepted' >&2; exit 1
 fi
 test ! -s "$INSPECT_TEST_LOG"
