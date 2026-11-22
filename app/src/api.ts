@@ -30,6 +30,7 @@ import type {
   KnowledgeRelation,
   MentionLink,
   Project as PersistenceProject,
+  ChangeSetApplicationResult,
   RestoreDocumentRevisionCommand,
   SaveAssertionCommand,
   SaveDocumentCommand,
@@ -81,8 +82,8 @@ export type AuthorReviewFeedItem =
       state: ChangeSet["status"];
       approvalModel: "whole-change-set";
       applicationModel: "transaction";
-      changeSet: Pick<ChangeSet, "id" | "projectId" | "status" | "version" | "createdAt">;
-      receipt: Record<string, unknown> | null;
+      changeSet: ChangeSet;
+      receipt: ChangeSetApplicationResult | null;
     };
 
 export class DocumentDepartureError extends DOMException {

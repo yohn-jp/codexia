@@ -124,6 +124,7 @@ test("Core author review feed presents durable proposal and ChangeSet lifecycles
 
   const feed = await core.listAuthorReviews(p.id);
   assert.deepEqual(feed.map(item => item.kind).sort(), ["core-proposal", "native-change-set"]);
+  assert.deepEqual((await core.listAuthorReviews(p.id, 1)).map(item => item.kind).sort(), ["core-proposal", "native-change-set"], "the limit applies to each bounded authority inventory, so neither proposal family is hidden");
   const legacy = feed.find(item => item.kind === "core-proposal");
   assert.ok(legacy?.kind === "core-proposal");
   assert.equal(legacy.status.state, "partially_approved");

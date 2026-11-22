@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
-import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject, type ChangeSet, type ChangeSetApplicationResult } from "@codexia/persistence-contracts";
+import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -597,11 +598,12 @@ export class CoreStore implements MutationCoordinator {
         approvalModel: "whole-change-set",
         applicationModel: "transaction",
         changeSet,
-        receipt: await reader.getChangeSetReceipt(pid(projectId), changeSet.id) ?? null,
+        receipt: changeSet.status === "applied"
+          ? await reader.getChangeSetReceipt(pid(projectId), changeSet.id) ?? null
+          : null,
       })));
       return [...coreItems, ...nativeItems]
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
-        .slice(0, limit);
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
     });
   }
   async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async reader => {

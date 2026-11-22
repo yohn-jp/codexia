@@ -1,7 +1,8 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { AuthorReviewFeedItem, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
+import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
+import type { AuthorReviewFeedItem } from "./api";
 
 export type ResponseGuard<T> = (value: unknown) => value is T;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -33,11 +34,11 @@ const authorReviewFeedItem: ResponseGuard<AuthorReviewFeedItem> = (v): v is Auth
   }
   if (v.kind !== "native-change-set" || v.approvalModel !== "whole-change-set" || v.applicationModel !== "transaction"
     || !oneOf(v.state, ["proposed", "approved", "applied", "rejected"]) || !record(v.changeSet)) return false;
-  const changeSet = v.changeSet;
-  return text(changeSet.id) && changeSet.id === v.id && text(changeSet.projectId) && changeSet.projectId === v.projectId
-    && changeSet.status === v.state && integer(changeSet.version) && changeSet.version > 0 && text(changeSet.createdAt)
-    && (v.receipt === null || jsonObject(v.receipt)
-      && record(v.receipt.changeSet) && v.receipt.changeSet.id === v.id && v.receipt.changeSet.projectId === v.projectId);
+  const nativeSet = v.changeSet;
+  return changeSet(nativeSet) && nativeSet.id === v.id && nativeSet.projectId === v.projectId && nativeSet.status === v.state
+    && nativeSet.createdAt === v.createdAt
+    && (v.receipt === null || changeSetApplication(v.receipt)
+      && v.receipt.changeSet.id === v.id && v.receipt.changeSet.projectId === v.projectId);
 };
 const scene: ResponseGuard<Scene> = (v): v is Scene => record(v) && [v.id, v.title, v.text, v.revision].every(text);
 const document: ResponseGuard<FileDocument> = (v): v is FileDocument => record(v) && text(v.path) && text(v.content) && nullableText(v.revision);

@@ -2929,7 +2929,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
     navigateDocument: navigateReference,
   });
-  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} showCoreReviews={Boolean(journalError)} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />

@@ -315,9 +315,10 @@ function DocumentBodyReview({ projectId, operation }: { projectId: string; opera
   return null;
 }
 
-export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, onOpenSource }: {
+export function NativeChangeSetReview({ projectId, canWrite = true, showCoreReviews = false, onApplied, onOpenSource }: {
   projectId: string;
   canWrite?: boolean;
+  showCoreReviews?: boolean;
   onApplied: () => void;
   onOpenSource?: (anchor: SaveEvidenceAnchorCommand, quote: string) => Promise<void>;
 }) {
@@ -345,19 +346,29 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
     setDetail(null);
     setSourceQuote(null);
     try {
-      let reviewFeedError: unknown;
-      const [result, reviewFeed] = await Promise.all([
-        api.nativeChangeSets(projectId, 100, signal),
-        canWrite ? api.authorReviewFeed(projectId, 100, signal).catch(error => { reviewFeedError = error; return null; }) : Promise.resolve(null),
-      ]);
+      let reviewFeed: Awaited<ReturnType<typeof api.authorReviewFeed>> | null = null;
+      let legacyList: Awaited<ReturnType<typeof api.nativeChangeSets>> | null = null;
+      if (canWrite) {
+        try {
+          reviewFeed = await api.authorReviewFeed(projectId, 100, signal);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) throw error;
+          legacyList = await api.nativeChangeSets(projectId, 100, signal);
+        }
+      } else {
+        legacyList = await api.nativeChangeSets(projectId, 100, signal);
+      }
+      const changeSets = reviewFeed
+        ? reviewFeed.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "native-change-set" }> => item.kind === "native-change-set").map(item => item.changeSet)
+        : legacyList!.changeSets;
       if (signal?.aborted || sequence.current !== currentSequence) return;
-      if (result.changeSets.some((item) => item.projectId !== projectId) || reviewFeed?.items.some((item) => item.projectId !== projectId)) throw new Error("提案の作品スコープが一致しません。");
-      setChangeSets(result.changeSets);
-      setCoreReviews(reviewFeed?.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "core-proposal" }> => item.kind === "core-proposal") ?? []);
-      if (reviewFeedError) setMessage("Core提案の承認・適用状態を確認できません。" + errorText(reviewFeedError));
-      const nextId = requestedId && result.changeSets.some((item) => item.id === requestedId)
+      if (changeSets.some((item) => item.projectId !== projectId) || reviewFeed?.items.some((item) => item.projectId !== projectId)) throw new Error("提案の作品スコープが一致しません。");
+      setChangeSets(changeSets);
+      setCoreReviews(showCoreReviews ? reviewFeed?.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "core-proposal" }> => item.kind === "core-proposal") ?? [] : []);
+      if (!reviewFeed && canWrite) setMessage("統合レビューfeedは利用できないため、ネイティブChangeSet一覧を既存APIから読み込みました。");
+      const nextId = requestedId && changeSets.some((item) => item.id === requestedId)
         ? requestedId
-        : result.changeSets.some((item) => item.id === selectedIdRef.current) ? selectedIdRef.current : result.changeSets[0]?.id ?? "";
+        : changeSets.some((item) => item.id === selectedIdRef.current) ? selectedIdRef.current : changeSets[0]?.id ?? "";
       setSelectedId(nextId);
       if (!nextId) setDetail(null);
       else {
@@ -371,7 +382,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
     } finally {
       if (!signal?.aborted && sequence.current === currentSequence) setLoading(false);
     }
-  }, [canWrite, projectId]);
+  }, [canWrite, projectId, showCoreReviews]);
 
   useEffect(() => {
     if (!projectId) {
