@@ -2336,6 +2336,29 @@ export class PostgresPersistence implements Persistence {
     return result.rows.map(row => row.id);
   }
 
+  async findUnmigratedPublishingProjectIds(
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    const { projectId = null, after = null, limit = 100 } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw validationError("Invalid Publishing maintenance project page size");
+    }
+    const result = await this.pool.query<{ id: ProjectId }>(
+      `SELECT p.id FROM project p
+       WHERE ($2::uuid IS NULL OR p.id = $2)
+         AND ($3::uuid IS NULL OR p.id > $3)
+         AND EXISTS (
+           SELECT 1 FROM module_record source
+           WHERE source.project_id = p.id AND source.module_id = 'core.artifacts'
+             AND source.key = ANY($1::text[])
+             AND source.value->'deleted' IS DISTINCT FROM 'true'::jsonb
+         )
+       ORDER BY p.id LIMIT $4`,
+      [PRIVATE_PUBLISHING_PATHS, projectId, after, limit],
+    );
+    return result.rows.map(row => row.id);
+  }
+
   /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */
   async snapshotStartupMode(): Promise<"transition" | "validate"> {
     const result = await this.pool.query("SELECT current_user AS role_name, current_setting('default_transaction_read_only') AS read_only");
