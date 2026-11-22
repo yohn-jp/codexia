@@ -12,6 +12,11 @@ case "$variant" in
   ubuntu-webkit) image='ghcr.io/yohn-jp/codexia/playwright-ubuntu-webkit@sha256:bc6fd8952f5b82671a46a0f2dc02c70820edc83b7eb74e2f81a99863e59b97b4' ;;
   minimal-webkit) image='ghcr.io/yohn-jp/codexia/playwright-webkit@sha256:4e8ffa23fb1636bf3d98a2b84216e0b768ae55634d95a8b369696f697b60f15b' ;;
   dual-local) image='localhost/codexia-playwright-dual-benchmark:pw-1.65.1' ;;
+  dual-ghcr)
+    : "${CODEXIA_BENCH_DUAL_DIGEST:?published dual-browser digest required}"
+    [[ "$CODEXIA_BENCH_DUAL_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Invalid dual digest' >&2; exit 2; }
+    image="ghcr.io/yohn-jp/codexia/playwright-ubuntu-dual-benchmark@$CODEXIA_BENCH_DUAL_DIGEST"
+    ;;
   *) echo "Unknown variant: $variant" >&2; exit 2 ;;
 esac
 if [[ "$mode" != probe && "$mode" != acceptance ]]; then echo "Unsupported mode: $mode" >&2; exit 2; fi
