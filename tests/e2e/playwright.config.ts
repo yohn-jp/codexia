@@ -11,11 +11,13 @@ const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXI
 const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const externalServer = Boolean(configuredBaseURL);
 const selfHostedAuthFixture = [
+  "core.acceptance.spec.ts",
   "job-inbox.acceptance.spec.ts",
   "modular-workspace.acceptance.spec.ts",
   "native-review.acceptance.spec.ts",
   "oauth-web.acceptance.spec.ts",
   "outline-headings.acceptance.spec.ts",
+  "persistence-database.acceptance.spec.ts",
   "recent-activity.acceptance.spec.ts",
   "redesign-visual.acceptance.spec.ts",
   "review-contributions.acceptance.spec.ts",
