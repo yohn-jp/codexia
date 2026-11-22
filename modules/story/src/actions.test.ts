@@ -1408,6 +1408,74 @@ test("native Knowledge uses explicit ID, not matching names, and keeps unconfirm
   assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
 });
 
+test("author context maps thread relations to the target scene and matches the overview snapshot", async () => {
+  const scenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-2.yaml";
+  const threadPath = (id: string) => `plot/threads/${id}.yaml`;
+  const files = fixtureFiles({
+    [scenePath]: yaml({
+      id: "sc-2", title: "Table", type: "scene", volume: "vol-main", chapter: "ch-main-1", order: 2,
+      threads: { plants: ["thread-legacy-plant", "thread-duplicate"], advances: ["thread-legacy-advance"] },
+      manuscript: "manuscript/vol-main/ch-main-1/sc-2.md",
+    }),
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml": yaml({
+      id: "sc-1", title: "Door", type: "scene", volume: "vol-main", chapter: "ch-main-1", order: 1,
+      threads: { plants: ["thread-other-scene"] },
+      manuscript: "manuscript/vol-main/ch-main-1/sc-1.md",
+    }),
+    [threadPath("thread-canonical-plant")]: yaml({ id: "thread-canonical-plant", type: "thread", planted: ["sc-2"] }),
+    [threadPath("thread-canonical-payoff")]: yaml({ id: "thread-canonical-payoff", type: "thread", payoff: ["sc-2"] }),
+    [threadPath("thread-duplicate")]: yaml({ id: "thread-duplicate", type: "thread", planted: ["sc-2"] }),
+    [threadPath("thread-legacy-plant")]: yaml({ id: "thread-legacy-plant", type: "thread" }),
+    [threadPath("thread-legacy-advance")]: yaml({ id: "thread-legacy-advance", type: "thread" }),
+    [threadPath("thread-other-scene")]: yaml({ id: "thread-other-scene", type: "thread" }),
+  });
+  const context = makeActionContext(makeReader(files));
+  const overview = await invoke<Array<{
+    thread: { id: string };
+    planted: Array<{ scene: { id: string } }>;
+    advanced: Array<{ scene: { id: string } }>;
+    payoff: Array<{ scene: { id: string } }>;
+  }>>("story.threads.overview", {}, context);
+  const author = await invoke<{
+    parts: Array<{ kind: string; value: Array<{ threadId: string; relation: string; meaning: string; revision: string | null }> }>;
+  }>("story.context.package", { sceneId: "sc-2", scope: "author", budget: 200_000 }, context);
+
+  assert.deepEqual(overview.snapshot, author.snapshot);
+  assert.deepEqual(author.snapshot, context.reader.snapshot);
+  const part = author.data.parts.find((item) => item.kind === "threads");
+  assert.ok(part);
+  const contextRelations = part.value.map(({ threadId, meaning }) => [threadId, meaning]).sort(([a], [b]) => a!.localeCompare(b!));
+  const overviewRelations = overview.data.flatMap(({ thread, planted, advanced, payoff }) => [
+    ...planted.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "planted"]),
+    ...advanced.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "advanced"]),
+    ...payoff.filter((item) => item.scene.id === "sc-2").map(() => [thread.id, "payoff"]),
+  ]).sort(([a], [b]) => a!.localeCompare(b!));
+  assert.deepEqual(contextRelations, overviewRelations);
+  assert.deepEqual(contextRelations, [
+    ["thread-canonical-payoff", "payoff"],
+    ["thread-canonical-plant", "planted"],
+    ["thread-duplicate", "planted"],
+    ["thread-legacy-advance", "advanced"],
+    ["thread-legacy-plant", "planted"],
+  ]);
+
+  const byThread = new Map(part.value.map((entry) => [entry.threadId, entry]));
+  assert.equal(byThread.get("thread-canonical-plant")?.revision, revision(files.get(threadPath("thread-canonical-plant"))!));
+  assert.equal(byThread.get("thread-canonical-payoff")?.revision, revision(files.get(threadPath("thread-canonical-payoff"))!));
+  assert.equal(byThread.get("thread-legacy-plant")?.revision, revision(files.get(scenePath)!));
+  assert.equal(byThread.get("thread-legacy-advance")?.revision, revision(files.get(scenePath)!));
+  assert.equal(byThread.get("thread-duplicate")?.relation, "planted", "the canonical direction wins when the same relation is duplicated");
+  assert.equal(byThread.has("thread-other-scene"), false, "relations from another scene must not leak into this package");
+
+  for (const scope of ["reader", "character"]) {
+    const restricted = await invoke<{ parts: Array<{ kind: string }> }>("story.context.package", {
+      sceneId: "sc-2", scope, characterId: "char-uma", budget: 200_000,
+    }, context);
+    assert.equal(restricted.data.parts.some((item) => item.kind === "threads"), false);
+    assert.doesNotMatch(JSON.stringify(restricted.data), /thread-canonical|thread-legacy|thread-duplicate/);
+  }
+});
+
 test("native Knowledge associates evidence through canonical document UUID mapping", async()=>{
   const path="meta/scriptorium/knowledge-context/v1.json";
   const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",documentMappings:[{documentId:"doc-uuid-1",storySceneId:"sc-1",mapping:"explicit"}],entries:[{
