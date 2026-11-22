@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
-import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
-import type { ChangeSet, ChangeSetApplicationResult } from "@codexia/persistence-contracts";
+import { HIERARCHY_REORDER_SOURCE, PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -119,6 +119,13 @@ export type ReorderHierarchyInput =
   | { kind: "chapter"; volumeId: string; orderedIds: string[] }
   | { kind: "scene"; volumeId: string; chapterId: string; orderedIds: string[] };
 
+export interface ProposeHierarchyReorderOptions {
+  projectVersion: number;
+  actorId: string;
+  idempotencyKey: string;
+  origin?: "author" | "external-agent";
+}
+
 export interface BuiltChangeOperation {
   snapshot: SnapshotId;
   operation: ChangeOperation;
@@ -198,6 +205,13 @@ function storedManifest(value: unknown, projectId: string, projectVersion: numbe
   return manifest;
 }
 function manifestFingerprint(manifest: Manifest): string { return hash(canonicalJson(manifest)); }
+function storyMetadata(mapping: JsonObject | undefined): JsonObject {
+  const metadata = mapping?.metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
+}
+function storyDocumentId(document: Document, metadata: JsonObject): string {
+  return typeof metadata.id === "string" ? metadata.id : document.id;
+}
 function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
@@ -325,21 +339,15 @@ export class CoreStore implements MutationCoordinator {
     add("meta/project.yaml", YAML.stringify({title:project.title,...project.settings}));
     const byId = new Map(documents.map((document) => [document.id,document]));
     const mappings = new Map(records.filter((record) => record.moduleId === PATHS).map((record) => [record.key, record.value]));
-    const metadataFor = (document: Document): JsonObject => {
-      const metadata = mappings.get(document.id)?.metadata;
-      return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? { ...metadata } : {};
-    };
-    const projectedId = (document: Document): string => {
-      const id = metadataFor(document).id;
-      return typeof id === "string" ? id : document.id;
-    };
+    const metadataFor = (document: Document) => storyMetadata(mappings.get(document.id));
+    const projectedId = (document: Document) => storyDocumentId(document, metadataFor(document));
     for (const [documentOrder, document] of documents.entries()) {
       const mapping = mappings.get(document.id);
       const parent = document.parentId ? byId.get(document.parentId) : undefined;
       const grandparent = parent?.parentId ? byId.get(parent.parentId) : undefined;
       const metadataPath = typeof mapping?.metadataPath === "string" ? mapping.metadataPath : document.kind === "volume" ? `plot/volumes/${document.id}/volume.yaml` : document.kind === "chapter" ? `plot/volumes/${parent?.id ?? "root"}/chapters/${document.id}/chapter.yaml` : `plot/volumes/${grandparent?.id ?? "root"}/chapters/${parent?.id ?? "root"}/scenes/${document.id}.yaml`;
       const manuscriptPath = typeof mapping?.manuscriptPath === "string" ? mapping.manuscriptPath : `documents/${document.id}.md`;
-      const metadata = metadataFor(document);
+      const metadata = { ...metadataFor(document) };
       // Hierarchy is owned by Document.parentId, not the optional module metadata.
       // Keep mapped Story identities while deriving links from the same pinned DB read.
       if (document.kind === "chapter" || document.kind === "scene") {
@@ -1151,6 +1159,72 @@ export class CoreStore implements MutationCoordinator {
       documentIds: siblings.map((document) => document.id).sort(),
     }];
     return built;
+  }
+  async proposeHierarchyReorder(project: string, input: ReorderHierarchyInput, options: ProposeHierarchyReorderOptions): Promise<ChangeSetResult> {
+    const { projectVersion, actorId, idempotencyKey, origin = "author" } = options;
+    if (!Number.isSafeInteger(projectVersion) || projectVersion < 1 || !actorId.trim() || !idempotencyKey.trim()) {
+      fail(400, "invalid_hierarchy_operation", "A project version, actor and idempotency key are required");
+    }
+    const projectId = pid(project);
+    const { kind, orderedIds } = input;
+    if (!orderedIds.length || new Set(orderedIds).size !== orderedIds.length) {
+      fail(422, "invalid_hierarchy_order", "Reorder must include every sibling exactly once");
+    }
+    const requestDigest = hash(canonicalJson({ projectVersion, actorId, origin, input }));
+    return this.persistence.transaction(async tx => {
+      await tx.assertProjectVersion(projectId);
+      const existing = await tx.getChangeSetByIdempotencyKey(projectId, idempotencyKey);
+      if (existing) {
+        if (existing.authorId !== actorId || existing.provenance.source !== HIERARCHY_REORDER_SOURCE ||
+            existing.provenance.details.requestDigest !== requestDigest) {
+          throw new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
+            resource: "idempotency_key", id: idempotencyKey,
+          });
+        }
+        return { changeSet: existing, replayed: true };
+      }
+      await tx.assertProjectVersion(projectId, projectVersion);
+      const documents = await tx.listDocuments(projectId, undefined, 1000);
+      if (documents.length === 1000) fail(413, "snapshot_too_large", "Project snapshot exceeds the supported document bound");
+      const mappings = new Map((await tx.listModuleRecords(projectId, PATHS)).map(record => [record.key, record.value]));
+      const logicalId = (document: Document) => storyDocumentId(document, storyMetadata(mappings.get(document.id)));
+      const resolveParent = (id: string, parentKind: "volume" | "chapter", parentId?: DocumentId) => {
+        const candidates = documents.filter(document => document.kind === parentKind &&
+          (parentId === undefined || document.parentId === parentId) && (document.id === id || logicalId(document) === id));
+        if (candidates.length !== 1) fail(422, "invalid_hierarchy_parent", "The selected parent is missing or ambiguous");
+        return candidates[0]!;
+      };
+      const volume = kind === "volume" ? undefined : resolveParent(input.volumeId, "volume");
+      const chapter = kind === "scene" ? resolveParent(input.chapterId, "chapter", volume!.id) : undefined;
+      const parentId = chapter?.id ?? volume?.id ?? null;
+      const siblings = documents.filter(document => document.parentId === parentId && document.kind === kind);
+      if (orderedIds.length !== siblings.length) fail(422, "invalid_hierarchy_order", "Reorder must include every sibling exactly once");
+      const byIdentity = new Map<string, Document | null>();
+      for (const document of siblings) {
+        for (const id of new Set([document.id, logicalId(document)])) {
+          byIdentity.set(id, byIdentity.has(id) ? null : document);
+        }
+      }
+      const ordered = orderedIds.map(id => {
+        const document = byIdentity.get(id);
+        if (!document) fail(422, "invalid_hierarchy_order", "A sibling identity is missing or ambiguous");
+        return document;
+      });
+      if (new Set(ordered.map(document => document.id)).size !== siblings.length) {
+        fail(422, "invalid_hierarchy_order", "Reorder must include every sibling exactly once");
+      }
+      return tx.createChangeSet({
+        projectId, authorId: actorId, idempotencyKey,
+        operations: ordered.map((document, index) => ({ type: "document.update", command: {
+          projectId, documentId: document.id, expectedVersion: document.version, orderKey: String(index).padStart(10, "0"),
+        } })),
+        readSet: ordered.map(document => ({ resource: "document", id: document.id, expectedVersion: document.version })),
+        writeSet: ordered.map(document => ({ resource: "document", id: document.id })),
+        provenance: { source: HIERARCHY_REORDER_SOURCE, actorId, details: {
+          kind, parentId, volumeId: volume?.id ?? null, projectVersion, origin, requestDigest,
+        } },
+      });
+    });
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);

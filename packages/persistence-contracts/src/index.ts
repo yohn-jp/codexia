@@ -400,6 +400,8 @@ export interface ChangeSetProvenance {
   details: JsonObject;
 }
 
+export const HIERARCHY_REORDER_SOURCE = "native-hierarchy-reorder";
+
 export type ChangeSetOperation =
   | { type: "document.update"; command: UpdateDocumentCommand }
   | { type: "document.delete"; command: DeleteDocumentCommand }
@@ -572,6 +574,7 @@ export interface PersistenceReader {
   listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId, limit?: number): Promise<readonly AssertionEvidence[]>;
   listEvidenceAssertions(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly AssertionEvidence[]>;
   getChangeSet(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSet | undefined>;
+  getChangeSetByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<ChangeSet | undefined>;
   listChangeSets(projectId: ProjectId, limit?: number): Promise<readonly ChangeSet[]>;
   getChangeSetReceipt(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSetApplicationResult | undefined>;
 }

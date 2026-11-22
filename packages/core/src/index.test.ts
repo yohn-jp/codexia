@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import YAML from "yaml";
 import { before, after, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
+import { PersistenceError } from "@codexia/persistence-contracts";
 import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
 import { CoreError, CoreStore } from "./index.js";
 const connectionString=process.env.CODEXIA_TEST_DATABASE_URL;
@@ -17,6 +18,94 @@ function operation(snapshot:SnapshotId,path:string,content:string|null,revision:
 function isHierarchyConflict(error: unknown): boolean {
   return error instanceof CoreError && ["hierarchy_parent_changed", "revision_conflict", "scope_conflict"].includes(error.code);
 }
+
+test("native hierarchy reorder keeps manuscript revisions and applies once after approval", async () => {
+  const p = await hierarchy();
+  const documents = await persistence.read(reader => reader.listDocuments(p.id));
+  const chapter = documents.find(document => document.kind === "chapter")!;
+  const original = documents.find(document => document.kind === "scene")!;
+  const { document: second } = await persistence.transaction(tx => tx.createDocument({
+    projectId: p.id, parentId: chapter.id, kind: "scene", title: "Second scene", orderKey: "2",
+    markdown: "Second body", authorId: "author", idempotencyKey: randomUUID(),
+  }));
+  const { snapshot } = await core.observe(p.id);
+  const options = { projectVersion: snapshot.projectVersion, actorId: "proposer", idempotencyKey: randomUUID(), origin: "external-agent" } as const;
+  const ordered = { kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: [second.id, "s1"] } as const;
+  await assert.rejects(() => core.proposeHierarchyReorder(p.id, { ...ordered, orderedIds: [original.id, "s1"] }, options), { code: "invalid_hierarchy_order" });
+  const propose = () => core.proposeHierarchyReorder(p.id, ordered, options);
+  const { changeSet: proposal, replayed } = await propose();
+  assert.equal(replayed, false);
+  assert.equal(proposal.authorId, "proposer");
+  assert.equal(proposal.provenance.details.origin, "external-agent");
+  assert.deepEqual(proposal.operations, [
+    { type: "document.update", command: { projectId: p.id, documentId: second.id, expectedVersion: second.version, orderKey: "0000000000" } },
+    { type: "document.update", command: { projectId: p.id, documentId: original.id, expectedVersion: original.version, orderKey: "0000000001" } },
+  ]);
+  const order = async () => (await persistence.read(reader => reader.listDocuments(p.id, chapter.id))).map(document => [document.id, document.headRevisionId]);
+  assert.deepEqual(await order(), [[original.id, original.headRevisionId], [second.id, second.headRevisionId]]);
+  const apply = (expectedVersion: number) => persistence.transaction(tx => tx.applyChangeSet({ projectId: p.id, changeSetId: proposal.id, expectedVersion }));
+  await assert.rejects(() => apply(proposal.version), { code: "invalid_change_set_state" });
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: p.id, changeSetId: proposal.id, expectedVersion: proposal.version, approvedBy: "reviewer",
+  }));
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: p.id, expectedVersion: snapshot.projectVersion, title: "Unrelated project title change",
+  }));
+  const applied = await apply(approved.version);
+  assert.equal(applied.changeSet.approvedBy, "reviewer");
+  assert.deepEqual(await order(), [[second.id, second.headRevisionId], [original.id, original.headRevisionId]]);
+  assert.equal((await core.observe(p.id)).snapshot.projectVersion, snapshot.projectVersion + 2);
+  assert.deepEqual(await apply(approved.version), { ...applied, replayed: true });
+  assert.deepEqual(await propose(), { changeSet: applied.changeSet, replayed: true });
+  await assert.rejects(() => core.proposeHierarchyReorder(p.id, { ...ordered, orderedIds: ["s1", second.id] }, options), { code: "idempotency_conflict" });
+});
+
+test("native hierarchy reorder rejects stale membership and row versions atomically", async t => {
+  for (const change of ["add", "move", "delete", "edit", "move parent"] as const) {
+    await t.test(change, async () => {
+      const p = await hierarchy();
+      const documents = await persistence.read(reader => reader.listDocuments(p.id));
+      const volume = documents.find(document => document.kind === "volume")!;
+      const chapter = documents.find(document => document.kind === "chapter")!;
+      const scene = documents.find(document => document.kind === "scene")!;
+      const { snapshot } = await core.observe(p.id);
+      const { changeSet } = await core.proposeHierarchyReorder(p.id, {
+        kind: "scene", volumeId: volume.id, chapterId: chapter.id, orderedIds: [scene.id],
+      }, { projectVersion: snapshot.projectVersion, actorId: "proposer", idempotencyKey: randomUUID() });
+      const approved = await persistence.transaction(tx => tx.approveChangeSet({
+        projectId: p.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "reviewer",
+      }));
+      await persistence.transaction(async tx => {
+        if (change === "add") await tx.createDocument({
+          projectId: p.id, parentId: chapter.id, kind: "scene", title: "New sibling", orderKey: "2",
+          markdown: "", authorId: "author", idempotencyKey: randomUUID(),
+        });
+        if (change === "move") await tx.updateDocument({ projectId: p.id, documentId: scene.id, expectedVersion: scene.version, parentId: null });
+        if (change === "delete") await tx.deleteDocument({ projectId: p.id, documentId: scene.id, expectedVersion: scene.version });
+        if (change === "edit") await tx.updateDocument({ projectId: p.id, documentId: scene.id, expectedVersion: scene.version, title: "New scene title" });
+        if (change === "move parent") {
+          const other = await tx.createDocument({
+            projectId: p.id, parentId: null, kind: "volume", title: "Another volume", orderKey: "2",
+            markdown: "", authorId: "author", idempotencyKey: randomUUID(),
+          });
+          await tx.updateDocument({ projectId: p.id, documentId: chapter.id, expectedVersion: chapter.version, parentId: other.document.id });
+        }
+      });
+      const read = () => persistence.read(reader => reader.listDocuments(p.id));
+      const beforeApply = await read();
+      await assert.rejects(() => persistence.transaction(tx => tx.applyChangeSet({
+        projectId: p.id, changeSetId: changeSet.id, expectedVersion: approved.version,
+      })), (error: unknown) => error instanceof PersistenceError && error.code === "conflict" &&
+        error.details?.resource === (change === "edit" ? "document" : "hierarchy_siblings"));
+      assert.deepEqual(await read(), beforeApply);
+      assert.equal(await persistence.read(reader => reader.getChangeSetReceipt(p.id, changeSet.id)), undefined);
+      assert.equal((await persistence.read(reader => reader.getChangeSet(p.id, changeSet.id)))?.status, "approved");
+      await assert.rejects(() => core.proposeHierarchyReorder(p.id, {
+        kind: "scene", volumeId: volume.id, chapterId: chapter.id, orderedIds: [scene.id],
+      }, { projectVersion: snapshot.projectVersion, actorId: "proposer", idempotencyKey: randomUUID() }), { code: "conflict" });
+    });
+  }
+});
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
 test("Core scene snapshots preserve horizontal-rule Markdown and strip explicit YAML frontmatter", async () => {

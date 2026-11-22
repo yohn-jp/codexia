@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { nextOrderKey } from "@codexia/contracts";
 import {
+  HIERARCHY_REORDER_SOURCE,
   PersistenceError,
   type Assertion,
   type AssertionEvidence,
@@ -966,6 +967,16 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapChangeSet(result.rows[0]) : undefined;
   }
 
+  private async changeSetRowByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<DbRow | undefined> {
+    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [projectId, key]);
+    return result.rows[0];
+  }
+
+  async getChangeSetByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<ChangeSet | undefined> {
+    const row = await this.changeSetRowByIdempotencyKey(projectId, key);
+    return row ? mapChangeSet(row) : undefined;
+  }
+
   async listChangeSets(projectId: ProjectId, limit = 50): Promise<readonly ChangeSet[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("ChangeSet page size must be between 1 and 200");
     const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2", [projectId, limit]);
@@ -1673,19 +1684,18 @@ class PostgresTransaction implements PersistenceTransaction {
       provenance: command.provenance,
     });
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
-    const existing = await this.query(
-      "SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2",
-      [command.projectId, command.idempotencyKey],
-    );
-    if (existing.rows[0]) {
-      if (asString(existing.rows[0].request_sha256).trim() !== requestSha256) throw idempotencyConflict(command.idempotencyKey);
-      return { changeSet: mapChangeSet(existing.rows[0]), replayed: true };
+    const existing = await this.changeSetRowByIdempotencyKey(command.projectId, command.idempotencyKey);
+    if (existing) {
+      if (asString(existing.request_sha256).trim() !== requestSha256) throw idempotencyConflict(command.idempotencyKey);
+      return { changeSet: mapChangeSet(existing), replayed: true };
     }
     let readSet = command.readSet;
-    if (command.provenance.source === "native-knowledge-service") {
+    if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE) {
       const sourceVersion = command.provenance.details.projectVersion;
       if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
+    }
+    if (command.provenance.source === "native-knowledge-service") {
       readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
       await this.assertChangeSetReadSet(command.projectId, readSet);
     }
@@ -1710,9 +1720,8 @@ class PostgresTransaction implements PersistenceTransaction {
       throw validationError("Knowledge merge proposal is malformed");
     }
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
-    const existing = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [command.projectId, command.idempotencyKey]);
-    if (existing.rows[0]) {
-      const stored = mapChangeSet(existing.rows[0]);
+    const stored = await this.getChangeSetByIdempotencyKey(command.projectId, command.idempotencyKey);
+    if (stored) {
       const details = stored.provenance.details;
       const same = stored.authorId === command.actorId && stored.provenance.source === "native-knowledge-merge"
         && stored.provenance.actorId === command.actorId && details.projectVersion === command.projectVersion
@@ -1908,6 +1917,36 @@ class PostgresTransaction implements PersistenceTransaction {
     return [...resolved.values()];
   }
 
+  private async assertHierarchyReorderScope(changeSet: ChangeSet): Promise<void> {
+    const { projectId, operations, readSet, provenance } = changeSet;
+    const { kind, parentId, volumeId } = provenance.details;
+    if (!((kind === "volume" && parentId === null && volumeId === null) ||
+          (kind === "chapter" && typeof parentId === "string" && parentId === volumeId) ||
+          (kind === "scene" && typeof parentId === "string" && typeof volumeId === "string"))) {
+      throw validationError("A hierarchy reorder requires a canonical sibling scope");
+    }
+    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
+    const expected = operations.map(operation => {
+      if (operation.type !== "document.update" || operation.command.parentId !== undefined || operation.command.title !== undefined ||
+          operation.command.orderKey === undefined || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
+        throw validationError("A hierarchy reorder must contain versioned order updates only");
+      }
+      return operation.command.documentId;
+    }).sort();
+    const scopeConflict = () => new PersistenceError("conflict", "The hierarchy sibling set changed since it was read", {
+      resource: "hierarchy_siblings", id: parentId ?? projectId,
+    });
+    if (volumeId !== null && (await this.getDocument(projectId, volumeId as DocumentId))?.kind !== "volume") throw scopeConflict();
+    if (kind === "scene") {
+      const chapter = await this.getDocument(projectId, parentId as DocumentId);
+      if (chapter?.kind !== "chapter" || chapter.parentId !== volumeId) throw scopeConflict();
+    }
+    const rows = await this.listDocuments(projectId, parentId as DocumentId | null, MAX_ACTIVE_DOCUMENTS_PER_PROJECT + 1);
+    const actual = rows.filter(document => document.kind === kind).map(document => document.id).sort();
+    if (rows.length > MAX_ACTIVE_DOCUMENTS_PER_PROJECT || actual.length !== expected.length ||
+        actual.some((id, index) => id !== expected[index])) throw scopeConflict();
+  }
+
   private async currentChangeSetReadSetEntry(projectId: ProjectId, entry: ChangeSetReadSetEntry): Promise<{ actualVersion: number | null; actualRevisionId: string | null }> {
       let actualVersion: number | null;
       let actualRevisionId: string | null = null;
@@ -2046,6 +2085,7 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.provenance,
       changeSet.operations.some(operation => operation.type === "knowledge.merge"),
     );
+    if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
     await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
     const results: ChangeSetOperationResult[] = [];
     for (const operation of changeSet.operations) results.push(await this.applyOperation(operation, changeSet.approvedBy));
