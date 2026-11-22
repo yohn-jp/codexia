@@ -101,27 +101,51 @@ test('a deployment document checked by root tests is included in the task source
   assert.notEqual(changed.source, original.source);
 });
 
-test('one source capture preserves independent task recipes and executed invocations', async t => {
+test('task proof identities distinguish shared Git inputs from actual invocation inputs', async t => {
   const root = await fixture(t);
-  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), runtime };
-  const closureFor = captureTaskInputSource(input);
-  for (const task of ['unit-core', 'unit-app', 'browser-full-ui-v1']) {
-    assert.deepEqual(closureFor(task), captureTaskInputClosure({ ...input, task }));
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const core = capture('unit-core');
+  const app = capture('unit-app');
+  const browser = capture('browser-full-ui-v1');
+
+  // All tasks bind the same immutable source tree; task-specific execution must
+  // still have a different recipe, environment or producer identity.
+  for (const field of ['source', 'tests', 'dependencies', 'toolchain']) {
+    assert.equal(core[field], app[field], field);
+    assert.equal(browser[field], app[field], field);
+    assert.match(core[field], /^[0-9a-f]{64}$/u, field);
   }
-  const configured = closureFor('unit-app');
-  const execution = closureFor('unit-app', { ...taskInvocation('unit-app', runtime.execPath), environmentKeys: ['CUSTOM'] });
-  assert.deepEqual({ ...execution, recipe: configured.recipe }, configured);
-  assert.notEqual(execution.recipe, configured.recipe);
+  assert.notEqual(core.recipe, app.recipe);
+  assert.notEqual(browser.recipe, app.recipe);
+  assert.notEqual(browser.environment, app.environment);
+  assert.notEqual(browser.producers, app.producers);
+
+  const canonical = taskInvocation('unit-app', runtime.execPath);
+  assert.equal(Array.isArray(canonical), false);
+  const misconfigured = capture('unit-app', {
+    ...canonical,
+    arguments: [...canonical.arguments, '--skip-tests'],
+    environmentKeys: [...canonical.environmentKeys, 'ADDED_RUNTIME_INPUT'],
+  });
+  assert.notEqual(misconfigured.recipe, app.recipe, 'Changed execution must not reuse a certified recipe');
+  for (const field of ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'producers']) {
+    assert.equal(misconfigured[field], app[field], field);
+  }
+  assert.throws(() => capture('unit-does-not-exist'), /exactly one verification group/u);
 });
 
-test('task invocations describe only canonical executable work with secret values redacted elsewhere', () => {
-  assert.deepEqual(taskInvocation('unit-core', '/opt/node/bin/node'), {
-    executable: '/opt/node/bin/node', arguments: ['scripts/ci-workspace.mjs', 'unit', 'core'], environmentKeys: [],
-  });
-  assert.deepEqual(taskInvocation('browser-full-ui-v1', '/opt/node/bin/node'), {
-    executable: '/opt/node/bin/node',
-    arguments: ['scripts/run-browser-shard.mjs', '--profile', 'full', '--suite', 'ui-v1', '--prebuilt'],
-    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL', 'CODEXIA_E2E_OUTPUT_DIR',
-      'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR'],
-  });
+test('uncommitted worktree changes cannot influence proof for a pinned Git SHA', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const original = captureTaskInputClosure({ root, sha, task: 'unit-core', runtime });
+  await writeFile(path.join(root, 'packages/core/src/index.ts'), 'local uncommitted source mutation\\n');
+  assert.deepEqual(captureTaskInputClosure({ root, sha, task: 'unit-core', runtime }), original);
+  await git(root, 'add', 'packages/core/src/index.ts');
+  await git(root, 'commit', '-qm', 'commit changed source');
+  const committed = captureTaskInputClosure({ root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime });
+  assert.notEqual(committed.source, original.source, 'Commit content must change source proof');
+  for (const field of ['tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
+    assert.equal(committed[field], original[field], field);
+  }
 });

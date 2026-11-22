@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS, UNIT_TARGETS, TYPECHECK_TARGETS, TEST_TYPECHECK_SCOPES, BROWSER_SHARDS, PROFILES, NATIVE_SELECTIONS, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
+import { PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
@@ -105,8 +106,10 @@ test('browser groups depend on profile producers; independent groups cannot canc
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  const mcrDigest = 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579';
-  const chromiumDigest = 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725';
+  const { webkit: mcrDigest, chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
+  assert.match(mcrDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(chromiumDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.notEqual(mcrDigest, chromiumDigest, 'Single-browser and multi-browser images must remain distinct');
   assert.equal(browser.container.image, [
     "${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@",
     mcrDigest,
