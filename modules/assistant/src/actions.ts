@@ -1306,13 +1306,10 @@ async function prepareSceneSummaryRecord(moduleContext: ModuleContext, context: 
     readRevision(context, outputPath, existing?.revision ?? null),
   ];
   if (current && current.sceneId === sceneId && current.sourceHash === sourceHash && current.promptVersion === prepared.promptVersion && typeof current.model === "string") {
-    await reportProgress(context, 1);
     return { summary: current, cached: true, outputPath, existingRevision: existing!.revision, reads: baseReads, write: undefined as { path: string; revision: string | null; content: string } | undefined, generated: undefined as GenerationResult | undefined };
   }
   const sourceRevisions = baseReads.slice(0, 2);
-  await reportProgress(context, 0.1);
   const generated = await generate(moduleContext, context, { feature: "scene-summary", prompt: prepared.prompt, promptVersion: prepared.promptVersion, sourceRevisions, outputTokens: 768 });
-  await reportProgress(context, 0.9);
   const parsed = parseStructured(generated.text, sceneSummarySchema);
   const summary = {
     sceneId, ...parsed, characters: parsed.characters.length ? parsed.characters : prepared.knownCharacters, sourceHash, generatedAt: generated.provenance.generatedAt,
