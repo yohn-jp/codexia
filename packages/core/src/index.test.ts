@@ -209,7 +209,7 @@ test("Core scene snapshots preserve horizontal-rule Markdown and strip explicit 
   await accept(p.id, operation(currentReader.snapshot, path, explicitMarkdown, current!.revision));
   assert.equal((await core.readSceneSnapshot(p.id, "s1")).scene.text, "本文です。");
 });
-test("PostgreSQL projection labels a note with misleading scene ancestry by its canonical document kind", async () => {
+test("native notes retain their manuscript and author identity without acquiring a scene projection", async () => {
   const p = await hierarchy();
   const documents = await persistence.read((reader) => reader.listDocuments(p.id));
   const scene = documents.find((document) => document.kind === "scene")!;
@@ -226,13 +226,36 @@ test("PostgreSQL projection labels a note with misleading scene ancestry by its 
   }));
   const reader = await core.reader(p.id);
   const misleadingPath = `plot/volumes/${chapter.id}/chapters/${scene.id}/scenes/${note.document.id}.yaml`;
-  const projectedNote = await reader.read(misleadingPath);
-  assert.equal(YAML.parse(projectedNote!.content).kind, undefined, "the immutable projection bytes remain unchanged");
-  assert.equal(projectedNote!.documentKind, "note");
-  assert.equal((await reader.read(`documents/${note.document.id}.md`))?.documentKind, "note", "native body reads expose their canonical PostgreSQL document kind");
-  const pinnedReader = await core.reader(p.id, reader.snapshot);
-  assert.equal((await pinnedReader.read(misleadingPath))?.documentKind, "note", "pinned stored snapshots expose their canonical document kind");
-  assert.equal((await pinnedReader.read(`documents/${note.document.id}.md`))?.documentKind, "note", "pinned native body reads expose their canonical PostgreSQL document kind");
+  const bodyPath = `documents/${note.document.id}.md`;
+  assert.equal(await reader.read(misleadingPath), null);
+  assert.ok(!(await reader.list("")).includes(misleadingPath));
+  const body = await reader.read(bodyPath);
+  assert.equal(body?.content, "Private note body");
+  assert.equal(body?.revision, note.revision.sha256);
+  assert.equal(body?.documentKind, "note");
+  await assert.rejects(core.readSceneSnapshot(p.id, note.document.id, reader.snapshot), { code: "scene_not_found" });
+
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: "core.document-paths", key: note.document.id,
+    value: { metadata: { id: "author-note" } }, expectedVersion: null,
+  }));
+  const next = await core.reader(p.id);
+  assert.equal(await next.read(misleadingPath), null);
+  assert.equal((await core.resolveDocumentScene(p.id, bodyPath, next.snapshot)).sceneId, "author-note");
+  assert.equal((await core.resolveDocumentScene(p.id, bodyPath, reader.snapshot)).sceneId, note.document.id);
+  assert.deepEqual((await core.searchSnapshot(p.id, "Private note body")).results.map(({ id, type }) => ({ id, type })),
+    [{ id: "author-note", type: "note" }]);
+  await assert.rejects(core.readSceneSnapshot(p.id, "author-note"), { code: "scene_not_found" });
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: "core.document-paths", key: note.document.id,
+    value: { metadataPath: misleadingPath, metadata: { id: "author-note", label: "Author annotation" } },
+    expectedVersion: 1,
+  }));
+  const explicit = await core.reader(p.id);
+  assert.deepEqual(YAML.parse((await explicit.read(misleadingPath))!.content).label, "Author annotation");
+  await assert.rejects(core.readSceneSnapshot(p.id, "author-note", explicit.snapshot), { code: "scene_not_found" });
+  assert.equal(await next.read(misleadingPath), null);
+  assert.equal((await core.readScene(p.id, "s1")).text, "Text 😀\n");
   const tree = await core.tree(p.id);
   assert.deepEqual(tree.volumes.map((volume) => volume.id), ["v1"]);
   assert.deepEqual(tree.volumes[0]?.chapters.map((chapter) => chapter.id), ["c1"]);

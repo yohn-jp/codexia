@@ -180,6 +180,7 @@ type Manifest = {
   publishingRecords?: Partial<Record<(typeof PUBLISHING_RECORD_KEYS)[number], OwnModuleRecord>>;
   nlpFeatureSettings?: OwnModuleRecord | null;
   knowledge?: SnapshotKnowledgeProjection;
+  logicalDocumentIds?: Record<string, string>;
 };
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
 type StoryProjectionEntry = { documents: NativeStoryDocument[]; fingerprint: string; bytes: number };
@@ -447,30 +448,43 @@ export class CoreStore implements MutationCoordinator {
     };
     const byId = new Map(documents.map((document) => [document.id,document]));
     const mappings = new Map(pathRecords.map((record) => [record.key, record.value]));
+    const logicalDocumentIds: Record<string, string> = {};
     const metadataFor = (document: Document) => storyMetadata(mappings.get(document.id));
     const projectedId = (document: Document) => storyDocumentId(document, metadataFor(document));
     for (const document of documents) {
       const mapping = mappings.get(document.id);
       const parent = document.parentId ? byId.get(document.parentId) : undefined;
       const grandparent = parent?.parentId ? byId.get(parent.parentId) : undefined;
-      const metadataPath = typeof mapping?.metadataPath === "string" ? mapping.metadataPath : document.kind === "volume" ? `plot/volumes/${document.id}/volume.yaml` : document.kind === "chapter" ? `plot/volumes/${parent?.id ?? "root"}/chapters/${document.id}/chapter.yaml` : `plot/volumes/${grandparent?.id ?? "root"}/chapters/${parent?.id ?? "root"}/scenes/${document.id}.yaml`;
+      const metadataPath = typeof mapping?.metadataPath === "string" ? mapping.metadataPath
+        : document.kind === "volume" ? `plot/volumes/${document.id}/volume.yaml`
+        : document.kind === "chapter" ? `plot/volumes/${parent?.id ?? "root"}/chapters/${document.id}/chapter.yaml`
+        : document.kind === "scene" ? `plot/volumes/${grandparent?.id ?? "root"}/chapters/${parent?.id ?? "root"}/scenes/${document.id}.yaml`
+        : undefined;
       const manuscriptPath = typeof mapping?.manuscriptPath === "string" ? mapping.manuscriptPath : `documents/${document.id}.md`;
-      const metadata = { ...metadataFor(document) };
-      // Hierarchy is owned by Document.parentId, not the optional module metadata.
-      // Keep mapped Story identities while deriving links from the same pinned DB read.
-      if (document.kind === "chapter" || document.kind === "scene") {
-        delete metadata.volume;
-        delete metadata.chapter;
-        if (document.kind === "chapter" && parent?.kind === "volume") {
-          metadata.volume = projectedId(parent);
+      const logicalId = projectedId(document);
+      if (metadataPath !== undefined) {
+        const metadata = { ...metadataFor(document) };
+        // Derive hierarchy links from the same pinned rows as the document.
+        if (document.kind === "chapter" || document.kind === "scene") {
+          delete metadata.volume;
+          delete metadata.chapter;
+          if (document.kind === "chapter" && parent?.kind === "volume") {
+            metadata.volume = projectedId(parent);
+          }
+          if (document.kind === "scene" && parent?.kind === "chapter") {
+            metadata.chapter = projectedId(parent);
+            if (grandparent?.kind === "volume") metadata.volume = projectedId(grandparent);
+          }
         }
-        if (document.kind === "scene" && parent?.kind === "chapter") {
-          metadata.chapter = projectedId(parent);
-          if (grandparent?.kind === "volume") metadata.volume = projectedId(grandparent);
-        }
+        const projectedMetadata = {
+          ...metadata, id: logicalId, title: document.title, order: document.orderKey,
+          ...(document.kind === "scene" ? { manuscript: manuscriptPath } : {}),
+        };
+        addInline(metadataPath, YAML.stringify(projectedMetadata), { documentId: document.id, metadata: true });
+      } else if (logicalId !== document.id) {
+        // Preserve explicitly mapped identities for documents with no metadata file.
+        logicalDocumentIds[document.id] = logicalId;
       }
-      const projectedMetadata = {...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})};
-      addInline(metadataPath, YAML.stringify(projectedMetadata), { documentId: document.id, metadata: true });
       if (document.headRevisionId) {
         const revision = revisionsByHead.get(JSON.stringify([document.id, document.headRevisionId]));
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
@@ -489,7 +503,8 @@ export class CoreStore implements MutationCoordinator {
     const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
     const snapshot = { projectId, projectVersion: project.version };
     const knowledge = makeKnowledgeProjection(snapshot, await projectKnowledgeContext(reader, pid(projectId), documents, documentMappings));
-    return { snapshot, files, documents, project, publishingRecords, knowledge, nlpFeatureSettings };
+    return { snapshot, files, documents, project, publishingRecords, knowledge, nlpFeatureSettings,
+      ...(Object.keys(logicalDocumentIds).length ? { logicalDocumentIds } : {}) };
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
     if (pinned && pinned.projectId !== projectId) fail(409,"snapshot_scope_mismatch","Snapshot belongs to another project");
@@ -526,7 +541,7 @@ export class CoreStore implements MutationCoordinator {
       this.snapshotIndexes.set(key, cached);
       return cached.index;
     }
-    const index = createSnapshotIndex(manifest.documents, manifest.files);
+    const index = createSnapshotIndex(manifest.documents, manifest.files, manifest.logicalDocumentIds);
     const bytes = estimateSnapshotIndexBytes(index);
     if (bytes <= MAX_SNAPSHOT_INDEX_BYTES) {
       this.snapshotIndexes.set(key, { index, bytes });
@@ -732,6 +747,7 @@ export class CoreStore implements MutationCoordinator {
   private findDocument(manifest:Manifest,id:string,index=this.snapshotIndex(manifest)): Document { const found=index.firstDocumentByLookupId.get(id); if (!found) fail(404,"scene_not_found","Document not found"); return found; }
   async readSceneSnapshot(projectId:string,sceneId:string,pinned?:SnapshotId) {
     const manifest=await this.manifest(projectId,pinned), index=this.snapshotIndex(manifest), document=this.findDocument(manifest,sceneId,index);
+    if (document.kind !== "scene") fail(404,"scene_not_found","Scene not found");
     const paths=index.pathsByDocumentId.get(document.id), manuscriptPath=paths?.bodyPath, metadataPath=paths?.metadataPath;
     const metadata = metadataPath ? manifest.files[metadataPath] : undefined;
     if (!manuscriptPath || !metadataPath || !metadata || !("content" in metadata)) fail(404,"scene_not_found","Scene body not found");

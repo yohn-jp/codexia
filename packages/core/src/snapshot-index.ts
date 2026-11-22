@@ -53,6 +53,7 @@ export function manuscriptCharacterCount(content: string): number {
 export function createSnapshotIndex(
   documents: readonly Document[],
   files: Readonly<Record<string, SnapshotIndexFile>>,
+  logicalDocumentIdsWithoutFiles?: Readonly<Record<string, string>>,
 ): SnapshotIndex {
   const pathsByDocumentId = new Map<string, SnapshotDocumentPaths>();
   for (const [path, file] of Object.entries(files)) {
@@ -80,7 +81,7 @@ export function createSnapshotIndex(
     const metadataPath = pathsByDocumentId.get(document.id)?.metadataPath;
     const metadataFile = metadataPath ? files[metadataPath] : undefined;
     const metadata = metadataFile && "content" in metadataFile ? YAML.parse(metadataFile.content) : null;
-    const logicalId = typeof metadata?.id === "string" ? metadata.id : document.id;
+    const logicalId = typeof metadata?.id === "string" ? metadata.id : logicalDocumentIdsWithoutFiles?.[document.id] ?? document.id;
     logicalIdByDocumentId.set(document.id, logicalId);
     logicalDocumentIds.add(logicalId);
     if (!firstDocumentByLookupId.has(document.id)) firstDocumentByLookupId.set(document.id, document);
