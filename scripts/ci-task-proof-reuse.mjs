@@ -26,6 +26,35 @@ const COMPACT_CERTIFICATION_STEP = 'Certify reused merged PR proof';
 
 const positive = value => Number.isSafeInteger(value) && value > 0;
 
+const PROOF_ENDPOINTS = [
+  /^actions\/workflows\/verify\.yml$/u,
+  /^actions\/workflows\/[1-9]\d*\/runs\?head_sha=[a-f0-9]{40}&event=(?:push|pull_request)&per_page=[1-9]\d*&page=[1-9]\d*$/u,
+  /^actions\/runs\/[1-9]\d*$/u,
+  /^actions\/runs\/[1-9]\d*\/jobs\?filter=latest&per_page=[1-9]\d*&page=[1-9]\d*$/u,
+  /^actions\/runs\/[1-9]\d*\/artifacts\?per_page=[1-9]\d*&page=[1-9]\d*$/u,
+  /^actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*\/jobs\?per_page=100&page=[1-9]\d*$/u,
+  /^commits\/[a-f0-9]{40}\/pulls\?per_page=100&page=1$/u,
+  /^pulls\/[1-9]\d*$/u,
+];
+
+/** A single read-only transport for trusted GitHub proof identities, never arbitrary file contents. */
+export function createGitHubProofClient({ repository, token, request = fetch }) {
+  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
+  assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
+  const send = async endpoint => {
+    if (typeof endpoint !== 'string' || !PROOF_ENDPOINTS.some(pattern => pattern.test(endpoint))) {
+      throw new Error('Unexpected GitHub task proof API endpoint');
+    }
+    const response = await request(PROOF_API + endpoint, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15_000), redirect: 'error',
+    });
+    return response;
+  };
+  return { send, get: endpoint => getJson(send, endpoint) };
+}
+
+
 function exactJob(jobs, name, run) {
   const matches = jobs.filter(job => job?.name === name);
   assert.equal(matches.length, 1, `Missing or duplicate exact-main job ${name}`);
@@ -64,10 +93,7 @@ async function resolveCompactMainTaskProofs({ plan, run, jobs, current, reposito
   assert.equal(certSteps.length, 1, 'Missing or duplicate compact exact-main certification step');
   assert.equal(certSteps[0].conclusion, 'success', 'Compact exact-main certification failed');
   const before = execFileSync('git', ['rev-parse', `${plan.base}^1`], { encoding: 'utf8' }).trim();
-  const githubRequest = async endpoint => request(`${PROOF_API}${endpoint}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(15_000), redirect: 'error',
-  });
+  const githubRequest = createGitHubProofClient({ repository, token, request }).send;
   const mainProof = await verifyReusableMainProof({ sourceSha: plan.base, before, repository, currentRun: run,
     checkoutSha: plan.sha,
     git: args => execFileSync('git', args, { encoding: 'utf8' }),
@@ -173,15 +199,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.equal(current?.head_sha, plan.sha, 'Current run source mismatch');
   assert.ok(positive(current?.workflow_id) && positive(current?.repository?.id), 'Current workflow identity is incomplete');
 
-  const get = async endpoint => {
-    // codeql[js/file-access-to-http] Authenticated provenance lookups go only to this fixed GitHub API origin.
-    const response = await request(`${PROOF_API}${endpoint}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000), redirect: 'error',
-    });
-    assert.ok(response.ok, `GitHub task proof lookup failed: HTTP ${response.status}`);
-    return response.json();
-  };
+  const get = createGitHubProofClient({ repository, token, request }).get;
   const workflow = await get('actions/workflows/verify.yml');
   assert.equal(workflow.id, current.workflow_id, 'Current run uses another workflow');
   assert.equal(workflow.path, VERIFY_PATH, 'Current workflow path changed');
@@ -268,15 +286,7 @@ export async function resolveExactMainTaskProofs({ plan: planValue, current, rep
     // Coverage is selected and will run normally if its own proof is unavailable.
     // It must not prevent independent omitted tasks from proving their inputs.
   }
-  const get = async endpoint => {
-    // codeql[js/file-access-to-http] Authenticated provenance lookups go only to this fixed GitHub API origin.
-    const response = await request(`${PROOF_API}${endpoint}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000), redirect: 'error',
-    });
-    assert.ok(response.ok, `GitHub task proof lookup failed: HTTP ${response.status}`);
-    return response.json();
-  };
+  const get = createGitHubProofClient({ repository, token, request }).get;
   const workflow = await get('actions/workflows/verify.yml');
   assert.equal(workflow.id, current.workflow_id, 'Current run uses another workflow');
   const runs = await collectGitHubPages((page, perPage) => get(

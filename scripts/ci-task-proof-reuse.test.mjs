@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
-import { resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
+import { createGitHubProofClient, resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
 import { taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { main as planProofReuse } from './reuse-ci-task-input-proof.mjs';
 
@@ -34,6 +34,49 @@ test('unavailable current workflow identity writes the full plan and preserves t
       assert.deepEqual(JSON.parse(await readFile(planPath, 'utf8')), createVerificationPlan({ ...selected, forceFull: true }));
     });
   }
+});
+
+
+test('task proof HTTP client accepts only the canonical read-only API paths', async () => {
+  const seen = [];
+  const request = async (url, options) => {
+    seen.push({ url, options });
+    return { ok: true, json: async () => ({ accepted: true }) };
+  };
+  const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });
+  const paths = [
+    'actions/workflows/verify.yml',
+    'actions/workflows/7/runs?head_sha=' + sourceSha + '&event=push&per_page=100&page=1',
+    'actions/workflows/7/runs?head_sha=' + candidateSha + '&event=pull_request&per_page=100&page=1',
+    'actions/runs/500', 'actions/runs/500/jobs?filter=latest&per_page=100&page=1',
+    'actions/runs/500/artifacts?per_page=100&page=1',
+    'actions/runs/500/attempts/2/jobs?per_page=100&page=1',
+    'commits/' + sourceSha + '/pulls?per_page=100&page=1', 'pulls/123',
+  ];
+  for (const path of paths) assert.deepEqual(await client.get(path), { accepted: true });
+  assert.deepEqual(seen.map(item => item.url), paths.map(path =>
+    'https://api.github.com/repos/yohn-jp/codexia/' + path));
+  assert.ok(seen.every(item => item.options.headers.Authorization === 'Bearer test-token' &&
+    item.options.redirect === 'error'));
+});
+
+test('task proof HTTP client blocks arbitrary file data and destinations without network I/O', async () => {
+  let calls = 0;
+  const request = async () => { calls += 1; throw new Error('Network request must not run'); };
+  const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });
+  for (const path of [
+    'https://evil.example/upload', '../user', '//evil.example/upload',
+    'actions/runs/500?token=file-content',
+    'actions/runs/500/jobs?filter=latest&per_page=100&page=1&secret=extra',
+    'actions/workflows/7/runs?head_sha=../private&event=push&per_page=100&page=1',
+    'actions/runs/0', 'pulls/1/merge',
+    'commits/' + sourceSha + '/pulls?per_page=100&page=1&secret=extra',
+  ]) await assert.rejects(client.get(path), /Unexpected GitHub task proof API endpoint/);
+  assert.equal(calls, 0);
+  assert.throws(() => createGitHubProofClient({ repository: 'foreign/repo', token: 'test-token', request }),
+    /canonical repository/);
+  assert.throws(() => createGitHubProofClient({ repository: 'yohn-jp/codexia', token: '', request }),
+    /GitHub read token is required/);
 });
 
 function mainEvidence({ latestConclusion = 'success' } = {}) {
