@@ -10,6 +10,10 @@ if [[ "$(id -un)" != codexia || "$(podman info --format '{{.Host.Security.Rootle
   echo 'Recovery requires the rootless codexia service account' >&2
   exit 2
 fi
+if ! command -v jq >/dev/null 2>&1 || ! command -v logger >/dev/null 2>&1; then
+  echo 'Recovery requires jq and logger to record a sanitized host audit event without the one-use grant' >&2
+  exit 1
+fi
 
 auth_dir="$HOME/.config/codexia-auth"
 state_dir="$HOME/.local/state/codexia-deploy"
@@ -39,11 +43,20 @@ oidc_secret=()
 if grep -q '^CODEXIA_OIDC_ISSUER=' "$auth_dir/runtime.env"; then
   oidc_secret=(--secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET)
 fi
-# This explicit operator command emits its single-use grant once on this terminal.
-podman run --rm --pull=never --network codexia-data \
+result="$(podman run --rm --pull=never --network codexia-data \
   --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
   --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
   "${oidc_secret[@]}" \
   --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET \
   --env-file "$auth_dir/runtime.env" --entrypoint=node "$2" \
-  /app/node_modules/@codexia/api/dist/grant-passkey-owner-recovery.js --apply
+  /app/node_modules/@codexia/api/dist/grant-passkey-owner-recovery.js --apply)"
+if ! audit_event="$(jq -ce '{event:"passkey-owner-recovery",ownerId:.ownerId,recordedAt:.recordedAt,sessionsRevoked:.sessionsRevoked,accessGrantsRevoked:.accessGrantsRevoked,refreshGrantsRevoked:.refreshGrantsRevoked,expiresInSeconds:.expiresInSeconds}' <<<"$result")"; then
+  echo 'Recovery completed and is recorded in PostgreSQL, but its sanitized host event could not be formatted.' >&2
+  printf '%s\n' "$result"
+  unset result
+  exit 1
+fi
+logger --tag codexia-passkey-recovery -- "$audit_event" || echo 'The recovery is durably recorded in PostgreSQL; the host journal write failed.' >&2
+# The database and host audit event omit the grant; display it once for the operator to transfer.
+printf '%s\n' "$result"
+unset result audit_event

@@ -30,6 +30,29 @@ function sameValues(actual: readonly string[], expected: readonly string[]): boo
   return actual.length === expected.length && expected.every((value) => actual.includes(value));
 }
 
+export function resolvePasskeyBootstrapRpId(
+  productionOrigin: string,
+  setupOrigin: string,
+  allowLoopbackForTests = false,
+): string {
+  const production = new URL(productionOrigin);
+  const setup = new URL(setupOrigin);
+  if ([production, setup].some((url) => url.username || url.password || url.pathname !== "/" || url.search || url.hash)) {
+    throw new Error("Passkey setup requires exact production and setup origins");
+  }
+  const loopbackTest = allowLoopbackForTests && process.env.NODE_ENV === "test" &&
+    production.protocol === "http:" && setup.protocol === "http:" &&
+    production.hostname === "127.0.0.1" && setup.hostname === "127.0.0.1";
+  if (production.protocol !== "https:" && !loopbackTest || setup.protocol !== "https:" && !loopbackTest) {
+    throw new Error("Passkey setup requires HTTPS origins");
+  }
+  if (loopbackTest) return production.hostname;
+  if (production.hostname === setup.hostname || !setup.hostname.endsWith(`.${production.hostname}`)) {
+    throw new Error("Passkey setup host must be a strict subdomain of the production auth hostname");
+  }
+  return production.hostname;
+}
+
 export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, options: BootstrapOptions) {
   const origin = new URL(config.publicOrigin);
   const audience = new URL(config.apiAudience!);
@@ -50,6 +73,9 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
         return redirect.origin !== audience.origin || Boolean(redirect.username || redirect.password || redirect.search || redirect.hash);
       })) {
     throw new Error("Bootstrap requires an isolated origin, exact owner and callbacks, and three distinct client IDs");
+  }
+  if ((config.passkeyBootstrap || options.passkeyRecoveryOwnerId) && !config.passkeyRpId) {
+    throw new Error("Passkey setup requires an RP ID derived from the production auth hostname");
   }
 
   const registrationId = new AsyncLocalStorage<string>();
@@ -139,6 +165,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
         ? "Replacement Passkey registered. Close this setup page and sign in again at the Codexia login page."
         : "Passkey registered. Continue to register OAuth clients.";
       const recoveryHeader = isRecovery ? "x-codexia-owner-recovery" : "x-codexia-owner-enrollment";
+      const ceremonyContext = isRecovery ? "codexia-owner-recovery-v1" : "codexia-first-owner-v1";
       const registrationForm = isRecovery ? "" : '<form method="post" action="/register"><button type="submit">Register OAuth clients</button></form>';
       const nonce = randomBytes(18).toString("base64");
       const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -147,7 +174,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
 <label for="grant">Enrollment grant</label> <input id="grant" type="password" autocomplete="off" required>
 <button id="enroll" type="button">Create Passkey</button>${registrationForm}
 <output id="status" aria-live="polite"></output></main><script nonce="${nonce}">
-const button=document.querySelector("#enroll"),out=document.querySelector("#status"),grant=document.querySelector("#grant"),grantHeader=${JSON.stringify(recoveryHeader)},successMessage=${JSON.stringify(success)};
+const button=document.querySelector("#enroll"),out=document.querySelector("#status"),grant=document.querySelector("#grant"),grantHeader=${JSON.stringify(recoveryHeader)},ceremonyContext=${JSON.stringify(ceremonyContext)},successMessage=${JSON.stringify(success)};
 if(!window.isSecureContext||typeof PublicKeyCredential!=="function"||typeof PublicKeyCredential.parseCreationOptionsFromJSON!=="function"){
   button.disabled=true;out.textContent="This browser does not support secure Passkey registration. Use a current browser on this HTTPS setup page.";
 }
@@ -155,7 +182,7 @@ button.addEventListener("click",async()=>{const token=grant.value;button.disable
 let publicKey,encoded;
 try{
   const headers={[grantHeader]:token};
-  const optionsResponse=await fetch("/api/auth/passkey/generate-register-options?context=codexia-first-owner-v1",{headers,credentials:"same-origin"});
+  const optionsResponse=await fetch("/api/auth/passkey/generate-register-options?context="+encodeURIComponent(ceremonyContext),{headers,credentials:"same-origin"});
   if(!optionsResponse.ok)throw new Error("The enrollment grant is invalid, expired, or already used.");
   const options=await optionsResponse.json();publicKey=PublicKeyCredential.parseCreationOptionsFromJSON(options);
   const credential=await navigator.credentials.create({publicKey});if(!credential)throw new Error("Passkey creation was cancelled.");
@@ -271,7 +298,13 @@ async function main(): Promise<void> {
     throw new Error("Passkey first-owner bootstrap settings are required");
   }
   const origin = process.env.CODEXIA_AUTH_BOOTSTRAP_ORIGIN!;
-  const config = { ...staged, publicOrigin: origin, apiAudience: staged.apiAudience ?? new URL("/api", staged.publicOrigin).href };
+  const passkeySetup = Boolean(staged.passkeyBootstrap || recoveryMode);
+  const config = {
+    ...staged,
+    publicOrigin: origin,
+    ...(passkeySetup ? { passkeyRpId: resolvePasskeyBootstrapRpId(staged.publicOrigin, origin, staged.allowInsecureLoopbackForTests) } : {}),
+    apiAudience: staged.apiAudience ?? new URL("/api", staged.publicOrigin).href,
+  };
   const tls = { cert: readFileSync("/run/codexia-bootstrap/tls.crt"), key: readFileSync("/run/codexia-bootstrap/tls.key"), minVersion: "TLSv1.2" as const };
   const bootstrap = createBetterAuthBootstrap(config, {
     ...(process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT ? { ownerOidcSubject: process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT } : {}),

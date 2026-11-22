@@ -17,6 +17,7 @@ async function main(): Promise<void> {
       recoveryToken: result.token,
       expiresInSeconds: result.expiresInSeconds,
       ownerId: result.ownerId,
+      recordedAt: result.recordedAt.toISOString(),
       sessionsRevoked: result.sessionsRevoked,
       accessGrantsRevoked: result.accessGrantsRevoked,
       refreshGrantsRevoked: result.refreshGrantsRevoked,

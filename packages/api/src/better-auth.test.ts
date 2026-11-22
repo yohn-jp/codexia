@@ -18,6 +18,20 @@ test("Better Auth runtime rejects insecure production origins before opening Pos
   assert.throws(() => createBetterAuthRuntime({ ...baseConfig, publicOrigin: "http://codexia.example.test" }), /absolute HTTPS URL/u);
 });
 
+test("Better Auth keeps the Passkey RP ID at the parent auth hostname for isolated setup origins", async () => {
+  const runtime = createBetterAuthRuntime({
+    ...baseConfig,
+    publicOrigin: "https://setup.codexia.example.test",
+    passkeyRpId: "codexia.example.test",
+  });
+  await runtime.pool.end();
+  assert.throws(() => createBetterAuthRuntime({
+    ...baseConfig,
+    publicOrigin: "https://setup.codexia.example.test",
+    passkeyRpId: "unrelated.example.org",
+  }), /public auth hostname or its parent domain/u);
+});
+
 test("Better Auth runtime rejects non-PostgreSQL or URL-overridden auth database settings before connecting", () => {
   assert.throws(() => createBetterAuthRuntime({ ...baseConfig, databaseUrl: "https://example.test/auth" }), /absolute PostgreSQL URL/u);
   assert.throws(() => createBetterAuthRuntime({ ...baseConfig, databaseUrl: `${baseConfig.databaseUrl}?options=-c%20search_path=public` }), /without query or fragment/u);

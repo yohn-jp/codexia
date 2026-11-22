@@ -26,6 +26,8 @@ export const OIDC_PROVIDER_ID = "workspace-oidc";
 export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
   readonly publicOrigin: string;
+  /** Explicit Passkey RP ID for an isolated setup listener on a production-host subdomain. */
+  readonly passkeyRpId?: string;
   readonly oidcIssuer?: string;
   readonly oidcClientId?: string;
   readonly oidcClientSecret?: string;
@@ -59,6 +61,19 @@ const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_p
 function codexiaAuthMethodsPlugin(oidcConfigured: boolean) {
   return {
     id: "codexia-auth-methods",
+    schema: {
+      passkeyRecoveryAudit: {
+        modelName: "passkey_recovery_audit",
+        fields: {
+          ownerId: { type: "string", required: true, fieldName: "owner_id" },
+          sessionsRevoked: { type: "number", required: true, fieldName: "sessions_revoked" },
+          accessGrantsRevoked: { type: "number", required: true, fieldName: "access_grants_revoked" },
+          refreshGrantsRevoked: { type: "number", required: true, fieldName: "refresh_grants_revoked" },
+          recordedAt: { type: "date", required: true, fieldName: "recorded_at" },
+          grantExpiresAt: { type: "date", required: true, fieldName: "grant_expires_at" },
+        },
+      },
+    } as const,
     endpoints: {
       authMethods: createAuthEndpoint("/codexia/auth-methods", { method: "GET" }, async (ctx) => {
         return ctx.json({ passkey: true, upstreamOidc: oidcConfigured });
@@ -252,6 +267,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
   }
   const publicOrigin = assertHttpsUrl(config.publicOrigin, "CODEXIA_PUBLIC_ORIGIN", config.allowInsecureLoopbackForTests);
   if (publicOrigin.pathname !== "/") throw new Error("CODEXIA_PUBLIC_ORIGIN must be an origin without a path");
+  const passkeyRpId = config.passkeyRpId ?? publicOrigin.hostname;
+  if (publicOrigin.hostname !== passkeyRpId && !publicOrigin.hostname.endsWith(`.${passkeyRpId}`)) {
+    throw new Error("Passkey RP ID must be the public auth hostname or its parent domain");
+  }
   const issuer = new URL("/api/auth", publicOrigin).toString();
   const oidcValues = [config.oidcIssuer, config.oidcClientId, config.oidcClientSecret];
   if (oidcValues.some(Boolean) && oidcValues.some((value) => !value)) {
@@ -313,7 +332,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     plugins: [
       codexiaAuthMethodsPlugin(Boolean(oidcIssuer)),
       passkey({
-        rpID: publicOrigin.hostname,
+        rpID: passkeyRpId,
         rpName: "Codexia",
         origin: publicOrigin.origin,
         authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
@@ -507,6 +526,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       token: string;
       ownerId: string;
       expiresInSeconds: number;
+      recordedAt: Date;
       sessionsRevoked: number;
       accessGrantsRevoked: number;
       refreshGrantsRevoked: number;
@@ -574,10 +594,21 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
           value: createHash("sha256").update(token).digest("hex"),
           expiresAt,
         });
+        await adapter.create({
+          model: "passkeyRecoveryAudit",
+          data: {
+            ownerId,
+            sessionsRevoked,
+            accessGrantsRevoked,
+            refreshGrantsRevoked,
+            recordedAt: now,
+            grantExpiresAt: expiresAt,
+          },
+        });
       });
 
       return { token, ownerId, expiresInSeconds: PASSKEY_BOOTSTRAP_GRANT_TTL_MS / 1000,
-        sessionsRevoked, accessGrantsRevoked, refreshGrantsRevoked };
+        recordedAt: now, sessionsRevoked, accessGrantsRevoked, refreshGrantsRevoked };
     },
     async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ""): Promise<void> {
       const context = await auth.$context;
