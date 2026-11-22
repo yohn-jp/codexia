@@ -17,6 +17,44 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  publish-dual:
+    name: Publish immutable dual-browser benchmark image
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'yohnark'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build, publish and verify immutable digest
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/playwright-ubuntu-dual-benchmark"
+          metadata="$RUNNER_TEMP/dual-image-metadata.json"
+          docker buildx build --platform linux/amd64 \
+            --file .github/docker/playwright-ubuntu-dual-benchmark.Dockerfile \
+            --tag "$image:pr-586-${GITHUB_SHA:0:12}" \
+            --metadata-file "$metadata" --push .
+          digest="$(jq -r '."containerimage.digest" // empty' "$metadata")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$image@$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Published benchmark-only image: $image@$digest" >> "$GITHUB_STEP_SUMMARY"
+
   host-pull:
     if: github.event_name == 'workflow_dispatch'
     name: ${{ matrix.engine }} pull / trial ${{ matrix.trial }}
@@ -162,6 +200,7 @@ jobs:
           done
 
   image-capability:
+    if: github.event_name == 'workflow_dispatch'
     name: Image completeness / ${{ matrix.engine }} / ${{ matrix.variant }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -188,6 +227,7 @@ jobs:
         run: bash scripts/ci-playwright-engine-benchmark.sh "$ENGINE" "$VARIANT" probe
 
   real-webkit:
+    if: github.event_name == 'workflow_dispatch'
     needs: image-capability
     name: Real four-shard WebKit / ${{ matrix.engine }} / ${{ matrix.variant }} / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
@@ -253,6 +293,7 @@ jobs:
           retention-days: 3
 
   container-webkit-reference:
+    if: github.event_name == 'workflow_dispatch'
     needs: image-capability
     name: Reference jobs.container / four-shard WebKit / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
@@ -303,6 +344,7 @@ jobs:
         run: bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
 
   dual-webkit-local:
+    if: github.event_name == 'workflow_dispatch'
     needs: image-capability
     name: Local dual-browser minimal Podman / ${{ matrix.profile }}
     runs-on: ubuntu-24.04
@@ -359,3 +401,73 @@ jobs:
       - name: Verify both browsers and execute real CI suites
         shell: bash
         run: bash scripts/ci-playwright-engine-benchmark.sh podman dual-local acceptance
+
+  compare-certified:
+    name: Current jobs.container versus Podman GHCR dual / ${{ matrix.profile }} / ${{ matrix.variant }}
+    needs: publish-dual
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        profile: [core, full]
+        variant: [current, podman-dual]
+    container: ${{ matrix.variant == 'current' && fromJSON('{"image":"mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579","options":"--init --ipc=host"}') || null }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_PROFILE: ${{ matrix.profile }}
+      CODEXIA_E2E_DATABASE_URL: ${{ matrix.variant == 'current' && 'postgres://codexia:codexia@postgres:5432/codexia_test' || 'postgres://codexia:codexia@postgres:5432/codexia_test' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build exact profile
+        run: pnpm build
+      - name: Execute four real WebKit-lane shards
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEXIA_BENCH_DUAL_DIGEST: ${{ needs.publish-dual.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.variant }}" == current ]]; then
+            bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
+          else
+            bash scripts/ci-playwright-engine-benchmark.sh podman dual-ghcr acceptance
+          fi
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: dual-benchmark-trace-${{ matrix.variant }}-${{ matrix.profile }}
+          path: tests/e2e/test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 3
