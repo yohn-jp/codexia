@@ -339,6 +339,8 @@
     codexia_auth_settings_sha256: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | hash('sha256') }}"
     codexia_auth_owner_client_ids: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_CLIENT_IDS=([^\r\n]*)$') | first | default('') | split(',') }}"
     codexia_auth_introspection_client_id: "{{ (codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=([^\r\n]*)$') | first | default('') }}"
+    codexia_auth_runtime_oidc_configured: "{{ ((codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=') | length) == 1 }}"
+    codexia_auth_secret_names: "{{ ['codexia-auth-database-url', 'codexia-auth-secret', 'codexia-oauth-introspection-client-secret'] + (['codexia-oidc-client-secret'] if ((codexia_auth_runtime_settings_content.content | b64decode) | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=') | length) == 1 else []) }}"
   when: codexia_deployment_auth_mode == 'better-auth'
   no_log: true
 
@@ -346,8 +348,8 @@
   ansible.builtin.assert:
     that:
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_PUBLIC_ORIGIN=https://[^/\s]+$') | length == 1
-      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=https://[^\s]+$') | length == 1
-      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length == 1
+      - (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=https://[^\s]+$') | length) == (codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length)
+      - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OIDC_ISSUER=https://[^\s]+$') | length in [0, 1]
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=[a-zA-Z0-9._:/|+-]+$') | length == 1
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_SUBJECT=[a-zA-Z0-9._@:/|+-]+$') | length == 1
       - codexia_auth_runtime_settings_text | regex_findall('(?m)^CODEXIA_OAUTH_OWNER_CLIENT_IDS=[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$') | length == 1
@@ -376,11 +378,7 @@
 - name: Verify every staged Better Auth Podman secret exists before activation
   ansible.builtin.command:
     argv: [podman, secret, exists, "{{ item }}"]
-  loop:
-    - codexia-auth-database-url
-    - codexia-auth-secret
-    - codexia-oidc-client-secret
-    - codexia-oauth-introspection-client-secret
+  loop: "{{ codexia_auth_secret_names }}"
   register: codexia_auth_runtime_secret_checks
   changed_when: false
   failed_when: codexia_auth_runtime_secret_checks.rc != 0
@@ -398,7 +396,7 @@
 
 - name: Render a digest-specific candidate Quadlet outside the active unit path
   ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + ('codexia-api.better-auth.container.example' if codexia_deployment_auth_mode == 'better-auth' else 'codexia-api.container')) | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) | replace('/home/codexia/.config/codexia-auth/runtime-', home + '/.config/codexia-auth/runtime-') | replace('AUTH_SETTINGS_DIGEST_PLACEHOLDER', codexia_auth_settings_sha256) }}"
+    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + ('codexia-api.better-auth.container.example' if codexia_deployment_auth_mode == 'better-auth' else 'codexia-api.container')) | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) | replace('/home/codexia/.config/codexia-auth/runtime-', home + '/.config/codexia-auth/runtime-') | replace('AUTH_SETTINGS_DIGEST_PLACEHOLDER', codexia_auth_settings_sha256) | replace('Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET\n', '' if not codexia_auth_runtime_oidc_configured else 'Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET\n') }}"
     dest: "{{ home }}/.local/state/codexia-deploy/{{ codexia_candidate_unit_filename }}"
     owner: codexia
     group: "{{ codexia_service_group | default('codexia') }}"
@@ -523,10 +521,14 @@
       fi
       run_auth_cli(){
         local script="$1"; shift
+        local oidc_secret=()
+        if grep -q '^CODEXIA_OIDC_ISSUER=' "$auth_settings_file"; then
+          oidc_secret=(--secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET)
+        fi
         podman run --rm --network codexia-data \
           --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
           --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
-          --secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET \
+          "${oidc_secret[@]}" \
           --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET \
           --env-file "$auth_settings_file" --entrypoint=node "$candidate_image" "$script" "$@"
       }

@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { assertAuthMigrationDatabaseIdentity, readBetterAuthMigrationConfig, requireExplicitApply } from "./migrate-auth.js";
+import { assertAuthMigrationDatabaseIdentity, migrateBetterAuth, readBetterAuthMigrationConfig, requireExplicitApply } from "./migrate-auth.js";
 import { createBetterAuthRuntime } from "./better-auth.js";
 
 async function main(): Promise<void> {
@@ -9,6 +9,7 @@ async function main(): Promise<void> {
   if (!config.passkeyBootstrap) {
     throw new Error("AUTH_PASSKEY_BOOTSTRAP_OWNER_ID, _OWNER_EMAIL, and _OWNER_NAME are required");
   }
+  await migrateBetterAuth(config);
   const runtime = createBetterAuthRuntime(config);
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
