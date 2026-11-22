@@ -61,6 +61,8 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /Cloudflare Tunnel unit/u);
   assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
     'the isolated SSHFS image must install packages without an interactive debconf frontend');
+  assert.ok(/rootless_podman build --build-arg "BASE_IMAGE=\$ubuntu_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1/u.test(fixture),
+    'the SSHFS image build output must be retained for failure diagnosis');
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });
