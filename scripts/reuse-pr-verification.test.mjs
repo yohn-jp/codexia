@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
@@ -124,13 +129,51 @@ test('an affected plan cannot silently replace omitted main obligations', async 
   await assert.rejects(verifyReusableMainProof(affected.args), /Affected PR proof/);
 });
 
-test('merge identity rejects direct push, wrong first parent, stale base and changed tree', () => {
-  const { git } = fixture();
-  assert.equal(mergeCandidate(sourceSha, base, git).tree, tree);
-  assert.throws(() => mergeCandidate(sourceSha, 'e'.repeat(40), git), /exactly one merge/);
-  assert.throws(() => mergeCandidate(sourceSha, base, args => args[0] === 'rev-list' ? sourceSha + ' ' + base : git(args)), /two-parent/);
-  assert.throws(() => mergeCandidate(sourceSha, base, args => args[0] === 'merge-base' ? head : git(args)), /not based/);
-  assert.throws(() => mergeCandidate(sourceSha, base, args => args[1] === head + '^{tree}' ? base : git(args)), /differs/);
+test('merge identity uses actual Git ancestry and rejects missing history or altered trees', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-merge-proof-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runGit = (args, cwd = directory) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = args => runGit(args);
+  git(['init', '--quiet', '--initial-branch=main']);
+  git(['config', 'user.email', 'fixture@example.test']);
+  git(['config', 'user.name', 'CI fixture']);
+  git(['config', 'commit.gpgsign', 'false']);
+  git(['commit', '--quiet', '--allow-empty', '-m', 'Base']);
+  const originalBase = git(['rev-parse', 'HEAD']).trim();
+  git(['switch', '--quiet', '-c', 'candidate']);
+  await writeFile(path.join(directory, 'candidate.txt'), 'tested content');
+  git(['add', 'candidate.txt']);
+  git(['commit', '--quiet', '-m', 'Tested candidate']);
+  const originalHead = git(['rev-parse', 'HEAD']).trim();
+
+  git(['switch', '--quiet', 'main']);
+  git(['merge', '--quiet', '--no-ff', '--no-edit', 'candidate']);
+  const originalMerge = git(['rev-parse', 'HEAD']).trim();
+  assert.deepEqual(mergeCandidate(originalMerge, originalBase, git), {
+    sourceSha: originalMerge, base: originalBase, head: originalHead,
+    tree: git(['rev-parse', 'candidate^{tree}']).trim(), files: ['candidate.txt'],
+  });
+  assert.throws(() => mergeCandidate(originalMerge, originalHead, git), /exactly one merge/u);
+  assert.throws(() => mergeCandidate(originalHead, originalBase, git, originalMerge), /two-parent/u);
+
+  const shallow = path.join(directory, 'shallow');
+  git(['clone', '--quiet', '--depth=1', pathToFileURL(directory).href, shallow]);
+  assert.throws(() => mergeCandidate(originalMerge, originalBase, args => runGit(args, shallow)), /two-parent/u);
+
+  git(['switch', '--quiet', '-c', 'changed', originalBase]);
+  git(['merge', '--quiet', '--no-ff', '--no-commit', 'candidate']);
+  await writeFile(path.join(directory, 'candidate.txt'), 'changed during merge');
+  git(['add', 'candidate.txt']);
+  git(['commit', '--quiet', '-m', 'Altered merge content']);
+  assert.throws(() => mergeCandidate(git(['rev-parse', 'HEAD']).trim(), originalBase, git), /Merged tree differs/u);
+
+  git(['switch', '--quiet', '-c', 'stale', originalBase]);
+  await writeFile(path.join(directory, 'stale.txt'), 'based on old main');
+  git(['add', 'stale.txt']);
+  git(['commit', '--quiet', '-m', 'Stale candidate']);
+  git(['switch', '--quiet', 'main']);
+  git(['merge', '--quiet', '--no-ff', '--no-edit', 'stale']);
+  assert.throws(() => mergeCandidate(git(['rev-parse', 'HEAD']).trim(), originalMerge, git), /PR head is not based/u);
 });
 
 test('actual merged diff and original base must equal the canonical PR plan', () => {

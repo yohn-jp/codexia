@@ -57,11 +57,19 @@ async function makeWorkspaceFixture(rootTestScript) {
   };
 }
 
-test('coverage maps every workspace test and typecheck scope to an executable target', () => {
+test('coverage admits the current workspace and rejects a new unmapped package', async t => {
   const result = run(['coverage']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /17 workspaces, 18 unit targets, 5 production typecheck groups, 3 test typecheck scopes/u);
-  assert.match(result.stdout, /test\/spec files mapped to package scripts/u);
+  assert.match(result.stdout, /Coverage PASS/u);
+
+  const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
+  t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+  const unknown = path.join(fixture.projectRoot, 'packages/unmapped-fixture');
+  await mkdir(unknown);
+  await writeFile(path.join(unknown, 'package.json'), JSON.stringify({ name: '@codexia/unmapped-fixture' }));
+  const unregistered = runProject(fixture.projectRoot, ['coverage'], fixture.env);
+  assert.equal(unregistered.status, 1);
+  assert.match(unregistered.stderr, /unregistered=\[packages\/unmapped-fixture\]/u);
 });
 
 test('root unit preparation builds the API dependency closure before invoking root script tests', async () => {
@@ -281,7 +289,7 @@ test('real workspace preparation overlaps independent builds and blocks dependen
   }
 });
 
-test('pre-profile workspace build preserves the complete 15-package build graph', async () => {
+test('pre-profile builds cover the pnpm workspaces needed before building API and UI', async () => {
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
   try {
     const result = runProject(fixture.projectRoot, ['build-workspace'], fixture.env);
@@ -289,9 +297,12 @@ test('pre-profile workspace build preserves the complete 15-package build graph'
     const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(JSON.parse);
     assert.equal(commands.length, 1);
     const filters = commands[0].flatMap((arg, index) => arg === '--filter' ? [commands[0][index + 1]] : []);
-    const expected = await Promise.all(WORKSPACES.filter(({id}) => id !== 'app' && id !== 'api').map(async ({path: workspacePath}) =>
-      JSON.parse(await readFile(path.join(root, workspacePath, 'package.json'), 'utf8')).name));
-    assert.equal(filters.length, 15);
+    const installed = spawnSync('pnpm', ['list', '--recursive', '--depth=-1', '--json'], { cwd: root, encoding: 'utf8' });
+    assert.ifError(installed.error);
+    assert.equal(installed.status, 0, installed.stderr);
+    const expected = JSON.parse(installed.stdout).filter(({ name, path: workspacePath }) =>
+      name !== '@codexia/api' && ['packages', 'modules'].includes(path.relative(root, workspacePath).split(path.sep)[0]))
+      .map(({ name }) => name);
     assert.deepEqual(filters.sort(), expected.sort());
     assert.deepEqual(commands[0].slice(0, 3), ['--recursive', '--sort', '--workspace-concurrency=2']);
     assert.deepEqual(commands[0].slice(-2), ['run', 'build']);
