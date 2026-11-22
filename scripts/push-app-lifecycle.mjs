@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
@@ -116,16 +117,36 @@ async function waitForExactSourceBackendRun() {
   }
   throw new Error('Exact-source backend OCI artifact did not become available within 45 minutes');
 }
+
+export async function readExactBackendProducerArtifacts(run, expected, { readCollection = apiPages, pause = delay } = {}) {
+  let remainingRetries = 3;
+  for (;;) {
+    const [jobs, artifacts] = await Promise.all([
+      readCollection(`actions/runs/${run.id}/jobs?filter=latest`, 'jobs'),
+      readCollection(`actions/runs/${run.id}/artifacts`, 'artifacts'),
+    ]);
+    try {
+      const selected = selectBackendArtifacts(run, artifacts, jobs, expected);
+      const full = selected.find(item => item.profile === 'full');
+      assertBackendProducerAttempt(full, jobs, expected);
+      return selected;
+    } catch (error) {
+      // The workflow run can become visible as completed before the jobs
+      // inventory contains final producer timestamps. Reobserve that same
+      // run briefly without changing the accepted artifact window.
+      if (remainingRetries === 0 || error?.code !== 'ERR_ASSERTION' ||
+          error.message !== 'Invalid backend producer time window') throw error;
+      remainingRetries--;
+      await pause(5_000);
+    }
+  }
+}
+
 async function loadExactSourceFullCandidate() {
   const run = await waitForExactSourceBackendRun();
-  const [jobs, artifacts] = await Promise.all([
-    apiPages(`actions/runs/${run.id}/jobs?filter=latest`, 'jobs'),
-    apiPages(`actions/runs/${run.id}/artifacts`, 'artifacts'),
-  ]);
-  const selected = selectBackendArtifacts(run, artifacts, jobs, { sourceSha, runId: run.id, currentAttempt: run.run_attempt,
+  const selected = await readExactBackendProducerArtifacts(run, { sourceSha, runId: run.id, currentAttempt: run.run_attempt,
     event: run.event, workflowSha: sourceSha, headBranch: run.head_branch });
   const full = selected.find(item => item.profile === 'full');
-  assertBackendProducerAttempt(full, jobs, { event: run.event, sourceSha, runId: run.id, currentAttempt: run.run_attempt, workflowSha: sourceSha });
   const bytes = await downloadArtifact(full.artifact, repository, token, fetch, { maxArchive: 512 * 1024 * 1024, downloadTimeoutMs: 60_000 });
   const folder = await mkdtemp(path.join(tempRoot, 'codexia-lifecycle-pr-full-'));
   try {
