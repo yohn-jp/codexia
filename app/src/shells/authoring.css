@@ -518,6 +518,9 @@
   align-items: stretch;
   gap: 3px;
 }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-row.is-heading {
+  grid-template-columns: 24px minmax(0, 1fr);
+}
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-zoom {
   min-height: 34px;
   padding: 4px 6px;
