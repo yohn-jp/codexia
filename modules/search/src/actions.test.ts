@@ -16,10 +16,10 @@ function revision(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0").repeat(8);
 }
 
-function makeReader(values: Record<string, string>, options: { blockReads?: boolean } = {}): SnapshotReader {
+function makeReader(values: Record<string, string>, selectedSnapshot = snapshot): SnapshotReader {
   const files = new Map(Object.entries(values).map(([path, content]) => [path, { content, revision: revision(content) }]));
   return {
-    snapshot,
+    snapshot: selectedSnapshot,
     async read(path) { return files.get(path) ?? null; },
     async list(prefix) { return [...files.keys()].filter((path) => path === prefix || path.startsWith(`${prefix}/`)); },
     async listRevisions(prefix) { return [...files].filter(([path]) => path === prefix || path.startsWith(`${prefix}/`)).map(([path, file]) => ({ path, revision: file.revision })); },
@@ -176,10 +176,22 @@ test("native Knowledge references store only identity and path, resolve aliases 
   assert.doesNotThrow(()=>assertChangeOperation(proposed[0]));
   await assert.rejects(()=>link.invoke(link.inputSchema.parse({knowledgeId:retired,targetPath:path}),context),/Confirmed Knowledge unavailable/);
   // New snapshot changes the authoritative aliases; the reference stays unchanged.
-  const changed=makeReader({...values,[projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[node(a,"新しい塔"),entries[1]],nodeLimitReached:false})});
-  const result=await resolve.invoke(resolve.inputSchema.parse({text:"青い塔、新しい塔"}),actionContext(changed));
-  assert.equal(result.ok,true);
-  if(result.ok)assert.equal((result.data as {spans:unknown[]}).spans.length,1);
+  const nextSnapshot = { ...snapshot, projectVersion: 12 };
+  const changed = makeReader({
+    ...values,
+    [projection]: JSON.stringify({
+      version: 1,
+      projectId: nextSnapshot.projectId,
+      entries: [node(a, "新しい塔"), entries[1]],
+      nodeLimitReached: false,
+    }),
+  }, nextSnapshot);
+  const text = "青い塔、新しい塔";
+  const result = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(changed));
+  assert.ok(result.ok);
+  assert.deepEqual(result.snapshot, nextSnapshot);
+  const resultSpans = (result.data as { spans: Array<{ start: number; end: number }> }).spans;
+  assert.deepEqual(resultSpans.map(({ start, end }) => text.slice(start, end)), ["新しい塔"]);
 });
 
 test("incomplete bounded alias inventory fails closed for automatic Knowledge links", async () => {

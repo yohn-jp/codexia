@@ -727,14 +727,19 @@ test("review queue preserves proposal ordering, scope and stale semantics", asyn
   }
   const secondSnapshot=(await core.observe(second.id)).snapshot;
   await accept(second.id,operation(secondSnapshot,"bible/other.yaml","B"));
-  const expected=[];
-  for(const p of [second,first]) for(const proposal of await core.listProposals(p.id))
-    if(proposal.state!=="applied")expected.push({projectId:p.id,proposal});
-  const page=await core.reviewQueue([second.id,first.id]);
-  assert.deepEqual(page,{unresolvedCount:expected.length,items:expected});
-  assert.equal(page.unresolvedCount,4);
-  assert.ok(page.items.filter(item=>item.projectId===second.id).every(item=>item.proposal.stale));
-  assert.ok(page.items.filter(item=>item.projectId===first.id).every(item=>!item.proposal.stale));
+  const page = await core.reviewQueue([second.id, first.id]);
+  assert.equal(page.unresolvedCount, 4);
+  assert.deepEqual(page.items.map(({ projectId, proposal }) => ({
+    projectId,
+    id: proposal.proposal.id,
+    state: proposal.state,
+    stale: proposal.stale,
+  })), [
+    { projectId: second.id, id: "a-review", state: "proposed", stale: true },
+    { projectId: second.id, id: "z-review", state: "proposed", stale: true },
+    { projectId: first.id, id: "a-review", state: "proposed", stale: false },
+    { projectId: first.id, id: "z-review", state: "proposed", stale: false },
+  ]);
 });
 
 test("literal search maps lowercase expansions to original UTF-16 ranges", async () => {

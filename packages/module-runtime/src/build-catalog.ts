@@ -160,7 +160,6 @@ export function resolveBuildCatalogSelection(
     fail("Build catalog platforms are invalid or duplicated");
   }
   if (catalog.modules.length !== trustedModules.length ||
-      new Set(catalog.modules.map(({ id }) => id)).size !== catalog.modules.length ||
       new Set(trustedModules.map(({ manifest }) => manifest.id)).size !== trustedModules.length) {
     fail("Build catalog module set does not match the producer's shipped modules");
   }
@@ -188,6 +187,7 @@ export function resolveBuildCatalogSelection(
           !Number.isSafeInteger(limit) || (limit as number) < 0)) {
       fail("Build catalog contains an invalid module descriptor");
     }
+    if (catalogById.has(module.id)) fail("Build catalog module set does not match the producer's shipped modules");
     const trusted = trustedById.get(module.id);
     if (!trusted) fail(`Build catalog includes unshipped module ${module.id}`);
     const manifest = trusted.manifest;

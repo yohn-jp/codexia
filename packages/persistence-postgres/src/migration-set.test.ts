@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,7 +17,7 @@ test("migration gate requires the exact applied set regardless of row order", ()
   assert.throws(() => assertMigrationSet(expected, [first, second, second]), /Duplicate applied migration/);
 });
 
-test("packaged migration checksums match the migration runner's UTF-8 input", async (t) => {
+test("packaged migration checksums preserve the exact UTF-8 bytes", async (t) => {
   const directory = await mkdtemp(path.join(tmpdir(), "codexia-migration-set-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(readMigrationSet(directory), /No packaged PostgreSQL migrations/);
@@ -29,12 +28,13 @@ test("packaged migration checksums match the migration runner's UTF-8 input", as
   const rows = await readMigrationSet(directory);
   assert.deepEqual(rows.map((row) => row.version), [first.version, second.version]);
   assert.equal(rows[0]?.sql, sql);
-  assert.equal(rows[0]?.checksum, createHash("sha256").update(sql, "utf8").digest("hex"));
+  // SHA-256 of the fixture bytes, including the CRLF and final LF.
+  assert.equal(rows[0]?.checksum, "52ba760cf421bf5f9435bd1a6e049bc50f14ba9a0194966dc3a517f0c4b49b12");
 });
 
 test("migration fingerprint is a stable ordered JSON identity", () => {
-  const canonical = JSON.stringify([[first.version, first.checksum], [second.version, second.checksum]]);
-  const fingerprint = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+  // Fixed release identity generated independently for the two ledger rows above.
+  const fingerprint = "sha256:3da861b6d9aeb3eae8a847b5edcd96231a872d3bfee4a1ef80822a5a79653d82";
   assert.equal(migrationSetFingerprint(expected), fingerprint);
   assert.equal(migrationSetFingerprint([second, first]), fingerprint);
   assert.notEqual(migrationSetFingerprint([first]), fingerprint);

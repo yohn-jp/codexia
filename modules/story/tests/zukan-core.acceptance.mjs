@@ -100,7 +100,12 @@ test("Story Zukan actions read and apply durable PostgreSQL proposals", async (t
     assert.ok(entityList.data.some((entity) => entity.id === "char-uma"));
     const materialized = await invoke("story.snapshot.materialize", {});
     assert.equal(materialized.ok, true, JSON.stringify(materialized.error));
-    assert.deepEqual(materialized.data, { entities: entityList.data.length, links: 2 });
+    assert.deepEqual(materialized.data, {
+      // Character, volume, chapter, scene and manuscript from the seeded work.
+      entities: 5,
+      // Viewpoint and chapter membership.
+      links: 2,
+    });
     assert.deepEqual(materialized.snapshot, entityList.snapshot, "materialization reports its pinned PostgreSQL reader snapshot");
     assert.deepEqual((await store.observe(project.id)).snapshot, initial.snapshot, "Story read actions do not mutate the PostgreSQL project");
     const graph = await invoke("story.graph.query", { types: ["character"] });
@@ -128,6 +133,9 @@ test("Story Zukan actions read and apply durable PostgreSQL proposals", async (t
     assert.equal(retried.ok, true, JSON.stringify(retried.error));
     assert.equal(retried.proposals.length, 1, "an exact retry returns the same pending Core proposal");
     assert.equal(retried.proposals[0].id, created.proposals[0].id);
+    const pendingBeforeApproval = (await store.listProposals(project.id)).filter(({ proposal }) => proposal.id === created.proposals[0].id);
+    assert.equal(pendingBeforeApproval.length, 1);
+    assert.equal(pendingBeforeApproval[0]?.state, "proposed");
 
     const proposal = created.proposals[0];
     await applyProposal(store, project.id, proposal);

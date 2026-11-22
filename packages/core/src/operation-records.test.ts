@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { BUILTIN_MODULE_IDS, type ChangeOperation, type ChangeProposal, type SnapshotId } from "@codexia/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleId, SnapshotId } from "@codexia/contracts";
 import {
   assertPersistedProposal,
   normalizedOperation,
@@ -102,8 +103,9 @@ test("proposal evidence may be bound by a covering read scope", () => {
 });
 
 
-test("persisted proposal evidence accepts exactly the canonical built-in module identities", () => {
-  for (const module of BUILTIN_MODULE_IDS) {
+test("persisted proposal evidence accepts the Full profile module identities", async () => {
+  const { modules } = JSON.parse(await readFile(new URL("../../../profiles/full.json", import.meta.url), "utf8")) as { modules: ModuleId[] };
+  for (const module of modules) {
     const proposal = goldenProposal();
     proposal.evidence![0]!.module = module;
     assert.doesNotThrow(() => assertPersistedProposal(proposal), module);

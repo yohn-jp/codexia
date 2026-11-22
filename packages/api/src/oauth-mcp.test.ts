@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
 import { test } from "node:test";
-import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments } from "./oauth-mcp.js";
+import { createOAuthMcpAuthenticator, parseOAuthMcpProjectAssignments } from "./oauth-mcp.js";
 
 const issuer = "https://api.codexia.example/api/auth";
 const audience = "https://api.codexia.example/api";
@@ -53,18 +53,19 @@ function authenticator(options: { active?: boolean; allowedClientIds?: readonly 
   return { verify, activeChecks: () => activeChecks };
 }
 
-test("verified registered MCP access token becomes a limited principal with only operation scopes", async () => {
+test("verified MCP principal receives only the operation scopes granted by its token", async () => {
   const instance = authenticator();
-  const principal = await instance.verify(token());
+  const principal = await instance.verify(token({ scope: "openid email mcp:read" }));
   assert.deepEqual(principal, {
     kind: "external-mcp",
     issuer,
     userId: "internal-user-17",
     clientId: "codexia-mcp-client",
     projectIds: ["project-1"],
-    scopes: [...OAUTH_MCP_SCOPES],
+    scopes: ["mcp:read"],
   });
-  assert.equal(instance.activeChecks(), 1);
+  assert.deepEqual((await instance.verify(token())).scopes, ["mcp:read", "mcp:compute", "mcp:propose"]);
+  assert.equal(instance.activeChecks(), 2);
 });
 
 test("MCP admission requires a configured MCP client and rejects owner clients", async () => {

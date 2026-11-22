@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { findPackageJSON } from "node:module";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { seedModelFixture } from "./model-postgres-fixture.mjs";
 
 const OUTPUT_DIRECTORY = "/p13-output";
@@ -493,11 +495,19 @@ async function runLifecycle() {
     const exactTokens = actionData(exactTokenResult, "nlp.countTokens exact E5");
     assert.deepEqual(exactTokens.counts, [8, 6, 11], "the public API must return cached E5 AutoTokenizer counts");
     assert.deepEqual(exactTokens.snapshot, exactTokenResult.snapshot);
+    const tokenizerPackage = findPackageJSON(
+      "@huggingface/transformers",
+      pathToFileURL(composition.moduleWorkerEntries.nlp),
+    );
+    assert.ok(tokenizerPackage, "the packaged NLP worker must resolve its Transformers dependency");
+    const tokenizerManifest = JSON.parse(await readFile(tokenizerPackage, "utf8"));
+    assert.equal(tokenizerManifest.name, "@huggingface/transformers");
+    assert.match(tokenizerManifest.version, /^\d+\.\d+\.\d+/u);
     assert.deepEqual(exactTokens.counter, {
       modelId: MODEL_IDS.embedding.id,
       exact: true,
       engine: "huggingface-transformers",
-      engineVersion: "3.8.1",
+      engineVersion: tokenizerManifest.version,
     });
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the exact token-counter child must release after its API lease");
 

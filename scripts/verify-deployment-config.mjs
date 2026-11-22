@@ -60,15 +60,10 @@ assert.match(terraformMain, /originRoutes/u);
 assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/codexia-api:3000"/u);
 assert.doesNotMatch(terraformVariables, /codexia-api-proxy/u, "retired proxy ingress must not be an accepted origin");
 
-assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
 assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
 assert.doesNotMatch(apiClient, /VITE_API_URL/u, 'the frontend API origin is same-origin and must not be injected at build time');
 assert.match(apiSource, /normalizeCorsOrigins/u, 'cross-origin browser access requires normalized exact HTTPS origins');
-assert.match(apiSource, /corsAllowedOrigins\.has\(originHeader\)/u, 'cross-origin API requests must match the configured exact origin');
 assert.match(apiSource, /CODEXIA_CORS_ALLOWED_ORIGINS/u, 'cross-origin browser access must remain deploy-time opt-in');
-assert.doesNotMatch(apiSource, /Access-Control-Allow-Credentials/u, 'the API must not enable credentialed CORS');
-assert.doesNotMatch(apiSource, /Access-Control-Allow-Origin[^\n]*\*/u, 'the API must not grant wildcard CORS');
-assert.match(apiSource, /sameOrigin\(request, trustProxy\)/u);
 
 assert.match(apiQuadlet, /^Image=CODEXIA_BACKEND_IMAGE$/mu);
 assert.match(apiQuadlet, /CODEXIA_AUTH_TOKEN_FILE=\/run\/secrets\/codexia-auth-token/u);

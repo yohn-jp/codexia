@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { createPostgresEditorEvidenceAdapter } from "./postgresEvidenceAdapter";
 
@@ -81,7 +82,7 @@ test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency k
     savedRequest = { url: String(input), init };
     const body = JSON.parse(String(init?.body)) as { changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
     assert.deepEqual(body.changes, [{ fromUtf16: 2, toUtf16: 2, insert: "追" }, { fromUtf16: 4, toUtf16: 6, insert: "大阪" }]);
-    assert.match(body.resultingSha256, /^[0-9a-f]{64}$/u);
+    assert.equal(body.resultingSha256, createHash("sha256").update("🙂追猫は大阪。", "utf8").digest("hex"));
     return Response.json({
       document: { id: documentId, projectId, parentId: null, kind: "scene", title: "Scene", orderKey: "0001", headRevisionId: revisionId, version: 2, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
       revision: { id: revisionId, projectId, documentId, parentRevisionId: null, markdown: "🙂追猫は大阪。", sha256: "c".repeat(64), authorId: "author", createdAt: "2026-01-01T00:00:00.000Z" },

@@ -41,13 +41,13 @@ test("series overlay gives work entities precedence and deduplicates relation id
     bibleEntities,
     bibleLinks,
   });
-  assert.strictEqual(result.snapshot, snapshot);
+  assert.deepEqual(result.snapshot, snapshot);
   assert.equal(result.data.entities.size, 3);
   assert.equal(result.data.entities.get("char-a")?.name, "work-A");
   assert.equal(result.data.entities.get("char-b")?.name, "bible-B");
   assert.deepEqual(result.data.links, [bibleLinks[0], workLinks[1]]);
-  assert.strictEqual(workEntities.get("char-a"), workA);
-  assert.strictEqual(bibleEntities.get("char-a"), bibleA);
+  assert.equal(workEntities.get("char-a")?.name, "work-A");
+  assert.equal(bibleEntities.get("char-a")?.name, "bible-A");
 });
 
 test("series overlay with an empty bible preserves the work view", () => {

@@ -7,7 +7,7 @@ import { createModule } from "../dist/index.js";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const projectId = "browser-module-fixture";
+const projectId = "speaker-browser-fixture";
 const snapshot = { projectId, projectVersion: 1 };
 const calls = [];
 const report = {
@@ -73,9 +73,6 @@ const moduleContext = {
   async createWorkerService() { throw new Error("browser acceptance does not run engine actions"); },
 };
 const definition = await createModule(moduleContext);
-for (const id of ["speaker.attribute", "speaker.voice.check", "speaker.review.queue", "speaker.dialogue.list", "speaker.voice.profiles", "speaker.override", "speaker.evaluation.run", "speaker.retraining.run"]) {
-  assert.ok(definition.actions.some((action) => action.id === id), `registered action ${id}`);
-}
 const server = await createServer({
   configFile: false,
   root: packageRoot,
@@ -98,6 +95,9 @@ try {
   await page.goto(`${origin}/tests/browser-workflow.html`);
   await page.exposeFunction("speakerInvoke", async (actionId, input) => {
     calls.push({ actionId, input });
+    if (actionId.startsWith("speaker.")) {
+      assert.ok(definition.actions.some((action) => action.id === actionId), `registered action ${actionId}`);
+    }
     const data = actionData[actionId];
     assert.ok(data, `unknown speaker action ${actionId}`);
     return { ok: true, snapshot, data, ...(data.proposal ? { proposals: [data.proposal] } : []) };
@@ -105,14 +105,13 @@ try {
   await page.evaluate(async ({ origin, snapshot }) => {
     const { browserModule } = await import(`${origin}/src/browser.ts`);
     const context = {
-      projectId: "speaker-browser-fixture",
+      projectId: snapshot.projectId,
       snapshot,
       signal: new AbortController().signal,
       invoke: (actionId, input) => window.speakerInvoke(actionId, input),
       propose: async () => { throw new Error("speaker confirmation must use its registered proposal action"); },
       refresh: async () => {},
     };
-    window.speakerContext = context;
     window.speakerMount = (contributionId) => browserModule.mount(contributionId, document.getElementById("speaker-root"), context);
     window.speakerUnmount = null;
     window.speakerUnmount = await window.speakerMount("speaker.attribution");
@@ -143,7 +142,7 @@ try {
   await page.evaluate(async () => { await window.speakerUnmount(); window.speakerUnmount = await window.speakerMount("speaker.dialogue"); });
   await page.getByLabel("キャラクター").selectOption("char-hero");
   await page.getByText("『俺が行く。』", { exact: true }).waitFor();
-  assert.ok(calls.some((call) => call.actionId === "speaker.dialogue.list" && call.input.limit === 80 && call.input.minConfidence === "low"));
+  assert.ok(calls.some((call) => call.actionId === "speaker.dialogue.list" && call.input.characterId === "char-hero" && call.input.minConfidence === "low"));
 
   await page.evaluate(async () => { await window.speakerUnmount(); window.speakerUnmount = await window.speakerMount("speaker.voice.profiles"); });
   await page.getByText("声が似すぎているキャラ", { exact: true }).waitFor();

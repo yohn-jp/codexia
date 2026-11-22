@@ -6,7 +6,7 @@ import { chromium } from "@playwright/test";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const projectId = "browser-module-fixture";
+const projectId = "assistant-browser-fixture";
 const snapshot = { projectId, projectVersion: 1 };
 const editorDraft = {
   sceneId: "sc-1",
@@ -14,11 +14,13 @@ const editorDraft = {
   documentRevision: "editor-document-rev",
   sceneRevision: "editor-scene-rev",
   text: "一文目。二文目。三文目。四文目。五文目。六文目。七文目。八文目。九文目。十文目。十一文目。十二文目。",
-  snapshot: { ...snapshot, overlayCommit: "d".repeat(40) },
+  snapshot: { ...snapshot, projectVersion: 2 },
   baseSnapshot: snapshot,
   baseSceneRevision: "b".repeat(64),
 };
 const calls = [];
+const unexpectedActions = [];
+const markupLikeAnswer = "<em data-provider-output>回答</em>";
 let streamMode = "success";
 let qaStreamMode = "error";
 const qaRequests = [];
@@ -139,7 +141,10 @@ try {
       return { ok: true, snapshot, data, proposals: [data.proposal] };
     }
     const data = actionData[actionId];
-    assert.ok(data, `unexpected assistant action: ${actionId}`);
+    if (!data) {
+      unexpectedActions.push(actionId);
+      throw new Error(`unexpected assistant action: ${actionId}`);
+    }
     return { ok: true, snapshot, data, ...(data.proposal ? { proposals: [data.proposal] } : {}) };
   });
 
@@ -166,7 +171,7 @@ try {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "一時的なプロバイダーエラー" }) });
       return;
     }
-    const answer = qaRequests.length === 2 ? "<img src=x onerror=alert(1)> 回答" : "再試行後の回答";
+    const answer = qaRequests.length === 2 ? markupLikeAnswer : "再試行後の回答";
     const response = {
       answer,
       confidence: "medium",
@@ -187,7 +192,7 @@ try {
     const { browserModule } = await import(`${origin}/src/browser.ts`);
     window.assistantEditorDraft = editorDraft;
     const context = {
-      projectId: "assistant-browser-fixture",
+      projectId: snapshot.projectId,
       snapshot,
       signal: new AbortController().signal,
       invoke: (actionId, input) => window.assistantInvoke(actionId, input),
@@ -280,9 +285,9 @@ try {
   await page.getByText("一時的なプロバイダーエラー", { exact: true }).waitFor();
   qaStreamMode = "success";
   await page.getByRole("button", { name: "回答を再試行" }).click();
-  await page.getByText("<img src=x onerror=alert(1)> 回答", { exact: true }).waitFor();
+  await page.getByText(markupLikeAnswer, { exact: true }).waitFor();
   await page.getByText("[scene:sc-1] 駅で会った。 (scenes/sc-1.md · r1)", { exact: true }).waitFor();
-  assert.equal(await page.locator("img").count(), 0, "model text is rendered as text, never executable markup");
+  assert.equal(await page.locator("[data-provider-output]").count(), 0, "model text is rendered as text, never executable markup");
   assert.deepEqual(qaRequests[0], { sceneId: "sc-1", messages: [{ role: "user", content: "この章で二人はどこで会った？" }] });
 
   qaStreamMode = "hang";
@@ -303,7 +308,7 @@ try {
     sceneId: "sc-1",
     messages: [
       { role: "user", content: "この章で二人はどこで会った？" },
-      { role: "assistant", content: "<img src=x onerror=alert(1)> 回答" },
+      { role: "assistant", content: markupLikeAnswer },
       { role: "user", content: "会話に追加される前にキャンセルする質問" },
     ],
   }, "retry keeps completed history and excludes the cancelled attempt");
@@ -439,17 +444,7 @@ try {
   await page.getByRole("button", { name: "話者候補を確認する" }).click();
   await page.getByText("話者候補を受け取りました", { exact: false }).waitFor();
 
-  const allowedActions = new Set([
-    "assistant.health", "assistant.queue.status", "assistant.settings.read", "assistant.settings.propose", "assistant.usage.read",
-    "assistant.rewrite", "assistant.summary.scene", "assistant.summary.chapter", "assistant.continuation", "assistant.aspect.review",
-    "assistant.rewrite.propose", "story.entities.list", "assistant.dialogue.topics", "assistant.dialogue.turns", "assistant.reader.reaction", "assistant.zukan.suggestions",
-    "assistant.synonyms.suggestions", "assistant.contradictions.assist", "assistant.stateEvents.draft", "assistant.speaker.attribute",
-    "assistant.summary.scene.preview", "assistant.summary.chapter.preview", "assistant.qa.preview", "assistant.continuation.preview", "assistant.aspect.review.preview",
-    "assistant.dialogue.topics.preview", "assistant.dialogue.turn.preview", "assistant.dialogue.turns.preview", "assistant.reader.reaction.preview", "assistant.synonyms.preview", "assistant.zukan.sandbox.preview",
-  ]);
-  assert.ok(calls.length > 0);
-  assert.ok(calls.every((call) => allowedActions.has(call.actionId)), "browser invokes only the approved assistant action IDs");
-  assert.equal(calls.some((call) => ["assistant.approve", "assistant.commit", "assistant.publish"].includes(call.actionId)), false);
+  assert.deepEqual(unexpectedActions, [], "the browser invokes only the supported fixture actions");
   assert.deepEqual(pageErrors, []);
   await page.evaluate(() => window.assistantUnmount());
   await page.close();

@@ -182,3 +182,74 @@ test("a 409 whose journal clear fails remains a recovery failure instead of open
     signal: new AbortController().signal,
   }), PersistenceSaveConflictJournalError);
 });
+
+test("journal binding failure cannot emit a remote write or an acknowledgement", async () => {
+  const { events, journal } = journalHarness();
+  journal.bindPersistenceDraftSave = async () => { events.push("journal:bind-failed"); return false; };
+  await assert.rejects(runPersistenceSaveProtocol({
+    authorScope, pending, reconcileReplay: false, journal,
+    async save() { events.push("api:unexpected-write"); return response; },
+    async readHead() { throw new Error("unexpected read"); },
+    signal: new AbortController().signal,
+  }), /IndexedDB/u);
+  assert.deepEqual(events, ["journal:bind-failed"], "a failed local durability barrier must stop all remote effects");
+});
+
+test("aborted save does not start a remote write or acknowledge after a successful journal bind", async () => {
+  const { events, journal } = journalHarness();
+  const controller = new AbortController();
+  journal.bindPersistenceDraftSave = async () => {
+    events.push("journal:bind");
+    controller.abort();
+    return true;
+  };
+  await assert.rejects(runPersistenceSaveProtocol({
+    authorScope, pending, reconcileReplay: false, journal,
+    async save() { events.push("api:unexpected-write"); return response; },
+    async readHead() { throw new Error("unexpected read"); },
+    signal: controller.signal,
+  }), { name: "AbortError" });
+  assert.deepEqual(events, ["journal:bind"], "cancellation after the durability barrier must not send a write");
+});
+
+test("replayed save cannot acknowledge a mismatched remote head", async (context) => {
+  const malformed = [
+    { name: "missing revision", head: { document, revision: null } },
+    { name: "foreign project", head: { document: { ...document, projectId: "other-project" }, revision } },
+    { name: "foreign document", head: { document, revision: { ...revision, documentId: "other-document" } } },
+    { name: "broken head pointer", head: { document: { ...document, headRevisionId: "other-revision" }, revision } },
+    { name: "same revision with altered content", head: { document, revision: { ...revision, markdown: "altered" } } },
+  ];
+  for (const item of malformed) {
+    await context.test(item.name, async () => {
+      const { events, journal } = journalHarness();
+      await assert.rejects(runPersistenceSaveProtocol({
+        authorScope, pending, reconcileReplay: true, journal,
+        async save() { events.push("api:save"); return response; },
+        async readHead() { events.push("api:read-head"); return item.head as { document: PersistenceDocument; revision: DocumentRevision | null }; },
+        signal: new AbortController().signal,
+      }), /最新Revision/u);
+      assert.deepEqual(events, ["journal:bind:save-operation-1", "api:save", "api:read-head"],
+        "untrusted replay head must never clear or acknowledge a recoverable draft");
+    });
+  }
+});
+
+test("replay superseded by another writer acknowledges the original receipt without rebasing the newer draft", async () => {
+  const { events, journal } = journalHarness();
+  const laterRevision = { ...revision, id: "revision-3", markdown: "newer writer text" };
+  const laterDocument = { ...document, headRevisionId: laterRevision.id };
+  const result = await runPersistenceSaveProtocol({
+    authorScope, pending, reconcileReplay: true, journal,
+    async save() { events.push("api:save"); return response; },
+    async readHead() { events.push("api:read-head"); return { document: laterDocument as PersistenceDocument, revision: laterRevision as DocumentRevision }; },
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.replayWasSuperseded, true);
+  assert.equal(result.acknowledgedRevision.id, laterRevision.id);
+  assert.equal(result.acknowledgedRevision.markdown, laterRevision.markdown);
+  assert.deepEqual(events, [
+    "journal:bind:save-operation-1", "api:save", "api:read-head",
+    "journal:ack:save-operation-1:revision-2:false",
+  ]);
+});

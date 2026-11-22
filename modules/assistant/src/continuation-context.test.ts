@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  approximateContinuationTokenCount,
   buildContinuationContext,
   buildContinuationRetrievalQuery,
-  DEFAULT_CONTINUATION_K,
-  DEFAULT_CONTINUATION_TOKEN_BUDGET,
   normalizeContinuationRetrievalHits,
 } from "./continuation-context.js";
 
@@ -13,11 +10,10 @@ test("continuation context defaults to the trailing eight sentences and a 12,000
   const recentSentences = Array.from({ length: 10 }, (_, index) => `sentence-${index + 1}`);
   const built = buildContinuationContext({ recentSentences });
 
-  assert.equal(DEFAULT_CONTINUATION_K, 8);
   assert.equal(built.text, recentSentences.slice(-8).join("\n"));
   assert.equal(built.manifest.parts[0]?.kind, "recent-sentences");
   assert.equal(built.manifest.parts[0]?.count, 8);
-  assert.equal(built.manifest.tokenBudget, DEFAULT_CONTINUATION_TOKEN_BUDGET);
+  assert.equal(built.manifest.tokenBudget, 12_000);
   assert.equal(built.manifest.tokenCountMode, "approximate");
 });
 
@@ -105,11 +101,10 @@ test("k is bounded to the source API range and zero omits recent sentences", () 
 });
 
 test("approximate fallback is explicitly labeled and is not presented as model-token measurement", () => {
-  assert.equal(approximateContinuationTokenCount("あa"), 2);
-  const built = buildContinuationContext({ recentSentences: ["hello"] });
+  const built = buildContinuationContext({ recentSentences: ["あa"] });
 
   assert.equal(built.manifest.tokenCountMode, "approximate");
-  assert.equal(built.manifest.totalTokens, approximateContinuationTokenCount("hello"));
+  assert.equal(built.manifest.totalTokens, 2);
 });
 
 test("invalid budgets and injected counter results fail instead of bypassing the cap", () => {

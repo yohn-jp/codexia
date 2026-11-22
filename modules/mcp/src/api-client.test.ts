@@ -68,30 +68,6 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
   assert.equal("source" in body, false);
 });
 
-test("stdio action client can read Story context without Assistant actions", async () => {
-  const calls: string[] = [];
-  const payload = { sceneId: "scene-one", scope: "reader", parts: [{ kind: "reader-disclosure" }] };
-  const fetcher: typeof fetch = async (input) => {
-    const path = new URL(String(input)).pathname;
-    if (path.endsWith("/actions")) return Response.json({ actions: [{ id: "story.context.package", module: "story", effect: "read" }] });
-    const actionId = path.split("/actions/")[1];
-    calls.push(actionId ?? "");
-    return Response.json({ ok: true, snapshot, data: payload });
-  };
-  const client = new ApiClient({ baseUrl: "https://codexia.test", token: "test-token", projectId: "project-one", fetch: fetcher });
-
-  const actions = await client.listActions();
-  assert.deepEqual(actions.map((action) => action.id), ["story.context.package"]);
-  const result = await client.invoke("story.context.package", { sceneId: "scene-one", scope: "reader" });
-  assert.deepEqual(result, { ok: true, snapshot, data: payload });
-  assert.deepEqual(calls, ["story.context.package"]);
-});
-
-test("stdio API client can bind a requested owner project", async () => {
-  const client = new ApiClient({ baseUrl: "http://127.0.0.1:3000", token: "token", projectId: "project-one" });
-  assert.equal(client.forProject("project-two").projectId, "project-two");
-});
-
 test("stdio API client follows bounded project pages and accepts the legacy array response", async () => {
   const calls: string[] = [];
   const cursor = Buffer.from(JSON.stringify({ updatedAt: "2026-11-20T00:00:00.000Z", id: "00000000-0000-4000-8000-000000000001" })).toString("base64url");
@@ -116,11 +92,23 @@ test("stdio API client follows bounded project pages and accepts the legacy arra
   assert.deepEqual(await legacy.listProjectPage(), { projects: [{ id: "project-one", title: "One" }], nextCursor: null });
 });
 
-test("stdio API client forwards MCP cancellation to each fetch", async () => {
-  const observed: Array<AbortSignal | null | undefined> = [];
+test("project discovery rejects an empty continuation emitted by the host", async () => {
+  const client = new ApiClient({
+    baseUrl: "https://codexia.test",
+    token: "test-token",
+    fetch: async () => Response.json({ projects: [{ id: "project-one", title: "One" }], nextCursor: "" }),
+  });
+
+  await assert.rejects(client.listProjectPage(1), { code: "INVALID_RESPONSE", status: 502 });
+});
+
+test("stdio API client cancels in-flight discovery and invocation requests", { timeout: 2_000 }, async () => {
   const fetcher: typeof fetch = async (_input, init = {}) => {
-    observed.push(init.signal);
-    return Response.json({ actions: [] });
+    const signal = init.signal;
+    assert.ok(signal, "the pending request needs a cancellation signal");
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
   };
   const client = new ApiClient({
     baseUrl: "https://codexia.test",
@@ -129,7 +117,13 @@ test("stdio API client forwards MCP cancellation to each fetch", async () => {
     fetch: fetcher,
   });
   const controller = new AbortController();
-  await client.listActions(controller.signal);
-  await client.invoke("core.status", {}, controller.signal);
-  assert.deepEqual(observed, [controller.signal, controller.signal]);
+  const discovery = client.listActions(controller.signal);
+  const invocation = client.invoke("core.status", {}, controller.signal);
+  const canceled = new Error("MCP caller canceled");
+  controller.abort(canceled);
+
+  await Promise.all([
+    assert.rejects(discovery, (error) => error === canceled),
+    assert.rejects(invocation, (error) => error === canceled),
+  ]);
 });

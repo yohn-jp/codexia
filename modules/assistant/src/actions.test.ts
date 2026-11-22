@@ -607,7 +607,7 @@ test("setting QA streams source-compatible global scene and hybrid Bible searche
       { kind: "scene", id: "sc-other", quote: "別の場面にも夜明けの駅が出てくる。", path: otherManuscriptPath, revision, sceneId: "sc-other", label: "searchScenes result" },
       { kind: "bible", id: "char-qa", quote: "アリス", path: "bible/characters/char-qa/profile.yaml", revision, label: "searchBible result" },
     ]);
-    assert.equal((data.provenance as Record<string, unknown>).snapshot && (data.provenance as Record<string, unknown>).snapshot, snapshot);
+    assert.deepEqual((data.provenance as Record<string, unknown>).snapshot, snapshot);
     assert.equal(usageEvents.length, 1);
     assert.equal(usageEvents[0]?.feature, "setting-qa");
   } finally {
@@ -867,7 +867,8 @@ test("chapter summary proposes fresh child and parent summaries in one Core oper
     assert.ok(sceneSummary);
     assert.match(sceneSummary, /characters:\n  - One\n  - Two/u, "the source POV and appearance names fill an empty model character list");
     assert.equal(progress.at(-1), 1);
-    assert.ok(progress.some((value) => Math.abs(value - 0.8) < 1e-9), "the chapter progress reports completion of its one child summary");
+    assert.ok(progress.some((value) => value > 0 && value < 1), "partial progress is visible before the parent summary finishes");
+    assert.deepEqual(progress, progress.toSorted((left, right) => left - right));
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1036,7 +1037,10 @@ test("usage history combines preserved JSONL and host-owned events without rewri
     },
   };
   const action = getAction(createAssistantActions(moduleContext(store)), "assistant.usage.read");
-  const actionContext = context({ files: { [usagePath]: legacyContent } });
+  const actionContext = context({
+    files: { [usagePath]: legacyContent },
+    onPropose() { assert.fail("usage inspection cannot rewrite the preserved JSONL"); },
+  });
   const result = await action.invoke({ limit: 10 }, actionContext);
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -1054,7 +1058,6 @@ test("usage history combines preserved JSONL and host-owned events without rewri
   assert.equal(data.aggregates["2026-10"]?.byFeature && (data.aggregates["2026-10"]?.byFeature as Record<string, number>).rewrite, 1);
   assert.equal(data.legacyRevision, revision);
   assert.equal((await actionContext.reader.read(usagePath))?.content, legacyContent);
-  assert.equal(legacyContent.includes('"futureField":{"retained":true}'), true);
 });
 
 

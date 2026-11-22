@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import type { ProposalStatus } from "@codexia/contracts";
+import { createWritingFixture } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
@@ -162,6 +163,55 @@ async function readProposalStatus(page: Page, projectId: string, proposalId: str
   expect(response.ok(), await response.text()).toBe(true);
   return await response.json() as ProposalStatus;
 }
+
+test("Core presents native Knowledge review without Story or Speaker contributions", async ({ page }) => {
+  test.skip(process.env.CODEXIA_PROFILE === "full", "This case verifies the Core-only contribution boundary.");
+  const { project } = await createWritingFixture(page);
+  const projectPath = `/api/v1/persistence/projects/${project.id}`;
+  const projectResponse = await page.request.get(projectPath);
+  expect(projectResponse.ok()).toBe(true);
+  const { project: current } = await projectResponse.json() as { project: { version: number } };
+  const nodeId = randomUUID();
+  const proposalResponse = await page.request.post(`${projectPath}/changesets`, {
+    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID() },
+    data: {
+      projectVersion: current.version,
+      operations: [{
+        type: "knowledge.node.save",
+        command: {
+          projectId: project.id,
+          id: nodeId,
+          type: "person",
+          name: "灯台守の候補",
+          attributes: {},
+          status: "proposed",
+          expectedVersion: null,
+        },
+      }],
+    },
+  });
+  expect(proposalResponse.status()).toBe(201);
+  const { changeSet } = await proposalResponse.json() as { changeSet: { id: string } };
+
+  const contributionResponse = await page.request.get(`/api/projects/${project.id}/contributions`);
+  expect(contributionResponse.ok()).toBe(true);
+  const contributions = await contributionResponse.json() as Array<{ module: string }>;
+  expect(contributions.filter(({ module }) => module === "story" || module === "speaker")).toEqual([]);
+
+  const workspace = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  const panelMenu = workspace.locator(".st-workspace-panel-menu");
+  await panelMenu.locator("summary").click();
+  await expect(panelMenu.getByRole("button", { name: "Zukan suggestionsを表示" })).toHaveCount(0);
+  await expect(panelMenu.getByRole("button", { name: "話者確認キューを表示" })).toHaveCount(0);
+  await panelMenu.locator("summary").click();
+  await openWorkspaceReviewPanel(page);
+  const card = page.locator(".native-changeset-card");
+  await expect(card).toContainText(changeSet.id);
+  await expect(card).toContainText("灯台守の候補");
+  await expect(card.getByRole("button", { name: "承認する" })).toBeEnabled();
+  const canonicalNode = await page.request.get(`${projectPath}/nodes/${nodeId}`);
+  expect(canonicalNode.status()).toBe(404);
+});
 
 test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page }) => {
   test.setTimeout(180_000);
