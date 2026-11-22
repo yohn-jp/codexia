@@ -3,7 +3,7 @@ import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-con
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { HIERARCHY_REORDER_SOURCE, PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
-import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -124,6 +124,15 @@ export interface ProposeHierarchyReorderOptions {
   actorId: string;
   idempotencyKey: string;
   origin?: "author" | "external-agent";
+}
+
+export type ProposeManuscriptRestoreInput = Pick<RestoreDocumentRevisionCommand, "documentId" | "baseRevisionId" | "sourceRevisionId">;
+
+export interface ProposeManuscriptRestoreOptions {
+  actorId: string;
+  idempotencyKey: string;
+  origin?: "author" | "external-agent";
+  snapshot?: SnapshotId;
 }
 
 export interface BuiltChangeOperation {
@@ -1212,6 +1221,46 @@ export class CoreStore implements MutationCoordinator {
           kind, parentId, volumeId: volume?.id ?? null, projectVersion, origin, requestDigest,
         } },
       });
+    });
+  }
+  async proposeManuscriptRestore(project: string, input: ProposeManuscriptRestoreInput, options: ProposeManuscriptRestoreOptions): Promise<ChangeSetResult> {
+    const projectId = pid(project);
+    const { documentId, baseRevisionId, sourceRevisionId } = input;
+    const { actorId, idempotencyKey, origin = "author", snapshot } = options;
+    if (snapshot && snapshot.projectId !== projectId) fail(409, "snapshot_scope_mismatch", "Snapshot belongs to another project");
+    return this.persistence.transaction(async tx => {
+      const proposal = await tx.createChangeSet({
+        projectId, authorId: actorId, idempotencyKey,
+        operations: [{ type: "document.restore", command: {
+          projectId, documentId, baseRevisionId, sourceRevisionId, authorId: actorId,
+          idempotencyKey: `restore-change-set:${hash(idempotencyKey)}`,
+        } }],
+        readSet: [], // The restore command binds the exact head revision at application.
+        writeSet: [{ resource: "document", id: documentId }],
+        provenance: { source: "native-manuscript-restore", actorId, details: { origin } },
+      });
+      // createChangeSet holds the project lock. Validate only fresh proposals,
+      // and roll back their registration if the observed ancestry has changed.
+      // Re-dispatch can resolve a newer project snapshot; the revision command
+      // itself is the stable request identity.
+      if (proposal.replayed) return proposal;
+      if (snapshot && (await tx.getProject(projectId))?.version !== snapshot.projectVersion) {
+        const saved = await tx.getModuleRecord(projectId, SNAPSHOTS, `snapshot:${snapshot.projectVersion}`);
+        if (!saved) fail(409, "snapshot_unavailable", "The requested immutable project snapshot is unavailable");
+        const manifest = storedManifest(saved.value, projectId, snapshot.projectVersion);
+        const observed = manifest.documents.find(document => document.id === documentId);
+        if (!observed) fail(404, "scene_not_found", "Manuscript document not found in the selected snapshot");
+        if (observed.headRevisionId !== baseRevisionId) fail(409, "revision_conflict", "Restore base does not belong to the selected snapshot");
+      }
+      const document = await tx.getDocument(projectId, documentId);
+      if (!document || document.kind === "volume" || document.kind === "chapter") {
+        fail(404, "scene_not_found", "Manuscript document not found");
+      }
+      if (document.headRevisionId !== baseRevisionId) fail(409, "revision_conflict", "The manuscript head has changed");
+      if (!await tx.getRevision(projectId, documentId, sourceRevisionId, baseRevisionId)) {
+        fail(404, "revision_not_found", "Restore source is not in the observed manuscript history");
+      }
+      return proposal;
     });
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{

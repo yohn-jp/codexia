@@ -17,8 +17,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
-import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
-import type { Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
+import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
+import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostgresAdditiveSchema, packagedMigrationFingerprint, runPostgresAdditiveMigrations, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
@@ -804,7 +804,7 @@ export function createServer(options: ApiServerOptions): Server {
     actorId: string,
     authorizeProposal?: () => Promise<void>,
     allowedProjectIds?: readonly string[],
-    resolveReorderActor?: () => Promise<string>,
+    resolveNativeProposalActor?: () => Promise<string>,
   ): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
@@ -893,9 +893,16 @@ export function createServer(options: ApiServerOptions): Server {
       return { kind: value.kind, volumeId: value.volumeId, chapterId: value.chapterId, orderedIds: value.orderedIds, idempotencyKey };
     } };
     const restoreInput: ValueSchema = { parse(value: unknown) {
-      if (!isRecord(value) || typeof value.sceneId !== "string" || !value.sceneId || !isPostgresRevisionId(value.snapshotId)) throw new Error("sceneId and a canonical PostgreSQL revision ID are required for restore");
-      const proposalId = optionalProposalId(value);
-      return { sceneId: value.sceneId, snapshotId: value.snapshotId, ...(proposalId ? { proposalId } : {}) };
+      if (!isRecord(value) || !isPostgresRevisionId(value.documentId) ||
+          !isPostgresRevisionId(value.baseRevisionId) || !isPostgresRevisionId(value.sourceRevisionId)) {
+        throw new Error("documentId, baseRevisionId and sourceRevisionId must be canonical PostgreSQL IDs");
+      }
+      const { idempotencyKey } = value;
+      if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200 ||
+          "proposalId" in value || "sceneId" in value || "snapshotId" in value) {
+        throw new Error("A native restore requires an idempotencyKey of 1 to 200 characters and canonical revision fields");
+      }
+      return { documentId: value.documentId, baseRevisionId: value.baseRevisionId, sourceRevisionId: value.sourceRevisionId, idempotencyKey };
     } };
     const search = async (reader: Awaited<ReturnType<typeof freshReader>>, term: string, limit: number) => {
       if (!coreStore.searchSnapshot) throw httpFailure(503, "SEARCH_UNAVAILABLE", "Snapshot search is not available in this Core version");
@@ -980,10 +987,20 @@ export function createServer(options: ApiServerOptions): Server {
         }
       },
     });
-    const hierarchyReorder: ModuleAction[] = resolveReorderActor === undefined ? [] : [{
-      id: "core.hierarchy.reorder",
+    const nativeCoreProposal = <Input>(
+      id: string,
+      inputSchema: ValueSchema,
+      propose: (input: Input, options: {
+        snapshot: SnapshotId;
+        actorId: string;
+        idempotencyKey: string;
+        origin: "author" | "external-agent";
+      }) => Promise<ChangeSetResult>,
+      resolveActor: () => Promise<string>,
+    ): ModuleAction => ({
+      id,
       effect: "propose",
-      inputSchema: hierarchyReorderInput,
+      inputSchema,
       outputSchema: jsonSchema,
       async invoke(input, context) {
         const snapshot = context.reader.snapshot;
@@ -995,12 +1012,12 @@ export function createServer(options: ApiServerOptions): Server {
           if (context.projectId !== projectId || snapshot.projectId !== projectId) {
             throw httpFailure(409, "snapshot_unavailable", "Action project does not match its selected reader");
           }
-          const authorId = await resolveReorderActor();
+          const actorId = await resolveActor();
           checkCancelled();
-          const { idempotencyKey, ...reorder } = input as ReorderHierarchyInput & { idempotencyKey: string };
-          const result = await coreStore.proposeHierarchyReorder(projectId, reorder, {
-            projectVersion: snapshot.projectVersion,
-            actorId: authorId,
+          const { idempotencyKey, ...command } = input as Input & { idempotencyKey: string };
+          const result = await propose(command as Input, {
+            snapshot,
+            actorId,
             idempotencyKey,
             origin: source === "mcp" ? "external-agent" : "author",
           });
@@ -1010,7 +1027,15 @@ export function createServer(options: ApiServerOptions): Server {
           return actionFailure(snapshot, error, "core_proposal_failed");
         }
       },
-    }];
+    });
+    const nativeProposals = resolveNativeProposalActor === undefined ? [] : [
+      nativeCoreProposal<ReorderHierarchyInput>("core.hierarchy.reorder", hierarchyReorderInput,
+        (input, { snapshot, ...options }) => coreStore.proposeHierarchyReorder(projectId, input, {
+          ...options, projectVersion: snapshot.projectVersion,
+        }), resolveNativeProposalActor),
+      nativeCoreProposal<ProposeManuscriptRestoreInput>("core.operation.restore", restoreInput,
+        (input, options) => coreStore.proposeManuscriptRestore(projectId, input, options), resolveNativeProposalActor),
+    ];
     return [
       { module: "core", action: makeProposal("core.hierarchy.create", hierarchyCreateInput, (context, input, existingProposal) =>
         options.store.buildCreateHierarchyOperation(
@@ -1021,9 +1046,7 @@ export function createServer(options: ApiServerOptions): Server {
         )) },
       { module: "core", action: makeProposal("core.hierarchy.delete", hierarchyDeleteInput, (context, input) =>
         options.store.buildDeleteHierarchyOperation(projectId, (input as { target: HierarchyTarget }).target, context.reader.snapshot)) },
-      ...hierarchyReorder.map(action => ({ module: "core" as const, action })),
-      { module: "core", action: makeProposal("core.operation.restore", restoreInput, (context, input) =>
-        options.store.buildRestoreOperation(projectId, input as { sceneId: string; snapshotId: string }, undefined, context.reader.snapshot)) },
+      ...nativeProposals.map(action => ({ module: "core" as const, action })),
       { module: "core", action: make("core.status", emptyInput, async () => options.store.status(projectId)) },
       { module: "core", action: make("core.history", emptyInput, async (context) => options.store.history(projectId, context.reader.snapshot)) },
       { module: "core", action: make("core.observation", emptyInput, async () => options.store.observe(projectId)) },
@@ -1100,10 +1123,10 @@ export function createServer(options: ApiServerOptions): Server {
     source: ChangeProposal["source"],
     allowedEffects?: readonly ActionDescriptor["effect"][],
     allowedProjectIds?: readonly string[],
-    resolveReorderActor?: () => Promise<string>,
+    resolveNativeProposalActor?: () => Promise<string>,
   ): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds, resolveReorderActor));
+    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds, resolveNativeProposalActor));
   };
   const proposeAs = async (
     projectId: string,
@@ -1133,7 +1156,7 @@ export function createServer(options: ApiServerOptions): Server {
     actorId = "owner",
     allowedEffects?: readonly ActionDescriptor["effect"][],
     allowedProjectIds?: readonly string[],
-    resolveReorderActor?: () => Promise<string>,
+    resolveNativeProposalActor?: () => Promise<string>,
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
@@ -1144,7 +1167,7 @@ export function createServer(options: ApiServerOptions): Server {
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
-      }, allowedProjectIds, resolveReorderActor),
+      }, allowedProjectIds, resolveNativeProposalActor),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
         if (hosted || (source === "mcp" && authorizeProposal)) {
@@ -1941,7 +1964,7 @@ export function createServer(options: ApiServerOptions): Server {
       requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
-    const resolveReorderActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(admittedMcpClient))
+    const resolveNativeProposalActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(admittedMcpClient))
       ? async (): Promise<string> => {
         if (hosted) {
           const principal = await requireWritePermission();
@@ -1951,7 +1974,7 @@ export function createServer(options: ApiServerOptions): Server {
           if (admittedMcpClient) return admittedMcpClient.userId;
           if (isAuthor) return "owner";
         }
-        throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose a hierarchy reorder");
+        throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose a native ChangeSet");
       }
       : undefined;
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
@@ -2272,7 +2295,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor) }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2282,10 +2305,10 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
         let descriptor = descriptors.find((item) => item.id === actionId);
         if (!descriptor && admittedMcpClient) {
-          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, admittedMcpClient.projectIds, resolveReorderActor);
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, admittedMcpClient.projectIds, resolveNativeProposalActor);
           const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
           if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
         }
@@ -2326,7 +2349,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2434,7 +2457,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveReorderActor);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
         if (mcpStreamableRoute && admittedMcpClient) {
           const { issuer, clientId, userId } = admittedMcpClient;
           host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
