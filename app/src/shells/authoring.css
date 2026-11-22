@@ -351,6 +351,7 @@
   box-shadow: none;
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-heading {
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-block-end: 6px;
@@ -384,14 +385,21 @@
   cursor: pointer;
   white-space: nowrap;
 }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[open] {
+  flex: 1 1 100%;
+  order: 2;
+  justify-items: stretch;
+  text-align: start;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[open] summary { justify-self: end; }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[data-state="saved"] summary { color: var(--success); }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[data-state="uncertain"] summary { color: var(--error-text); }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state-detail {
-  position: absolute;
-  z-index: 8;
-  inset-inline-end: 0;
-  top: calc(100% + 4px);
-  min-inline-size: 16rem;
+  position: static;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  max-block-size: min(40dvh, 20rem);
+  overflow: auto;
   padding: 8px 12px;
   border: 1px solid var(--st-folio-edge);
   border-radius: 4px;

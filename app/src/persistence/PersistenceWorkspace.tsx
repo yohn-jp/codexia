@@ -274,6 +274,20 @@ interface PendingSave {
   clientId: string;
 }
 
+/** Presentation only: revision, journal and the pending save remain authoritative. */
+function saveProtectionLabel(active: ActiveDocument, pendingSave: boolean): string {
+  if (active.recovery === "failed") return "この入力はまだ保護されていません";
+  if (active.recovery === "other-tab") return "別タブの下書きを確認してください";
+  if (active.remoteConflict) return "別の版と競合しています";
+  if (active.save === "failed") return pendingSave ? "保存結果を確認できません" : "作品への保存を確認できません";
+  if (active.save === "saving") {
+    if (!active.dirty) return "作品への保存を確認中";
+    return active.recovery === "stored" ? "保存中・追加入力はブラウザーに記録済み" : "保存中・追加入力を保護中";
+  }
+  if (active.dirty) return active.recovery === "stored" ? "このブラウザーに下書きあり" : "この入力を保護中";
+  return active.save === "saved" && active.recovery === "stored" ? "作品に保存済み" : "保存状態を確認中";
+}
+
 type DesktopDurability = "draft" | "saving" | "uncertain" | "saved";
 
 function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability | undefined {
@@ -383,6 +397,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
   const [active, setActive] = useState<ActiveDocument | null>(null);
+  const [protectingDraft, setProtectingDraft] = useState(false);
   const activeRef = useRef<ActiveDocument | null>(null);
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
   // Tracks only recovery records this editor instance successfully wrote. A clean
@@ -1091,6 +1106,39 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     try { return await operation; }
     finally { if (draftChainsRef.current.get(ownershipKey) === operation) draftChainsRef.current.delete(ownershipKey); }
   }, [authorScope, journalError]);
+
+  const retryDraftProtection = useCallback(async (): Promise<void> => {
+    const captured = activeRef.current;
+    if (!captured?.dirty || captured.recovery !== "failed" || sessionBlockedRef.current) return;
+    setProtectingDraft(true);
+    try {
+      const stored = await persistDraft(captured);
+      const latest = activeRef.current;
+      if (!latest || latest.document.projectId !== captured.document.projectId || latest.document.id !== captured.document.id ||
+          latest.generation !== captured.generation || latest.markdown !== captured.markdown) return;
+      if (!stored) {
+        publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブに新しい回復下書きがあります。比較してから操作してください。" });
+        return;
+      }
+      publishEditor({ ...latest, recovery: "stored", save: "idle", error: "" });
+      // Retry the existing save only after this exact generation is durable.
+      if (!latest.remoteConflict) window.setTimeout(() => {
+        const current = activeRef.current;
+        if (current?.document.projectId === captured.document.projectId && current.document.id === captured.document.id &&
+            current.generation === captured.generation && current.recovery === "stored" && !current.remoteConflict) {
+          void saveDocumentRef.current();
+        }
+      }, 900);
+    } catch (error) {
+      const latest = activeRef.current;
+      if (latest?.document.projectId === captured.document.projectId && latest.document.id === captured.document.id &&
+          latest.generation === captured.generation) {
+        publishEditor({ ...latest, recovery: "failed", save: "failed", error: error instanceof Error ? error.message : "復旧用の下書きを記録できませんでした。" });
+      }
+    } finally {
+      setProtectingDraft(false);
+    }
+  }, [persistDraft, publishEditor]);
 
   const revalidateActiveDocument = useCallback(async (signal: AbortSignal): Promise<void> => {
     const captured = activeRef.current;
@@ -2607,11 +2655,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
               <summary aria-live={active.error || active.remoteConflict || active.recovery === "failed" || active.recovery === "other-tab"
                 ? "off"
                 : active.save === "saving" || (active.save === "saved" && !active.dirty && active.recovery === "stored") ? "polite" : "off"}>
-                {active.remoteConflict || active.error || active.save === "failed" || active.recovery === "failed" || active.recovery === "other-tab"
-                  ? "要確認"
-                  : active.save === "saving" ? "サーバーへの保存を確認中"
-                    : active.dirty ? active.recovery === "pending" ? "この端末へ記録中" : "この端末に下書きがあります"
-                      : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
+                {saveProtectionLabel(active, Boolean(pendingSaveForDisplay))}
                 {evidencePendingForActive && <span role="status" className="pg-evidence-pending"> · 根拠を確認中</span>}
               </summary>
               <div className="pg-save-state-detail">
@@ -2632,18 +2676,24 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                 </p>}
                 {active.save === "failed" && !pendingSaveForDisplay && !active.remoteConflict &&
                   active.recovery !== "failed" && active.recovery !== "other-tab" &&
-                  <p>現在の編集の保存を確認できません。原稿のエラーを確認してください。</p>}
+                  <p>現在の編集を作品に保存できませんでした。エラーを確認してから再試行してください。</p>}
+                {active.recovery === "failed" && <p>このタブを閉じないでください。下書きの記録に失敗しています。空き容量などを確認し、下書きを再保護してください。</p>}
+                {active.recovery === "stored" && active.dirty && <p>このブラウザーに記録した後続入力は、別端末からはまだ開けません。</p>}
               </div>
             </details>
           </div>
-          {active.error && <p className="pg-alert" role="alert">{active.error}</p>}
+          {active.error && <div className="pg-alert" role="alert">
+            <p>{active.error}</p>
+            {active.dirty && active.recovery === "failed" && <button type="button" disabled={protectingDraft || sessionBlocked}
+              onClick={() => void retryDraftProtection()}>{protectingDraft ? "下書きを再保護中…" : "下書きを再保護"}</button>}
+          </div>}
           {evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id && <div className="pg-alert" role="alert">
             <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceLoadIssue.message}</p>
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
-              {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
+              {active.save === "failed" && pendingSaveForDisplay ? "保存結果を確認して再試行" : active.save === "failed" ? "作品への保存を再試行" : "今すぐ保存"}
             </button>
             <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
             <details className="pg-editor-command-menu">

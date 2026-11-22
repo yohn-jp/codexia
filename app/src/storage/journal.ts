@@ -230,12 +230,12 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 function storageMessage(error: unknown, operation: string): JournalError {
   const name = error instanceof DOMException ? error.name : "";
   if (name === "QuotaExceededError") {
-    return new JournalError(`Browser storage is full. Your ${operation} is still in this tab, but it could not be protected for recovery. Free browser storage and try again.`, error);
+    return new JournalError("ブラウザーの保存領域がいっぱいです。入力はこのタブに残っていますが、復旧用の記録を作れていません。空き容量を確保し、下書きを再保護してください。", error);
   }
   if (name === "SecurityError" || name === "NotAllowedError") {
-    return new JournalError(`Browser storage is unavailable. Your ${operation} could not be protected for recovery.`, error);
+    return new JournalError("ブラウザーの保存領域を利用できません。復旧用の記録を作れていないため、このタブを閉じずに保存設定を確認してください。", error);
   }
-  return new JournalError(`Browser storage could not save your ${operation}. Keep this tab open and try again.`, error);
+  return new JournalError("ブラウザーに復旧用の記録を作れませんでした。このタブを閉じずに再保護してください。", error);
 }
 
 export class BrowserJournal {
