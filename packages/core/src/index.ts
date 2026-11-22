@@ -5,7 +5,7 @@ import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPu
 import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
-import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, manuscriptCharacterCount, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
 export type { ProposalStatus } from "@codexia/contracts";
 export interface TreeScene {
@@ -692,8 +692,14 @@ export class CoreStore implements MutationCoordinator {
     for (const document of manifest.documents) {
       if (document.kind !== "scene") continue;
       const sceneId = this.logicalId(index, document);
+      // A scene's logical ID can resolve to an earlier document of another kind.
       const source = this.findDocument(manifest, sceneId, index);
-      const charCount = index.sceneCharacterCountsByDocumentId.get(source.id) ?? 0;
+      let charCount = index.writingCharacterCountsByDocumentId.get(source.id);
+      if (charCount === undefined) {
+        const bodyPath = index.pathsByDocumentId.get(source.id)?.bodyPath;
+        charCount = bodyPath === undefined ? 0 : manuscriptCharacterCount(manifest.files[bodyPath]!.content);
+        index.writingCharacterCountsByDocumentId.set(source.id, charCount);
+      }
       sceneStats.set(sceneId, { sceneId, charCount, pages400: Math.ceil(charCount / 400) });
       totalCharCount += charCount;
     }

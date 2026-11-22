@@ -25,7 +25,7 @@ export interface SnapshotIndex {
   volumes: Document[];
   chaptersByVolumeId: Map<string, Document[]>;
   scenesByChapterId: Map<string, Document[]>;
-  sceneCharacterCountsByDocumentId: Map<string, number>;
+  writingCharacterCountsByDocumentId: Map<string, number>;
 }
 
 const WHITESPACE = /\s/u;
@@ -34,9 +34,9 @@ export function manuscriptBody(content: string): string {
   return splitManuscriptMarkdown(content).body;
 }
 
-function countNonWhitespaceCodePoints(content: string): number {
+export function manuscriptCharacterCount(content: string): number {
   let count = 0;
-  for (const character of content) {
+  for (const character of manuscriptBody(content)) {
     if (!WHITESPACE.test(character)) count++;
   }
   return count;
@@ -67,7 +67,6 @@ export function createSnapshotIndex(
   const volumes: Document[] = [];
   const chaptersByVolumeId = new Map<string, Document[]>();
   const scenesByChapterId = new Map<string, Document[]>();
-  const sceneCharacterCountsByDocumentId = new Map<string, number>();
 
   for (const document of documents) {
     documentsById.set(document.id, document);
@@ -95,11 +94,6 @@ export function createSnapshotIndex(
         scenesByChapterId.set(document.parentId, scenes);
       }
     }
-    // A scene's logical ID may resolve to an earlier non-scene document.
-    // Preserve the original first-match statistic for every document kind.
-    const bodyPath = pathsByDocumentId.get(document.id)?.bodyPath;
-    const bodyContent = bodyPath ? files[bodyPath]!.content : "";
-    sceneCharacterCountsByDocumentId.set(document.id, countNonWhitespaceCodePoints(manuscriptBody(bodyContent)));
   }
 
   return {
@@ -112,7 +106,7 @@ export function createSnapshotIndex(
     volumes,
     chaptersByVolumeId,
     scenesByChapterId,
-    sceneCharacterCountsByDocumentId,
+    writingCharacterCountsByDocumentId: new Map(),
   };
 }
 
