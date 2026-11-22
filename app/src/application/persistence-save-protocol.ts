@@ -59,6 +59,9 @@ export async function runPersistenceSaveProtocol(input: PersistenceSaveProtocolI
   };
   const bound = await journal.bindPersistenceDraftSave(pending.projectId, pending.documentId, authorScope, operation);
   if (!bound) throw new Error("送信する保存操作をIndexedDB回復Journalへ確定できませんでした。");
+  // Cancellation can arrive while the asynchronous journal bind is pending.
+  // Never issue a remote write after the caller has abandoned this operation.
+  signal.throwIfAborted();
 
   let result: EditorPersistenceSaveResult | undefined;
   try {
