@@ -2,29 +2,36 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test as base, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test as base, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { startBetterAuthFixture, type BetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 import { browserServerProfile } from "./browser-server-profile";
 
 type Shell = "desktop" | "mobile";
 export type AuthorApiFetch = APIRequestContext["fetch"];
+export interface AuthorSession { origin: string; fetch: AuthorApiFetch }
+interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
+export type AuthorizeAuthor = (shell: Shell, targetPage?: Page, navigation?: AuthorNavigation) => Promise<AuthorSession>;
 
-async function signIn(page: Page, origin: string, shell: Shell): Promise<string> {
-  await page.goto(new URL(`/${shell}/`, origin).href);
+async function signIn(page: Page, origin: string, shell: Shell, navigation: AuthorNavigation): Promise<string> {
+  const destination = new URL(navigation.continueCurrentPage ? page.url() : navigation.path ?? `/${shell}/`, origin);
+  if (destination.origin !== origin || (destination.pathname !== `/${shell}` && !destination.pathname.startsWith(`/${shell}/`))) {
+    throw new Error(`Author sign-in requires a ${shell} route on the fixture origin`);
+  }
+  if (!navigation.continueCurrentPage) await page.goto(destination.href);
   const provider = page.getByRole("button", { name: "IDプロバイダーでサインイン" });
   const consent = page.getByRole("button", { name: "許可して続ける" });
-  const workspace = page.getByRole("heading", { name: "Database workspace" });
+  const expectedView = navigation.expectedView ?? page.getByRole("heading", { name: "Database workspace" });
   const [issued] = await Promise.all([
     page.waitForResponse((response) => response.url() === `${origin}/api/auth/oauth2/token` && response.ok()),
     (async () => {
-      await page.getByRole("button", { name: "OAuthでサインイン" }).click();
-      await provider.or(consent).or(workspace).first().waitFor();
+      await page.getByRole("button", { name: /^(?:OAuthでサインイン|OAuthで再認証)$/u }).click();
+      await provider.or(consent).or(expectedView).first().waitFor();
       if (await provider.isVisible()) {
         await provider.click();
-        await consent.or(workspace).first().waitFor();
+        await consent.or(expectedView).first().waitFor();
       }
       if (await consent.isVisible()) await consent.click();
-      await expect(workspace).toBeVisible();
+      await expect(expectedView).toBeVisible();
     })(),
   ]);
   const body = await issued.json() as { access_token?: unknown };
@@ -33,7 +40,7 @@ async function signIn(page: Page, origin: string, shell: Shell): Promise<string>
 }
 
 export const test = base.extend<{
-  authorizeAuthor: (shell: Shell) => Promise<{ origin: string; fetch: AuthorApiFetch }>;
+  authorizeAuthor: AuthorizeAuthor;
 }, { authorServer: BetterAuthFixture }>({
   authorServer: [async ({}, use) => {
     const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -75,10 +82,14 @@ export const test = base.extend<{
   authorizeAuthor: async ({ page, playwright, authorServer }, use) => {
     const origin = authorServer.apiOrigin;
     const request = await playwright.request.newContext();
+    const sessions = new WeakMap<Page, AuthorSession>();
     try {
-      await use(async (shell) => {
-        const accessToken = await signIn(page, origin, shell);
-        return { origin, fetch: (path, options) => {
+      await use(async (shell, targetPage = page, navigation = {}) => {
+        const previous = navigation.continueCurrentPage && sessions.get(targetPage);
+        const view = navigation.expectedView ?? targetPage.getByRole("heading", { name: "Database workspace" });
+        if (previous && new URL(targetPage.url()).origin === origin && await view.isVisible()) return previous;
+        const accessToken = await signIn(targetPage, origin, shell, navigation);
+        const session: AuthorSession = { origin, fetch: (path, options) => {
           if (typeof path !== "string") throw new Error("Author API requests require an explicit URL or path");
           const url = new URL(path, origin);
           if (url.origin !== origin || !url.pathname.startsWith("/api/") || url.pathname.startsWith("/api/auth/")) {
@@ -90,6 +101,8 @@ export const test = base.extend<{
             headers: { ...options?.headers, Authorization: `Bearer ${accessToken}` },
           });
         } };
+        sessions.set(targetPage, session);
+        return session;
       });
     } finally {
       await request.dispose();

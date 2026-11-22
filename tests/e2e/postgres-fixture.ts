@@ -1,9 +1,11 @@
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import type { AuthorizeAuthor, AuthorSession } from "./author-oauth-fixture";
 
 export const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 export const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
+export interface WritingFixture { project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }
 
 /** Shared manuscript operator; callers own the scenario and text assertions. */
 export const manuscriptEditor = (page: Page) => page.getByRole("textbox", { name: "本文", exact: true });
@@ -114,7 +116,7 @@ export async function fillDraft(page: Page, text: string): Promise<void> {
   await expectDeviceDraft(page);
 }
 
-export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
+export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<WritingFixture> {
   const headers = { Origin: new URL(appBaseURL).origin };
   const session = await page.request.get(new URL("/api/session", appBaseURL).href);
   if (session.status() === 401) {
@@ -127,7 +129,7 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   const { project, scene } = fixture;
   // Fixture setup must not race an unrelated prior project's guarded selector.
   // Exercise the supported canonical deep link instead of mutating UI selection.
-  const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
+  const writingRoute = writingFixturePath(mode, project, scene);
   await page.goto(new URL(writingRoute, appBaseURL).toString());
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(manuscriptEditor(page)).toBeVisible();
@@ -135,7 +137,7 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   return fixture;
 }
 
-export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title: string, manuscript: string): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
+export async function seedWritingProject(fetch: APIRequestContext["fetch"], origin: string, title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。\n"): Promise<WritingFixture> {
   const headers = { Origin: new URL(origin).origin };
   const createdProject = await fetch(new URL("/api/v1/persistence/projects", origin).toString(), { method: "POST", headers, data: { title: `Writing ${crypto.randomUUID()}` } });
   expect(createdProject.status()).toBe(201);
@@ -148,6 +150,24 @@ export async function seedWritingProject(fetch: APIRequestContext["fetch"], orig
   const scene = await create(title, "a", manuscript);
   const second = await create("次のシーン", "b", "最初の本文。\n次の文章です。");
   return { project, scene, second };
+}
+
+export function writingFixturePath(shell: "desktop" | "mobile", project: FixtureProject, scene: FixtureDocument): string {
+  return `/${shell}/projects/${project.id}/scenes/${scene.id}${shell === "mobile" ? "?view=writing" : ""}`;
+}
+
+export async function openWritingProject(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile", project: FixtureProject, scene: FixtureDocument): Promise<AuthorSession> {
+  const author = await authorizeAuthor(shell, page, { path: writingFixturePath(shell, project, scene) });
+  await expect(manuscriptEditor(page)).toBeVisible();
+  await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+  return author;
+}
+
+export async function createOAuthWritingFixture(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile" = "desktop", title?: string, manuscript?: string): Promise<WritingFixture & { author: AuthorSession }> {
+  const initial = await authorizeAuthor(shell, page);
+  const fixture = await seedWritingProject(initial.fetch, initial.origin, title, manuscript);
+  const author = await openWritingProject(authorizeAuthor, page, shell, fixture.project, fixture.scene);
+  return { ...fixture, author };
 }
 
 export async function readPersistenceDrafts(page: Page): Promise<Array<{ key: string; projectId: string; documentId: string; markdown: string; generation: number }>> {
