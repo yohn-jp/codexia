@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -22,7 +24,6 @@ test('push-host fixture is a manual, isolated Ansible bootstrap proof', async ()
   assert.match(workflow, /host-fixture-outcome\.json/u);
   assert.match(workflow, /if: always\(\)/u);
   assert.match(workflow, /if-no-files-found: warn/u);
-  assert.match(helper, /CODEXIA_DISPOSABLE_HOST.*push-host/u);
   assert.match(helper, /service_user=codexia/u);
   assert.match(helper, /CODEXIA_HOST_FIXTURE_USER="\$service_user"/u);
   assert.match(helper, /refusing adoption/u);
@@ -42,5 +43,26 @@ test('push-host fixture is a manual, isolated Ansible bootstrap proof', async ()
   assert.match(hostHelper, /"\$CODEXIA_HOST_CONVERGENCE" "\$tmp\/inventory\.yml" host/u);
   for (const marker of ['pull requests', 'codexia', 'NOT_CHECKED', 'reboot', 'CODEXIA_HOST_CONVERGENCE']) {
     assert.ok(doc.toLowerCase().includes(marker.toLowerCase()), `Missing evidence boundary: ${marker}`);
+  }
+});
+
+test('push-host refuses an unmarked runner before inspecting or changing the host', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-host-gate-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const observed = path.join(directory, 'host-inspected');
+  await writeFile(path.join(directory, 'lsb_release'), '#!/bin/bash\n: > "$OBSERVED"\n', { mode: 0o755 });
+  const script = path.join(root, 'deploy/ansible/test-push-host.sh');
+  for (const env of [
+    { GITHUB_ACTIONS: 'true', CODEXIA_DISPOSABLE_HOST: 'other-fixture' },
+    { GITHUB_ACTIONS: 'false', CODEXIA_DISPOSABLE_HOST: 'push-host' },
+  ]) {
+    const result = spawnSync('/bin/bash', [script], {
+      encoding: 'utf8',
+      env: { PATH: directory, OBSERVED: observed, ...env },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Run only inside the dedicated disposable Push push-host workflow/u);
+    await assert.rejects(readFile(observed), { code: 'ENOENT' });
   }
 });
