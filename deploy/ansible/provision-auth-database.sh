@@ -3,11 +3,17 @@ set -Eeuo pipefail
 umask 077
 
 die(){ printf '%s\n' "$1" >&2; exit 1; }
-[[ $# == 2 ]] || die 'Usage: codexia-auth-runtime-bootstrap inspect|verify|verify-permissions|converge /absolute/lock-file'
+[[ $# == 2 || $# == 3 ]] || die 'Usage: codexia-auth-runtime-bootstrap <operation> /absolute/lock-file [reviewed immutable Full image]'
 operation="$1"
 lock_file="$2"
 [[ "$lock_file" == /* && ! "$lock_file" =~ [[:cntrl:]] ]] || die 'Invalid auth bootstrap lock path'
-[[ "$operation" =~ ^(inspect|verify|verify-permissions|converge)$ ]] || die 'Invalid auth bootstrap operation'
+case "$operation" in
+  inspect|verify|verify-permissions|converge) [[ $# == 2 ]] || die 'Unexpected auth bootstrap argument' ;;
+  initialize-application)
+    [[ $# == 3 && "$3" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] ||
+      die 'Application initialization requires a reviewed immutable Full image' ;;
+  *) die 'Invalid auth bootstrap operation' ;;
+esac
 
 exec 9>"$lock_file"
 flock --exclusive --nonblock 9 || die 'Another Codexia deployment or backup holds the host lock'
@@ -150,12 +156,40 @@ case "$operation" in
   inspect)
     admin_psql <<'SQL'
 SELECT json_build_object(
+  'applicationLedgerExists', to_regclass('public.codexia_schema_migrations') IS NOT NULL,
   'roleExists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_auth_runtime'),
   'schemaExists', EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='codexia_auth'),
   'schemaOwner', COALESCE((SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='codexia_auth'),''),
   'authObjects', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='codexia_auth' AND c.relkind IN ('r','p','v','m','f'))
 )::text;
 SQL
+    ;;
+  initialize-application)
+    image="$3"
+    state_dir="$(dirname -- "$lock_file")"
+    pending="$state_dir/deploy-transaction.json"
+    unit="$HOME/.config/containers/systemd/codexia-api.container"
+    [[ ! -e "$pending" && ! -L "$pending" && ! -e "$unit" && ! -L "$unit" ]] ||
+      die 'Application initialization requires a fresh host without an API unit or pending deployment'
+    if podman container exists codexia-api; then
+      die 'Application initialization requires a fresh host without an API container'
+    elif [[ $? != 1 ]]; then
+      die 'Could not verify that no API container exists'
+    fi
+    podman run --rm --pull=never --network codexia-data \
+      --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
+      --entrypoint=node "$image" --input-type=module -e '
+        import { readFileSync } from "node:fs";
+        import { initializeFreshPostgresSchema } from "@codexia/persistence-postgres";
+        const identity = JSON.parse(readFileSync("/app/update-identity.json", "utf8"));
+        if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full") {
+          throw new Error("Application initialization requires a packaged Full image");
+        }
+        const password = readFileSync("/run/secrets/app-password", "utf8").trim();
+        if (!/^[a-fA-F0-9]{64}$/.test(password)) throw new Error("Database application secret is invalid");
+        const applied = await initializeFreshPostgresSchema(`postgres://codexia:${password}@codexia-db:5432/codexia`);
+        console.log(applied.length ? "INITIALIZED_FRESH_SCHEMA" : "VERIFIED_EXACT_SCHEMA");
+      '
     ;;
   verify)
     IFS= read -r auth_password_b64 || die 'Auth password input is missing'

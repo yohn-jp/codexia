@@ -18,8 +18,9 @@ all:
         codexia_secrets_approved: false
         codexia_base_approved: false
         codexia_database_initialization_approved: false
-        # Better Auth provisioning creates only the runtime role/schema and
-        # rootless secrets; migrations and service activation are separate.
+        # On a fresh database, supply the reviewed immutable Full image already
+        # present in rootless Podman, and approve database initialization.
+        # codexia_auth_bootstrap_image: ghcr.io/yohn-jp/codexia-backend@sha256:<digest>
         codexia_auth_runtime_approved: false
         codexia_auth_database_url_file: /private/codexia-auth-database-url
         codexia_auth_secret_file: /private/codexia-auth-secret
@@ -34,7 +35,6 @@ all:
         # Optional: match the API resource URI registered with the provider.
         # codexia_api_audience: https://codexia.example.invalid/api
         # Required only for explicitly approved base-secret convergence.
-        codexia_auth_token_file: /private/api-auth-token
         codexia_tunnel_token_file: /private/tunnel-token
         codexia_postgres_admin_password_file: /private/postgres-admin-password
         codexia_postgres_app_password_file: /private/postgres-app-password

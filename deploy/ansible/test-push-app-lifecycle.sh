@@ -135,7 +135,7 @@ rootless_podman() { rootless /usr/bin/podman "$@"; }
 rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
-  local log_name=${4:-deploy-$key-$RANDOM} auth_mode=${5:-token} activation_approved=${6:-false}
+  local log_name=${4:-deploy-$key-$RANDOM}
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -147,8 +147,6 @@ codexia_backup_destination: "$fixture_home/.local/state/codexia-backup-mount"
 codexia_backup_recipient: "$backup_recipient"
 codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
-codexia_auth_mode: $auth_mode
-codexia_better_auth_activation_approved: $activation_approved
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
   run_playbook "$tmp/deploy-vars.yml" "$log_name"
@@ -237,7 +235,7 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+    for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
       codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
@@ -418,7 +416,6 @@ runtime_ready=true
 # The service receives synthetic credentials only; all secret-bearing output is suppressed.
 mkdir -p "$tmp/secrets"
 rootless mkdir -p "$fixture_home/.config/containers" "$fixture_home/.local/state"
-printf 'fixture-auth-token-0123456789abcdef0123456789abcdef\n' > "$tmp/secrets/auth"
 printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
 printf '%064d' 1 > "$tmp/secrets/admin"
 printf '%064d\n' 2 > "$tmp/secrets/app"
@@ -426,7 +423,6 @@ chmod 0600 "$tmp/secrets"/*
 cat > "$tmp/secrets.yml" <<YAML
 codexia_stage: secrets
 codexia_secrets_approved: true
-codexia_auth_token_file: "$tmp/secrets/auth"
 codexia_tunnel_token_file: "$tmp/secrets/tunnel"
 codexia_postgres_admin_password_file: "$tmp/secrets/admin"
 codexia_postgres_app_password_file: "$tmp/secrets/app"
@@ -605,6 +601,8 @@ node - "$report" "$database_image_name" "$database_image_id" "$database_repo_dig
 const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',builder:'host Docker; archive loaded into rootless Podman',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY
 
+run_application_lifecycle() {
+  local failed_image compatible_image
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
@@ -685,6 +683,7 @@ observe_runtime interrupted-recovery compatible
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
+}
 source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
 run_better_auth_lifecycle
 node - "$report" <<'REPORT_COMPLETE'

@@ -55,9 +55,7 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
-  assert.equal(ansible.env.CODEXIA_AUTH_MODE, "${{ vars.CODEXIA_AUTH_MODE || 'token' }}");
   assert.equal(ansible.env.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED, "${{ vars.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED || 'false' }}");
-  assert.match(ansible.run, /codexia_auth_mode:process\.env\.CODEXIA_AUTH_MODE/u);
   assert.match(ansible.run, /codexia_better_auth_activation_approved:process\.env\.CODEXIA_BETTER_AUTH_ACTIVATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_initial_install_approved:process\.env\.CODEXIA_INITIAL_INSTALL_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_database_initialization_approved:process\.env\.CODEXIA_DATABASE_INITIALIZATION_APPROVED==="true"/u);
@@ -197,7 +195,7 @@ test('production admission reuses canonical runtime validators and checks exact 
   assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-tunnel\.service/u);
 });
 
-test('first activation initializes only a pristine database after backup under both explicit approvals', () => {
+test('first activation verifies the initialized database after backup under both explicit approvals', () => {
   const deployment = transactionTasks;
   const approval = deployment.find(task => task.name === 'Refuse implicit first activation without explicit verified schema approval');
   assert.deepEqual(approval['ansible.builtin.assert'].that, [
@@ -207,19 +205,19 @@ test('first activation initializes only a pristine database after backup under b
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
-  const freshMigration = shell.indexOf('initializeFreshPostgresSchema');
+  const freshMigration = shell.indexOf('verifyPostgresSchema');
   const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"'));
   assert.ok(backup >= 0 && freshMigration > backup && startApi > freshMigration,
-    'first schema initialization must follow its backup and precede API activation');
+    'first schema verification must follow its backup and precede API activation');
   assert.doesNotMatch(shell, /if \[\[ -n "\$current_image" \]\]; then[\s\S]*backup-locked/u,
     'a first activation with an existing database must still make a pre-activation backup');
   assert.ok(shell.indexOf('stop codexia-api.service') < backup,
     'backup admission must follow API and Tunnel quiescence');
   assert.match(shell, /podman run --rm --network codexia-data[\s\S]*--secret=codexia-postgres-app-password[\s\S]*candidate_image/u);
-  assert.match(shell, /initializeFreshPostgresSchema\(connectionString\)/u);
-  assert.match(shell, /if \[\[ "\$had_unit" != true \]\]; then[\s\S]*initializeFreshPostgresSchema/u);
+  assert.match(shell, /verifyPostgresSchema\(connectionString\)/u);
+  assert.match(shell, /if \[\[ "\$had_unit" != true \]\]; then[\s\S]*verifyPostgresSchema/u);
   assert.doesNotMatch(shell, /DATABASE_MIGRATE_ON_START=1/u,
-    'the one-shot approved initializer must not enable recurring startup migrations');
+    'the one-shot schema verification must not enable recurring startup migrations');
   const persistencePackage = JSON.parse(readFileSync(new URL('../packages/persistence-postgres/package.json', import.meta.url), 'utf8'));
   const persistenceExports = readFileSync(new URL('../packages/persistence-postgres/src/index.ts', import.meta.url), 'utf8');
   assert.ok(persistencePackage.files.includes('dist') && persistencePackage.files.includes('migrations'),
@@ -227,7 +225,7 @@ test('first activation initializes only a pristine database after backup under b
   assert.match(persistenceExports, /export \{[^}]*initializeFreshPostgresSchema[^}]*\} from "\.\/migrate\.js"/u);
 });
 
-test('failed fresh-schema initialization restores a first activation without stopping an absent API service', () => {
+test('failed fresh-schema verification restores a first activation without stopping an absent API service', () => {
   const tasks = transactionTasks;
   const transaction = tasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
@@ -239,13 +237,14 @@ test('failed fresh-schema initialization restores a first activation without sto
   assert.match(restore, /rm -f -- "\$transaction_intent"/u, 'successful rollback must clear durable intent');
 });
 
-test('first activation precedes optional Better Auth namespace creation', () => {
-  const runbook = readFileSync(new URL('../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8');
-  const firstActivation = runbook.indexOf('Run the first API activation through the protected production workflow');
-  const optionalAuth = runbook.indexOf('Only after successful first activation');
-  assert.ok(firstActivation > 0 && optionalAuth > 0, 'both first activation and optional auth setup must be documented');
-  assert.match(runbook, /Do not run `auth-runtime` before initializing the application schema/u);
-  assert.match(runbook, /creating.*codexia_auth|codexia_auth.*additional database object/ui);
+test('fresh auth staging initializes the application ledger before provisioning auth schema', () => {
+  const authRuntime = parse(readFileSync(new URL('../deploy/ansible/auth-runtime.yml', import.meta.url), 'utf8'));
+  const initialize = authRuntime.find(task => task['ansible.builtin.command']?.argv?.includes('initialize-application'));
+  assert.equal(initialize.when, 'not codexia_auth_database_state_value.applicationLedgerExists');
+  const provision = authRuntime.find(task => task['ansible.builtin.command']?.argv?.includes('converge'));
+  assert.ok(authRuntime.indexOf(initialize) < authRuntime.indexOf(provision));
+  const helper = readFileSync(new URL('../deploy/ansible/provision-auth-database.sh', import.meta.url), 'utf8');
+  assert.match(helper, /flock --exclusive --nonblock[\s\S]*await initializeFreshPostgresSchema/u);
 });
 
 test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
@@ -305,25 +304,20 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
     'rollback must restore and health-check the previous API before restoring Tunnel ingress');
 });
 
-test('Better Auth activation is explicit, validates staged state, and retains mode through update and rollback', () => {
-  const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
-  const selectMode = deployment.find(task => task.name === 'Require an explicit standalone authentication deployment mode');
-  assert.ok(selectMode, 'the push stage must receive an explicit token or Better Auth mode');
-  const transition = transactionTasks.find(task => task.name === 'Reject auth mode drift, implicit Better Auth enablement and downgrade');
-  assert.ok(transition, 'Better Auth activation and downgrade must be gated against the installed Quadlet');
+test('Better Auth activation uses protected staged settings on a fresh or existing API', () => {
+  const transition = transactionTasks.find(task => task.name === 'Refuse ambiguous prior authentication or unapproved retirement of a token API');
+  assert.ok(transition, 'retiring an installed token API still requires explicit approval');
   assert.ok(transition['ansible.builtin.assert'].that.some(item => item.includes('codexia_better_auth_activation_approved')));
-  assert.ok(transition['ansible.builtin.assert'].that.some(item => item.includes("codexia_current_auth_mode == 'better-auth' and codexia_deployment_auth_mode == 'token'")));
   const staging = transactionTasks.find(task => task.name === 'Require private staged Better Auth settings before activation');
-  assert.equal(staging.when, "codexia_deployment_auth_mode == 'better-auth'");
+  assert.equal(staging.when, undefined);
   assert.ok(transactionTasks.indexOf(transition) < transactionTasks.indexOf(staging));
   assert.ok(transactionTasks.some(task => task.name === 'Require complete public Better Auth settings without secret material in the environment file'));
   assert.ok(transactionTasks.some(task => task.name === 'Verify every staged Better Auth Podman secret exists before activation'));
   const candidate = transactionTasks.find(task => task.name === 'Render a digest-specific candidate Quadlet outside the active unit path');
-  assert.match(candidate['ansible.builtin.copy'].content, /codexia-api\.better-auth\.container\.example/u);
+  assert.match(candidate['ansible.builtin.copy'].content, /codexia-api\.container/u);
   assert.match(candidate['ansible.builtin.copy'].content, /AUTH_SETTINGS_DIGEST_PLACEHOLDER/u);
   assert.match(candidate['ansible.builtin.copy'].dest, /codexia_candidate_unit_filename/u);
-  assert.match(candidate['ansible.builtin.copy'].content, /codexia_auth_runtime_oidc_configured \| default\(false\)/u,
-    'token-mode Quadlet rendering must not depend on facts created only for Better Auth');
+  assert.match(candidate['ansible.builtin.copy'].content, /codexia_auth_runtime_oidc_configured/u);
   const settingsGuard = transactionTasks.find(task => task.name ===
     'Require complete public Better Auth settings without secret material in the environment file');
   const oidcRules = settingsGuard['ansible.builtin.assert'].that.filter(rule => rule.includes('CODEXIA_OIDC_'));
@@ -358,16 +352,15 @@ test('Better Auth activation is explicit, validates staged state, and retains mo
   const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
   assert.ok(backup >= 0 && authMigration > backup && verifyClients > authMigration && installCandidate > verifyClients,
     'Better Auth migration and client checks must follow encrypted backup and precede the API mode switch');
-  assert.match(shell, /\[\[ "\$auth_mode" == better-auth && "\$prior_auth_mode" == token \]\]/u);
+  assert.match(shell, /\[\[ "\$prior_auth_mode" == token \]\]/u);
   assert.match(shell, /authSettingsSha256/u);
   assert.match(shell, /restore_previous/u);
 
   const recovery = readFileSync(new URL('../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
   assert.match(recovery, /authMode !== unitAuthMode/u);
   assert.match(recovery, /authSettingsSha256 !== unitDigest/u);
-  const tokenUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
-  const betterAuthUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.better-auth.container.example', import.meta.url), 'utf8');
-  assert.match(tokenUnit, /^Environment=CODEXIA_AUTH_MODE=token$/mu);
+  const betterAuthUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
+  assert.doesNotMatch(betterAuthUnit, /CODEXIA_AUTH_TOKEN|codexia-auth-token/u);
   assert.match(betterAuthUnit, /^Environment=CODEXIA_AUTH_MODE=better-auth$/mu);
   assert.match(betterAuthUnit, /^Environment=CODEXIA_AUTH_SETTINGS_SHA256=AUTH_SETTINGS_DIGEST_PLACEHOLDER$/mu);
 
@@ -394,13 +387,11 @@ test('stale admission stops before touching activation links, transaction intent
   assert.match(revalidation, /Stale deployment admission/u);
 });
 
-test('the disposable entry point defaults to token and shares the same auth transaction', () => {
+test('the disposable entry point exercises the same auth transaction', () => {
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
   const fixtureAdmission = fixture[0]['ansible.builtin.assert'].that;
   assert.ok(fixtureAdmission.some(condition => condition.includes("['head', 'compatible', 'failed', 'auth-primary', 'auth-update', 'auth-failed']")));
-  const mode = transactionTasks.find(task => task.name === 'Resolve the authentication mode for the shared transaction');
-  assert.match(mode['ansible.builtin.set_fact'].codexia_deployment_auth_mode, /default\('token'\)/u);
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const noOp = shell.slice(shell.indexOf('cmp -s -- "$candidate_unit" "$active_unit"'), shell.indexOf('echo "UNCHANGED'));

@@ -94,7 +94,11 @@ DOCKERFILE
     --volume "$proxy_context:/fixture:ro" --entrypoint=node "$primary_image" \
     /fixture/push-auth-lifecycle-oidc.mjs serve >/dev/null
 
-  run_deploy auth-primary false '' auth-initial-token token
+  rootless_podman pull "$primary_image" >/dev/null
+  if rootless_podman secret exists codexia-auth-token; then
+    echo 'Fresh deployment fixture unexpectedly has a legacy application token' >&2
+    return 1
+  fi
   printf '%s' 'postgresql://codexia_auth_runtime:codexia-fixture-database-32-characters@codexia-db:5432/codexia' >"$tmp/auth-database-url"
   printf '%s' 'codexia-fixture-auth-secret-32-characters' >"$tmp/auth-secret"
   printf '%s' 'codexia-fixture-oidc-secret-32-characters' >"$tmp/auth-oidc-secret"
@@ -107,6 +111,8 @@ codexia_service_group: codexia
 codexia_service_uid: $fixture_uid
 codexia_service_home: "$fixture_home"
 codexia_auth_runtime_approved: true
+codexia_database_initialization_approved: true
+codexia_auth_bootstrap_image: "$primary_image"
 codexia_auth_registration_pending: true
 codexia_auth_database_url_file: "$tmp/auth-database-url"
 codexia_auth_secret_file: "$tmp/auth-secret"
@@ -118,6 +124,13 @@ codexia_oidc_client_id: codexia-fixture-client
 codexia_oauth_introspection_client_id: "$introspection"
 codexia_oauth_owner_client_ids: "$web,$ios"
 YAML
+  sed 's/codexia_database_initialization_approved: true/codexia_database_initialization_approved: false/' \
+    "$tmp/auth-stage.yml" > "$tmp/auth-stage-unapproved.yml"
+  if run_playbook "$tmp/auth-stage-unapproved.yml" auth-schema-unapproved; then
+    echo 'Fresh application schema initialization bypassed approval' >&2
+    return 1
+  fi
+  grep -Fq 'Initialize a pristine application schema with explicit approval' "$tmp/auth-schema-unapproved.log"
   run_playbook "$tmp/auth-stage.yml" auth-stage-pending
   cat >"$tmp/bootstrap.env" <<ENV
 CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://codexia-auth-registration:8443
@@ -153,13 +166,14 @@ NODE
   printf 'codexia_oauth_owner_subject: "%s"\n' "$owner" >>"$tmp/auth-stage.yml"
   run_playbook "$tmp/auth-stage.yml" auth-stage-final
 
-  if run_deploy auth-primary false '' auth-transition-unapproved better-auth; then
-    echo 'Better Auth activation bypassed its explicit approval' >&2
+  if run_deploy head false '' auth-first-install-unapproved; then
+    echo 'Fresh Better Auth activation bypassed its explicit installation approval' >&2
     return 1
   fi
-  grep -Fq 'Better Auth requires an approved token-to-Better-Auth transition' "$tmp/auth-transition-unapproved.log"
-  rootless_podman exec codexia-api node -e 'if (process.env.CODEXIA_AUTH_MODE !== "token") process.exit(1)'
-  run_deploy auth-primary false '' auth-transition better-auth true
+  grep -Fq 'A fresh activation requires a separately initialized and verified database plus explicit approval.' "$tmp/auth-first-install-unapproved.log"
+  run_application_lifecycle
+
+  run_deploy auth-primary false '' auth-verified-activation
   auth_fixture authorize "$web" "$owner" >"$tmp/auth-session.json"
   token=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).accessToken' "$tmp/auth-session.json")
   proof=$(observe_auth "$primary_image")
@@ -169,20 +183,20 @@ NODE
   set_state better_auth_activation PASS 'isolated HTTPS registration, discovery and protected owner session verified'
 
   prior=$(release_checksums)
-  run_deploy auth-primary false '' auth-same-digest better-auth
+  run_deploy auth-primary false '' auth-same-digest
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary
   record_auth better-auth-same-digest "$primary_image" "$proof"
   set_state better_auth_same_digest PASS 'same release, settings, signing keys, auth schema and owner session'
 
-  run_deploy auth-update false '' auth-compatible-update better-auth
+  run_deploy auth-update false '' auth-compatible-update
   [[ "$(observe_auth "$update_image")" == "$proof" ]]
   observe_runtime better-auth-compatible-update auth-update
   record_auth better-auth-compatible-update "$update_image" "$proof"
   set_state better_auth_compatible_update PASS 'alternate OCI digest with original signing keys, schema and owner session'
 
   prior=$(release_checksums)
-  if run_deploy auth-failed false '' auth-failed-candidate better-auth; then
+  if run_deploy auth-failed false '' auth-failed-candidate; then
     echo 'Deliberately failing Better Auth candidate unexpectedly deployed' >&2
     return 1
   fi

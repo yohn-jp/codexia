@@ -12,7 +12,7 @@ The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) 
 | `host` | Rootless service account and host prerequisites |
 | `secrets` | Initial protected Podman credential convergence |
 | `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
-| `auth-runtime` | Explicit Better Auth role, schema, and runtime secret provisioning; no migrations or activation |
+| `auth-runtime` | Approved application schema initialization for a pristine database, Better Auth role, schema and protected runtime secrets |
 | `deploy` | Approved pristine-schema first activation or certified image update, encrypted off-VM backup, application health and rollback |
 | `deploy-lifecycle-fixture` | GitHub Actions disposable-host verification only; local `localhost` connection, run-bound source evidence and the shared deployment transaction, with production admission kept on `deploy` |
 | `restore-drill` | Isolated encrypted backup restoration and checksum verification |
@@ -23,6 +23,6 @@ Runtime state lives only in `~/.local/state/codexia-deploy`, with the host lock,
 
 Require pinned SSH host keys, protected GitHub environment approval, independently held backup encryption keys and a private inventory. Never put credentials or private keys in Git.
 
-First activation requires `host`, `secrets`, `base`, then `deploy` with explicit first-install and database-use approvals. On a pristine database, optional `auth-runtime` provisioning must follow the successful first `deploy`: its separate schema would otherwise fail the fresh-schema admission check. See the ordered procedure and the unsupported schema-maintenance boundary in [Push deployment](PUSH-DEPLOYMENT.md).
+For first activation, run `host`, `secrets`, `base`, and `auth-runtime` before `deploy`. On a pristine database, `auth-runtime` initializes the application schema from a reviewed immutable Full image before provisioning the auth schema. Register the owner and OAuth clients through the isolated setup, then use the first-install and database-use approvals for the [protected activation](PUSH-DEPLOYMENT.md).
 
-After staging Better Auth, follow the [token-to-OAuth activation procedure](PUSH-DEPLOYMENT.md) to register the owner and clients and switch the running API. [Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md) describe independent restore and disposable-host verification. Production acceptance also requires observations on the target VM and its public route.
+[Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md) describe independent restore and disposable-host verification. Production acceptance also requires observations on the target VM and its public route.

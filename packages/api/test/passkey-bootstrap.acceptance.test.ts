@@ -419,6 +419,7 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal(invalidGrantUpdate.length, 0);
   browser = await chromium.launch({
     headless: true,
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
   const browserContext = await browser.newContext();
   contexts.push(browserContext);
@@ -683,7 +684,6 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
     profile: "core",
     store: testStore,
     persistence: testPersistence,
-    authToken: randomBytes(32).toString("base64url"),
     staticDir: process.cwd(),
     usageDirectory: authorApiUsageDirectory,
     betterAuth: oauthRuntime,
