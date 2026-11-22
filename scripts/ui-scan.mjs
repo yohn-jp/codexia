@@ -42,7 +42,7 @@ async function main() {
   const directory = path.join(outputDir, 'detector');
   await mkdir(directory, { recursive: true });
   const scans = [
-    { name: 'source', args: ['--no-design-system', '--json', 'app'] },
+    { name: 'source', args: ['--json', 'app'] },
     { name: 'desktop', args: ['--no-design-system', '--viewport', '1440x900', '--json', `${origin}/desktop/`] },
     { name: 'mobile', args: ['--no-design-system', '--viewport', '390x844', '--json', `${origin}/mobile/`] },
   ];

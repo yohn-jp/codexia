@@ -4,12 +4,13 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 
 | Topic | Reference |
 | --- | --- |
+| Visual design system | [App design system](../app/DESIGN.md) — canonical visual direction and owner-confirmed decisions |
 | Design, information architecture and UX acceptance | [Design and UX contract](design/UX-CONTRACT.md) — normative target, not a runtime certification |
 | Creative workspace information architecture | [Information architecture](design/INFORMATION-ARCHITECTURE.md) — design proposal |
 | Desktop writing | [Desktop authoring](design/DESKTOP-AUTHORING.md) — design proposal |
 | Knowledge and review | [Knowledge and review](design/KNOWLEDGE-REVIEW.md) — design proposal |
 | Mobile writing | [Mobile authoring](design/MOBILE-AUTHORING.md) — design proposal |
-| Visual system | [Visual system](design/VISUAL-SYSTEM.md) — design proposal |
+| Visual system history | [Visual system](design/VISUAL-SYSTEM.md) — existing proposals, comparisons and decision history; not the visual source of truth |
 | Interaction and recovery states | [Interaction contract](design/INTERACTION-CONTRACT.md) — design proposal |
 | Trial-reading files and reader links | [Publishing design](design/PUBLISHING.md) |
 | Installation and local startup | [Repository README](../README.md) |
