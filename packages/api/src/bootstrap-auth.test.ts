@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolvePasskeyBootstrapRpId } from "./bootstrap-auth.js";
+import { assertInitialAuthBootstrapMode, resolvePasskeyBootstrapRpId } from "./bootstrap-auth.js";
 
 test("Passkey bootstrap uses the production auth hostname as RP ID only from a strict setup subdomain", () => {
   assert.equal(
@@ -33,4 +33,21 @@ test("Passkey bootstrap permits only an explicit test loopback origin override",
     if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = originalNodeEnv;
   }
+});
+
+test("first-owner enrollment accepts approved Passkey-only and OIDC-only bootstrap paths", () => {
+  const passkey = {
+    passkeyBootstrap: {
+      ownerId: "owner-123", ownerEmail: "owner@example.test", ownerName: "Approved Owner",
+    },
+  };
+  const oidc = { oidcIssuer: "https://idp.example.test" };
+  assert.doesNotThrow(() => assertInitialAuthBootstrapMode(passkey, undefined));
+  assert.doesNotThrow(() => assertInitialAuthBootstrapMode(oidc, "approved-idp-subject"));
+
+  assert.throws(() => assertInitialAuthBootstrapMode({}, undefined), /exactly one approved/u);
+  assert.throws(() => assertInitialAuthBootstrapMode(oidc, undefined), /exactly one approved/u);
+  assert.throws(() => assertInitialAuthBootstrapMode({}, "unbound-subject"), /exactly one approved/u);
+  assert.throws(() => assertInitialAuthBootstrapMode(passkey, "unbound-subject"), /exactly one approved/u);
+  assert.throws(() => assertInitialAuthBootstrapMode({ ...passkey, ...oidc }, "approved-idp-subject"), /exactly one approved/u);
 });
