@@ -7,6 +7,34 @@ import { createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
+test("mixed line endings preserve source offsets for edits and selected evidence", async ({ page }) => {
+  const original = "First.\r\nSecond.\nThird.\rLast.";
+  const fixture = await createWritingFixture(page, "desktop", `Source offsets ${crypto.randomUUID()}`, original);
+  const path = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
+  const editor = manuscriptEditor(page);
+  await editor.press("Control+End");
+  await editor.press("A");
+  const saved = `${original}A`;
+  await expect.poll(async () => (await (await page.request.get(path)).json()).revision.markdown).toBe(saved);
+  await editor.press("Shift+Home");
+  await page.locator(".pg-editor-command-menu > summary").click();
+  await page.getByRole("button", { name: "選択範囲をText Anchorにする" }).click();
+  await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました: Last.A");
+  await expect(editor.locator(".cm-text-anchor-current")).toHaveText("Last.A");
+  await openResearchInspector(page);
+  await page.getByLabel("Knowledge候補を追加").fill("Last");
+  await page.getByRole("button", { name: "候補を保存" }).click();
+  const knowledge = page.locator(".pg-knowledge-list").getByRole("listitem").filter({ hasText: "Last" });
+  await knowledge.getByRole("button", { name: "内容を確認して確定" }).click();
+  const evidence = page.locator(".pg-evidence-list");
+  await evidence.getByRole("button", { name: /Last\.A/u }).click();
+  await evidence.getByRole("button", { name: "Knowledgeリンクを確定" }).click();
+  const backlinks = page.getByRole("region", { name: "Knowledgeの根拠" });
+  await backlinks.getByRole("button", { name: /Last\.A/u }).click();
+  await expect(page.locator(".pg-notice")).toContainText("現在のRevisionの根拠箇所を選択しました");
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("Last.A");
+});
+
 test("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {

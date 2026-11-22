@@ -14,6 +14,7 @@ import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
 import { refreshTermAdornments, termAdornmentsExtension } from "./cm/termAdornments";
 import { externalDocumentSync, setDocumentEvidence, textAnchorDecorationsExtension } from "./cm/textAnchorDecorations";
 import { emptyDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type TextChange } from "./evidence";
+import { editorOffsetReader, sourceEdit, sourceSelection } from "./sourceText";
 import { planWritingSymbol, type WritingSymbolId } from "./writingSymbols";
 import { type ResolveEditorTerms } from "./terms";
 import { createUiSentencePositionIndexCache, type UiSentencePositionIndexCache } from "../resume/continueCandidates";
@@ -94,6 +95,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const sourceTextRef = useRef(value);
+  sourceTextRef.current = value;
   const sentencePositionIndexRef = useRef<UiSentencePositionIndexCache<EditorState["doc"]> | null>(null);
   const editabilityCompartment = useRef(new Compartment()).current;
   const externalSyncRef = useRef(false);
@@ -149,7 +152,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       const view = viewRef.current;
       if (!view) throw new Error("原稿エディタが初期化されていません。本文を保護するため、画面の切り替えを中止しました。");
       if (isViewComposing(view)) throw new Error("日本語入力の変換が完了していません。変換を確定してから画面を切り替えてください。");
-      return view.state.doc.toString();
+      return readSourceText(view, sourceTextRef.current);
     },
     async flushComposition() {
       const view = viewRef.current;
@@ -162,7 +165,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
           throw new Error("日本語入力の変換が完了していません。変換を確定してから画面を切り替えてください。");
         }
       }
-      return view.state.doc.toString();
+      return readSourceText(view, sourceTextRef.current);
     },
     insert(symbol) {
       const view = viewRef.current;
@@ -200,8 +203,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       const view = viewRef.current;
       if (!view) return null;
       const selection = view.state.selection.main;
-      if (selection.empty) return null;
-      return { from: selection.from, to: selection.to, text: view.state.sliceDoc(selection.from, selection.to) };
+      return sourceSelection(readSourceText(view, sourceTextRef.current), selection.from, selection.to);
     },
   }), [restorePosition]);
 
@@ -220,7 +222,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
         ellipsisNormalizeExtension(),
         editorCompositionExtension(),
         termAdornmentsExtension(resolverRef, navigatorRef),
-        textAnchorDecorationsExtension(evidenceRef, documentRevisionRef, evidenceCallbackRef, navigatorRef),
+        textAnchorDecorationsExtension(evidenceRef, documentRevisionRef, evidenceCallbackRef, navigatorRef, sourceTextRef),
         styleNonceExtension(),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
@@ -243,16 +245,16 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
             : null;
           if (update.docChanged) {
             if (externalSyncRef.current) externalSyncRef.current = false;
-            else if (changedText !== null) latestRef.current.onChange(changedText, textChanges);
+            else if (changedText !== null) {
+              const edit = sourceEdit(sourceTextRef.current, changedText, textChanges);
+              sourceTextRef.current = edit.markdown;
+              latestRef.current.onChange(edit.markdown, edit.changes);
+            }
           }
           if (update.docChanged || update.selectionSet) {
             const selection = update.state.selection.main;
             latestRef.current.onSelectionLengthChange?.(selection.empty ? 0 : Math.abs(selection.to - selection.from));
-            latestRef.current.onSelectionChange?.(selection.empty ? null : {
-              from: Math.min(selection.anchor, selection.head),
-              to: Math.max(selection.anchor, selection.head),
-              text: update.state.sliceDoc(Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)),
-            });
+            latestRef.current.onSelectionChange?.(sourceSelection(sourceTextRef.current, selection.from, selection.to));
             if (!externalSyncRef.current && !suppressPositionRef.current) {
               latestRef.current.onCursorPositionChange?.(
                 (changedDocumentIndex ?? sentencePositionIndex(update.state.doc)).indexAtOffset(selection.head),
@@ -292,7 +294,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     const view = viewRef.current;
     if (!view || lastEvidenceLoadKeyRef.current === evidenceLoadKey) return;
     lastEvidenceLoadKeyRef.current = evidenceLoadKey;
-    const next = evidenceState?.positionsTrusted && view.state.doc.toString() !== evidenceSourceText
+    const next = evidenceState?.positionsTrusted && readSourceText(view, sourceTextRef.current) !== evidenceSourceText
       ? markEvidenceNeedsReview(evidenceState)
       : evidenceState ?? emptyDocumentEvidence(value, documentRevision);
     view.dispatch({ effects: setDocumentEvidence.of(next) });
@@ -300,7 +302,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
 
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || view.state.doc.toString() === value) return;
+    if (!view || readSourceText(view, value) === value) return;
     externalSyncRef.current = true;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
@@ -321,14 +323,15 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     const request = evidenceRangeRequest;
     const frame = requestAnimationFrame(() => {
       const view = viewRef.current;
+      const offset = editorOffsetReader(evidenceSourceText);
+      const from = offset(request.from);
+      const to = offset(request.to);
       const valid = view && !isViewComposing(view) && request.revisionId === documentRevisionRef.current &&
-        view.state.doc.toString() === evidenceSourceText &&
-        Number.isSafeInteger(request.from) && Number.isSafeInteger(request.to) &&
-        request.from >= 0 && request.to > request.from && request.to <= view.state.doc.length &&
-        view.state.sliceDoc(request.from, request.to) === request.quote;
+        readSourceText(view, sourceTextRef.current) === evidenceSourceText &&
+        from !== null && to !== null && to > from && evidenceSourceText.slice(request.from, request.to) === request.quote;
       if (view && valid) {
         view.dispatch({
-          selection: { anchor: request.from, head: request.to },
+          selection: { anchor: from, head: to },
           scrollIntoView: true,
           annotations: Transaction.addToHistory.of(false),
         });
@@ -349,4 +352,10 @@ function styleNonceExtension() {
 
 function editabilityExtensions(readOnly: boolean) {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
+/** CodeMirror represents all line breaks as LF. A navigation read must retain unchanged source bytes. */
+function readSourceText(view: EditorView, source: string): string {
+  const text = view.state.doc.toString();
+  return source.includes("\r") && source.replace(/\r\n?/gu, "\n") === text ? source : text;
 }

@@ -47,7 +47,12 @@ function observeWrites(page: Page, projectId: string): string[] {
 test("desktop outline keyboard navigation reaches the second duplicate heading without writes", async ({ page }) => {
   expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const markdown = duplicateHeadingManuscript();
-  const fixture = await createWritingFixture(page, "desktop", `Outline headings ${crypto.randomUUID()}`, markdown);
+  const storedMarkdown = markdown.replaceAll("\n", "\r\n");
+  const fixture = await createWritingFixture(page, "desktop", `Outline headings ${crypto.randomUUID()}`, storedMarkdown);
+  const path = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
+  const before = await page.request.get(path);
+  expect(before.ok()).toBe(true);
+  const revisionId = (await before.json()).revision.id;
   const writes = observeWrites(page, fixture.project.id);
   const headings = page.locator(".pg-outline-heading");
   await headings.nth(0).focus();
@@ -58,6 +63,12 @@ test("desktop outline keyboard navigation reaches the second duplicate heading w
   await expectSelectedDuplicatePosition(page, markdown);
   await page.waitForTimeout(2_200);
   expect(writes).toEqual([]);
+  await page.getByRole("button", { name: "読む", exact: true }).click();
+  await expect(page.getByRole("button", { name: "編集へ戻る", exact: true })).toBeVisible();
+  await page.waitForTimeout(2_200);
+  const after = await page.request.get(path);
+  expect(after.ok()).toBe(true);
+  expect((await after.json()).revision).toMatchObject({ id: revisionId, markdown: storedMarkdown });
 });
 
 test("switching documents protects the draft and derives headings from the newly active document", async ({ page }) => {
