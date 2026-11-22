@@ -215,6 +215,15 @@ test('collector reports runs whose PR association cannot be resolved', async () 
   ]);
 });
 
+test('diagnostic JSON is copied from a single accessible button', () => {
+  const html=readFileSync(new URL('./site/index.html',import.meta.url),'utf8');
+  const client=readFileSync(new URL('./site/dashboard.js',import.meta.url),'utf8');
+  assert.match(html,/id="copy-diagnostics"[^>]*disabled/u);
+  assert.match(html,/id="copy-status" role="status" aria-live="polite"/u);
+  assert.match(client,/navigator\.clipboard\.writeText/u);
+  assert.match(client,/buildDiagnosticExport/u);
+});
+
 test('static shell displays live telemetry and no invented metrics', () => {
   const html=readFileSync(new URL('./site/index.html',import.meta.url),'utf8');
   const client=readFileSync(new URL('./site/dashboard.js',import.meta.url),'utf8');

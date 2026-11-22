@@ -144,14 +144,18 @@ export function observeRun(run, jobs, verifySource) {
     createdAt: job.created_at ?? null, startedAt: job.started_at ?? null, completedAt: job.completed_at ?? null,
     queueSeconds: elapsed(job.created_at, job.started_at), durationSeconds: elapsed(job.started_at, job.completed_at),
     runner: value(job.runner_name || job.runner_group_name || 'Not reported'),
+    runnerLabels: Array.isArray(job.labels) ? job.labels.filter(item => typeof item === 'string').slice(0,12).map(value) : [],
     critical: path.has(job.name), url: job.html_url,
-    steps: (job.steps ?? []).filter(step => step.started_at && step.completed_at).map(step => ({
+    steps: (job.steps ?? []).map(step => ({
+      number: Number.isSafeInteger(step.number) ? step.number : null,
       name: value(step.name), phase: phase(step.name),
+      startedAt: step.started_at ?? null, completedAt: step.completed_at ?? null,
       durationSeconds: elapsed(step.started_at, step.completed_at), conclusion: step.conclusion,
     })),
   }));
   return {
-    id: run.id, name: value(run.name), sha: run.head_sha, attempt: run.run_attempt,
+    id: run.id, workflowId: run.workflow_id ?? null, event: run.event ?? null,
+    name: value(run.name), sha: run.head_sha, attempt: run.run_attempt,
     conclusion: run.conclusion, status: run.status, url: run.html_url,
     createdAt: run.created_at, startedAt: run.run_started_at,
     completedAt: run.status === 'completed'

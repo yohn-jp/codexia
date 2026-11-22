@@ -30,6 +30,39 @@ Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [ana
 - Missing, cancelled, failed, carried or subsequent-attempt evidence yields an unavailable attribution, not a successful claim. Missing step timestamps render individual phase values unknown, not zero.
 - Individual tasks already report timing in the `ci-group.mjs` logs and `ci-evidence-*/report.json` artifacts. The public, no-token dashboard deliberately does not download job logs or authenticated artifacts, and therefore **cannot identify the slowest Playwright task**. Use the exact run's logs or evidence artifact for task-level attribution; a future telemetry export must be independently reviewed for permissions, privacy and source identity.
 
+## Copyable diagnostic JSON
+
+The sole additional UI action is **診断JSONをコピー**. It copies a complete,
+source-bound `codexia-ci-diagnostics/v1` JSON document for the selected PR revision
+using the browser's HTTPS clipboard API. It adds no alternate publisher, file export,
+GitHub token, new API fetch, CI task or certification gate. Copy failure is reported,
+not silently treated as success.
+
+The copied diagnostic model aggregates:
+
+- Executed source SHA, PR number, observation timestamp, bounded history/identity
+  coverage, workflow IDs, attempts, outcomes, timing and current-attempt job/step evidence.
+- Per-job queue and execution elapsed seconds, GitHub runner labels, raw step timestamps
+  and durations, classified phase totals, validation start/end, container initialization,
+  and missing step counts. A missing stage is `null`, never zero.
+- Observed Verify dependency family, prerequisite release-to-start interval,
+  last canonical leaf, latest-finishing competing leaves, remaining finish-time slack,
+  certification tail, longest jobs/steps and measured runner time by step phase.
+- Bounded historical comparisons: first-attempt complete successful Verify runs
+  with the **same executed job-name set**, plus sample count, p50/p90/min/max/mean
+  for certification/queue/runner and each job. Matching names do not prove matching
+  selected tasks, cache state, VM/image, source input closure or runner load.
+- Explicit `interpretation.notMeasured` reasons for unavailable telemetry.
+
+**Collection boundary:** The browser only reads public GitHub Actions REST run/job/step
+metadata. The existing per-task timings in `ci-group.mjs` logs and `ci-evidence`
+artifacts cannot be read as API step metrics. Likewise, CPU PSI, memory usage,
+I/O, per-test Playwright timings, pure image pull and cache-hit evidence remain
+unavailable without separately authorized CI telemetry collection. The JSON does not
+fabricate those values, retrieve logs or artifact ZIPs, or claim all branch-protection
+checks have been sampled. Observed dependencies and slack are not counterfactual
+speedup predictions.
+
 ## Metrics and limitations
 
 | Metric | Definition |

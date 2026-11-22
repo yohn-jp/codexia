@@ -1,5 +1,6 @@
 import { collect } from './collection.mjs';
 import { comparableHistory } from './analysis.mjs';
+import { buildDiagnosticExport } from './diagnostics.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const API = 'https://api.github.com/repos/' + REPOSITORY + '/';
@@ -33,7 +34,7 @@ function quantile(numbers, p) {
   const sorted = [...numbers].sort((a,b) => a - b);
   return sorted[Math.ceil(p * sorted.length) - 1];
 }
-let all = [], selected = null, coverage = {};
+let all = [], selected = null, coverage = {}, verifySource = '';
 
 async function request(endpoint) {
   const response = await fetch(API + endpoint, {
@@ -193,6 +194,7 @@ function renderHistory(pr) {
     button.addEventListener('click', () => {
       selected = item;
       el('pr').value = String(all.indexOf(item));
+      el('copy-status').textContent = '';
       render();
     });
     target.append(button);
@@ -214,14 +216,37 @@ function render() {
   renderContext(pr);
   renderHistory(pr);
 }
+async function copyDiagnostics() {
+  const target = selected;
+  if (!target) return;
+  const button = el('copy-diagnostics');
+  const status = el('copy-status');
+  button.disabled = true;
+  status.textContent = '診断JSONをコピーしています。';
+  try {
+    if (!window.isSecureContext || !navigator.clipboard?.writeText) {
+      throw new Error('Clipboard API unavailable');
+    }
+    const diagnostic = buildDiagnosticExport(target, all, coverage, verifySource);
+    await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+    status.textContent = 'PR #' + target.number + ' の診断JSONをコピーしました。';
+  } catch {
+    status.textContent = 'コピーできませんでした。クリップボード権限とHTTPS接続を確認してください。';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function main() {
+  el('copy-diagnostics').addEventListener('click', copyDiagnostics);
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
       signal: AbortSignal.timeout(20_000),
       redirect: 'error',
     });
     if (!workflowResponse.ok) throw new Error('Verify workflow source unavailable (HTTP ' + workflowResponse.status + ')');
-    const result = await collect(request, await workflowResponse.text());
+    verifySource = await workflowResponse.text();
+    const result = await collect(request, verifySource);
     if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
     all = result.prs;
     coverage = { ...result.coverage, observedAt: result.observedAt };
@@ -238,8 +263,9 @@ async function main() {
       return;
     }
     selected = all[0];
+    el('copy-diagnostics').disabled = false;
     select.value = '0';
-    select.addEventListener('change', () => { selected = all[Number(select.value)]; render(); });
+    select.addEventListener('change', () => { selected = all[Number(select.value)]; el('copy-status').textContent = ''; render(); });
     el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
