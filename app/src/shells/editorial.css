@@ -9,30 +9,22 @@
   --st-folio: #fffcf6;
   --st-folio-edge: #e3dbcf;
   --st-folio-shadow: 0 10px 36px rgb(67 50 32 / 5%);
-  --st-rail: #26322f;
-  --st-rail-ink: #f2eee3;
-  --st-rail-muted: #b4c0ba;
-  --st-rail-edge: #46534d;
-  --st-rail-selected: #3a4b43;
+  --st-rail: var(--sidebar-bg);
+  --st-rail-ink: var(--ink);
+  --st-rail-muted: var(--muted);
+  --st-rail-edge: var(--line);
+  --st-rail-selected: var(--surface-selected);
 }
 :root[data-zp-theme="paper"] :is(.st-desktop-shell, .mobile-shell) {
   --st-canvas: #eae2d3;
   --st-folio: #fcf6e9;
   --st-folio-edge: #d7c9b4;
-  --st-rail: #302f29;
-  --st-rail-edge: #555249;
-  --st-rail-selected: #484337;
 }
 :root[data-zp-theme="dark"] :is(.st-desktop-shell, .mobile-shell) {
   --st-canvas: #171e24;
   --st-folio: #1d262e;
   --st-folio-edge: #34424a;
   --st-folio-shadow: none;
-  --st-rail: #0f191b;
-  --st-rail-ink: #dfece9;
-  --st-rail-muted: #a5bab8;
-  --st-rail-edge: #34474a;
-  --st-rail-selected: #213936;
 }
 
 /* Desktop: quiet command strip, ink-bound index, dominant folio. */
@@ -74,7 +66,7 @@
 }
 .st-desktop-shell .topbar > .quiet-button {
   min-height: 2.35rem;
-  border-color: var(--line);
+  border-color: var(--input-border);
   border-radius: 0.5rem;
   font-size: 0.8rem;
 }
@@ -101,6 +93,7 @@
 }
 .st-desktop-shell .st-desktop-switch {
   min-height: 1.95rem;
+  border-color: var(--input-border);
   border-radius: 0.35rem;
   background: transparent;
   font-size: 0.75rem;
@@ -121,30 +114,12 @@
   --ink: var(--st-rail-ink);
   --muted: var(--st-rail-muted);
   --line: var(--st-rail-edge);
-  --paper: #34423d;
+  --paper: var(--st-rail);
   --sidebar-bg: var(--st-rail);
   --toolbar-bg: var(--st-rail);
-  --accent: #e2b77f;
-  --accent-strong: #f4d4aa;
-  --button-foreground: #242d28;
-  --surface-hover: #35463f;
   --surface-selected: var(--st-rail-selected);
-  --surface-selected-border: #c49b67;
-  --input-border: #728079;
-  --placeholder: #bdc8c1;
-  --error: #ffb6af;
-  --badge-bg: #34423d;
   color: var(--st-rail-ink);
   background: var(--st-rail);
-}
-:root[data-zp-theme="dark"] .st-desktop-shell .st-desktop-navigation {
-  --paper: #19292c;
-  --accent: #72c9b9;
-  --accent-strong: #a1e1d6;
-  --surface-hover: #1e3433;
-  --surface-selected-border: #5dbdaf;
-  --input-border: #52696a;
-  --button-foreground: #0f191b;
 }
 .st-desktop-shell .st-desktop-panel-tabs {
   gap: 0.3rem;
@@ -155,6 +130,7 @@
 .st-desktop-shell .st-desktop-panel-tab {
   min-height: 2.75rem;
   padding: 0.45rem 0.7rem 0.7rem;
+  border-color: transparent;
   border-bottom: 2px solid transparent;
   color: var(--st-rail-muted);
   background: transparent;
@@ -166,7 +142,7 @@
   background: var(--surface-hover);
 }
 .st-desktop-shell .st-desktop-panel-tab[data-state="active"] {
-  border-bottom-color: var(--accent-strong);
+  border-bottom-color: var(--surface-selected-border);
   color: var(--st-rail-ink);
   background: transparent;
 }
@@ -267,7 +243,7 @@
   font-weight: 650;
 }
 .st-desktop-shell .editor-actions .quiet-button {
-  border-color: var(--line);
+  border-color: var(--input-border);
   color: var(--ink);
   background: var(--paper);
 }
@@ -318,7 +294,7 @@
 .st-desktop-shell .typography-toolbar button {
   min-height: 2.15rem;
   padding: 0.32rem 0.55rem;
-  border-color: var(--line);
+  border-color: var(--input-border);
   background: transparent;
   font-size: 0.75rem;
 }
@@ -338,7 +314,12 @@
   background: var(--st-folio);
   box-shadow: var(--st-folio-shadow);
 }
-.st-desktop-shell .manuscript-column { border-top: 3px solid var(--accent); }
+.st-desktop-shell .manuscript-column { border: 0; background: transparent; box-shadow: none; }
+.st-desktop-shell .manuscript-input:focus-within {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.st-desktop-shell .manuscript-input:focus-within .cm-editor.cm-focused { outline: none; }
 .st-desktop-shell .manuscript-column > label,
 .st-desktop-shell .preview-column h2 {
   color: var(--muted);
@@ -347,9 +328,9 @@
   letter-spacing: 0.09em;
 }
 .st-desktop-shell .manuscript-input {
-  border: 1px solid var(--st-folio-edge);
-  border-radius: 0.25rem;
-  background: var(--st-folio);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .st-desktop-shell .cm-content {
   max-width: 46em;
@@ -490,7 +471,7 @@
   overflow-wrap: anywhere;
 }
 .mobile-shell .mobile-shell-slot .editor-actions .quiet-button {
-  border-color: var(--st-folio-edge);
+  border-color: var(--input-border);
   color: var(--ink);
   background: var(--st-folio);
 }

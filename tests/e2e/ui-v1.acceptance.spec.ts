@@ -571,6 +571,92 @@ test("mobile reference sheet has a named dialog and excludes the background from
   await expect(inspectorTrigger).toBeFocused();
 });
 
+test("mobile outline reveal keeps its title, tabs, and dismiss control visible at narrow widths", async ({ page }) => {
+  const { project } = await createWritingFixture(page, "mobile", "作業中の初期シーン");
+  const origin = new URL(page.url()).origin;
+  async function createDocument(input: {
+    kind: "volume" | "chapter" | "scene";
+    title: string;
+    orderKey: string;
+    parentId?: string;
+  }): Promise<{ id: string }> {
+    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+      headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+      data: { markdown: "", ...input },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return (await response.json() as { document: { id: string } }).document;
+  }
+
+  const volume = await createDocument({ kind: "volume", title: "第一巻　潮が満ちる", orderKey: "00" });
+  const chapter = await createDocument({ kind: "chapter", title: "第三章　濡れた目録", orderKey: "00", parentId: volume.id });
+  const title = "薄明の羅針盤と夜明け前の連絡船が交わした長い約束「青い目録」 CodexiaMobileManuscript";
+  const scene = await createDocument({ kind: "scene", title, orderKey: "00", parentId: chapter.id });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`, page.url()).toString());
+  await expect(editor(page)).toBeVisible();
+  const currentTitle = page.locator(".mobile-shell-current-title");
+  await expect(currentTitle).toHaveText(title);
+  const editorPanelFocus = await page.locator('.st-workspace-panel[data-workspace-panel="editor"]').evaluate((element) => {
+    const panel = element as HTMLElement;
+    panel.focus();
+    const style = getComputedStyle(panel);
+    return {
+      focused: document.activeElement === panel,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
+    };
+  });
+  expect(editorPanelFocus).toEqual({ focused: true, outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
+  for (const { width, height } of [{ width: 390, height: 844 }, { width: 320, height: 760 }]) {
+    await page.setViewportSize({ width, height });
+    await expect(currentTitle).toBeVisible();
+    const titleLayout = await currentTitle.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        whiteSpace: style.whiteSpace,
+        textOverflow: style.textOverflow,
+        overflow: style.overflow,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      };
+    });
+    expect(titleLayout.whiteSpace).toBe("normal");
+    expect(titleLayout.textOverflow).toBe("clip");
+    expect(titleLayout.overflow).toBe("visible");
+    expect(titleLayout.scrollWidth).toBeLessThanOrEqual(titleLayout.clientWidth + 1);
+
+    await page.getByRole("button", { name: "構成", exact: true }).click();
+    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+    await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+    await expect(sheet.locator(".mobile-shell-reference-header")).toBeVisible();
+    const sheetLayout = () => sheet.evaluate((element) => {
+      const header = element.querySelector<HTMLElement>(".mobile-shell-reference-header");
+      const close = element.querySelector<HTMLButtonElement>(".mobile-shell-reference-close");
+      const selected = element.querySelector<HTMLElement>('.mobile-shell-reference-pane .pg-outline-document[aria-current="page"]');
+      if (!header || !close || !selected) return { headerVisible: false, closeVisible: false, selectedVisible: false };
+      const headerRect = header.getBoundingClientRect();
+      const closeRect = close.getBoundingClientRect();
+      const selectedRect = selected.getBoundingClientRect();
+      return {
+        headerVisible: headerRect.top >= 0 && headerRect.bottom <= window.innerHeight,
+        closeVisible: closeRect.top >= 0 && closeRect.bottom <= window.innerHeight,
+        selectedVisible: selectedRect.top >= headerRect.bottom && selectedRect.top < window.innerHeight
+          && selectedRect.bottom > headerRect.bottom,
+      };
+    });
+    await expect.poll(sheetLayout).toEqual({ headerVisible: true, closeVisible: true, selectedVisible: true });
+    await expect(sheet.getByRole("tablist", { name: "参照する情報" })).toBeVisible();
+    await expect(sheet.locator('.mobile-shell-reference-pane .pg-outline-document[aria-current="page"]')).toContainText(title);
+    await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeHidden();
+    await expect(currentTitle).toHaveText(title);
+    await expect(editor(page)).toBeVisible();
+  }
+});
+
 test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const { project } = await createWritingFixture(page, "mobile");

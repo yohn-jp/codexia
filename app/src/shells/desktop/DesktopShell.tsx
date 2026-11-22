@@ -8,6 +8,7 @@ import "./desktop.css";
 import "../editorial.css";
 import "./studio.css";
 import "../authoring.css";
+import "./desktop-refinement.css";
 
 function describeFailure(reason: unknown): string {
   return reason instanceof Error && reason.message.trim()

@@ -181,10 +181,20 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
     const current = content?.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
     if (!content || !current) return false;
     void content.getScrollElement().then((scrollElement) => {
-      const viewport = scrollElement.getBoundingClientRect();
-      const target = current.getBoundingClientRect();
-      const centeredTop = scrollElement.scrollTop + target.top - viewport.top - (viewport.height - target.height) / 2;
-      scrollElement.scrollTop = Math.max(0, centeredTop);
+      requestAnimationFrame(() => {
+        if (!current.isConnected) return;
+        const viewport = scrollElement.getBoundingClientRect();
+        const target = current.getBoundingClientRect();
+        const header = content.querySelector<HTMLElement>(".mobile-shell-reference-header");
+        const headerBottom = header?.getBoundingClientRect().bottom ?? viewport.top;
+        const topInset = Math.max(0, Math.min(viewport.height, headerBottom - viewport.top));
+        const availableHeight = viewport.height - topInset;
+        const targetTop = target.top - viewport.top;
+        const offset = target.height > availableHeight
+          ? targetTop - topInset
+          : targetTop - topInset - (availableHeight - target.height) / 2;
+        scrollElement.scrollTop = Math.max(0, scrollElement.scrollTop + offset);
+      });
     });
     return true;
   }, []);
@@ -584,46 +594,48 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
         onDidPresent={() => { if (referenceSheet === "outline") revealCurrentScene(); }}
         onDidDismiss={onReferenceDismissed}
         breakpoints={[0, 0.56, 0.88, 1]}
-        initialBreakpoint={0.56}
+        initialBreakpoint={0.88}
         handle={true}
         handleBehavior="cycle"
         expandToScroll={false}
         htmlAttributes={{ "aria-label": "原稿の参照" }}
       >
         <IonContent ref={referenceContentRef} className="mobile-shell-reference-content" scrollY={true}>
-          <div className="mobile-shell-reference-top">
-            <div>
-              <p className="mobile-shell-reference-eyebrow">WRITING CONTEXT</p>
-              <h2 id="mobile-shell-reference-title">原稿の参照</h2>
-            </div>
-            <button type="button" className="mobile-shell-reference-close" onClick={closeReferenceSheet}>
-              閉じる
-            </button>
-          </div>
-          <div className="mobile-shell-reference-switch" role="tablist" aria-label="参照する情報">
-            {([
-              { id: "outline", label: "構成" },
-              { id: "inspector", label: "知識・根拠" },
-            ] as const).map((choice) => (
-              <button type="button" role="tab" key={choice.id}
-                id={"mobile-reference-tab-" + choice.id}
-                aria-selected={referenceSheet === choice.id}
-                aria-controls="mobile-shell-reference-pane"
-                tabIndex={referenceSheet === choice.id ? 0 : -1}
-                onKeyDown={(event) => {
-                  const next = event.key === "ArrowRight" || event.key === "End" ? "inspector"
-                    : event.key === "ArrowLeft" || event.key === "Home" ? "outline" : null;
-                  if (!next) return;
-                  event.preventDefault();
-                  setReferenceSheet(next);
-                  event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(
-                    "#mobile-reference-tab-" + next,
-                  )?.focus();
-                }}
-                onClick={() => setReferenceSheet(choice.id)}>
-                {choice.label}
+          <div className="mobile-shell-reference-header">
+            <div className="mobile-shell-reference-top">
+              <div>
+                <p className="mobile-shell-reference-eyebrow">WRITING CONTEXT</p>
+                <h2 id="mobile-shell-reference-title">原稿の参照</h2>
+              </div>
+              <button type="button" className="mobile-shell-reference-close" onClick={closeReferenceSheet}>
+                閉じる
               </button>
-            ))}
+            </div>
+            <div className="mobile-shell-reference-switch" role="tablist" aria-label="参照する情報">
+              {([
+                { id: "outline", label: "構成" },
+                { id: "inspector", label: "知識・根拠" },
+              ] as const).map((choice) => (
+                <button type="button" role="tab" key={choice.id}
+                  id={"mobile-reference-tab-" + choice.id}
+                  aria-selected={referenceSheet === choice.id}
+                  aria-controls="mobile-shell-reference-pane"
+                  tabIndex={referenceSheet === choice.id ? 0 : -1}
+                  onKeyDown={(event) => {
+                    const next = event.key === "ArrowRight" || event.key === "End" ? "inspector"
+                      : event.key === "ArrowLeft" || event.key === "Home" ? "outline" : null;
+                    if (!next) return;
+                    event.preventDefault();
+                    setReferenceSheet(next);
+                    event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(
+                      "#mobile-reference-tab-" + next,
+                    )?.focus();
+                  }}
+                  onClick={() => setReferenceSheet(choice.id)}>
+                  {choice.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div id="mobile-shell-reference-pane" className="mobile-shell-reference-pane"
             role="tabpanel"
