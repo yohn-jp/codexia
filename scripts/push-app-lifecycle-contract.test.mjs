@@ -172,9 +172,13 @@ test('runtime verification uses a separate proof stage and shares the production
   assert.ok(safeFailure, 'transaction failure diagnostics must not expose command output');
   assert.match(safeFailure['ansible.builtin.fail'].msg, /fresh database schema initialization/u);
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
-  assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
-  assert.equal(fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-prepare.yml'),
-    fixture.findIndex(task => task.name === 'Recover interrupted disposable deployment before examining the active API') - 1);
+  const fixtureMode = fixture.findIndex(task => task['ansible.builtin.set_fact']?.codexia_lifecycle_fixture === true);
+  const fixturePrepare = fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-prepare.yml');
+  const fixtureFirstImageCommand = fixture.findIndex(task => task['ansible.builtin.command']?.argv?.[0] === 'podman');
+  const fixtureTransaction = fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml');
+  assert.ok(fixtureMode >= 0 && fixtureMode < fixturePrepare && fixturePrepare < fixtureFirstImageCommand &&
+    fixtureFirstImageCommand < fixtureTransaction,
+  'the disposable lane must establish its scope, recover through shared preparation, observe the image, then use the production transaction');
   assert.ok(fixture.some(task => /verification evidence/u.test(task.name ?? '')));
   assert.ok(parse(readFileSync(new URL('../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'))
     .some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
