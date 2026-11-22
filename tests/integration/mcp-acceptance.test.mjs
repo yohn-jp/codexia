@@ -162,7 +162,8 @@ async function startStdioClient(host, projectId, token = ACCESS_TOKEN) {
   const environment = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     CODEXIA_API_URL: host.base,
-    CODEXIA_AUTH_TOKEN: token,
+    // The legacy fixture uses a synthetic bearer to exercise transport, not OAuth issuance.
+    CODEXIA_MCP_ACCESS_TOKEN: token,
     CODEXIA_PROJECT_ID: projectId,
   };
   const transport = new StdioClientTransport({
