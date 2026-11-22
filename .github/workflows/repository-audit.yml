@@ -73,7 +73,6 @@ jobs:
             node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
           fi
       - name: Generate main source graph for Pages
-        timeout-minutes: 12
         env:
           GRAPHIFY_BACKEND: none
         run: |
