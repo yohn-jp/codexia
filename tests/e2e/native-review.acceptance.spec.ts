@@ -25,7 +25,7 @@ async function proposeNode(author: AuthorSession, projectId: string, label: stri
 }
 
 async function proposeCoreMetadata(author: AuthorSession, projectId: string, message: string) {
-  const snapshotResponse = await author.fetch(`/api/projects/${projectId}/snapshot`);
+  const snapshotResponse = await author.fetch(`/api/projects/${projectId}/snapshot?projection=editor`);
   expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
   const { snapshot } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
   const id = crypto.randomUUID();

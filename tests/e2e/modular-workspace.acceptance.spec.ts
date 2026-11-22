@@ -446,16 +446,16 @@ async function createWorkspaceFixture(author: AuthorSession): Promise<WorkspaceF
 async function seedTermRegistry(author: AuthorSession, fixture: WorkspaceFixture): Promise<void> {
   const { origin } = author;
   const projectPath = `/api/projects/${fixture.project.id}`;
-  const snapshotResponse = await author.fetch(`${projectPath}/snapshot`);
+  const documentId = fixture.scenes[1]!.document.id;
+  const snapshotResponse = await author.fetch(`${projectPath}/snapshot?projection=editor&documentId=${encodeURIComponent(documentId)}`);
   expect(snapshotResponse.ok()).toBe(true);
   const snapshotRead = await snapshotResponse.json() as {
     snapshot: { projectId: string; projectVersion: number };
-    files: Array<{ path: string; revision: string; content: string }>;
+    document: { path: string; revision: string } | null;
   };
-  const targetPath = `documents/${fixture.scenes[1]!.document.id}.md`;
-  expect(snapshotRead.files.some((file) => file.path === targetPath)).toBe(true);
+  const targetPath = `documents/${documentId}.md`;
+  expect(snapshotRead.document?.path).toBe(targetPath);
   const registryPath = "meta/scriptorium/modules/search/terms.json";
-  const existing = snapshotRead.files.find((file) => file.path === registryPath);
   const terms = {
     schemaVersion: 1,
     terms: [
@@ -469,8 +469,8 @@ async function seedTermRegistry(author: AuthorSession, fixture: WorkspaceFixture
     projectId: fixture.project.id,
     baseProjectVersion: snapshotRead.snapshot.projectVersion,
     effect: "metadata",
-    reads: [{ path: registryPath, revision: existing?.revision ?? null }],
-    writes: [{ path: registryPath, revision: existing?.revision ?? null, content: JSON.stringify(terms) }],
+    reads: [{ path: registryPath, revision: null }],
+    writes: [{ path: registryPath, revision: null, content: JSON.stringify(terms) }],
     message: "Acceptance terminology registry",
   };
   const proposalId = `terms-proposal-${randomUUID()}`;
@@ -1151,12 +1151,17 @@ test("full profile exposes optional lexical search and terminology without chang
   // Exercise the real Search action -> Runtime -> Core -> PostgreSQL proposal boundary.
   const projectPath = `/api/projects/${encodeURIComponent(projectId)}`;
   const origin = new URL(page.url()).origin;
-  const snapshotResponse = await fixture.author.fetch(`${projectPath}/snapshot`);
-  expect(snapshotResponse.ok()).toBe(true);
-  const snapshotRead = await snapshotResponse.json() as { files: Array<{ path: string; content: string }> };
-  const registry = snapshotRead.files.find(file => file.path === "meta/scriptorium/modules/search/terms.json");
-  expect(registry).toBeDefined();
-  const existing = (JSON.parse(registry!.content) as { terms: Array<{ id: string; canonical: string; aliases: string[]; targetPath: string }> }).terms[0]!;
+  const registry = await fixture.author.fetch(`${projectPath}/actions/search.terms.list`, {
+    method: "POST", headers: { Origin: origin }, data: { input: {} },
+  });
+  expect(registry.status()).toBe(200);
+  const listed = await registry.json() as {
+    ok: boolean;
+    data: { terms: Array<{ id: string; canonical: string; targetPath: string }> };
+  };
+  expect(listed.ok).toBe(true);
+  const existing = listed.data.terms.find(term => term.canonical === "Beacon Quay");
+  if (!existing) throw new Error("The seeded Beacon Quay term was not listed");
   const proposedInputs = [
     { action: "search.terms.propose", input: { canonical: "New Harbor", aliases: [], targetPath: existing.targetPath }, kind: "term_registry_update" },
     { action: "search.terms.propose", input: { ...existing, aliases: ["Updated alias"] }, kind: "term_registry_update" },

@@ -569,23 +569,23 @@ test("one malformed legacy key does not hide later recoverable PostgreSQL drafts
 });
 
 async function submitProposal(f: Fixture): Promise<{ id: string; operation: ChangeOperation; generated: string }> {
-  const snapshotResponse = await f.fetch(`/api/projects/${f.projectId}/snapshot`); expect(snapshotResponse.ok()).toBe(true);
-  const { snapshot, files } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number }; files: Array<{ path: string; revision: string; content: string }> };
-  const path = `documents/${f.one.document.id}.md`;
-  const current = files.find((file) => file.path === path);
-  if (!current) throw new Error(`PostgreSQL snapshot omitted the document path ${path}`);
-  const generated = `${current.content}\nMCP proposal requires explicit author approval.\n`;
-  const operation: ChangeOperation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision }], writes: [{ path, revision: current.revision, content: generated }], message: "MCP acceptance proposal" };
-  const id = `mcp-${randomUUID()}`;
   const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
   if (!databaseUrl) throw new Error("Browser acceptance requires its disposable PostgreSQL database");
   const persistence = createPostgresPersistence(databaseUrl);
   try {
     // Seed a real pending MCP proposal for author review. The OAuth MCP transport has separate API coverage.
-    const stored = await new CoreStore({ persistence }).propose(f.projectId, { id, snapshot, operations: [operation], source: "mcp" });
+    const store = new CoreStore({ persistence });
+    const reader = await store.reader(f.projectId);
+    const path = `documents/${f.one.document.id}.md`;
+    const current = await reader.read(path);
+    if (!current) throw new Error(`PostgreSQL snapshot omitted the document path ${path}`);
+    const generated = `${current.content}\nMCP proposal requires explicit author approval.\n`;
+    const operation: ChangeOperation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: reader.snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision }], writes: [{ path, revision: current.revision, content: generated }], message: "MCP acceptance proposal" };
+    const id = `mcp-${randomUUID()}`;
+    const stored = await store.propose(f.projectId, { id, snapshot: reader.snapshot, operations: [operation], source: "mcp" });
     expect(stored).toMatchObject({ id, source: "mcp" });
+    return { id, operation, generated };
   } finally { await persistence.close(); }
-  return { id, operation, generated };
 }
 
 test("external MCP proposals require owner approval before PostgreSQL application", async ({ page, authorizeAuthor }) => {
