@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
@@ -976,16 +976,45 @@ test("guarded shell switches remember completed choices and keep the manuscript 
 });
 
 test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page }) => {
-  await createWritingFixture(page); const requests: string[] = [];
-  page.on("request", (request) => { if (/terms|terminology/u.test(request.url())) requests.push(request.url()); });
-  await editor(page).fill("Lantern Harborの用語を確認する。");
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-  const hiddenCount = requests.length;
-  await page.waitForTimeout(200);
-  expect(requests.length).toBe(hiddenCount);
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  await expect(editor(page)).toContainText("Lantern Harbor");
-  await editor(page).press("End"); await editor(page).press("!"); await expect(editor(page)).toContainText("!");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The terminology resolver is selected by the Full profile.");
+  const { project } = await createWritingFixture(page);
+  const resolverPath = `/api/projects/${project.id}/actions/search.terms.resolve`;
+  const manuscript = "Lantern Harborの用語を確認する。";
+  const targetsManuscript = (request: Request) =>
+    new URL(request.url()).pathname === resolverPath && request.postDataJSON()?.input?.text === manuscript;
+
+  let releaseRequest!: () => void;
+  const heldRequest = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  let blocked = false;
+  await page.route((url) => url.pathname === resolverPath, async (route) => {
+    if (!blocked && targetsManuscript(route.request())) {
+      blocked = true;
+      await heldRequest;
+      // A cancelled request may already have expired at the browser boundary.
+      await route.continue().catch(() => undefined);
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    const started = page.waitForRequest(targetsManuscript);
+    await editor(page).fill(manuscript);
+    const runningRequest = await started;
+    const cancelled = page.waitForEvent("requestfailed", (request) => request === runningRequest);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    await cancelled;
+    releaseRequest();
+
+    const resumed = page.waitForResponse((response) => targetsManuscript(response.request()));
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    expect((await resumed).ok()).toBe(true);
+    await expectMarkdown(page, manuscript);
+    await editor(page).press("End");
+    await editor(page).press("!");
+    await expectMarkdown(page, manuscript + "!");
+  } finally {
+    releaseRequest();
+  }
 });
 
 test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page }) => {
