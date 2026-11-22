@@ -38,6 +38,7 @@ export interface StoryFile {
   content: string;
   revision: string;
   documentKind?: string;
+  documentOrder?: number;
 }
 
 export interface LoadedStorySnapshot extends StoryGraphInput {
@@ -197,6 +198,7 @@ async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): P
         content: value.content,
         revision: value.revision,
         ...(value.documentKind ? { documentKind: value.documentKind } : {}),
+        ...(value.documentOrder === undefined ? {} : { documentOrder: value.documentOrder }),
       });
     }
   }
@@ -212,11 +214,13 @@ export async function readStorySnapshot(
   const entities = new Map<string, StoryEntity>();
   const filePathsById = new Map<string, string[]>();
   const links: StoryLink[] = [];
+  const documentOrderByEntityId = new Map<string, number>();
 
   for (const file of files.values()) {
     const entity = parseStoryEntity(file);
     if (!entity) continue;
     entities.set(entity.id, entity);
+    if (file.documentOrder !== undefined) documentOrderByEntityId.set(entity.id, file.documentOrder);
     const paths = filePathsById.get(entity.id) ?? [];
     paths.push(entity.filePath);
     filePathsById.set(entity.id, paths);
@@ -245,6 +249,7 @@ export async function readStorySnapshot(
     snapshot: reader.snapshot,
     entities,
     links,
+    documentOrderByEntityId,
     files,
     revisions: new Map([...files].map(([filePath, file]) => [filePath, file.revision])),
     duplicateIds: new Map([...filePathsById].filter(([, paths]) => paths.length > 1)),

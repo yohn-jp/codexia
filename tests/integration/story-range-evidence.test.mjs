@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { CoreStore } from "../../packages/core/dist/index.js";
 import { createPostgresPersistence, migratePostgresDatabase } from "../../packages/persistence-postgres/dist/index.js";
 import { buildNarrativeChangeProposal } from "../../modules/story/dist/narrativeChangeSet.js";
+import { buildSceneLocationInfos, createStoryActions, readStorySnapshot } from "../../modules/story/dist/index.js";
 
 const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error("CODEXIA_TEST_DATABASE_URL is required for Story range evidence acceptance");
@@ -237,6 +238,248 @@ test("Story range approval applies exact PostgreSQL edits and preserves unrelate
     }));
     await core.apply(project.id, legacyOperation);
     assert.equal((await core.readScene(project.id, "s1")).text, "Legacy full-document proposal");
+  } finally {
+    await persistence.close();
+  }
+});
+
+test("Story hierarchy and reader disclosures follow PostgreSQL ordering on each snapshot", async () => {
+  await migratePostgresDatabase(databaseUrl);
+  const persistence = createPostgresPersistence(databaseUrl);
+  const core = new CoreStore({ persistence });
+  try {
+    const project = await core.createProject({ title: `Story order authority ${randomUUID()}` });
+    const ids = {
+      rootScene: "10000000-0000-4000-8000-000000000001",
+      volumeLong: "30000000-0000-4000-8000-000000000001",
+      volumeShort: "30000000-0000-4000-8000-000000000002",
+      chapterSelected: "40000000-0000-4000-8000-000000000001",
+      chapterLater: "40000000-0000-4000-8000-000000000002",
+      chapterOtherVolume: "40000000-0000-4000-8000-000000000003",
+      sceneEarly: "50000000-0000-4000-8000-000000000001",
+      sceneShort: "50000000-0000-4000-8000-000000000002",
+      sceneTieCanonicalFirst: "50000000-0000-4000-8000-000000000003",
+      sceneTieCanonicalSecond: "50000000-0000-4000-8000-000000000004",
+      sceneLaterChapter: "50000000-0000-4000-8000-000000000005",
+      sceneOtherVolume: "50000000-0000-4000-8000-000000000006",
+    };
+    const logicalIds = {
+      rootScene: "root-scene",
+      volumeLong: "vol-long-key",
+      volumeShort: "vol-short-key",
+      chapterSelected: "chapter-selected",
+      chapterLater: "chapter-later",
+      chapterOtherVolume: "chapter-other-volume",
+      sceneEarly: "scene-early",
+      sceneShort: "scene-short",
+      sceneTieCanonicalFirst: "scene-tie-z",
+      sceneTieCanonicalSecond: "scene-tie-a",
+      sceneLaterChapter: "scene-later-chapter",
+      sceneOtherVolume: "scene-other-volume",
+    };
+    const manuscripts = new Map([
+      ["sceneEarly", "Aster first appears here."],
+      ["sceneShort", "Aster also appears here."],
+      ["sceneTieCanonicalFirst", "Aster appears in the first database tie."],
+      ["sceneTieCanonicalSecond", "Aster appears in the second database tie."],
+      ["sceneLaterChapter", "Cinder appears after the selected chapter."],
+      ["sceneOtherVolume", "No named entity appears here."],
+      ["rootScene", "An opening with no registered name."],
+    ]);
+    const documentIdsByLogicalId = new Map(Object.entries(logicalIds).map(([key, logicalId]) => [logicalId, ids[key]]));
+
+    await persistence.transaction(async (tx) => {
+      const create = async ({ key, kind, title, orderKey, parentKey = null, metadataName, body = "" }) => {
+        const documentId = ids[key];
+        const logicalId = logicalIds[key];
+        const parentId = parentKey ? ids[parentKey] : null;
+        const document = (await tx.createDocument({
+          projectId: project.id,
+          documentId,
+          ...(parentId ? { parentId } : {}),
+          kind,
+          title,
+          orderKey,
+          markdown: body,
+          authorId: "story-order-owner",
+          idempotencyKey: `story-order-${key}`,
+        })).document;
+        const volumeKey = kind === "volume"
+          ? key
+          : kind === "chapter"
+            ? parentKey
+            : parentKey === "chapterOtherVolume"
+              ? "volumeShort"
+              : "volumeLong";
+        const volumeLogicalId = volumeKey ? logicalIds[volumeKey] : "root";
+        const chapterLogicalId = kind === "chapter"
+          ? logicalId
+          : parentKey === "chapterSelected" || parentKey === "chapterLater" || parentKey === "chapterOtherVolume"
+            ? logicalIds[parentKey]
+            : null;
+        const metadataPath = kind === "volume"
+          ? `plot/volumes/${logicalId}/volume.yaml`
+          : kind === "chapter"
+            ? `plot/volumes/${volumeLogicalId}/chapters/${logicalId}/chapter.yaml`
+          : parentKey
+              ? `plot/volumes/${volumeLogicalId}/chapters/${chapterLogicalId}/scenes/${logicalId}.yaml`
+              : `plot/volumes/root/chapters/root/scenes/${logicalId}.yaml`;
+        const manuscriptPath = kind === "scene" ? `manuscript/${logicalId}.md` : undefined;
+        await tx.saveModuleRecord({
+          projectId: project.id,
+          moduleId: "core.document-paths",
+          key: document.id,
+          value: {
+            metadataPath,
+            ...(manuscriptPath ? { manuscriptPath } : {}),
+            metadata: { id: logicalId, ...(metadataName ? { name: metadataName } : {}) },
+          },
+          expectedVersion: null,
+        });
+      };
+
+      await create({ key: "rootScene", kind: "scene", title: "Root", orderKey: "0000000002", body: manuscripts.get("rootScene") });
+      await create({ key: "volumeLong", kind: "volume", title: "Long key", orderKey: "0000000002" });
+      await create({ key: "volumeShort", kind: "volume", title: "Short key", orderKey: "00000001" });
+      await create({ key: "chapterSelected", kind: "chapter", title: "Selected", orderKey: "0000000002", parentKey: "volumeLong" });
+      await create({ key: "chapterLater", kind: "chapter", title: "Later", orderKey: "00000001", parentKey: "volumeLong" });
+      await create({ key: "chapterOtherVolume", kind: "chapter", title: "Other volume", orderKey: "00000001", parentKey: "volumeShort" });
+      await create({ key: "sceneEarly", kind: "scene", title: "Scene early key", orderKey: "0000000002", parentKey: "chapterSelected", body: manuscripts.get("sceneEarly") });
+      await create({ key: "sceneShort", kind: "scene", title: "Scene short key", orderKey: "00000001", parentKey: "chapterSelected", body: manuscripts.get("sceneShort") });
+      await create({ key: "sceneTieCanonicalFirst", kind: "scene", title: "Tie canonical first", orderKey: "same", parentKey: "chapterSelected", metadataName: "Z display title", body: manuscripts.get("sceneTieCanonicalFirst") });
+      await create({ key: "sceneTieCanonicalSecond", kind: "scene", title: "Tie canonical second", orderKey: "same", parentKey: "chapterSelected", metadataName: "A display title", body: manuscripts.get("sceneTieCanonicalSecond") });
+      await create({ key: "sceneLaterChapter", kind: "scene", title: "Later chapter scene", orderKey: "0000000001", parentKey: "chapterLater", body: manuscripts.get("sceneLaterChapter") });
+      await create({ key: "sceneOtherVolume", kind: "scene", title: "Other volume scene", orderKey: "0000000001", parentKey: "chapterOtherVolume", body: manuscripts.get("sceneOtherVolume") });
+      await tx.saveModuleRecord({
+        projectId: project.id,
+        moduleId: "core.artifacts",
+        key: "bible/characters/char-aster/profile.yaml",
+        value: { content: "id: char-aster\nname: Aster\ntype: character\n", encoding: "utf8" },
+        expectedVersion: null,
+      });
+      await tx.saveModuleRecord({
+        projectId: project.id,
+        moduleId: "core.artifacts",
+        key: "bible/characters/char-cinder/profile.yaml",
+        value: { content: "id: char-cinder\nname: Cinder\ntype: character\n", encoding: "utf8" },
+        expectedVersion: null,
+      });
+    });
+
+    const moduleContext = {
+      cacheDirectory: "/unused/story-order-acceptance",
+      signal: new AbortController().signal,
+      async acquireCapability() { throw new Error("Unexpected Story capability request"); },
+      async createWorkerService() { throw new Error("Unexpected Story worker request"); },
+    };
+    const actions = createStoryActions(moduleContext);
+    async function invoke(actionId, input, reader) {
+      const action = actions.find((item) => item.id === actionId);
+      assert.ok(action, `Story action is missing: ${actionId}`);
+      const context = {
+        projectId: project.id,
+        reader,
+        async invoke() { throw new Error("Unexpected delegated Story action"); },
+        async listActions() { return []; },
+        async linkedReader() { throw new Error("Unexpected linked project read"); },
+        signal: new AbortController().signal,
+        async propose(operations, evidence, proposalId) {
+          const proposal = {
+            id: proposalId ?? randomUUID(),
+            snapshot: reader.snapshot,
+            operations,
+            source: "module",
+            ...(evidence ? { evidence } : {}),
+          };
+          await core.propose(project.id, proposal);
+          return proposal;
+        },
+        async runJob() { throw new Error("Unexpected Story job"); },
+      };
+      const result = await action.invoke(input, context);
+      assert.equal(result.ok, true, result.ok ? undefined : `${result.error.code}: ${result.error.message}`);
+      return result;
+    }
+    async function assertStoryMatchesPostgres(reader) {
+      const database = await persistence.read(async (db) => {
+        const projectRecord = await db.getProject(project.id);
+        const documents = await db.listDocuments(project.id, undefined, 1000);
+        return { projectRecord, documents };
+      });
+      assert.equal(reader.snapshot.projectVersion, database.projectRecord.version);
+      const byParent = new Map();
+      for (const document of database.documents) {
+        const key = document.parentId ?? "<root>";
+        const siblings = byParent.get(key) ?? [];
+        siblings.push(document);
+        byParent.set(key, siblings);
+      }
+      const story = await readStorySnapshot(reader, { includeManuscripts: true });
+      const tree = (await invoke("story.volumes.tree", {}, reader)).data.tree;
+      const rootDocuments = byParent.get("<root>") ?? [];
+      assert.deepEqual(tree.map(({ volume }) => documentIdsByLogicalId.get(volume.id)),
+        rootDocuments.filter((document) => document.kind === "volume").map((document) => document.id));
+      for (const { volume, chapters } of tree) {
+        const volumeDocumentId = documentIdsByLogicalId.get(volume.id);
+        assert.ok(volumeDocumentId);
+        const expectedChapters = (byParent.get(volumeDocumentId) ?? []).filter((document) => document.kind === "chapter");
+        assert.deepEqual(chapters.map(({ chapter }) => documentIdsByLogicalId.get(chapter.id)), expectedChapters.map((document) => document.id));
+        for (const { chapter, scenes } of chapters) {
+          const chapterDocumentId = documentIdsByLogicalId.get(chapter.id);
+          assert.ok(chapterDocumentId);
+          const expectedScenes = (byParent.get(chapterDocumentId) ?? []).filter((document) => document.kind === "scene");
+          assert.deepEqual(scenes.map((scene) => documentIdsByLogicalId.get(scene.id)), expectedScenes.map((document) => document.id));
+        }
+      }
+      const expectedSceneIds = [];
+      for (const document of rootDocuments) {
+        if (document.kind === "scene") expectedSceneIds.push(document.id);
+        if (document.kind !== "volume") continue;
+        for (const chapter of (byParent.get(document.id) ?? []).filter((candidate) => candidate.kind === "chapter")) {
+          for (const scene of (byParent.get(chapter.id) ?? []).filter((candidate) => candidate.kind === "scene")) expectedSceneIds.push(scene.id);
+        }
+      }
+      const storySceneIds = buildSceneLocationInfos(story).data.map(({ sceneId }) => documentIdsByLogicalId.get(sceneId));
+      assert.deepEqual(storySceneIds, expectedSceneIds);
+      return { story, tree, database };
+    }
+
+    const initialReader = await core.reader(project.id);
+    const initial = await assertStoryMatchesPostgres(initialReader);
+    const selected = (await invoke("story.reader-model.build", { chapterId: logicalIds.chapterSelected }, initialReader)).data;
+    assert.equal(selected.disclosures.find((item) => item.entityId === "char-aster")?.sceneId, logicalIds.sceneEarly);
+    assert.ok(!selected.disclosures.some((item) => item.entityId === "char-cinder"), "later chapter disclosures stay beyond the selected chapter boundary");
+    assert.equal(selected.firstReadReaction, null);
+
+    const reorderedIds = initial.tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
+      .chapters.find(({ chapter }) => chapter.id === logicalIds.chapterSelected)
+      .scenes.map((scene) => scene.id).reverse();
+    const reordered = await invoke("story.entities.reorder", {
+      type: "scene",
+      parentId: logicalIds.chapterSelected,
+      orderedIds: reorderedIds,
+      base_revision: (await invoke("story.volumes.tree", {}, initialReader)).data.revision,
+      operation_id: "story-order-authority-reorder",
+    }, initialReader);
+    assert.equal(reordered.proposals?.length, 1);
+    const proposal = reordered.proposals[0];
+    const operation = proposal.operations[0];
+    await core.approve(project.id, {
+      proposalId: proposal.id,
+      operationIds: [operation.id],
+      authorScope: "story-order-owner",
+    });
+    await core.apply(project.id, operation);
+
+    const afterReader = await core.reader(project.id);
+    const after = await assertStoryMatchesPostgres(afterReader);
+    assert.deepEqual(after.tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
+      .chapters.find(({ chapter }) => chapter.id === logicalIds.chapterSelected)
+      .scenes.map((scene) => scene.id), reorderedIds);
+    const afterSelected = (await invoke("story.reader-model.build", { chapterId: logicalIds.chapterSelected }, afterReader)).data;
+    assert.equal(afterSelected.disclosures.find((item) => item.entityId === "char-aster")?.sceneId, logicalIds.sceneTieCanonicalSecond);
+    assert.ok(!afterSelected.disclosures.some((item) => item.entityId === "char-cinder"), "post-reorder reader disclosures remain inside the selected chapter boundary");
+    assert.equal(afterReader.snapshot.projectVersion, initialReader.snapshot.projectVersion + 1);
   } finally {
     await persistence.close();
   }

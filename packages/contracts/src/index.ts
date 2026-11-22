@@ -99,7 +99,13 @@ export interface ProjectObservation {
 export interface SnapshotReader {
   snapshot: SnapshotId;
   /** Canonical PostgreSQL kind for projected metadata and body files, even when the bytes omit it. */
-  read(path: string, encoding?: "utf8" | "base64"): Promise<{ content: string; revision: string; documentKind?: string } | null>;
+  read(path: string, encoding?: "utf8" | "base64"): Promise<{
+    content: string;
+    revision: string;
+    documentKind?: string;
+    /** Snapshot-local PostgreSQL document sequence; sibling-relative order matches `listDocuments`. */
+    documentOrder?: number;
+  } | null>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
