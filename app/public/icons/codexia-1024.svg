@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-label="革装の古書を開き、羽根ペンで物語を書き始めるCodexiaのアイコン">
+<title>革装の古書を開き、羽根ペンで物語を書き始めるCodexiaのアイコン</title><defs>
+      <linearGradient id="codexia-1024-leftPage" x1=".12" y1=".07" x2=".91" y2="1" objectBoundingBox="true"><stop offset="0" stop-color="#FFF4DC"/><stop offset=".60" stop-color="#FFF4DC"/><stop offset="1" stop-color="#F3DDB8"/></linearGradient>
+      <linearGradient id="codexia-1024-rightPage" x1=".86" y1=".08" x2=".2" y2="1" objectBoundingBox="true"><stop offset="0" stop-color="#FFF4DC"/><stop offset=".60" stop-color="#FFF4DC"/><stop offset="1" stop-color="#F3DDB8"/></linearGradient>
+      <linearGradient id="codexia-1024-feather" x1=".15" y1="1" x2=".88" y2=".1" objectBoundingBox="true"><stop offset="0" stop-color="#D5A35D"/><stop offset=".42" stop-color="#FFE6B0"/><stop offset="1" stop-color="#FFE2A5"/></linearGradient>
+     </defs><rect width="256" height="256" fill="#24152F"/><g>
+      <!-- Leather-bound cover, debossed edges, asymmetric page stacks -->
+      <path d="M22 158 C57 142 93 145 128 173 C168 142 200 142 234 158 L234 207 C195 190 159 201 128 226 C91 200 60 189 22 207 Z" fill="#BD854D"/>
+      <path d="M23 154 C59 137 96 145 128 172 C164 145 200 138 233 154 L233 202 C190 186 162 200 128 221 C94 200 66 186 23 202 Z" fill="#F1C67D"/>
+      <path d="M29 156 C65 142 99 160 126 182 L126 213 C95 188 63 185 29 196 Z M130 182 C162 155 194 142 227 156 L227 196 C192 185 159 188 130 213 Z" fill="#682D48"/>
+      <path d="M32 159 Q62 152 91 168 M165 168 Q197 152 224 159" fill="none" stroke="#FFE2A5" stroke-width="1.8" opacity=".9"/>
+      <!-- Ribbon is embedded in the binding, not floating above the pages -->
+      <path d="M68 177 C76 173 87 175 96 181 L88 227 L77 219 L65 226 Z" fill="#B14B67"/>
+      <path d="M70 179 C78 176 86 178 91 180 L85 217 L77 213 L70 220 Z" fill="#682D48"/>
+      <!-- Gilded page block and paper curvature -->
+      <path d="M33 122 Q80 107 124 144 L124 203 Q78 178 33 189 Z" fill="#CE9F75"/>
+      <path d="M132 144 Q179 107 223 122 L223 189 Q176 178 132 203 Z" fill="#CE9F75"/>
+      <path d="M36 114 C65 103 96 113 124 137 L124 198 Q85 175 36 181 Z" fill="#F3DDB8"/>
+      <path d="M132 137 C160 113 191 103 220 114 L220 181 Q170 175 132 198 Z" fill="#F3DDB8"/>
+      <!-- Main parchment spreads, modeled by two restrained vector gradients -->
+      <path d="M39 107 C70 99 101 112 125 135 L125 196 C91 172 66 168 39 176 Q41 140 39 107 Z" fill="url(#codexia-1024-leftPage)"/>
+      <path d="M131 135 C157 112 187 99 217 107 Q215 140 217 176 C190 168 166 172 131 196 Z" fill="url(#codexia-1024-rightPage)"/>
+      <path d="M39 110 Q79 99 125 138 M131 138 Q174 100 217 110" stroke="#FFF4DC" stroke-width="2.3" fill="none" opacity=".75"/>
+      <path d="M125 135 C125 156 126 177 126 199 M131 135 C130 155 130 177 130 199" fill="none" stroke="#CE9F75" stroke-width="1.35"/>
+      <path d="M128 139 L128 216" stroke="#BD854D" stroke-width="4" stroke-linecap="round"/>
+      <!-- Gold gilding under the open folios -->
+      <path d="M30 200 C63 191 92 198 125 218 M131 218 C165 198 194 191 226 200" fill="none" stroke="#FFE2A5" stroke-width="2" stroke-linecap="round"/>
+      <path d="M34 195 C69 185 95 199 120 210 M136 210 C160 198 189 185 222 195" fill="none" stroke="#BD854D" stroke-width="1.3" opacity=".85"/><path d="M107 138 C107 103 127 74 150 55 C165 41 181 33 196 29 C190 53 186 65 171 84 C156 105 132 128 107 138 Z" fill="url(#codexia-1024-feather)" stroke="#BD854D" stroke-width="1.35" stroke-linejoin="round"/>
+      <!-- Three swept barbs give the silhouette the distinctive 'writing feather' profile -->
+      <path d="M124 109 C128 86 150 63 176 47 C171 66 154 84 135 96 Z" fill="#FFE6B0" opacity=".92"/>
+      <path d="M133 109 C152 95 174 84 181 73 C178 92 158 109 131 123 Z" fill="#FFE6B0" opacity=".96"/>
+      <path d="M154 68 C168 56 183 47 192 32" fill="none" stroke="#FFF4DC" stroke-width="2.3" stroke-linecap="round" opacity=".75"/>
+      <!-- Quill shaft and nibbled vanes: no fixed-width hairlines in compact masters -->
+      <path d="M107 138 C134 83 168 50 196 29" fill="none" stroke="#6A3F47" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M107 138 C131 97 164 57 193 30" fill="none" stroke="#FFE2A5" stroke-width="1.4" stroke-linecap="round"/>
+      <path d="M140 86 L162 81 M129 101 L150 99 M154 66 L174 62" fill="none" stroke="#6A3F47" stroke-width="2" stroke-linecap="round"/>
+      <path d="M107 138 L98 159" fill="none" stroke="#BD854D" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M107 138 L100 154" fill="none" stroke="#FFE2A5" stroke-width="1.5" stroke-linecap="round"/></g></svg>
