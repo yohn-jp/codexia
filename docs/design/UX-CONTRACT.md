@@ -2,7 +2,7 @@
 
 ## 1. この文書の位置付け
 
-本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。具体的な再設計提案は [情報設計](INFORMATION-ARCHITECTURE.md)、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)、[視覚設計](VISUAL-SYSTEM.md)、[操作・状態・復旧](INTERACTION-CONTRACT.md) を参照する。本書の契約が優先される。
+本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。ビジュアルデザインの方向と合意事項は [app design system](../../app/DESIGN.md) を参照する。具体的な過去の再設計案・比較は [視覚設計の履歴](VISUAL-SYSTEM.md)、情報設計、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)、[操作・状態・復旧](INTERACTION-CONTRACT.md) を参照する。本書のUX・操作・アクセシビリティ契約が優先される。
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 

@@ -1,6 +1,45 @@
 # Codexia — Visual system
 
-## 位置付けと選択した方向
+## 文書の位置付け
+
+本書は既存の視覚設計案、比較、検討履歴を保存する資料であり、現在のビジュアルデザイン正本ではない。現在の正本は [app design system](../../app/DESIGN.md)。UX・操作・アクセシビリティの正本は [UX contract](UX-CONTRACT.md) であり、その契約は維持する。
+
+以下の方向、CSS値、配置例には過去の提案が含まれる。現在の合意と衝突する具体案は採用仕様として扱わず、app design system を優先する。
+
+## オーナー合意の履歴
+
+| 論点 | 現時点の合意 | 未決定 |
+| --- | --- | --- |
+| 基調 | 静かで文学的、明晰。Writing は Quiet Page、構成・調査・レビューでは Folio Atlas の考え方を作業別に取り入れる | 各作業の実画面で必要な面の細部 |
+| Platform | Web/PWA と Capacitor iOS Mobile shell を共通のデザインシステムで扱う | Android 対応はこの合意に含まない |
+| 色 | Desktop 由来のココア／ティール／墨を Desktop・Mobile 共通の方向とし、Light／Dark／Paper を維持。3テーマの共通色tokenを採用。Dark accent は `#7DAF9F` | 背景・surface・状態色を含めた実画面でのコントラスト再計算 |
+| 日本語組版 | UI は和文 sans、原稿は作者が明朝／ゴシックを選択。原稿の基準は16px、行間1.8、最大幅960px | 画面幅に応じた実表示は可読性とともに比較する |
+| 密度 | Writing はQuiet Page。Research／Structure／Review は作業ごとに必要な面を組み合わせ、常時3面を要求しない | 個々の作業での配置・密度 |
+| 面の分離 | 共通余白4／8／12／16／24／32px。背景トーン、境界、ラベル、余白で階層化。影はシート等の浮上面に限定 | 実画面で操作境界が十分に判別できるか確認する |
+| Accessibility | 既存UX contractを変更せず、主要タッチ目標44×44 CSS pxを維持 | なし。既存の適用要件を満たす |
+
+色方向を比較した時点の参照値は以下のとおり。アクセント上の文字コントラストは候補比較用の計算値であり、palette全体のアクセシビリティ検証ではない。
+
+| 比較候補 | Light accent / 文字 | Dark accent / 文字 | Paper accent / 文字 | accent 上の文字コントラスト |
+| --- | --- | --- | --- | --- |
+| Desktop由来：ココア／ティール／墨 | #70452F / #FFFEFA | #4FC3B0 / #08120F | #3D3429 / #FFFFFF | 8.06:1 / 8.85:1 / 12.20:1 |
+| Mobile由来：オリーブ／セージ／石色 | #5B6F56 / #FFFEFA | #A8C39E / #08120F | #695D46 / #FFFFFF | 5.40:1 / 9.93:1 / 6.45:1 |
+
+Mobile由来の補助文字 #72766D と #FBFAF6 は4.44:1。過去の候補比較で、既存の薄い境界色は面に対して約1.3–1.6:1、MobileのLight／Paper選択境界は約2.1:1だった。これらは装飾線と操作・選択状態の境界を分けて評価する必要を示す観察値であり、最終色の決定ではない。
+
+## 第4ラウンドで採用した共通色token
+
+下記の色値はオーナー合意済みであり、Desktop・Mobile 共通の意味tokenとする。計算には現行 Desktop CSS の面色を比較背景として使った。背景色や状態色を変えた場合は、Desktop・Mobileの実際の隣接色でコントラストを再計算する。
+
+| テーマ | 補助文字 | 操作境界 | 選択境界 | focus | 最小コントラスト |
+| --- | --- | --- | --- | --- | --- |
+| Light | #6D675E | #8D8375 | #7F5B3F | #70452F | 文字4.84:1、操作境界3.22:1、選択境界4.22:1、focus5.67:1 |
+| Dark | #93A0AE | #687583 | #7DAF9F | #7DAF9F | 文字6.81:1、操作境界3.85:1、選択境界4.90:1、focus4.90:1 |
+| Paper | #605B53 | #817462 | #75644F | #3D3429 | 文字5.66:1、操作境界3.83:1、選択境界3.88:1、focus8.33:1 |
+
+Light のアクセント／on-accent は #70452F／#FFFEFA（8.06:1）、Dark は #7DAF9F／#08120F（7.71:1）、Paper は #3D3429／#FFFFFF（12.20:1）。Focus の共通形状は3px solid outline、2px offset。装飾的な境界は操作境界と別のtoken役割にする。
+
+## 過去の位置付けと選択肢
 
 [UX contract](UX-CONTRACT.md) を具体化する視覚設計提案。原稿の内容、構成と関連知識が製品の個性を生む。写真、装飾的なグラデーション、ダッシュボード風の均等なカードによる演出を基準にしない。既存テーマと日本語組版を維持する。
 
@@ -12,7 +51,7 @@ Quiet Pageでは、DesktopのWriting初期配置を構成20%・原稿80%とし�
 
 実装した全画面、Before / after、操作・accessibility・persistence・performanceの別評価は[視覚受入記録](../../evidence/ui-redesign-v2/acceptance.md)にまとめた。以前の画面は[Desktop](../../evidence/ui-redesign-v2/before-desktop.png)と[Mobile](../../evidence/ui-redesign-v2/before-mobile.png)、採用後は[Writing](../../evidence/ui-redesign-v2/after-desktop-writing.png)、[Research](../../evidence/ui-redesign-v2/after-desktop-research.png)、[Review](../../evidence/ui-redesign-v2/after-desktop-review.png)、[Mobile Writing](../../evidence/ui-redesign-v2/after-mobile-writing.png)を参照する。MobileのBeforeは同じorigin/mainから390×844 CSS pxで撮影した。
 
-## 基礎トークンの責務
+## 当時の基礎トークン案（検討資料）
 
 既存 `app/styles.css` の `--page-bg`、`--paper`、`--ink`、`--muted`、`--line`、`--accent`、`--focus-ring`、`--surface-selected`、`--error`、`--success`、diff用変数を第一の基準とする。既存のeditorial.css等にある `--st-canvas`、`--st-folio`、`--st-rail` は必要な見た目の役割に対応付け、同じ意味の色を各Shellに重複定義しない。新しいUIライブラリや独立テーマパッケージは要件ではない。
 
