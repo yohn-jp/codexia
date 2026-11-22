@@ -8,6 +8,13 @@
       "skillPath": "skills/chrome-extensions/SKILL.md",
       "computedHash": "802ef1e0135ebd69e0eec533914754ba8ed0f080af86e55400de6e7fb22e6bae"
     },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "commit": "b49177d32788f2dc585c42831d845dacf1ebed2c",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "08bd5bf141cb507f46bd8347890cd985865606f15adf88295ed3a73bc9ad5d96"
+    },
     "modern-web-guidance": {
       "source": "GoogleChrome/modern-web-guidance",
       "commit": "64a6d708f5a43f2cd3fde5d4d7db3905ba1bdf65",
