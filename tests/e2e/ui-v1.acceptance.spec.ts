@@ -118,7 +118,7 @@ test("legacy draft import preserves input after its strict journal write fails",
   // the application confirms the failed durable write; otherwise the pending
   // write succeeds after denyWrites(false), silently removing the source.
   await expect(page.locator("details.pg-legacy-import").getByRole("status"))
-    .toContainText("Browser storage is full");
+    .toContainText("ブラウザーの保存領域がいっぱいです");
   await expectMarkdown(page, original); expect(await sourceExists(page)).toBe(true);
   await denyWrites(page, false);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
@@ -1099,14 +1099,14 @@ test("journal writes do not spam live save status while a server receipt remains
   await editor(page).pressSequentially("abcdefgh", { delay: 140 });
   await expectDeviceDraft(page);
   const summary = page.locator(".pg-save-state summary");
-  await expect(summary).toHaveText("この端末に下書きがあります");
+  await expect(summary).toHaveText("このブラウザーに下書きあり");
   await expect(summary).toHaveAttribute("aria-live", "off");
   expect(await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? [])).toEqual([]);
   await expectServerSaved(page);
   await expect(summary).toHaveAttribute("aria-live", "polite");
   const changes = await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? []);
   expect(changes.length).toBeLessThanOrEqual(3);
-  expect(changes).not.toContain("この端末に下書きがあります");
+  expect(changes).not.toContain("このブラウザーに下書きあり");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   await expect(details.locator("summary")).toHaveText("作品に保存済み");
 });

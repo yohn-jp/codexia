@@ -1147,7 +1147,7 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   await page.getByLabel("アクセス・トークン").fill(authToken);
   await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Browser storage is unavailable");
+  await expect(page.getByRole("alert")).toContainText("ブラウザーの保存領域を利用できません");
   await expect(page.locator(".pg-document-list")).toContainText("Scene One");
   await expect(page.locator(".pg-editor")).toHaveCount(0);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);

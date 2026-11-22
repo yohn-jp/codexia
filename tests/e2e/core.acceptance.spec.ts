@@ -1276,7 +1276,8 @@ test("native publishing uses the external reader origin and preserves proposal, 
   };
   expect(actionBody.ok).toBe(true);
   expect(actionResponse.request().postDataJSON()).toMatchObject({ input: { kind: "scene", id: rootScene.document.id } });
-  await expect(panel).toContainText("発行提案中 作品直下 / 同じタイトル");
+  await expect(panel).toContainText("発行提案中：作品直下 / 同じタイトル");
+  await expect(panel).toContainText("提案作成時点では読者はまだ開けません");
   await expect(panel).toContainText(`提案 ${actionBody.data.proposalId}`);
 
   const issuedUrl = new URL(await panel.locator("code").innerText());
