@@ -102,6 +102,8 @@ test("scene lists exclude native notes while retaining native and mapped scenes"
 test("Story consumes the pinned typed native hierarchy while preserving its file adapter metadata", async () => {
   const metadataPath = "plot/imported/s1.yaml";
   const bodyPath = "documents/11111111-1111-4111-8111-111111111111.md";
+  const missingPath = "documents/00000000-0000-4000-8000-000000000000.md";
+  const locationPath = "bible/locations/cafe.yaml";
   const metadata = { id: "s1", title: "Typed scene", order: "0001", chapter: "c1", volume: "v1", manuscript: bodyPath, importedFields: { translation: "草稿" } };
   const metadataContent = yaml(metadata);
   const nativeScene = {
@@ -111,11 +113,19 @@ test("Story consumes the pinned typed native hierarchy while preserving its file
   const reader: SnapshotReader = {
     snapshot: { projectId: "native-story", projectVersion: 17 },
     nativeStoryDocuments: [nativeScene],
-    async read(path) {
-      if (path === bodyPath) return { content: "Scene body", revision: revision("Scene body"), documentKind: "scene", documentOrder: 2 };
-      return null;
+    async read() { assert.fail("the pinned file selection uses the available batch reader"); },
+    async readMany(paths: readonly string[]) {
+      assert.deepEqual(paths, [locationPath, missingPath, bodyPath]);
+      return [
+        { content: "id: cafe\nname: Café\n", revision: "cafe-revision" },
+        null,
+        { content: "Scene body", revision: revision("Scene body"), documentKind: "scene", documentOrder: 2 },
+      ];
     },
-    async list(prefix) { return prefix === "documents" ? [bodyPath] : []; },
+    async list(prefix) {
+      if (prefix === "documents") return [bodyPath, missingPath];
+      return prefix === "bible" ? [locationPath] : [];
+    },
   };
   const story = await readStorySnapshot(reader);
   assert.equal(story.snapshot, reader.snapshot);
@@ -128,6 +138,8 @@ test("Story consumes the pinned typed native hierarchy while preserving its file
   assert.equal(story.files.get(metadataPath)?.revision, revision(metadataContent));
   assert.equal(story.files.get(metadataPath)?.content, metadataContent, "the adapter retains exact file bytes for existing Story change-set consumers");
   assert.equal(story.files.get(metadataPath)?.documentOrder, 2);
+  assert.deepEqual([...story.files.keys()], [locationPath, bodyPath, metadataPath]);
+  assert.equal(story.files.get(bodyPath)?.revision, revision("Scene body"));
   assert.equal(story.entities.get("doc-ms-11111111-1111-4111-8111-111111111111")?.body, "Scene body");
 });
 

@@ -1,6 +1,6 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import YAML from "yaml";
-import { assertProjectPath, type NativeStoryDocument, type SnapshotReader } from "@codexia/contracts";
+import { assertProjectPath, SNAPSHOT_READ_MANY_LIMIT, type NativeStoryDocument, type SnapshotReader } from "@codexia/contracts";
 import type { StoryEntity, StoryGraphInput, StoryLink } from "./domain/index.js";
 
 const ENTITY_DIRS: ReadonlyArray<[string, StoryEntity["type"]]> = [
@@ -196,10 +196,16 @@ async function readFiles(
   for (const filePath of paths) assertProjectPath(filePath);
 
   const files = new Map<string, StoryFile>();
-  const batchSize = 12;
+  const batchSize = reader.readMany ? SNAPSHOT_READ_MANY_LIMIT : 12;
   for (let offset = 0; offset < paths.length; offset += batchSize) {
     const batch = paths.slice(offset, offset + batchSize);
-    const values = await Promise.all(batch.map(async (filePath) => {
+    const filePaths = batch.filter((filePath) => !nativeByPath.has(filePath));
+    const values = filePaths.length === 0 ? [] : reader.readMany
+      ? await reader.readMany(filePaths)
+      : await Promise.all(filePaths.map((filePath) => reader.read(filePath)));
+    if (values.length !== filePaths.length) throw new TypeError("Snapshot file batch has the wrong length");
+    let valueIndex = 0;
+    for (const filePath of batch) {
       const document = nativeByPath.get(filePath);
       // Existing proposals still use the exact projected bytes and revision.
       const value = document ? {
@@ -207,10 +213,7 @@ async function readFiles(
         revision: document.metadataRevision,
         documentKind: document.kind,
         documentOrder: document.documentOrder,
-      } : await reader.read(filePath);
-      return [filePath, value] as const;
-    }));
-    for (const [filePath, value] of values) {
+      } : values[valueIndex++];
       if (value) files.set(filePath, {
         path: filePath,
         content: value.content,
