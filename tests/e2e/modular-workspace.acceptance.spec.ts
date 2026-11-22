@@ -1020,7 +1020,7 @@ test("editor remains unavailable until delayed browser recovery completes, then 
   await expect(page.locator(".cm-content")).toHaveText(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
   await page.unroute(`**${documentUrl}`);
-  await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
+  await page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/u }).click();
   await expectServerSaved(page);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(draft);
 });
@@ -1077,7 +1077,7 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   await page.getByLabel("アクセス・トークン").fill(authToken);
   await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Browser storage is unavailable");
+  await expect(page.getByRole("alert")).toContainText("ブラウザーの保存領域を利用できません");
   await expect(page.locator(".pg-document-list")).toContainText("Scene One");
   await expect(page.locator(".pg-editor")).toHaveCount(0);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
@@ -1123,7 +1123,7 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   await expect(page.locator(".cm-content")).toHaveText(authorText);
   await expectDraft(page, fixture.scene.document.id, authorText);
   await page.unroute(`**${documentUrl}`);
-  await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
+  await page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/u }).click();
   await expectServerSaved(page);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(authorText);
   expect((await readJournal(page)).some((entry) => entry.documentId === fixture.scene.document.id)).toBe(false);
@@ -1212,9 +1212,18 @@ test("full profile exposes optional lexical search and terminology without chang
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "用語辞典を表示", exact: true }).click();
+  const menuSearch = toolbar.getByRole("searchbox", { name: "パネルを検索" });
+  await menuSearch.fill("用語辞典");
+  await menuSearch.press("Tab");
+  await page.keyboard.press("Enter");
   const termsPanel = page.locator('[data-workspace-panel="module:search.terms"]');
   await expect(termsPanel).toBeVisible();
+  const selectedResearchTab = page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "用語辞典", exact: true });
+  await expect.poll(() => selectedResearchTab.evaluate((element) => {
+    const tab = element.getBoundingClientRect();
+    const parent = element.parentElement!.getBoundingClientRect();
+    return tab.left >= parent.left - 1 && tab.right <= parent.right + 1;
+  })).toBe(true);
   await closePanelMenu(page);
   await expect(termsPanel).toContainText("Lantern Harbor");
   await expect(termsPanel).toContainText("Beacon Quay");
@@ -1375,7 +1384,7 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await sheet.getByRole("tab", { name: "構成" }).press("ArrowRight");
   await expect(sheet.getByRole("tab", { name: "知識・根拠" })).toHaveAttribute("aria-selected", "true");
   await expect(sheet.locator('[data-mobile-reference-panel="inspector"]')).toBeVisible();
-  await expect(page.locator(".pg-save-state summary")).toHaveText(/この端末に下書きがあります|保存中|保存済み|要確認/u);
+  await expect(page.locator(".pg-save-state summary")).toHaveText(/このブラウザーに下書きあり|保存中|作品に保存済み|保存結果を確認できません|この入力はまだ保護されていません/u);
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).not.toBeVisible();

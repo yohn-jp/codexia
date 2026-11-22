@@ -138,7 +138,10 @@ function actionResponse(response: { url(): string; request(): { method(): string
 async function openWorkspaceContributionPanel(page: Page, id: string, title: string): Promise<ReturnType<Page["locator"]>> {
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
-  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: title, exact: true }).click();
+  const menu = toolbar.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("searchbox", { name: "パネルを検索" }).fill(title);
+  await menu.getByRole("button", { name: `${title}を表示`, exact: true }).click();
   const panel = page.locator('[data-workspace-panel="module:' + id + '"]');
   await expect(panel).toBeVisible();
   return panel;

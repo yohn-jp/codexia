@@ -78,6 +78,22 @@
   background: var(--paper);
   box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 16%);
 }
+.st-workspace-panel-menu-search {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.st-workspace-panel-menu-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.3rem;
+  color: var(--ink);
+  background: var(--paper);
+}
 .st-workspace-panel-menu-item {
   display: flex;
   align-items: center;
