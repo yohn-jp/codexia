@@ -8,7 +8,7 @@ import type {
 
 export interface McpActionClient {
   readonly projectId?: string;
-  /** Available on the standalone owner bearer transport; an in-process MCP session is project-bound. */
+  /** Available on the standalone bearer transport; an in-process MCP session is project-bound. */
   listProjectPage?(limit: number, cursor?: string, signal?: AbortSignal): Promise<ProjectInfoPage>;
   listActions(signal?: AbortSignal): Promise<ActionDescriptor[]>;
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
@@ -74,7 +74,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Bearer client used by the compiled stdio entry. It only calls the owner API. */
+/** Bearer client for the compiled stdio entry. The API enforces its scopes and project assignments. */
 export class ApiClient implements McpActionClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
