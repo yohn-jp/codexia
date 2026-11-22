@@ -9,11 +9,16 @@ export type NativeAuthConfig = {
   scopes: readonly string[];
 };
 
+export type NativeSignOutResult = {
+  localCredentialsCleared: boolean;
+  revoked: boolean;
+};
+
 export function createNativeApiTransport(apiOrigin: string): (requestUrl: string, init?: RequestInit) => Promise<Response>;
 
 export function createNativeAuth(config: NativeAuthConfig): {
   signIn(): Promise<string>;
   accessTokenFor(requestUrl: string): Promise<string>;
   fetchRequest(requestUrl: string, init?: RequestInit): Promise<Response>;
-  signOut(): Promise<{ revoked: boolean }>;
+  signOut(): Promise<NativeSignOutResult>;
 };

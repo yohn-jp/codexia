@@ -31,6 +31,6 @@ applyThemeMode(theme);
 installNativeSelectCspCompatibility(document);
 const nativeAuth = nativeAuthClient ? {
   signIn: async () => { await nativeAuthClient.signIn(); },
-  signOut: async () => { await nativeAuthClient.signOut(); },
+  signOut: async () => nativeAuthClient.signOut(),
 } : null;
 createRoot(root).render(<BrowserRouter><PersistenceEntry mode="mobile" nativeAuth={nativeAuth} /></BrowserRouter>);
