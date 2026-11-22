@@ -2654,7 +2654,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <details className="pg-save-state" data-state={desktopDurabilityFor(active)}>
               <summary aria-live={active.error || active.remoteConflict || active.recovery === "failed" || active.recovery === "other-tab"
                 ? "off"
-                : active.save === "saving" || (active.save === "saved" && !active.dirty && active.recovery === "stored") ? "polite" : "off"}>
+                : active.save === "saved" && !active.dirty && active.recovery === "stored" ? "polite" : "off"}>
                 {saveProtectionLabel(active, Boolean(pendingSaveForDisplay))}
                 {evidencePendingForActive && <span role="status" className="pg-evidence-pending"> · 根拠を確認中</span>}
               </summary>

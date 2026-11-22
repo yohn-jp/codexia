@@ -1140,6 +1140,7 @@ test("save details keep the confirmed work version separate from later device in
 
     await expect(details).toContainText("現在の編集をこのブラウザーに記録しました");
     await expect(details).toContainText("送信後の入力は今回の保存に含まれません");
+    await expect(details.locator("summary")).toHaveAttribute("aria-live", "off");
     await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial);
 
     releaseFirst();
