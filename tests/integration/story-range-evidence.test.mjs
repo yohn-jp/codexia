@@ -442,35 +442,34 @@ test("Story hierarchy and reader disclosures follow PostgreSQL ordering on each 
     assert.ok(!selected.disclosures.some((item) => item.entityId === "char-cinder"), "later chapter disclosures stay beyond the selected chapter boundary");
     assert.equal(selected.firstReadReaction, null);
 
-    const reorderedIds = initial.tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
+    const selectedSceneIds = (tree) => tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
       .chapters.find(({ chapter }) => chapter.id === logicalIds.chapterSelected)
-      .scenes.map((scene) => scene.id).reverse();
-    const { snapshot, operation } = await core.buildReorderHierarchyOperation(project.id, {
+      .scenes.map((scene) => scene.id);
+    const originalIds = [logicalIds.sceneEarly, logicalIds.sceneShort, logicalIds.sceneTieCanonicalFirst, logicalIds.sceneTieCanonicalSecond];
+    const reorderedIds = [logicalIds.sceneTieCanonicalSecond, logicalIds.sceneTieCanonicalFirst, logicalIds.sceneShort, logicalIds.sceneEarly];
+    assert.deepEqual(selectedSceneIds(initial.tree), originalIds);
+    const { changeSet } = await core.proposeHierarchyReorder(project.id, {
       kind: "scene",
       volumeId: logicalIds.volumeLong,
       chapterId: logicalIds.chapterSelected,
       orderedIds: reorderedIds,
-    }, initialReader.snapshot);
-    assert.deepEqual(snapshot, initialReader.snapshot);
-    const proposal = await core.propose(project.id, {
-      id: randomUUID(),
-      snapshot,
-      operations: [operation],
-      source: "author",
+    }, {
+      projectVersion: initialReader.snapshot.projectVersion,
+      actorId: "story-order-owner",
+      idempotencyKey: randomUUID(),
     });
+    assert.equal(changeSet.status, "proposed");
     assert.deepEqual((await core.observe(project.id)).snapshot, initialReader.snapshot);
-    await core.approve(project.id, {
-      proposalId: proposal.id,
-      operationIds: [operation.id],
-      authorScope: "story-order-owner",
-    });
-    await core.apply(project.id, operation);
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "story-order-owner",
+    }));
+    await persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: approved.version,
+    }));
 
     const afterReader = await core.reader(project.id);
     const after = await assertStoryMatchesPostgres(afterReader);
-    assert.deepEqual(after.tree.find(({ volume }) => volume.id === logicalIds.volumeLong)
-      .chapters.find(({ chapter }) => chapter.id === logicalIds.chapterSelected)
-      .scenes.map((scene) => scene.id), reorderedIds);
+    assert.deepEqual(selectedSceneIds(after.tree), reorderedIds);
     const afterSelected = (await invoke("story.reader-model.build", { chapterId: logicalIds.chapterSelected }, afterReader)).data;
     assert.equal(afterSelected.disclosures.find((item) => item.entityId === "char-aster")?.sceneId, logicalIds.sceneTieCanonicalSecond);
     assert.ok(!afterSelected.disclosures.some((item) => item.entityId === "char-cinder"), "post-reorder reader disclosures remain inside the selected chapter boundary");
