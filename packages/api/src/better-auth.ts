@@ -576,12 +576,12 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         // Recovery revokes all OAuth grants for this owner, including those rows, before deleting sessions.
         accessGrantsRevoked = await adapter.updateMany({
           model: "oauthAccessToken",
-          where: [{ field: "userId", value: ownerId }],
+          where: [{ field: "userId", value: ownerId }, { field: "revoked", value: null }],
           update: { revoked: now },
         });
         refreshGrantsRevoked = await adapter.updateMany({
           model: "oauthRefreshToken",
-          where: [{ field: "userId", value: ownerId }],
+          where: [{ field: "userId", value: ownerId }, { field: "revoked", value: null }],
           update: { revoked: now },
         });
         sessionsRevoked = await adapter.count({
