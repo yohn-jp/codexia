@@ -20,3 +20,26 @@ For a replacement or deletion, record the old assertion and the surviving contra
 - [PR #616](https://github.com/yohn-jp/codexia/pull/616) at `8520b6e56e92731af5a1d22a7a5fe57453af0f49` covers persistence save and replay gates, and fixes the cancellation race between durable binding and a remote save. The affected test is annotated. [Certification](https://github.com/yohn-jp/codexia/actions/runs/45029086752/job/137229754652)
 
 Both PRs were open at inventory time. Reuse their evidence and validate the integrated source before closing the associated rows.
+
+## Result ledgers and final reconciliation
+
+The TSVs in this directory record the original inventory and its ownership. The completed domain records are committed in `evidence/test-audit-615/*.tsv` on the audit result branches and gathered on the integration branch. Resolve each baseline path to one final authoritative row. When a follow-up supersedes a decision, record its source and reason and use that row for the final count. In particular, the follow-up to #614 owns the final disposition of `packages/contracts/src/index.test.ts`.
+
+Reconcile against the exact integration commit. Re-enumerate tracked test names and test-only support from the final test runners and workflows using the inventory method above. Name matching alone omits helpers, fixtures, snapshots and CI verification scripts. Compare the old and final trees to find paths added, renamed or removed during the audit.
+
+```sh
+baseline=52cd5f6b21fdb2114a43d9bff482b7eca889c5d5
+final=$(git rev-parse HEAD)
+git diff --name-status --find-renames "$baseline" "$final"
+git ls-tree -r --name-only "$final" | rg '\.(test|spec|acceptance)\.'
+```
+
+Use the TSV header to read each record's `path`, `decision`, evidence commit (`commit_sha` or `evidence_sha`) and verification result (`action_and_verification` or `result`). For the final comparison, build three path sets from the original inventory, the final tree's re-enumerated verification assets and the authoritative result rows.
+
+- Every baseline path must have a result row with a completed disposition. Report missing and ambiguous rows and any records still marked unassessed. Count each baseline path once.
+- Record new verification assets with result rows and report their count separately. Investigate any result path absent from the original inventory and final verification assets.
+- For an absent baseline path, verify `MERGE`, `DELETE` or a recorded rename in the Git diff. Resolve a rename to its final path. Where a contract survived removal, check the replacement path and counterexample evidence. Keep the removed path in the baseline count.
+- Resolve each evidence SHA with `git cat-file -e "$sha^{commit}"` after fetching its branch or PR ref if needed. Compare the tested change with the integrated diff and check that the recorded verification applies. A source SHA can differ after integration. The final required CI must validate the exact integration commit.
+- Check the results and artifacts for the final commit against [issue #615](https://github.com/yohn-jp/codexia/issues/615). Keep optional historical or environment-dependent probes marked unexecuted when their required inputs were unavailable. A pending or skipped required check does not establish success.
+
+The reconciliation is complete only after the final inventory, authoritative rows, retained contracts and exact-head CI agree.
