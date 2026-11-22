@@ -612,6 +612,7 @@ test("native manuscript restore requires approval, appends an attributed revisio
   }));
   const original = await createScene("Original manuscript");
   const other = await createScene("A different manuscript");
+  const olderSnapshot = (await core.reader(p.id)).snapshot;
   const documentId = original.document.id;
   const save = (baseRevisionId: typeof original.revision.id, prior: string, markdown: string) =>
     persistence.transaction(tx => tx.saveDocument({
@@ -621,7 +622,9 @@ test("native manuscript restore requires approval, appends an attributed revisio
     }));
   const current = await save(original.revision.id, originalText, currentText);
   const input = { documentId, baseRevisionId: current.revision.id, sourceRevisionId: original.revision.id };
-  const options = { actorId: "external-proposer", idempotencyKey: randomUUID(), origin: "external-agent" } as const;
+  const options = { actorId: "external-proposer", idempotencyKey: randomUUID(), origin: "external-agent",
+    snapshot: (await core.reader(p.id)).snapshot } as const;
+  await assert.rejects(() => core.proposeManuscriptRestore(p.id, input, { ...options, snapshot: olderSnapshot }), { code: "revision_conflict" });
   await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, sourceRevisionId: other.revision.id }, options), { code: "revision_not_found" });
   await assert.rejects(() => core.proposeManuscriptRestore(p.id, { ...input, baseRevisionId: original.revision.id }, options), { code: "revision_conflict" });
   assert.deepEqual(await persistence.read(reader => reader.listChangeSets(p.id)), []);
@@ -655,7 +658,7 @@ test("native manuscript restore requires approval, appends an attributed revisio
 
   const { changeSet: stale } = await core.proposeManuscriptRestore(p.id, {
     ...input, baseRevisionId: restored.revision.id, sourceRevisionId: current.revision.id,
-  }, { ...options, idempotencyKey: randomUUID() });
+  }, { ...options, snapshot: undefined, idempotencyKey: randomUUID() });
   const approvedStale = await approve(stale);
   const intervening = await save(restored.revision.id, originalText, "Intervening editor save");
   await assert.rejects(() => apply(approvedStale), (error: unknown) => error instanceof PersistenceError && error.code === "conflict" &&

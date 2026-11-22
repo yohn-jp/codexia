@@ -132,6 +132,7 @@ export interface ProposeManuscriptRestoreOptions {
   actorId: string;
   idempotencyKey: string;
   origin?: "author" | "external-agent";
+  snapshot?: SnapshotId;
 }
 
 export interface BuiltChangeOperation {
@@ -1225,7 +1226,8 @@ export class CoreStore implements MutationCoordinator {
   async proposeManuscriptRestore(project: string, input: ProposeManuscriptRestoreInput, options: ProposeManuscriptRestoreOptions): Promise<ChangeSetResult> {
     const projectId = pid(project);
     const { documentId, baseRevisionId, sourceRevisionId } = input;
-    const { actorId, idempotencyKey, origin = "author" } = options;
+    const { actorId, idempotencyKey, origin = "author", snapshot } = options;
+    if (snapshot && snapshot.projectId !== projectId) fail(409, "snapshot_scope_mismatch", "Snapshot belongs to another project");
     return this.persistence.transaction(async tx => {
       const proposal = await tx.createChangeSet({
         projectId, authorId: actorId, idempotencyKey,
@@ -1235,11 +1237,21 @@ export class CoreStore implements MutationCoordinator {
         } }],
         readSet: [], // The restore command binds the exact head revision at application.
         writeSet: [{ resource: "document", id: documentId }],
-        provenance: { source: "native-manuscript-restore", actorId, details: { origin } },
+        provenance: { source: "native-manuscript-restore", actorId, details: {
+          origin, ...(snapshot && { projectVersion: snapshot.projectVersion }),
+        } },
       });
       // createChangeSet holds the project lock. Validate only fresh proposals,
       // and roll back their registration if the observed ancestry has changed.
       if (proposal.replayed) return proposal;
+      if (snapshot && (await tx.getProject(projectId))?.version !== snapshot.projectVersion) {
+        const saved = await tx.getModuleRecord(projectId, SNAPSHOTS, `snapshot:${snapshot.projectVersion}`);
+        if (!saved) fail(409, "snapshot_unavailable", "The requested immutable project snapshot is unavailable");
+        const manifest = storedManifest(saved.value, projectId, snapshot.projectVersion);
+        const observed = manifest.documents.find(document => document.id === documentId);
+        if (!observed) fail(404, "scene_not_found", "Manuscript document not found in the selected snapshot");
+        if (observed.headRevisionId !== baseRevisionId) fail(409, "revision_conflict", "Restore base does not belong to the selected snapshot");
+      }
       const document = await tx.getDocument(projectId, documentId);
       if (!document || document.kind === "volume" || document.kind === "chapter") {
         fail(404, "scene_not_found", "Manuscript document not found");
