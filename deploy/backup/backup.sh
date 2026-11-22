@@ -18,8 +18,13 @@ verify_lock_descriptor(){
   flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not own the maintenance lock'
 }
 backup_directory(){
+  local access="${2:-write}"
   [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute backup directory without symlinks'
-  [[ -w "$1" ]] || die 'Backup destination is not writable'
+  case "$access" in
+    write) [[ -w "$1" ]] || die 'Backup destination is not writable';;
+    read) [[ -r "$1" && -x "$1" ]] || die 'Backup artifact directory is not readable';;
+    *) die 'Unknown backup directory access mode';;
+  esac
   local fstype mount_source remote_host local_addresses remote_addresses address
   fstype="$(findmnt -T "$1" -n -o FSTYPE)"
   case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) return 0;; esac
@@ -59,7 +64,7 @@ backup_directory(){
 # Identify the exact ciphertext set without interpreting filenames from the manifest.
 validate_artifact(){
   local dir="$1" file
-  backup_directory "$dir"
+  backup_directory "$dir" read
   for file in database.dump.age history.tar.age manifest.age SHA256SUMS; do
     [[ -f "$dir/$file" && ! -L "$dir/$file" ]] || die 'Backup artifact contains a missing or unsafe file'
   done
@@ -178,7 +183,7 @@ case "${1:-}" in
     ;;
   drill)
     [[ $# == 4 && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved'
-    backup_directory "$2"
+    backup_directory "$2" read
     identity_mode="$(stat -Lc '%a' -- "$3")"
     identity_owner="$(stat -Lc '%u' -- "$3")"
     [[ "$identity_mode" == 400 || "$identity_mode" == 600 ]] || die 'Recovery identity must be mode 0400 or 0600'
