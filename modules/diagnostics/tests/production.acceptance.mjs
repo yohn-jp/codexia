@@ -564,3 +564,109 @@ test("P06 public actions apply and recover durable PostgreSQL project changes", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("native PostgreSQL scene body diagnostics and revision-bound proposals", { timeout: 120_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codexia-native-diagnostics-"));
+  let fixture;
+  let runtime;
+  try {
+    fixture = await postgresFixture(syntheticFiles(), "Native Diagnostics Work");
+    const { store, project } = fixture;
+    const volumeId = randomUUID();
+    const chapterId = randomUUID();
+    const sceneId = randomUUID();
+    const noteId = randomUUID();
+    const foreignProject = await store.createProject({ title: "Foreign Diagnostics Work" });
+    const foreignDocumentId = randomUUID();
+    const nativeScenePath = `documents/${sceneId}.md`;
+    const nativeNotePath = `documents/${noteId}.md`;
+    const foreignPath = `documents/${foreignDocumentId}.md`;
+    const originalBody = "星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
+    const noteBody = "Do not edit this note…";
+    const authorId = "native-diagnostics-fixture";
+    await fixture.persistence.transaction(async (transaction) => {
+      await transaction.createDocument({
+        projectId: project.id, documentId: volumeId, kind: "volume", title: "Native volume", orderKey: "0001",
+        markdown: "", authorId, idempotencyKey: `native-diagnostics-volume-${volumeId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: chapterId, parentId: volumeId, kind: "chapter", title: "Native chapter", orderKey: "0001",
+        markdown: "", authorId, idempotencyKey: `native-diagnostics-chapter-${chapterId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: sceneId, parentId: chapterId, kind: "scene", title: "Native scene", orderKey: "0001",
+        markdown: originalBody, authorId, idempotencyKey: `native-diagnostics-scene-${sceneId}`,
+      });
+      await transaction.createDocument({
+        projectId: project.id, documentId: noteId, kind: "note", title: "Unrelated note", orderKey: "0001",
+        markdown: noteBody, authorId, idempotencyKey: `native-diagnostics-note-${noteId}`,
+      });
+      await transaction.createDocument({
+        projectId: foreignProject.id, documentId: foreignDocumentId, kind: "scene", title: "Foreign scene", orderKey: "0001",
+        markdown: "foreign scene text…", authorId, idempotencyKey: `native-diagnostics-foreign-${foreignDocumentId}`,
+      });
+    });
+
+    const reader = await currentReader(store, project.id);
+    let host = actionHost(store, project.id, reader);
+    runtime = await createRuntime(join(root, "runtime-cache"));
+    const nativeFile = await reader.read(nativeScenePath);
+    assert.equal(nativeFile?.documentKind, "scene");
+    assert.equal(await reader.read(foreignPath), null, "a PostgreSQL document from another project is absent from the selected snapshot");
+
+    const fullResult = await runtime.invokeAction("diagnostics", "diagnostics.scene", { sceneId }, host);
+    const full = actionData(fullResult, "diagnostics.scene saved native body", reader);
+    assert.equal(full.analysis.charCount, originalBody.length);
+    assert.equal(full.textHash, fnv1aHash(originalBody));
+
+    const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: nativeScenePath, baseRevision: nativeFile.revision, operationId: "native-pg-lint-fix",
+    }, host);
+    const lint = actionData(lintResult, "diagnostics.proposeLintFix native body", reader);
+    const lintProposal = proposalFor(lintResult, "diagnostics.proposeLintFix native body");
+    assert.equal(lint.fixed, true);
+    assert.equal(lintProposal.operations[0].reads[0].revision, nativeFile.revision);
+    assert.equal(lintProposal.operations[0].writes[0].path, nativeScenePath);
+    assert.equal((await store.listProposals(project.id)).find((item) => item.proposal.id === lintProposal.id)?.state, "proposed");
+    assert.equal((await currentReader(store, project.id)).snapshot.projectVersion, reader.snapshot.projectVersion,
+      "an unapproved native lint proposal does not advance the PostgreSQL project version");
+    assert.equal((await reader.read(nativeScenePath)).content, originalBody);
+    assert.equal((await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", { path: nativeNotePath }, host)).ok, false);
+    const foreignLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", { path: foreignPath }, host);
+    assert.equal(foreignLint.ok, false, "a foreign-project document cannot be resolved through this project action context");
+
+    await approveAndApply(store, project.id, lintProposal);
+    let appliedReader = await currentReader(store, project.id);
+    host = actionHost(store, project.id, appliedReader);
+    assert.notEqual((await appliedReader.read(nativeScenePath)).revision, nativeFile.revision);
+    const staleLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: nativeScenePath, baseRevision: nativeFile.revision,
+    }, host);
+    assert.equal(staleLint.ok, false);
+    if (!staleLint.ok) assert.equal(staleLint.error.code, "revision_conflict");
+
+    const storyContext = actionData(await runtime.invokeAction("story", "story.scene.context", { sceneId }, host), "story.scene.context native body", appliedReader);
+    const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId }, host);
+    const formatted = actionData(formatResult, "diagnostics.formatManuscript native body", appliedReader);
+    assert.equal(formatted.formattedText, "星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    const formatProposal = proposalFor(formatResult, "diagnostics.formatManuscript native body");
+    assert.equal(formatProposal.operations[0].reads[0].revision, (await appliedReader.read(nativeScenePath)).revision);
+    assert.equal(formatProposal.operations[0].writes[0].path, nativeScenePath);
+    assert.equal(formatted.sourceProposal.operations[0].target.manuscriptId, storyContext.manuscript.id);
+    assert.equal(formatted.sourceProposal.operations[0].precondition.value, storyContext.manuscriptRevision);
+    assert.equal((await store.listProposals(project.id)).find((item) => item.proposal.id === formatProposal.id)?.state, "proposed");
+    assert.equal((await currentReader(store, project.id)).snapshot.projectVersion, appliedReader.snapshot.projectVersion,
+      "an unapproved native format proposal does not advance the PostgreSQL project version");
+    assert.equal((await appliedReader.read(nativeScenePath)).content, "星野は夜明けを待った……。\n\n\t「もう大丈夫だ。」");
+
+    await approveAndApply(store, project.id, formatProposal);
+    appliedReader = await currentReader(store, project.id);
+    assert.equal((await appliedReader.read(nativeScenePath)).content, formatted.formattedText);
+    assert.equal((await appliedReader.read(nativeNotePath)).content, noteBody);
+    t.diagnostic("Verified saved native-scene diagnostics, scene-only revision-bound proposals, note/foreign-project rejection, stale-revision protection, and PostgreSQL application after approval.");
+  } finally {
+    await runtime?.shutdown().catch(() => undefined);
+    await fixture?.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});

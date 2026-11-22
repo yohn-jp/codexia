@@ -176,7 +176,7 @@ function makeReader(manifest: Manifest): SnapshotReader {
   return { snapshot: structuredClone(manifest.snapshot),
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
       const bytes = Buffer.from(file.content, file.encoding);
-      const documentKind = file.metadata && file.documentId ? documentKinds.get(file.documentId) : undefined;
+      const documentKind = file.documentId ? documentKinds.get(file.documentId) : undefined;
       return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {})}; },
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }

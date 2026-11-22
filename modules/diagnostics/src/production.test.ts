@@ -23,7 +23,7 @@ function moduleContext(): ModuleContext {
   };
 }
 
-const initialFiles = new Map<string, { content: string; revision: string }>([
+const initialFiles = new Map<string, { content: string; revision: string; documentKind?: string }>([
   ["bible/characters/hero/profile.yaml", { content: "id: char-hero\nname: 星野\naliases:\n  - 星の剣士\nnotes: 星の剣士は古い遺跡を調べる。\n", revision: "hero-r1" }],
   ["plot/volumes/v1/scenes/scene-1.yaml", { content: "id: scene-1\ntype: scene\nname: 遺跡\nintended_tone: suspense\ngoal: 鍵を見つけて扉を開ける\nconflict: 黒い霧が道を塞ぐ\nmanuscript: manuscript/v1/scene-1.md\n", revision: "scene-r1" }],
   ["manuscript/v1/scene-1.md", { content: "---\ntitle: 遺跡\n---\n「……」\n星野は古い遺跡へ走った。黒い霧が道を塞ぐ。\n", revision: "manuscript-r1" }],
@@ -32,7 +32,7 @@ const initialFiles = new Map<string, { content: string; revision: string }>([
   ["meta/scriptorium/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
 ]);
 
-async function createRuntime(files: Map<string, { content: string; revision: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
+async function createRuntime(files: Map<string, { content: string; revision: string; documentKind?: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
   const stub = moduleContext();
   const nlpDefinition = await createNlpModule(stub);
   const diagnosticsDefinition = await createDiagnosticsModule(stub);
@@ -180,6 +180,89 @@ test("source manuscript formatter proposes a frontmatter-preserving edit without
       assert.equal(noChange.proposal, null);
     }
     assert.equal(proposals.length, 1, "already formatted text produces no empty proposal");
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test("native scene body formatting and lint fixes are revision-bound proposals and reject unlinked documents", async () => {
+  const files = new Map(initialFiles);
+  const nativeDocumentId = "123e4567-e89b-42d3-a456-426614174000";
+  const nativePath = `documents/${nativeDocumentId}.md`;
+  const nativeSceneId = "scene-native";
+  const original = "星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
+  files.set("plot/volumes/v1/scenes/scene-native.yaml", {
+    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
+  });
+  files.set(nativePath, { content: original, revision: "native-body-r1", documentKind: "scene" });
+  files.set("documents/123e4567-e89b-42d3-a456-426614174001.md", {
+    content: "note …", revision: "native-note-r1", documentKind: "note",
+  });
+  files.set("documents/123e4567-e89b-42d3-a456-426614174002.md", {
+    content: "unlinked scene …", revision: "native-unlinked-r1", documentKind: "scene",
+  });
+  files.set("plot/volumes/v1/scenes/scene-note.yaml", {
+    content: "id: scene-note\ntype: scene\nname: Note\nmanuscript: manuscript/v1/scene-note.md\n", revision: "scene-note-r1", documentKind: "scene",
+  });
+  files.set("manuscript/v1/scene-note.md", { content: "note body …", revision: "legacy-note-r1", documentKind: "note" });
+  files.set("meta/scriptorium/modules/diagnostics/lint-rules.yaml", {
+    content: `rules:
+  - id: ellipsis-single-piece
+    kind: regex_sequence
+    pattern: '(?<!…)…(?!…)'
+    flags: u
+    replacement: ……
+    message: ellipsis
+`,
+    revision: "lint-rules-r1",
+  });
+  const proposals: ChangeProposal[] = [];
+  const { runtime, host } = await createRuntime(files, proposals);
+  try {
+    const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: nativePath, baseRevision: "native-body-r1", operationId: "native-lint-fix",
+    }, host);
+    assert.equal(lintResult.ok, true, JSON.stringify(lintResult));
+    assert.deepEqual(lintResult.snapshot, snapshot);
+    if (!lintResult.ok) return;
+    const lintProposal = lintResult.proposals?.[0];
+    assert.ok(lintProposal, "native lint fix returns a Core proposal");
+    assert.deepEqual(lintProposal.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
+    assert.deepEqual(lintProposal.operations[0]?.writes.map(({ path }) => path), [nativePath]);
+    assert.equal(files.get(nativePath)?.content, original, "lint proposals do not change the selected snapshot");
+
+    const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId: nativeSceneId }, host);
+    assert.equal(formatResult.ok, true, JSON.stringify(formatResult));
+    if (!formatResult.ok) return;
+    const formatData = formatResult.data as {
+      formattedText: string;
+      proposal: ChangeProposal | null;
+      sourceProposal: {
+        operations: Array<{ target: { manuscriptId: string; sceneId: string }; precondition: { value: string } }>;
+        evidence: Array<{ revision: string }>;
+      } | null;
+    };
+    assert.equal(formatData.formattedText, "星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    assert.deepEqual(formatData.proposal?.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
+    assert.equal(formatData.proposal?.operations[0]?.writes[0]?.path, nativePath);
+    assert.equal(formatData.sourceProposal?.operations[0]?.target.manuscriptId, `doc-ms-${nativeDocumentId}`);
+    assert.equal(formatData.sourceProposal?.operations[0]?.target.sceneId, nativeSceneId);
+    assert.equal(formatData.sourceProposal?.operations[0]?.precondition.value, formatData.sourceProposal?.evidence[0]?.revision);
+    assert.equal(files.get(nativePath)?.content, original, "format proposals do not change the selected snapshot");
+
+    const noteResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: "documents/123e4567-e89b-42d3-a456-426614174001.md",
+    }, host);
+    assert.equal(noteResult.ok, false, "native note documents are not lint-fix targets");
+    const unlinkedResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: "documents/123e4567-e89b-42d3-a456-426614174002.md",
+    }, host);
+    assert.equal(unlinkedResult.ok, false, "a native document without a canonical scene link is not a lint-fix target");
+    const mappedNoteResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: "manuscript/v1/scene-note.md",
+    }, host);
+    assert.equal(mappedNoteResult.ok, false, "legacy project-path mappings retain the canonical note kind check");
+    assert.equal(proposals.length, 2, "only the canonical scene body receives proposals");
   } finally {
     await runtime.shutdown();
   }
