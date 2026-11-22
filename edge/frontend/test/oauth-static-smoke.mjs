@@ -76,7 +76,7 @@ try {
     const errors=[];
     const authorizationRequests=[];
     page.on('pageerror',error=>errors.push(error.message));
-    await page.route('**/api/version',route=>route.fulfill({
+    await page.route('**/api/browser/version',route=>route.fulfill({
       status:200,
       contentType:'application/json',
       body:JSON.stringify({name:'codexia',version:'0.1.0',profile:'full',hosted:false}),

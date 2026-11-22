@@ -2344,7 +2344,13 @@ describe("Codexia HTTP boundary", () => {
       });
     const valid = token();
     const browser = { "Cf-Access-Jwt-Assertion": valid };
-    assert.equal((await send("/api/version").then(r => r.json()) as { browserAuth: string }).browserAuth, "cloudflare-access");
+    const releaseVersion = await send("/api/version");
+    const browserVersion = await send("/api/browser/version");
+    assert.equal(releaseVersion.status, 200);
+    assert.equal(browserVersion.status, 200);
+    const identity = await releaseVersion.json() as { browserAuth: string };
+    assert.equal(identity.browserAuth, "cloudflare-access");
+    assert.deepEqual(await browserVersion.json(), identity);
     const session = await send("/api/session", browser);
     assert.equal(session.status, 200);
     assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });

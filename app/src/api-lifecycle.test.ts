@@ -73,7 +73,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     const rejectedJobStreamFetch = new Promise<Response>((_resolve, reject) => { rejectJobStreamFetch = reject; });
     globalThis.fetch = async (input, init) => {
       requests.push({ input: String(input), keepalive: init?.keepalive === true });
-      if (String(input) === "/api/version") {
+      if (String(input) === "/api/browser/version") {
         return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
       }
       if (String(input) === "/api/v1/persistence/projects?limit=100" && holdInitialProject) {

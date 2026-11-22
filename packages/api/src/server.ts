@@ -266,6 +266,7 @@ function sameOrigin(request: IncomingMessage, trustProxy: boolean): boolean {
 }
 
 const CORS_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+const VERSION_PATHS = ["/api/version", "/api/browser/version"];
 const CORS_HEADERS = new Map([
   ["authorization", "Authorization"], ["content-type", "Content-Type"],
   ["idempotency-key", "Idempotency-Key"], ["x-client-id", "X-Client-Id"],
@@ -1599,7 +1600,7 @@ export function createServer(options: ApiServerOptions): Server {
     const method = request.method ?? "GET";
     const query = queryOf(request);
     const isRead = method === "GET" || method === "HEAD";
-    const publicRead = isRead && ["/api/health", "/api/ready", "/api/version", "/health/live", "/health/ready", "/health/startup"].includes(routePath);
+    const publicRead = isRead && (VERSION_PATHS.includes(routePath) || ["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup"].includes(routePath));
     const publicModuleRoute = !hosted && routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
     const originHeader = request.headers.origin;
     const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
@@ -1765,7 +1766,7 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, 200, { authenticated: true });
       return;
     }
-    if (routePath === "/api/version" && isRead) {
+    if (isRead && VERSION_PATHS.includes(routePath)) {
       sendJson(response, 200, {
         name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
         ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
@@ -1941,7 +1942,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (hasAuth && hosted && routePath.startsWith("/api/") &&
-        !["/api/health", "/api/ready", "/api/version", RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH].includes(routePath) &&
+        !["/api/health", "/api/ready", ...VERSION_PATHS, RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH].includes(routePath) &&
         ((method !== "GET" && method !== "HEAD" && method !== "OPTIONS") || routePath.endsWith("/recent-activity"))) {
       lastMeaningfulActivityAt = new Date().toISOString();
     }
@@ -2496,7 +2497,7 @@ export function createServer(options: ApiServerOptions): Server {
     const method = request.raw.method ?? "GET";
     const isNonActivityRoute = [
       RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH,
-      "/api/health", "/api/ready", "/api/version",
+      "/api/health", "/api/ready", ...VERSION_PATHS,
     ].includes(routePath);
     const trackedApiRequest = routePath.startsWith("/api/") && !isNonActivityRoute;
     const isMcpRequest = trackedApiRequest && typeof request.raw.headers.authorization === "string" && request.raw.headers.authorization.startsWith("Bearer ");
