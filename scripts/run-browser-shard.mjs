@@ -4,6 +4,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBrowserTestArguments, resolveBrowserShard } from "./browser-shards.mjs";
+import { withBrowserFixture } from "./ci-browser-fixture.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
@@ -11,11 +12,17 @@ function parseArguments(args) {
   let profile;
   let suite;
   let prebuilt = false;
+  let ciFixture = false;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--prebuilt") {
       if (prebuilt) throw new Error("--prebuilt may only be specified once");
       prebuilt = true;
+      continue;
+    }
+    if (flag === "--ci-fixture") {
+      if (ciFixture) throw new Error("--ci-fixture may only be specified once");
+      ciFixture = true;
       continue;
     }
     if (flag !== "--profile" && flag !== "--suite") throw new Error(`Unknown browser shard argument: ${flag}`);
@@ -30,8 +37,8 @@ function parseArguments(args) {
     }
     index += 1;
   }
-  if (!profile || !suite) throw new Error("Usage: node scripts/run-browser-shard.mjs --profile <core|full> --suite <browser-shard> [--prebuilt]");
-  return { profile, suite, prebuilt };
+  if (!profile || !suite) throw new Error("Usage: node scripts/run-browser-shard.mjs --profile <core|full> --suite <browser-shard> [--prebuilt] [--ci-fixture]");
+  return { profile, suite, prebuilt, ciFixture };
 }
 
 function run(command, args, env) {
@@ -41,9 +48,8 @@ function run(command, args, env) {
   return result.status ?? 1;
 }
 
-async function main() {
-  const { profile, suite, prebuilt } = parseArguments(process.argv.slice(2));
-  const shard = resolveBrowserShard(profile, suite);
+async function runShard(shard, prebuilt, fixtureSettings = {}) {
+  const { profile } = shard;
   const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR
     ? path.resolve(process.env.CODEXIA_CI_REPORT_DIR)
     : path.resolve(root, "tests/e2e/test-results");
@@ -53,6 +59,7 @@ async function main() {
 
   const env = {
     ...process.env,
+    ...fixtureSettings,
     CODEXIA_PROFILE: profile,
     CODEXIA_E2E_PROFILE: profile,
     CODEXIA_E2E_SHARD: shard.id,
@@ -99,6 +106,13 @@ async function main() {
   }
   if (report.outcome !== "PASS" || report.failed !== 0 || report.notRun !== 0) return testStatus || 1;
   return testStatus;
+}
+
+async function main() {
+  const { profile, suite, prebuilt, ciFixture } = parseArguments(process.argv.slice(2));
+  const shard = resolveBrowserShard(profile, suite);
+  if (ciFixture) return withBrowserFixture(`browser-${profile}-${shard.id}`, 0, (settings) => runShard(shard, prebuilt, settings));
+  return runShard(shard, prebuilt);
 }
 
 try {

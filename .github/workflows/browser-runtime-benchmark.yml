@@ -55,7 +55,7 @@ jobs:
       - name: Build matching Core application
         run: pnpm build
       - name: Run real browser acceptance
-        run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
+        run: node scripts/run-browser-shard.mjs --profile core --suite "${{ matrix.browser == 'webkit' && 'webkit' || 'ui-v1' }}" --prebuilt --ci-fixture
 
   host:
     name: ${{ matrix.mode == 'all' && 'B Host all' || 'C Host selective' }} / ${{ matrix.browser }}
@@ -118,4 +118,4 @@ jobs:
       - name: Build matching Core application
         run: pnpm build
       - name: Run real browser acceptance
-        run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
+        run: node scripts/run-browser-shard.mjs --profile core --suite "${{ matrix.browser == 'webkit' && 'webkit' || 'ui-v1' }}" --prebuilt --ci-fixture
