@@ -219,18 +219,19 @@ test("author review shows durable Core status once when IndexedDB journal is una
   expect(await page.locator(".proposal-card").filter({ hasText: coreProposalId }).count()).toBe(1);
 });
 
-test("author review falls back to the native ChangeSet list when an older backend lacks the feed route", async ({ page }) => {
+test("author review surfaces a missing feed without requesting the native ChangeSet list", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project } = await createWritingFixture(page, "desktop", "Legacy author review route");
-  const native = await proposeNode(page, project.id, "Legacy native proposal");
+  const { project } = await createWritingFixture(page, "desktop", "Unavailable author review feed");
+  await proposeNode(page, project.id, "Proposal behind unavailable feed");
   let listReads = 0;
   await page.route(`**/api/v1/persistence/projects/${project.id}/review-feed**`, route => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found", code: "NOT_FOUND" }) }));
   page.on("request", request => { if (/\/changesets$/u.test(new URL(request.url()).pathname)) listReads += 1; });
   await openReview(page, "desktop");
-  await expect(page.locator(".native-changeset-card")).toContainText(native.changeSetId);
-  await expect(page.locator(".native-review-message")).toContainText("ネイティブChangeSet一覧");
-  expect(listReads).toBe(1);
+  const review = page.getByRole("region", { name: "変更提案" });
+  await expect(review.getByRole("alert")).toHaveText("Not found");
+  await expect(review.getByRole("button", { name: "承認する" })).toHaveCount(0);
+  expect(listReads).toBe(0);
 });
 
 for (const mode of ["desktop", "mobile"] as const) {
