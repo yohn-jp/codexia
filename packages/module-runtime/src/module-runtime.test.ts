@@ -1096,6 +1096,8 @@ test("optional capabilities do not block profile resolution and cannot activate 
 test("own module records bind to the executing module and admitted snapshot", async (t) => {
   const publishing = manifest("publishing");
   const story = manifest("story");
+  const nlp = manifest("nlp");
+  const nlpInput = { key: "feature-settings", value: { externalEnabled: { rewrite: true } }, expectedVersion: null, idempotencyKey: "consent-1" };
   const input = { key: "share-grants", value: { count: 2 }, expectedVersion: 4, idempotencyKey: "publish-1" };
   let completedReads = 0;
   const readAction: ModuleAction = {
@@ -1107,9 +1109,16 @@ test("own module records bind to the executing module and admitted snapshot", as
     },
   };
   const runtime = new ModuleRuntime({
-    manifests: [publishing, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/codexia-runtime-test",
+    manifests: [publishing, story, nlp], enabled: ["publishing", "story", "nlp"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: {
       story: async () => definition(story, readAction),
+      nlp: async () => definition(nlp, {
+        id: "propose-record", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const reference = await context.proposeOwnModuleRecord?.(nlpInput);
+          return { ok: true, snapshot: context.reader.snapshot, data: reference ?? null };
+        },
+      }),
       publishing: async () => ({ ...definition(publishing, readAction), actions: [readAction, {
         id: "propose-record", effect: "propose", inputSchema: schema, outputSchema: schema,
         async invoke(_input, context) {
@@ -1153,6 +1162,15 @@ test("own module records bind to the executing module and admitted snapshot", as
   assert.deepEqual(publicAction, { ok: true, snapshot, data: { record: undefined, canPropose: false } });
   const external = await runtime.invokeAction("publishing", "propose-record", {}, { ...host, caller: "external-agent" });
   assert.deepEqual(external, { ok: true, snapshot, data: null });
+  const externalNlp = { ...host, caller: "external-agent" as const };
+  const nlpProposal = await runtime.invokeAction("nlp", "propose-record", {}, { ...externalNlp, allowedEffects: ["propose"] });
+  assert.deepEqual(nlpProposal, { ok: true, snapshot, data: reference });
+  assert.deepEqual(proposals.at(-1), {
+    scope: { moduleId: "nlp", snapshot, access: "owner", caller: "external-agent", effect: "propose" }, request: nlpInput,
+  });
+  const nlpWithoutProposalEffect = await runtime.invokeAction("nlp", "propose-record", {}, { ...externalNlp, allowedEffects: ["read"] });
+  assert.ok(!nlpWithoutProposalEffect.ok);
+  assert.equal(nlpWithoutProposalEffect.error.code, "action_effect_denied");
   const denied = await runtime.invokeAction("publishing", "propose-record", {}, { ...host, allowedEffects: ["read"] });
   assert.ok(!denied.ok);
   assert.equal(denied.error.code, "action_effect_denied");
@@ -1179,7 +1197,7 @@ test("own module records bind to the executing module and admitted snapshot", as
   assert.equal(cancelled.error.code, "action_cancelled");
   assert.equal(completedReads, 2, "a late record cannot reach the cancelled action");
   assert.equal(reads.length, 2);
-  assert.equal(proposals.length, 1);
+  assert.equal(proposals.length, 2);
 });
 
 test("HTTP contributions are hidden until activation and public reads cannot propose; streamed calls drain on cancel", async () => {

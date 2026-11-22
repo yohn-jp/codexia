@@ -751,8 +751,8 @@ export class ModuleRuntime {
         throw new ModuleRuntimeError("action_snapshot_mismatch", "Module record access does not belong to the action snapshot");
       }
     };
-    const canPropose = access === "owner" && caller !== "external-agent" && effect === "propose" && inheritedEffect === "propose" &&
-      (!host.allowedEffects || host.allowedEffects.includes("propose"));
+    const canPropose = access === "owner" && (caller !== "external-agent" || moduleId === "nlp") &&
+      effect === "propose" && inheritedEffect === "propose" && (!host.allowedEffects || host.allowedEffects.includes("propose"));
     return {
       ...(host.readOwnModuleRecord ? { readOwnModuleRecord: async (key) => {
         assertActive();
