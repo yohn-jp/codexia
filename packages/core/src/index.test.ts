@@ -827,9 +827,16 @@ test("pinned manuscript history never includes or restores a future revision", a
   const path = "manuscript/v1/c1/s1.md";
   const initial = (await core.listManuscriptSnapshots(p.id, "s1", undefined, old.snapshot)).snapshots;
   await accept(p.id, operation(old.snapshot, path, "Future revision", (await old.read(path))!.revision));
+  const currentVersion = (await core.observe(p.id)).snapshot.projectVersion;
+  const currentManifest = () => persistence.read(reader =>
+    reader.getModuleRecord(p.id, "core.authority.snapshots", `snapshot:${currentVersion}`));
+  assert.equal(await currentManifest(), undefined);
+  const currentHistory = await core.history(p.id);
+  assert.equal(await currentManifest(), undefined, "revision history does not materialize a file snapshot");
   const current = await core.listManuscriptSnapshots(p.id, "s1");
   const future = current.snapshots.find(item => !initial.some(previous => previous.id === item.id))!;
   assert.ok(future);
+  assert.ok(currentHistory.some(item => item.hash === future.id));
   assert.deepEqual((await core.listManuscriptSnapshots(p.id, "s1", undefined, old.snapshot)).snapshots, initial);
   assert.equal((await core.readManuscriptSnapshot(p.id, initial[0]!.id, "s1", undefined, old.snapshot)).manuscriptSnapshot.body, "Text 😀\n");
   await assert.rejects(core.readManuscriptSnapshot(p.id, future.id, "s1", undefined, old.snapshot), {code:"revision_not_found"});

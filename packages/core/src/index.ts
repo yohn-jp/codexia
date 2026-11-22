@@ -1220,10 +1220,18 @@ export class CoreStore implements MutationCoordinator {
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(manuscriptBody(revision.markdown)).length,source:"postgres",body:manuscriptBody(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
   }
   async status(projectId:string) { const observation=await this.observe(projectId);return {...observation.snapshot,state:"durable" as const}; }
-  async history(projectId:string,pinned?:SnapshotId):Promise<Commit[]> {
-    const manifest = await this.manifest(projectId,pinned);
-    const heads = manifest.documents.flatMap(document => document.headRevisionId ? [{documentId:document.id,revisionId:document.headRevisionId}] : []);
-    const revisions = await this.persistence.read(reader => reader.listProjectRevisionHistory(pid(projectId), heads, 100));
+  async history(project: string, pinned?: SnapshotId): Promise<Commit[]> {
+    const projectId = pid(project);
+    const pinnedDocuments = pinned ? (await this.manifest(project, pinned)).documents : undefined;
+    const revisions = await this.persistence.read(async reader => {
+      if (!pinnedDocuments && !await reader.getProject(projectId)) fail(404, "project_not_found", "Project not found");
+      const documents = pinnedDocuments ?? await reader.listDocuments(projectId, undefined, 1000);
+      if (documents.length === 1000) fail(413, "snapshot_too_large", "Project snapshot exceeds the supported document bound");
+      const heads = documents.flatMap(document => document.headRevisionId
+        ? [{ documentId: document.id, revisionId: document.headRevisionId }]
+        : []);
+      return reader.listProjectRevisionHistory(projectId, heads, 100);
+    });
     return revisions.map(revision => ({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`}));
   }
 }
