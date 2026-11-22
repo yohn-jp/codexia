@@ -173,11 +173,13 @@ function stableId(projectId: string, key: string): DocumentId {
 }
 function makeReader(manifest: Manifest): SnapshotReader {
   const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
+  const documentOrder = new Map(manifest.documents.map((document, index) => [String(document.id), index]));
   return { snapshot: structuredClone(manifest.snapshot),
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
       const bytes = Buffer.from(file.content, file.encoding);
       const documentKind = file.documentId ? documentKinds.get(file.documentId) : undefined;
-      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {})}; },
+      const order = file.documentId ? documentOrder.get(file.documentId) : undefined;
+      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {}), ...(order === undefined ? {} : {documentOrder: order})}; },
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }
   };

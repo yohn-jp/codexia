@@ -153,6 +153,29 @@ function listByTypeData(entities: ReadonlyMap<string, StoryEntity>, type: string
     .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id, "ja"));
 }
 
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareDocumentOrder(
+  left: StoryEntity,
+  right: StoryEntity,
+  documentOrderByEntityId?: ReadonlyMap<string, number>,
+): number {
+  const leftOrder = documentOrderByEntityId?.get(left.id);
+  const rightOrder = documentOrderByEntityId?.get(right.id);
+  if (leftOrder !== undefined && rightOrder !== undefined && leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  const leftKey = left.raw.order;
+  const rightKey = right.raw.order;
+  const keyOrder = typeof leftKey === "number" && typeof rightKey === "number"
+    ? leftKey - rightKey
+    : compareText(String(leftKey ?? ""), String(rightKey ?? ""));
+  return keyOrder || compareText(left.id, right.id);
+}
+
 function deduplicateSceneRefs(refs: ThreadSceneRef[]): ThreadSceneRef[] {
   const byId = new Map<string, ThreadSceneRef>();
   for (const ref of refs) {
@@ -161,10 +184,12 @@ function deduplicateSceneRefs(refs: ThreadSceneRef[]): ThreadSceneRef[] {
   return [...byId.values()];
 }
 
-function getVolumeTreeData(entities: ReadonlyMap<string, StoryEntity>): StoryVolumeTree {
-  const volumes = listByTypeData(entities, "volume").sort(
-    (a, b) => Number(a.raw.order ?? 0) - Number(b.raw.order ?? 0),
-  );
+function getVolumeTreeData(
+  entities: ReadonlyMap<string, StoryEntity>,
+  documentOrderByEntityId?: ReadonlyMap<string, number>,
+): StoryVolumeTree {
+  const volumes = listByTypeData(entities, "volume").sort((a, b) =>
+    compareDocumentOrder(a, b, documentOrderByEntityId));
   const chapters = listByTypeData(entities, "chapter");
   const scenes = listByTypeData(entities, "scene");
 
@@ -172,7 +197,7 @@ function getVolumeTreeData(entities: ReadonlyMap<string, StoryEntity>): StoryVol
     const volumeId = volume.id;
     const volumeChapters = chapters
       .filter((chapter) => chapter.raw.volume === volumeId || String(chapter.raw.volume) === volumeId)
-      .sort((a, b) => Number(a.raw.order ?? 0) - Number(b.raw.order ?? 0));
+      .sort((a, b) => compareDocumentOrder(a, b, documentOrderByEntityId));
 
     return {
       volume,
@@ -182,7 +207,7 @@ function getVolumeTreeData(entities: ReadonlyMap<string, StoryEntity>): StoryVol
           .filter(
             (scene) => scene.raw.chapter === chapter.id || scene.raw.chapter === chapter.raw.id,
           )
-          .sort((a, b) => Number(a.raw.order ?? 0) - Number(b.raw.order ?? 0)),
+          .sort((a, b) => compareDocumentOrder(a, b, documentOrderByEntityId)),
       })),
     };
   });
@@ -248,9 +273,17 @@ export function getEntityAppearances(
     });
   }
 
-  const data = [...byScene.values()].sort(
-    (a, b) => Number(a.scene.raw.order ?? 0) - Number(b.scene.raw.order ?? 0),
+  const sceneOrderById = new Map(
+    buildSceneLocationInfos(input).data.map((item) => [item.sceneId, item.order]),
   );
+  const data = [...byScene.values()].sort((a, b) => {
+    const leftOrder = sceneOrderById.get(a.scene.id);
+    const rightOrder = sceneOrderById.get(b.scene.id);
+    if (leftOrder !== undefined && rightOrder !== undefined && leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return compareDocumentOrder(a.scene, b.scene, input.documentOrderByEntityId);
+  });
   return snapshotResult(input.snapshot, data);
 }
 
@@ -307,7 +340,7 @@ export function getGraphData(
 }
 
 export function getVolumeTree(input: StoryGraphInput): StorySnapshotResult<StoryVolumeTree> {
-  return snapshotResult(input.snapshot, getVolumeTreeData(input.entities));
+  return snapshotResult(input.snapshot, getVolumeTreeData(input.entities, input.documentOrderByEntityId));
 }
 
 export function buildSceneLocationInfos(
@@ -315,25 +348,22 @@ export function buildSceneLocationInfos(
 ): StorySnapshotResult<SceneLocationInfo[]> {
   const infos: SceneLocationInfo[] = [];
   let globalOrder = 0;
-  const volumes = getVolumeTreeData(input.entities);
+  const volumes = getVolumeTreeData(input.entities, input.documentOrderByEntityId);
   const directRootScenes = listByTypeData(input.entities, "scene").filter((scene) =>
     !(typeof scene.raw.volume === "string" && scene.raw.volume.length > 0) &&
     !(typeof scene.raw.chapter === "string" && scene.raw.chapter.length > 0));
   const topLevel = [
     ...volumes.map((tree) => ({
       kind: "volume" as const,
-      order: Number(tree.volume.raw.order ?? 0),
-      name: tree.volume.name ?? tree.volume.id,
+      entity: tree.volume,
       tree,
     })),
     ...directRootScenes.map((scene) => ({
       kind: "scene" as const,
-      order: Number(scene.raw.order ?? 0),
-      name: scene.name ?? scene.id,
+      entity: scene,
       scene,
     })),
-  ].sort((a, b) => a.order - b.order ||
-    (a.kind === b.kind ? a.name.localeCompare(b.name, "ja") : a.kind === "volume" ? -1 : 1));
+  ].sort((a, b) => compareDocumentOrder(a.entity, b.entity, input.documentOrderByEntityId));
 
   const appendScene = (scene: StoryEntity, chapterId?: string) => {
     globalOrder += 1;
