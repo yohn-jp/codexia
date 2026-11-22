@@ -91,6 +91,19 @@ test('same-tree complete PR proof certifies the merged source with exact artifac
   assert.equal(receipt.tree, tree);
 });
 
+test('compact main evidence resolves from an exact PR checkout without relaxing main identity', async () => {
+  const { args, git } = fixture();
+  const currentPrHead = 'f'.repeat(40);
+  const prGit = command => command[0] === 'rev-parse' && command[1] === 'HEAD'
+    ? currentPrHead + '\n' : git(command);
+  await assert.rejects(verifyReusableMainProof({ ...args, git: prGit }), /Checkout is not the expected exact source/);
+  const receipt = await verifyReusableMainProof({ ...args, git: prGit, checkoutSha: currentPrHead });
+  assert.equal(receipt.sourceSha, sourceSha);
+  assert.equal(receipt.headSha, head);
+  await assert.rejects(verifyReusableMainProof({ ...args, git: prGit, checkoutSha: base }),
+    /Checkout is not the expected exact source/);
+});
+
 test('closed PR runs with cleared associations resolve only the actual merged PR', async () => {
   const { state, args } = fixture();
   state.prRun.pull_requests = [];
