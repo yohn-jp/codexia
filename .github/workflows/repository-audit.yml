@@ -77,7 +77,7 @@ jobs:
           GRAPHIFY_BACKEND: none
         run: |
           python -m pip install --disable-pip-version-check --no-cache-dir graphifyy==0.9.115
-          timeout 600s graphify extract . --code-only --backend none \
+          timeout 600s graphify extract . --code-only \
             --out "$RUNNER_TEMP/graphify-out" \
             --max-workers 2 \
             --exclude 'tests/**' \
