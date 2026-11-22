@@ -148,7 +148,7 @@ function preferredPanels(preset: Exclude<WorkspacePreset, "custom">, ids: string
   const ordered = preset === "writing"
     ? ["outline", "editor"]
     : preset === "research"
-      ? ["outline", "editor", "inspector", ...ids.filter((id) => id.startsWith("module:"))]
+      ? ["outline", "editor", "inspector"]
       : ["editor", "review", "inspector"];
   const selected = ordered.filter((id, index) => ids.includes(id) && ordered.indexOf(id) === index);
   return selected.length ? selected : ids.slice(0, 1);
@@ -310,7 +310,15 @@ function addToFirstPanel(node: WorkspaceNode, panelId: string, root: WorkspaceNo
 
 export function showWorkspacePanel(layout: WorkspaceLayout, panelId: string): WorkspaceLayout {
   if (visiblePanelIds(layout.root).includes(panelId) || !validPanelId(panelId)) return layout;
-  const root = addToFirstPanel(layout.root, panelId, layout.root);
+  // Preserve the editor as the primary research surface when opening a hidden tool.
+  // Use the existing auxiliary stack, including after the first activation makes
+  // the layout custom. Never move or rewrite an author's separately saved layout.
+  const root = layout.root.type === "split" && layout.root.children.length === 2 &&
+    layout.root.children[0]?.type === "leaf" && layout.root.children[0].panelId === "editor" &&
+    layout.root.children[1]?.type === "stack"
+      ? { ...layout.root, children: layout.root.children.map((child, index) =>
+          index === 1 ? addToFirstPanel(child, panelId, layout.root) : child) }
+      : addToFirstPanel(layout.root, panelId, layout.root);
   const updated = {
     ...layout,
     preset: "custom" as const,

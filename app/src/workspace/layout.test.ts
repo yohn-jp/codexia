@@ -29,7 +29,8 @@ test("presets are valid editable trees with the expected panel selections", () =
   assert.deepEqual(writing.root.type === "split" ? writing.root.sizes : [], [20, 80]);
   assert.deepEqual(writing.hiddenPanelIds, ["inspector", "history", "review", "module:terms"]);
   assert.equal(research.root.type, "split");
-  assert.deepEqual(visiblePanelIds(research.root), ["editor", "outline", "inspector", "module:terms"]);
+  assert.deepEqual(visiblePanelIds(research.root), ["editor", "outline", "inspector"]);
+  assert.ok(research.hiddenPanelIds.includes("module:terms"));
   assert.deepEqual(research.root.type === "split" ? research.root.sizes : [], [68, 32]);
   assert.equal(research.root.type === "split" ? research.root.children[1]?.type : undefined, "stack");
   assert.equal(research.root.type === "split" && research.root.children[1]?.type === "stack"
@@ -98,6 +99,20 @@ test("dock operations create tab stacks and horizontal or vertical splits", () =
   assert.equal(pairDirection(docked.root, "editor", "inspector"), "vertical");
   const dockedRight = moveWorkspacePanel(initial, "inspector", "editor", "right");
   assert.equal(pairDirection(dockedRight.root, "editor", "inspector"), "horizontal");
+});
+
+test("a hidden research contribution opens in the auxiliary stack, even after layout becomes custom", () => {
+  const research = createWorkspacePreset("research", [...panels, "module:extra"]);
+  const withTerms = showWorkspacePanel(research, "module:terms");
+  const withExtra = showWorkspacePanel(withTerms, "module:extra");
+  assert.equal(withExtra.preset, "custom");
+  assert.equal(withExtra.root.type, "split");
+  if (withExtra.root.type !== "split") return;
+  assert.deepEqual(withExtra.root.children[0], { type: "leaf", panelId: "editor" });
+  assert.equal(withExtra.root.children[1]?.type, "stack");
+  if (withExtra.root.children[1]?.type !== "stack") return;
+  assert.equal(withExtra.root.children[1].activePanelId, "module:extra");
+  assert.deepEqual(visiblePanelIds(withExtra.root.children[1]), ["outline", "inspector", "module:terms", "module:extra"]);
 });
 
 test("panels can be hidden and restored, while the final visible panel is retained", () => {

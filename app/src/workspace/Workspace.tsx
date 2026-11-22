@@ -417,6 +417,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [presetRevision, setPresetRevision] = useState(0);
   const [message, setMessage] = useState("");
+  const [panelQuery, setPanelQuery] = useState("");
   const [changing, setChanging] = useState(false);
   const [committingPanelRequest, setCommittingPanelRequest] = useState<number>();
   const [routeSelectionRevision, setRouteSelectionRevision] = useState(0);
@@ -430,6 +431,10 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const workspaceIdentityRef = useRef({ scope, mode });
   useLayoutEffect(() => { workspaceIdentityRef.current = { scope, mode }; }, [scope, mode]);
   const visibleIds = useMemo(() => visiblePanelIds(layout.root), [layout.root]);
+  const matchingPanels = useMemo(() => {
+    const query = panelQuery.trim().toLocaleLowerCase("ja-JP");
+    return query ? panels.filter((panel) => panel.title.toLocaleLowerCase("ja-JP").includes(query)) : panels;
+  }, [panels, panelQuery]);
 
   const retryPendingRouteSelection = useCallback((): void => {
     if (!pendingRouteSelectionRef.current) return;
@@ -447,6 +452,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     setMoveSource(firstActivePanel(loaded.layout.root));
     setMoveTarget(panelIds.find((id) => id !== "editor") ?? "");
     setLayoutEditing(false);
+    setPanelQuery("");
     setMessage("");
     onActivePanelChange?.(firstActivePanel(loaded.layout.root));
   }, [scope, mode, onActivePanelChange]);
@@ -725,6 +731,29 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     }
   };
 
+  const openPanelFromMenu = (panelId: string): void => {
+    const wasVisible = visibleIds.includes(panelId);
+    const operation = wasVisible
+      ? (mode === "mobile" ? activateMobilePanel(panelId) : activateTab(panelId))
+      : changeLayout((current) => showWorkspacePanel(current, panelId),
+          "パネルを開きました。次回も使うには配置を保存してください。");
+    void operation.then((allowed) => {
+      if (!allowed) return;
+      if (!wasVisible) {
+        setFloating((current) => current.filter((item) => item.panelId !== panelId));
+        if (mode === "mobile") setMobilePanelId(panelId);
+        onActivePanelChange?.(panelId);
+      }
+      if (panelMenuRef.current) panelMenuRef.current.open = false;
+      setPanelQuery("");
+      window.requestAnimationFrame(() => {
+        const target = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
+          .find((element) => element.dataset.workspacePanel === panelId);
+        target?.focus({ preventScroll: true });
+      });
+    });
+  };
+
   const titleOf = (panelId: string): string => catalog.get(panelId)?.title ?? panelId;
   const storageLabel = persistenceState === "valid"
     ? "保存済みの配置を読み込みました。"
@@ -746,19 +775,26 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
         ref={panelMenuRef}
         onToggle={(event) => {
           if (mode === "desktop" && event.currentTarget.open) setLayoutEditing(false);
+          if (!event.currentTarget.open) setPanelQuery("");
         }}
       >
-        <summary aria-label="パネル">パネル</summary>
+        <summary aria-label="パネル">{layout.preset === "research" ? "その他の調査パネル" : "パネル"}</summary>
         <div className="st-workspace-panel-menu-list">
-          {panels.map((panel) => {
+          <label className="st-workspace-panel-menu-search">パネルを検索
+            <input type="search" value={panelQuery} onChange={(event) => setPanelQuery(event.target.value)} />
+          </label>
+          {matchingPanels.length === 0 && <p role="status">一致するパネルはありません。</p>}
+          {matchingPanels.map((panel) => {
             const visible = visibleIds.includes(panel.id);
             const isFloating = floating.some((item) => item.panelId === panel.id);
             return (
               <div className="st-workspace-panel-menu-item" key={panel.id}>
                 <span>{panel.title}</span>
-                <button type="button" disabled={changing || (visible && visibleIds.length <= 1)} onClick={() => visible ? hidePanel(panel.id) : showPanel(panel.id)}>
-                  {isFloating ? `${panel.title}を配置に戻す` : visible ? `${panel.title}を隠す` : `${panel.title}を表示`}
+                <button type="button" disabled={changing} onClick={() => openPanelFromMenu(panel.id)}>
+                  {isFloating ? `${panel.title}を配置に戻す` : visible ? `${panel.title}を開く` : `${panel.title}を表示`}
                 </button>
+                {visible && <button type="button" disabled={changing || visibleIds.length <= 1}
+                  onClick={() => hidePanel(panel.id)}>{`${panel.title}を隠す`}</button>}
                 {mode === "desktop" && visible && visibleIds.length > 1
                   ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`${panel.title}を別ウィンドウにする`}</button> : null}
               </div>
