@@ -39,8 +39,8 @@ export function registerSearchTools(server: McpServer, baseClient: McpActionClie
     "Legacy semantic search over project story content; use search_lexical for ordinary full-text search.",
     {
       project_id: projectIdSchema,
-      query: z.string().describe("Search query"),
-      limit: z.number().optional().describe("Maximum result count (default 20)"),
+      query: z.string().max(8192).describe("Search query (at most 8192 characters)"),
+      limit: z.number().int().min(1).max(100).optional().describe("Maximum result count (default 20, max 100)"),
     },
     guarded(async ({ project_id, query, limit }) => {
       const client = scopedClient(baseClient, project_id);
