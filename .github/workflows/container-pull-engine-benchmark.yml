@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - .github/workflows/container-pull-engine-benchmark.yml
+      - .github/docker/playwright-ubuntu-dual-benchmark.Dockerfile
+      - scripts/ci-playwright-engine-benchmark.sh
   workflow_dispatch:
 
 permissions:
@@ -150,3 +152,195 @@ jobs:
             printf 'PAIRED engine=%s order=%s pull_ms=%s startup_ms=%s runner_image=%s\n' "$engine" "$ORDER" "$pull_ms" "$startup_ms" "${ImageVersion:-unknown}"
             echo "- $engine ($ORDER): pull ${pull_ms} ms, startup ${startup_ms} ms" >> "$GITHUB_STEP_SUMMARY"
           done
+
+  image-capability:
+    name: Image completeness / ${{ matrix.engine }} / ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+        variant: [official, mirror, ubuntu-webkit, minimal-webkit]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Measure cold Pull, complete runtime capabilities and image size
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENGINE: ${{ matrix.engine }}
+          VARIANT: ${{ matrix.variant }}
+        run: bash scripts/ci-playwright-engine-benchmark.sh "$ENGINE" "$VARIANT" probe
+
+  real-webkit:
+    name: Real four-shard WebKit / ${{ matrix.engine }} / ${{ matrix.variant }} / ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+        variant: [official, mirror]
+        profile: [core, full]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+      CODEXIA_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install exact dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build exact profile outside timing
+        run: pnpm build
+      - name: Compare Pull and complete real acceptance suite
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENGINE: ${{ matrix.engine }}
+          VARIANT: ${{ matrix.variant }}
+        run: bash scripts/ci-playwright-engine-benchmark.sh "$ENGINE" "$VARIANT" acceptance
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: container-benchmark-trace-${{ matrix.engine }}-${{ matrix.variant }}-${{ matrix.profile }}
+          path: tests/e2e/test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 3
+
+  container-webkit-reference:
+    name: Reference jobs.container / four-shard WebKit / ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    container:
+      image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --init --ipc=host
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
+      CODEXIA_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install exact dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build exact profile outside timing
+        run: pnpm build
+      - name: Execute matching real browser shards
+        shell: bash
+        run: bash scripts/ci-playwright-engine-benchmark.sh native official acceptance
+
+  dual-webkit-local:
+    name: Local dual-browser minimal Podman / ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+      CODEXIA_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install exact dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build exact profile outside timing
+        run: pnpm build
+      - name: Build unpublished dual-browser image and record build cost
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s%N)
+          podman build --file .github/docker/playwright-ubuntu-dual-benchmark.Dockerfile \
+            --tag localhost/codexia-playwright-dual-benchmark:pw-1.65.1 .
+          printf 'BENCHMARK_DUAL_BUILD runner=%s profile=%s build_ms=%s\n' \
+            "${ImageVersion:-unknown}" "$CODEXIA_PROFILE" "$(( ($(date +%s%N)-start)/1000000 ))"
+      - name: Verify both browsers and execute real CI suites
+        shell: bash
+        run: bash scripts/ci-playwright-engine-benchmark.sh podman dual-local acceptance
