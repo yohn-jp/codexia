@@ -445,7 +445,13 @@ exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=
 ENTRYPOINT
 sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs.Dockerfile" "$build_context/sshfs/Dockerfile"
 sudo install -o codexia -g codexia -m 0755 "$tmp/sshfs.entrypoint.sh" "$build_context/sshfs/entrypoint.sh"
-rootless_podman build --build-arg "BASE_IMAGE=$ubuntu_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >"$tmp/sshfs-build.log" 2>&1
+if rootless_podman build --build-arg "BASE_IMAGE=$ubuntu_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >"$tmp/sshfs-build.log" 2>&1; then
+  :
+else
+  build_status=$?
+  record_failure "$build_status" "$LINENO" 'SSHFS fixture image build'
+  exit "$build_status"
+fi
 rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup -p 127.0.0.1:2222:22 codexia-sshfs-fixture >/dev/null
 fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
 test -n "$fixture_ip"
