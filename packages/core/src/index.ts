@@ -186,7 +186,7 @@ const AUTHORITY = "core.authority.proposals";
 const SNAPSHOTS = "core.authority.snapshots";
 // Increment this proof epoch when the canonical projected bytes change. Older
 // pinned snapshots retain their original key and are never rewritten.
-export const SNAPSHOT_PROJECTION_EPOCH = 1;
+export const SNAPSHOT_PROJECTION_EPOCH = 2;
 function projectionProofKey(version: number): string {
   return `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${version}`;
 }
