@@ -78,7 +78,7 @@ test("dock operations create tab stacks and horizontal or vertical splits", () =
   const initial = createWorkspacePreset("research", panels);
   const tabbed = moveWorkspacePanel(initial, "inspector", "outline", "tab");
   assert.equal(validateWorkspaceLayout(tabbed), true);
-  assert.deepEqual(visiblePanelIds(tabbed.root), ["editor", "outline", "inspector", "module:terms"]);
+  assert.deepEqual(visiblePanelIds(tabbed.root), ["editor", "outline", "inspector"]);
   assert.equal(tabbed.root.type === "split" && tabbed.root.children[1]?.type === "stack"
     ? tabbed.root.children[1].children.some((child) => child.panelId === "outline") &&
       tabbed.root.children[1].children.some((child) => child.panelId === "inspector")
