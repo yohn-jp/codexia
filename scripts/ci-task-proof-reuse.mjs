@@ -15,6 +15,8 @@ import { coverageRuntime } from './ci-coverage-inputs.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 
+const PROOF_REPOSITORY = 'yohn-jp/codexia';
+const PROOF_API = 'https://api.github.com/repos/yohn-jp/codexia/';
 const VERIFY_PATH = '.github/workflows/verify.yml';
 const COVERAGE_JOB = 'types-tests';
 const COVERAGE_WORKFLOW_JOB = 'types';
@@ -62,7 +64,7 @@ async function resolveCompactMainTaskProofs({ plan, run, jobs, current, reposito
   assert.equal(certSteps.length, 1, 'Missing or duplicate compact exact-main certification step');
   assert.equal(certSteps[0].conclusion, 'success', 'Compact exact-main certification failed');
   const before = execFileSync('git', ['rev-parse', `${plan.base}^1`], { encoding: 'utf8' }).trim();
-  const githubRequest = async endpoint => request(`https://api.github.com/repos/${repository}/${endpoint}`, {
+  const githubRequest = async endpoint => request(`${PROOF_API}${endpoint}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(15_000), redirect: 'error',
   });
@@ -164,7 +166,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.equal(plan.event, 'pull_request', 'Task proof reuse is only available to pull requests');
   assert.match(plan.base ?? '', /^[a-f0-9]{40}$/u, 'Task proof reuse requires an exact PR base');
   assert.ok(plan.tasks.includes('coverage'), 'Coverage task is not selected');
-  assert.ok(typeof repository === 'string' && /^[\w.-]+\/[\w.-]+$/u.test(repository), 'Invalid proof repository');
+  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
   assert.equal(current?.path, VERIFY_PATH, 'Current workflow path mismatch');
   assert.equal(current?.event, 'pull_request', 'Current run is not a pull request');
@@ -172,7 +174,8 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.ok(positive(current?.workflow_id) && positive(current?.repository?.id), 'Current workflow identity is incomplete');
 
   const get = async endpoint => {
-    const response = await request(`https://api.github.com/repos/${repository}/${endpoint}`, {
+    // codeql[js/file-access-to-http] Authenticated provenance lookups go only to this fixed GitHub API origin.
+    const response = await request(`${PROOF_API}${endpoint}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
@@ -251,6 +254,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
 /** Resolve full-plan task proofs only from the latest successful exact-base main certification. */
 export async function resolveExactMainTaskProofs({ plan: planValue, current, repository, token, tasks, request = fetch, readArtifact }) {
   const plan = validateVerificationPlan(planValue);
+  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
   assert.equal(plan.event, 'pull_request', 'Task proof reuse is only available to pull requests');
   assert.match(plan.base ?? '', /^[a-f0-9]{40}$/u, 'Task proof reuse requires an exact PR base');
   assert.ok(Array.isArray(tasks) && new Set(tasks).size === tasks.length, 'Invalid omitted task proof inventory');
@@ -265,7 +269,8 @@ export async function resolveExactMainTaskProofs({ plan: planValue, current, rep
     // It must not prevent independent omitted tasks from proving their inputs.
   }
   const get = async endpoint => {
-    const response = await request(`https://api.github.com/repos/${repository}/${endpoint}`, {
+    // codeql[js/file-access-to-http] Authenticated provenance lookups go only to this fixed GitHub API origin.
+    const response = await request(`${PROOF_API}${endpoint}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
