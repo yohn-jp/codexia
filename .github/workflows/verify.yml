@@ -360,9 +360,11 @@ jobs:
           corepack enable
           corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # PR caches are scoped to that PR and cannot accelerate other PRs.
+      # Browser shards restore main's trusted cache but never race to save it.
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
@@ -392,6 +394,15 @@ jobs:
           CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci-group.mjs "browser-${{ matrix.group }}"
+      # Only one main-push browser job populates the scoped cache after passing
+      # every selected validation. A cache failure must not replace CI evidence.
+      - name: Save browser pnpm cache from main
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'core-reference' && steps.dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v7.0.2
         if: always() && (matrix.group == 'core-reference' || matrix.group == 'full-reference')
         with:
