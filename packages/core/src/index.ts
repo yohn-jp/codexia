@@ -572,27 +572,14 @@ export class CoreStore implements MutationCoordinator {
   }
 
   /**
-   * Explicit startup compatibility transition, before accepting requests.
+   * Apply a projection transition for a project selected by explicit maintenance.
    * A projection change is a new semantic snapshot version, not a content edit.
    * Equivalent legacy snapshots acquire a proof; incompatible snapshots retain
    * their original pinned bytes and the project advances under its version fence.
    * Ordinary reads never perform this transition.
    */
-  async prepareSnapshotReuse(projectId?: string, mode: "transition" | "validate" = "transition"): Promise<void> {
-    if (projectId !== undefined) {
-      await this.prepareProjectSnapshotReuse(pid(projectId), mode);
-      return;
-    }
-    let after: ProjectId | undefined;
-    for (;;) {
-      const ids = await this.persistence.read(reader => reader.listProjectIds(100, after));
-      for (const id of ids) await this.prepareProjectSnapshotReuse(id, mode);
-      if (ids.length < 100) return;
-      after = ids[ids.length - 1]!;
-    }
-  }
-
-  private async prepareProjectSnapshotReuse(projectId: ProjectId, mode: "transition" | "validate"): Promise<void> {
+  async prepareSnapshotReuse(project: string): Promise<void> {
+    const projectId = pid(project);
     for (let attempt = 0; attempt < 3; attempt++) {
       const legacy = await this.persistence.read(async reader => {
         const project = await reader.getProject(projectId);
@@ -606,10 +593,7 @@ export class CoreStore implements MutationCoordinator {
         return { version: project.version, recordVersion: record.version, fresh,
           equivalent: manifestFingerprint(saved) === manifestFingerprint(fresh) };
       });
-      // A candidate preflight is read-only. Successful materialization above
-      // proves the legacy projection can be inspected; only the exclusive
-      // writer may certify it or advance the project version.
-      if (!legacy || mode === "validate") return;
+      if (!legacy) return;
       if (legacy.equivalent) {
         await this.persistManifest(legacy.fresh);
         return;
@@ -630,7 +614,7 @@ export class CoreStore implements MutationCoordinator {
         return;
       } catch (error) {
         if (!(error instanceof PersistenceError) || error.code !== "conflict") throw error;
-        // A concurrent content mutation or startup transition advanced the
+        // A concurrent content mutation or maintenance transition advanced the
         // version. Re-read the current project instead of bumping it again.
       }
     }

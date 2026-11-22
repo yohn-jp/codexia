@@ -572,8 +572,6 @@ export interface PersistenceReader {
   listProjects(limit?: number): Promise<readonly Project[]>;
   /** Recent-project keyset page; `limit` includes the optional lookahead row. */
   listProjectPage?(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]>;
-  /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
-  listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined>;

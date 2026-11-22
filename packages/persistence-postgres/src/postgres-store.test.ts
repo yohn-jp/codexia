@@ -1183,24 +1183,6 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
   assert.equal(rejectedUpdate.reason.code, "conflict");
 });
 
-test("startup project inventory uses bounded stable keyset pages", async () => {
-  const first = await createProject(`project-page-a-${randomUUID()}`);
-  const second = await createProject(`project-page-b-${randomUUID()}`);
-  await persistence.read(async reader => {
-    const ids = [];
-    let after: typeof first.id | undefined;
-    for (;;) {
-      const page = await reader.listProjectIds(2,after);
-      assert.ok(page.length <= 2);
-      ids.push(...page);
-      if (page.length < 2) break;
-      after = page[page.length-1]!;
-    }
-    assert.ok(ids.includes(first.id) && ids.includes(second.id));
-    assert.deepEqual(ids,[...new Set(ids)].sort());
-  });
-});
-
 test("project page preserves deterministic keyset order across more than 200 projects", async (t) => {
   const prefix = `pagination-${randomUUID()}-`;
   const rows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `${prefix}${index}` }));

@@ -17,7 +17,7 @@ import type {
   ProjectId,
 } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import { CoreStore } from "./index.js";
+import { CoreStore, SNAPSHOT_PROJECTION_EPOCH } from "./index.js";
 import { makeKnowledgeProjection } from "./knowledge-context.js";
 import YAML from "yaml";
 
@@ -526,23 +526,21 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   const compatible = await seedLegacy(true);
   const incompatible = await seedLegacy(false);
   const store = new CoreStore({persistence});
-  // Use real PostgreSQL reads with transactions forced read-only; no writer
-  // transaction may be attempted by the compatibility preflight.
+  // Exercise the packaged CLI's pending-proof query using a read-only session.
   const readOnly = createPostgresPersistence({connectionString, options:"-c default_transaction_read_only=on"});
   try {
-    const preflight = new CoreStore({persistence:readOnly});
-    await preflight.prepareSnapshotReuse(compatible.project.id, "validate");
-    await preflight.prepareSnapshotReuse(incompatible.project.id, "validate");
     for (const item of [compatible,incompatible]) {
+      assert.deepEqual(await readOnly.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH, { projectId: item.project.id }),
+        [item.project.id]);
       assert.equal((await store.observe(item.project.id)).snapshot.projectVersion,item.project.version);
-      assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id as ProjectId,legacyModule,`proof:projection:1:snapshot:${item.project.version}`)),undefined);
+      assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id,legacyModule,`proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${item.project.version}`)),undefined);
     }
   } finally { await readOnly.close(); }
   for (const item of [compatible, incompatible]) {
     await assert.rejects(store.reader(item.project.id), { code: "snapshot_unavailable" });
     assert.equal((await store.observe(item.project.id)).snapshot.projectVersion, item.project.version);
     assert.equal(await persistence.read(reader =>
-      reader.getModuleRecord(item.project.id, legacyModule, `proof:projection:1:snapshot:${item.project.version}`)), undefined);
+      reader.getModuleRecord(item.project.id, legacyModule, `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${item.project.version}`)), undefined);
   }
   const exactFiles = async (reader: SnapshotReader) => Promise.all((await reader.list("")).map(async path => ({path, file:await reader.read(path,"base64")})));
   const compatibleFiles = await exactFiles(await store.reader(compatible.project.id, compatible.snapshot));
