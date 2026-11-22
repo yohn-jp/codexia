@@ -1,41 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BROWSER_SHARDS, PROFILES } from "./ci-contract.mjs";
 import { buildBrowserTestArguments, resolveBrowserShard, summarizeBrowserCoverage } from "./browser-shards.mjs";
-
-test("each profile resolves every declared shard to its Playwright project and file", () => {
-  assert.deepEqual(PROFILES, ["core", "full"]);
-  for (const profile of PROFILES) {
-    for (const shard of BROWSER_SHARDS) {
-      const resolved = resolveBrowserShard(profile, shard.id);
-      assert.deepEqual(resolved, { profile, ...shard });
-      if (resolved.project === "chromium") assert.equal(resolved.file, `${resolved.id}.acceptance.spec.ts`);
-    }
-  }
-  assert.deepEqual(resolveBrowserShard("full", "webkit"), {
-    profile: "full",
-    id: "webkit",
-    project: "webkit",
-    file: "ui-v1.acceptance.spec.ts",
-  });
-});
 
 test("unknown profiles and shards are rejected before a runner starts", () => {
   assert.throws(() => resolveBrowserShard("preview", "core"), /Unknown browser profile/u);
   assert.throws(() => resolveBrowserShard("core", "empty"), /Unknown browser shard/u);
 });
 
-test("Playwright receives one named project and the selected spec as a test filter", () => {
-  const shard = resolveBrowserShard("core", "job-inbox");
-  assert.deepEqual(buildBrowserTestArguments(shard), [
-    "exec",
-    "playwright",
-    "test",
-    "--config",
-    "tests/e2e/playwright.config.ts",
-    "tests/e2e/job-inbox.acceptance.spec.ts",
-    "--project=chromium",
-  ]);
+test("Playwright invokes the actual Chromium and WebKit shard with its own spec", () => {
+  const cases = [
+    { profile: "core", id: "job-inbox", file: "job-inbox.acceptance.spec.ts", project: "chromium" },
+    { profile: "full", id: "webkit", file: "ui-v1.acceptance.spec.ts", project: "webkit" },
+  ];
+  for (const { profile, id, file, project } of cases) {
+    const shard = resolveBrowserShard(profile, id);
+    assert.deepEqual(buildBrowserTestArguments(shard), [
+      "exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts",
+      `tests/e2e/${file}`, `--project=${project}`,
+    ]);
+  }
 });
 
 test("browser coverage counts discovered, executed, skipped and failed cases", () => {

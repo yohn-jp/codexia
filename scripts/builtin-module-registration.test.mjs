@@ -41,6 +41,7 @@ function assertSameIds(actual, expected, label) {
 }
 
 test('module manifests exactly register the canonical built-ins', async () => {
+  assert.equal(Object.isFrozen(BUILTIN_MODULE_IDS), true, 'module inventory must be immutable');
   const moduleRoot = path.join(root, 'modules');
   const directories = (await readdir(moduleRoot, { withFileTypes: true })).filter(entry => entry.isDirectory());
   const ids = [];

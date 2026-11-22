@@ -1,11 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
-test("built-in module IDs remain a frozen canonical tuple", () => {
-  assert.deepEqual(BUILTIN_MODULE_IDS, ["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"]);
-  assert.equal(Object.isFrozen(BUILTIN_MODULE_IDS), true);
-});
-
+import { assertChangeOperation, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
 test("next order keys append after padded, unpadded and reordered text keys", () => {
   assert.equal(nextOrderKey([]), "0000000001");
   assert.equal(nextOrderKey(["0000000009"]), "0000000010");
