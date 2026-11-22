@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, matchesGlob } from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { publicError } from './push-app-lifecycle.mjs';
+import { publicError, readExactBackendProducerArtifacts } from './push-app-lifecycle.mjs';
 
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
@@ -14,6 +14,65 @@ const workflow = parse(readFileSync(new URL('../.github/workflows/push-app-lifec
 const backendWorkflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
 const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const deploy = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+
+function completedBackendProducer() {
+  const sourceSha = 'a'.repeat(40);
+  const run = { id: 123, run_attempt: 1, status: 'completed', conclusion: 'success',
+    event: 'pull_request', head_branch: 'audit/example', head_sha: sourceSha };
+  const expected = { sourceSha, runId: run.id, currentAttempt: 1, event: run.event, workflowSha: sourceSha, headBranch: run.head_branch };
+  const jobs = ['core', 'full'].map(profile => ({
+    name: `Build and test backend OCI image (${profile})`,
+    run_id: run.id, run_attempt: 1, head_sha: sourceSha, status: 'completed', conclusion: 'success',
+    started_at: '2026-11-22T14:28:35Z', completed_at: '2026-11-22T14:31:22Z',
+  }));
+  const artifacts = ['core', 'full'].map((profile, index) => ({
+    id: 20 + index, name: `codexia-backend-image-${sourceSha}-${profile}-attempt-1`, expired: false,
+    created_at: '2026-11-22T14:31:03Z', digest: `sha256:${'b'.repeat(64)}`, size_in_bytes: 100,
+    workflow_run: { id: run.id, head_sha: sourceSha },
+  }));
+  return { run, expected, jobs, artifacts };
+}
+
+test('a completed backend run waits for its own producer job window to become available', async () => {
+  const { run, expected, jobs, artifacts } = completedBackendProducer();
+  let jobReads = 0;
+  const requests = [];
+  const selected = await readExactBackendProducerArtifacts(run, expected, {
+    async readCollection(resource, key) {
+      requests.push(resource);
+      if (key === 'artifacts') return artifacts;
+      jobReads++;
+      return jobReads === 1 ? [jobs[0], { ...jobs[1], completed_at: null }] : jobs;
+    },
+    async pause() {},
+  });
+  assert.equal(jobReads, 2);
+  assert.ok(requests.every(resource => resource.startsWith('actions/runs/123/')));
+  assert.deepEqual(selected.map(item => [item.profile, item.artifact.id]), [['core', 20], ['full', 21]]);
+});
+
+test('an unavailable producer window stays unresolved and invalid artifact evidence fails immediately', async () => {
+  const { run, expected, jobs, artifacts } = completedBackendProducer();
+  let polls = 0;
+  await assert.rejects(readExactBackendProducerArtifacts(run, expected, {
+    async readCollection(_resource, key) {
+      if (key === 'artifacts') return artifacts;
+      polls++;
+      return [jobs[0], { ...jobs[1], completed_at: null }];
+    },
+    async pause() {},
+  }), /Invalid backend producer time window/u);
+  assert.equal(polls, 4);
+
+  let pauses = 0;
+  await assert.rejects(readExactBackendProducerArtifacts(run, expected, {
+    async readCollection(_resource, key) {
+      return key === 'jobs' ? jobs : [artifacts[0], { ...artifacts[1], digest: 'invalid' }];
+    },
+    async pause() { pauses++; },
+  }), /Backend artifact digest is invalid/u);
+  assert.equal(pauses, 0);
+});
 
 test('includes bounded command stderr in sanitized lifecycle failure evidence', () => {
   const error = Object.assign(new Error(`Command failed: ${'podman-argument '.repeat(100)}`), {
