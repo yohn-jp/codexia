@@ -1,7 +1,46 @@
+import type { SnapshotReader } from "@codexia/contracts";
 import type { LoadedStorySnapshot } from "../snapshot.js";
+import { readStorySnapshot } from "../snapshot.js";
+import { nativeKnowledge } from "./nativeKnowledge.js";
 import { temporalScene } from "./temporal.js";
 
 export type ContextScope = "author" | "character" | "reader";
+export interface ContextPackageRequest {
+  sceneId: string;
+  scope: ContextScope;
+  characterId?: string;
+  budget: number;
+}
+
+/** Parse the stable Action/MCP context request without depending on Assistant DTOs. */
+export function parseContextPackageRequest(value: unknown): ContextPackageRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Context request must be an object");
+  const input = value as Record<string, unknown>;
+  if (typeof input.sceneId !== "string" || input.sceneId.length === 0 || input.sceneId.length > 256) throw new TypeError("sceneId must be a nonempty string");
+  if (input.scope !== "author" && input.scope !== "character" && input.scope !== "reader") throw new TypeError("Invalid context scope");
+  if (input.characterId !== undefined && typeof input.characterId !== "string") throw new TypeError("characterId must be a string");
+  const budget = input.budget === undefined ? 12_000 : Number(input.budget);
+  if (!Number.isSafeInteger(budget) || budget < 128 || budget > 200_000) throw new TypeError("Invalid context budget");
+  return {
+    sceneId: input.sceneId,
+    scope: input.scope,
+    ...(input.characterId === undefined ? {} : { characterId: input.characterId }),
+    budget,
+  };
+}
+
+/** Assemble Story context from exactly one selected PostgreSQL snapshot. */
+export async function buildStoryContextPackage(reader: SnapshotReader, input: unknown) {
+  const request = parseContextPackageRequest(input);
+  const story = await readStorySnapshot(reader);
+  const native = await nativeKnowledge(reader, story, request.sceneId);
+  const author = request.scope === "author";
+  return {
+    ...sceneContextPackage(story, request.sceneId, request.scope, request.characterId, request.budget, native.parts, native.omissions),
+    ...(author ? { knowledgeAvailable: native.available, knowledgeTruncated: native.truncated } : {}),
+  };
+}
+
 type ThreadContextMeaning = "planted" | "advanced" | "payoff";
 
 function sceneThreadContextLinks(story: LoadedStorySnapshot, sceneId: string) {
@@ -55,7 +94,7 @@ function sceneThreadContextLinks(story: LoadedStorySnapshot, sceneId: string) {
   return [...byRelation.values()].map(({ priority: _priority, ...link }) => link);
 }
 
-export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string, scope: ContextScope, characterId: string | undefined, budget: number, nativeParts: Array<{kind:string;value:unknown}> = [], nativeOmissions: Array<{reason:string}> = []) {
+function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string, scope: ContextScope, characterId: string | undefined, budget: number, nativeParts: Array<{kind:string;value:unknown}> = [], nativeOmissions: Array<{reason:string}> = []) {
   if (!["author", "character", "reader"].includes(scope)) throw new TypeError("Invalid context scope");
   if (!Number.isSafeInteger(budget) || budget < 128 || budget > 200000) throw new TypeError("Invalid context budget");
   if (scope === "character" && (!characterId || story.entities.get(characterId)?.type !== "character")) throw new TypeError("Character scope requires a valid character");

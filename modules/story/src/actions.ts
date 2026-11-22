@@ -45,7 +45,7 @@ import {
 } from "./domain/index.js";
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
 import { nativeKnowledge } from "./domain/nativeKnowledge.js";
-import { sceneContextPackage, type ContextScope } from "./domain/context.js";
+import { buildStoryContextPackage } from "./domain/context.js";
 import { parseWorldTime, temporalScene } from "./domain/temporal.js";
 import type { SceneStateEvent } from "./domain/worldState.js";
 import { narrativeFindings, applyNarrativeDecisions, narrativeSourceFingerprint, type NarrativeDecision, type NarrativeDisposition, type NarrativeFinding } from "./domain/narrativeReview.js";
@@ -1413,11 +1413,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       return nativeKnowledge(context.reader,story,input.sceneId as string|undefined);
     }),
     action("story.context.package", read, fieldSchema(["sceneId", "scope"], ["sceneId", "scope", "characterId"]), async (input, context) => {
-      const story = await readStorySnapshot(context.reader);
-      const sceneId=stringValue(input.sceneId,"sceneId");
-      const native=await nativeKnowledge(context.reader,story,sceneId);
-      const author=input.scope==="author";
-      return {...sceneContextPackage(story,sceneId,input.scope as ContextScope,input.characterId as string|undefined,input.budget===undefined?12000:Number(input.budget),native.parts,native.omissions),...(author?{knowledgeAvailable:native.available,knowledgeTruncated:native.truncated}:{})};
+      return buildStoryContextPackage(context.reader, input);
     }),
     action("story.narrative.review", read, fieldSchema([], ["sceneId"]), async (input, context) => {
       const story=await readStorySnapshot(context.reader,{includeManuscripts:true});

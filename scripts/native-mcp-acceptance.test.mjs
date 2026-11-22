@@ -12,12 +12,13 @@ test("native MCP acceptance exercises real PostgreSQL over both transports", { t
   const env = { ...process.env, CODEXIA_MCP_ACCEPTANCE_MODULES: "story,mcp" };
   delete env.NODE_TEST_CONTEXT;
   const output = execFileSync(process.execPath, [
-    "--test", "--test-reporter=tap", "--test-name-pattern=^native Knowledge MCP tools preserve PostgreSQL scope",
+    "--test", "--test-reporter=tap", "--test-name-pattern=^(direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP|native Knowledge MCP tools preserve PostgreSQL scope)",
     "tests/integration/mcp-acceptance.test.mjs",
   ], { cwd: root, stdio: ["ignore", "pipe", "inherit"], encoding: "utf8", env });
   console.log(output);
-  assert.match(output, /^ok 1 - native Knowledge MCP tools preserve PostgreSQL scope[^\r\n]*$/m);
-  assert.match(output, /^# pass 1$/m);
+  assert.match(output, /^ok 1 - direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP[^\r\n]*$/m);
+  assert.match(output, /^ok 2 - native Knowledge MCP tools preserve PostgreSQL scope[^\r\n]*$/m);
+  assert.match(output, /^# pass 2$/m);
   assert.match(output, /^# fail 0$/m);
   assert.match(output, /^# skipped 0$/m);
 });
