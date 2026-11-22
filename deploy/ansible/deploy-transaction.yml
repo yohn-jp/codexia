@@ -417,6 +417,7 @@
       candidate_image={{ codexia_image | quote }}
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
       auth_mode={{ codexia_deployment_auth_mode | quote }}
+      require_tunnel={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
       prior_auth_mode={{ (codexia_current_auth_mode if codexia_current_container_exists.rc == 0 else '') | quote }}
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
@@ -434,6 +435,22 @@
         exit 1
       }
       [[ ! -e "$transaction_intent" && ! -L "$transaction_intent" ]] || stale_admission 'a deployment transaction needs recovery'
+      if ! podman volume exists codexia-history; then
+        echo 'Deployment base runtime requires the rootless history volume' >&2
+        exit 1
+      fi
+      if ! systemctl --user is-active --quiet codexia-db.service ||
+         ! podman inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' codexia-db | grep -Fxq healthy; then
+        echo 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' >&2
+        exit 1
+      fi
+      tunnel_present=false
+      if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1; then
+        tunnel_present=true
+      elif [[ "$require_tunnel" == true ]]; then
+        echo 'Deployment base runtime requires the rootless Tunnel Quadlet' >&2
+        exit 1
+      fi
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
@@ -541,10 +558,8 @@
         fi
       }
       ensure_wants_link "$api_wants_link" ../codexia-api.service api_link_created
-      tunnel_present=false
-      if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1; then
+      if [[ "$tunnel_present" == true ]]; then
         ensure_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
-        tunnel_present=true
       fi
       if [[ "$unchanged" == true ]]; then
         systemctl --user daemon-reload
@@ -739,7 +754,10 @@
          'Better Auth settings snapshot' if 'Better Auth settings snapshot is invalid' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth migration' if 'Better Auth migrations failed' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth client registration verification' if 'Better Auth schema or registered clients failed verification' in (codexia_deploy_transaction.stderr | default('')) else
-         'encrypted backup' if 'Encrypted off-VM backup failed' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (history volume)' if 'Deployment base runtime requires the rootless history volume' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (PostgreSQL)' if 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (Tunnel)' if 'Deployment base runtime requires the rootless Tunnel Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
+         'encrypted backup' if 'Encrypted backup failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API startup' if 'Candidate API failed to start' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API readiness' if 'Candidate API readiness failed' in (codexia_deploy_transaction.stderr | default('')) else
@@ -753,6 +771,7 @@
                  'migration packaging' if 'ERR_MODULE_NOT_FOUND' in (codexia_deploy_transaction.stderr | default('')) or 'Cannot find package' in (codexia_deploy_transaction.stderr | default('')) else
                  'container secret or file permissions' if 'EACCES' in (codexia_deploy_transaction.stderr | default('')) or 'permission denied' in (codexia_deploy_transaction.stderr | default('')) else
                  'database pristine-schema guard' if 'untracked database objects' in (codexia_deploy_transaction.stderr | default('')) or 'not pristine' in (codexia_deploy_transaction.stderr | default('')) else
+                 'run the approved base stage with verified production data under the codexia service account' if 'Deployment base runtime requires' in (codexia_deploy_transaction.stderr | default('')) else
                  'container runtime or unclassified initializer error' }}, exit code {{ codexia_deploy_transaction.rc | default('unknown') }}).
   when: (codexia_deploy_transaction.rc | default(1) | int) != 0
 

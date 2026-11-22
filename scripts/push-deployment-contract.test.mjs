@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
@@ -130,6 +131,55 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
+test('deployment requires the rootless base runtime under the lock before activation', () => {
+  const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'].cmd;
+  const start = shell.indexOf('if ! podman volume exists codexia-history');
+  const end = shell.indexOf("current_container=''", start);
+  assert.ok(start > shell.indexOf('flock --exclusive --nonblock') && end > start);
+  assert.ok(end < shell.indexOf('mkdir -p "$wants_dir"'));
+  assert.match(shell, /require_tunnel=.*'false' if \(codexia_lifecycle_fixture \| default\(false\) \| bool\) else 'true'/u);
+
+  const preflight = shell.slice(start, end).replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
+  const fixtureCommands = `
+    set -eu -o pipefail
+    podman() {
+      case "$1" in
+        volume) [[ "$*" == 'volume exists codexia-history' && "$missing" != history ]];;
+        inspect) [[ "$4" == codexia-db ]] && printf '%s\\n' "$db_health";;
+        *) return 99;;
+      esac
+    }
+    systemctl() {
+      case "$*" in
+        '--user is-active --quiet codexia-db.service') [[ "$missing" != db ]];;
+        '--user cat codexia-tunnel.service') [[ "$missing" != tunnel ]];;
+        *) return 99;;
+      esac
+    }
+  `;
+  const safeFailure = transactionTasks.find(task => task.name === 'Report only an allowlisted deployment transaction failure stage');
+  for (const [missing, dbHealth, requireTunnel, error] of [
+    ['history', 'healthy', 'true', 'Deployment base runtime requires the rootless history volume'],
+    ['db', 'healthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['', 'unhealthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['tunnel', 'healthy', 'true', 'Deployment base runtime requires the rootless Tunnel Quadlet'],
+    ['tunnel', 'healthy', 'false', ''],
+    ['', 'healthy', 'true', ''],
+  ]) {
+    const result = spawnSync('bash', ['-c', fixtureCommands + preflight], {
+      encoding: 'utf8',
+      env: { ...process.env, missing, db_health: dbHealth, require_tunnel: requireTunnel },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, error ? 1 : 0, result.stderr);
+    assert.equal(result.stderr.trim(), error);
+    if (error) assert.ok(safeFailure['ansible.builtin.fail'].msg.includes(error));
+  }
+  assert.match(safeFailure['ansible.builtin.fail'].msg,
+    /'encrypted backup' if 'Encrypted backup failed; candidate was not applied'/u);
+});
+
 test('the production Quadlet binds an immutable image and disables startup schema mutation', () => {
   const quadlet = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
   assert.match(quadlet, /^Image=CODEXIA_BACKEND_IMAGE$/mu);
@@ -234,7 +284,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   assert.match(databaseUnit, /^Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_DB=codexia$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_USER=codexia_admin$/mu);
-  assert.doesNotMatch(shell, /codexia-db\.container|codexia-postgres\.volume|podman volume/u,
+  assert.doesNotMatch(shell, /codexia-db\.container|codexia-postgres\.volume|podman volume (?!exists codexia-history\b)/u,
     'an image-only API rollout must leave canonical PostgreSQL storage untouched');
 
   const restore = shell.indexOf('restore_previous(){');
