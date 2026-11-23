@@ -10,7 +10,7 @@
 
 1. **要求・意味的設計:** 承認済みMarkdown/構造化要求管理が仕様の決定を所有する。コードの既存動作を無断で正本へ昇格させない。
 2. **実行可能な詳細契約:** HTTPはTypeSpec、DB物理定義は承認済みSQL migration、MCPは公式SDK tool input/output Schema、外部IaCは各管理ツールの宣言的設定。責務が異なる契約を一つの言語に強制しない。
-3. **派生コード:** OpenAPI、Hono route/validator、ブラウザ/iOSクライアント、ERD、文書サイトは生成物。派生生成物を手修正して正本との差を隠さない。
+3. **派生コード:** OpenAPI、Fastify route schema/validator、ブラウザ/iOSクライアント、ERD、文書サイトは生成物。派生生成物を手修正して正本との差を隠さない。
 4. **検証:** ライブラリの型検査・lint・diff・schema検証は構文/静的整合の証拠。認可、競合、原子性、ユーザー操作、復旧などの意味的義務は実コンポーネントのテストで証明する。
 5. **追跡:** 要求が持つrelation、コードファイル/範囲、検証ID、実行したCI run/artifactを標準ツールで関連付ける。独自traceability engineの新設はしない。
 
@@ -20,9 +20,9 @@
 | --- | --- | --- | --- |
 | 要求/追跡 | **StrictDoc** | Sphinx-Needs | 機能の中心が要求、source relation、trace matrix、coverage。Sphinx-NeedsはSphinx基盤とextension群を構成する必要がある。StrictDocのMarkdown・TS symbol・Nodeテスト実績は別gate |
 | HTTP wire仕様 | **TypeSpec + OpenAPI 3.1.0 emitter** | OpenAPI YAML直接編集 | model/operationの一意の宣言と再利用、OpenAPI生成が可能。YAML手編集は型・共通DTO更新に重複を生みやすい |
-| HTTP runtime | **Hono（Node.js）** | Fastify | Web標準Request/ResponseがBetter Auth、MCP SDK v2に適合し、OrvalがHonoルート生成可能。Fastifyもschema-first可能で性能上優位の可能性はあるが、生成経路の統一を重視。移行前の性能・認可検証は必須 |
-| server/client生成 | **Orval** | Hey API | Honoサーバールート、Zod validatorとfetch clientの公式生成機能。Hey APIは型付きclientに強いが今回のserver側一元化要件ではOrvalを優先 |
-| runtime Schema | **Zod v4** | TypeBox | Orval/Zod連携、既存Zod、MCP v2に統一可能。TypeBoxはFastify/JSON Schemaに向くが本構成では追加schema系統になる |
+| HTTP runtime | **Fastify（Node.js、継続採用）** | Hono | Schema/response serialization、plugin encapsulation、hook/close lifecycleとNodeのストリーム境界を維持。HonoのWeb標準APIとOrval Hono generatorは魅力だが、VM上のAPIで置換する合理性は不足。現行catch-allの廃止はFastify標準routeへ移行して実施 |
+| server/client生成 | **Orval（client/Zod生成に限定）** | Hey API | TypeSpec由来OpenAPIからclient/Schema生成を行う。Orval Hono server generatorは採用しない。Fastifyのroute schemaはOpenAPI/JSON Schemaから生成・照合し、二重の手書きDTOを作らない |
+| runtime Schema | **Zod v4（業務/MCP/client）＋ Fastify JSON Schema/Ajv（HTTP境界）** | TypeBoxをHTTPの別正本とする方式 | ZodとJSON Schemaは異なる責務。HTTPワイヤ契約はTypeSpec→OpenAPI/JSON Schemaに一方向生成し、Fastifyの標準validator/serializerで実行。Zodを独立編集可能なHTTP正本にしない |
 | OpenAPI品質 | **Redocly CLI 2** | Spectral | lint、bundle、ルール/Markdownチェックを集約。実API適合は別ツールで証明 |
 | OpenAPI互換 | **oasdiff** | OpenAPI Diff | breaking/change severity、format別出力とCIゲート。互換epochの設計判断は既存 deployment契約が所有 |
 | API契約の実動作 | **Schemathesis** | Dredd | schemaに基づくpositive/negative・stateful探索。意味的なBOLA/作者承認/保存テストは別途維持 |
@@ -38,15 +38,15 @@
 | Docs表示 | **StrictDoc静的HTML + Scalar** | VitePress中心 | 要求・tracingを入口にする。既存GitHub Pagesの単一publisherと開発PortalのURL方針を維持し、新規公開経路を増やさない |
 | CI証拠 | **既存GitHub Actionsのexact-source認証** | Allureを第二正本化 | 正しいartifact/run identityの既存ガバナンスがある。test reportの表示は派生物のみ |
 
-**不採用:** ts-restは保守終了の公式案内があり、今回の新しい中核依存にしない。Atlas無償機能だけではtrigger/functionまで完全に検証できないためDBの正本・完全性ゲートには採用しない。Hono/Orvalを選んでもFastify固有機能が黙って破壊されることは許さない。
+**不採用:** ts-restは保守終了の公式案内があり、今回の新しい中核依存にしない。Atlas無償機能だけではtrigger/functionまで完全に検証できないためDBの正本・完全性ゲートには採用しない。Honoへの全面置換は行わない。Fastifyの現行catch-allは契約に基づく明示的なrouteへ改修し、既存のHTTP admission・権限・streamingを保持する。
 
 ## 実装と仕様の現状差（設計承認≠実装済み）
 
 | 現行コード/仕様の実情 | 変更後の目標 | 必須の変更と不変条件 |
 | --- | --- | --- |
-| packages/api/src/server.tsはFastifyを生成するが、共通catch-all内でmethod/pathを手動分岐。Node IncomingMessage/ServerResponse、SSE、Abort、独自security headersを使用 | TypeSpec→OpenAPI→Orval routeとHonoの宣言的endpoint | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
+| packages/api/src/server.tsはFastifyを生成するが、共通catch-all内でmethod/pathを手動分岐。Node IncomingMessage/ServerResponse、SSE、Abort、独自security headersを使用 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
 | packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | 生成Zod validatorを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない |
-| modules/mcp/src/http.tsはv1のstateful session map、Mcp-Session-Id、GET/POST/DELETE、idle timerを使う | SDK v2と2026 specのStateless HTTP。必要な移行期間だけ正式に承認されたversionを扱う | owner/project/scopeの毎request再検証、CORS/headers、切断、stream、retry、旧session削除を実証 |
+| modules/mcp/src/http.tsはv1のstateful session map、Mcp-Session-Id、GET/POST/DELETE、idle timerを使う | SDK v2と2026 specのStateless HTTPをFastifyへ公式Web標準handler adapter経由で接続。必要な移行期間だけ正式に承認されたversionを扱う | owner/project/scopeの毎request再検証、CORS/headers、切断、stream、retry、旧session削除を実証 |
 | modules/mcp/src/stdio.tsはv1のStdioServerTransportへconnect、tool registrarはZod互換モード | v2のserveStdioとZod v4 | 入出力schema、同じaction/effect、STDOUT汚染なし、旧protocol拒否/許可の方針を明記 |
 | public schemaは3つのSQL migrationとchecksum ledger、認証schemaはBetter Auth専用 | SQLを物理詳細契約として維持しpgTAPで検証 | schema/checksum/trigger/roleと隔離restoreを維持。既存migrationを改変しない |
 | 要件はMarkdown表30件と関連コードの候補パス | StrictDoc requirement relationとsource/TEST/evidence trace | 既存REQ-IDを保存し、一つの要求を二重編集可能な正本にしない |
@@ -66,9 +66,9 @@
 ## 詳細設計と資料
 
 - [要求/StrictDoc移行](../requirements/STRICTDOC-TRACEABILITY.md)
-- [TypeSpec/Hono/Orval/API契約移行](HTTP-PLATFORM-MIGRATION.md)
+- [TypeSpec/Fastify/Orval/API契約移行](HTTP-PLATFORM-MIGRATION.md)
 - [DB契約検証](POSTGRES-CONTRACT-VERIFICATION.md)
 - [MCP v2と認証境界](MCP-V2-MIGRATION.md)
 - [CI・脅威・性能・Portalの受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)
 
-公式参照（2026-11-23照合）: [TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval Hono config](https://orval.dev/docs/reference/configuration/output/)、[StrictDoc supported formats](https://strictdoc-project.github.io/formats/)、[MCP v2 SDK](https://ts.sdk.modelcontextprotocol.io/v2/)、[MCP v2 protocol era migration](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[Better Auth OpenAPI](https://better-auth.com/docs/plugins/open-api)、[Hono security fixes/releases](https://github.com/honojs/hono/releases)。最新releaseのpinは**導入時に個別検証**し、独立互換制約を説明できない古い固定を放置しない。
+公式参照（2026-11-23照合）: [TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval config](https://orval.dev/docs/reference/configuration/output/)、[StrictDoc supported formats](https://strictdoc-project.github.io/formats/)、[MCP v2 SDK](https://ts.sdk.modelcontextprotocol.io/v2/)、[MCP v2 protocol era migration](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[Better Auth OpenAPI](https://better-auth.com/docs/plugins/open-api)、[Hono security fixes/releases](https://github.com/honojs/hono/releases)。最新releaseのpinは**導入時に個別検証**し、独立互換制約を説明できない古い固定を放置しない。
