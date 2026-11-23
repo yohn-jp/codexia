@@ -90,7 +90,11 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 
 **現行ガバナンス:** [Pages inventory](PAGES-FUNCTION-INVENTORY.md)、[Architecture Atlas](ARCHITECTURE-ATLAS.md)、[Development Pages UX proposal](../design/DEVELOPMENT-PAGES-UX.md)。唯一の公開者は `.github/workflows/repository-audit.yml`、別のpages publisher/VM/Cloudflare secretsを追加しない。提案中の `/audit/` 移動などのURLを本書で暗黙採用しない。
 
-- StrictDocの静的HTML/trace matrix、ScalarのOpenAPI表示、LikeC4から生成した静的図は**Repository Audit Pagesの生成物**として組み込むことを採用目標とする。URLの割当は既存サイトマップと別途照合し、既存の `/architecture/`、`/graph/`、`/ci/`、`/snapshots/<SHA>/` を勝手に壊さない。
+- Repository Audit PagesはStrictDoc、Scalar、LikeC4の公開用生成物を組み立てる。
+- Scalarリファレンスはサイト相対 `/api/` に置く。
+  生成OpenAPIの許可された操作、入出力、認可スキーム、エラーを表示し、現在の操作と未実装の目標を識別できるようにする。
+  Chromiumで契約への移動、検索、操作詳細、狭い画面と既存ルートを検証する。
+- `/architecture/`、`/graph/`、`/ci/`、`/snapshots/<SHA>/` は既存URLを維持する。
 - 本番APIに直接通信する `Try it out` や認証セッション/保護されたschemaの自動露出はしない。Scalarで許可するのは公開可能な静的契約表示。API実行は隔離した検証環境だけ。
 - 生成manifestには各結果のsource SHA、generator/依存lock identity、入力契約ファイル、使用したOpenAPI/schemaのdigest、生成時点、private/public判定を保持する。
 - PR previewでは公開せず従来のartifactへ格納し、mainの正規公開にのみ昇格する。GitHub Pages自体がCodexiaの本番Workers UI/Owner consoleになることはない。
