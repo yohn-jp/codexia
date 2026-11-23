@@ -1,6 +1,6 @@
 # CI Observatory — GitHub Pages timing dashboard
 
-CI Observatory displays a bounded sample of public GitHub Actions metadata inside the development portal. The selected PR, full executed SHA and observation time identify the source of each result. See the [CI screen design](../design/DEVELOPMENT-PAGES-UX.md#5-ci分析のux).
+CI Observatory displays a progressively enumerated inventory of public GitHub Actions PR revisions and retrieves job/step metadata only for the selected revision inside the development portal. The selected PR, full executed SHA and observation time identify the source of each result. See the [CI screen design](../design/DEVELOPMENT-PAGES-UX.md#5-ci分析のux).
 
 ## Deployment and ownership
 
@@ -9,18 +9,19 @@ CI Observatory displays a bounded sample of public GitHub Actions metadata insid
 - Existing Pages upload/deploy actions and the **github-pages** environment are reused. Pages Source must be GitHub Actions.
 - The packaging workflow needs only **contents: read**. The browser requests public Actions metadata directly from GitHub's unauthenticated API.
 - Published URL: the repository's configured Pages base plus **/ci/** (typically https://yohn-jp.github.io/codexia/ci/ unless a custom domain is configured).
-- Data is fetched when a visitor opens **/ci/**, so it reflects current public run metadata without publishing a generated data file. The browser bounds the request to two run-inventory pages and 20 selected workflows; each workflow's job history is capped at two pages.
+- Data is fetched when a visitor opens **/ci/**, so it reflects current public run metadata without publishing a generated data file. The initial request reads up to 100 workflow runs. **残りのPR・リビジョンを全件読み込む** fetches successive inventory pages without the former 20-PR/20-workflow cap. Job/step requests are made only for the selected revision (up to 20 job pages per workflow, failing rather than silently truncating beyond that bound). API rate limits, history retention and API search-result limits can still prevent a truly complete historical inventory; the UI must report that it is partial, not assert completeness.
 
 ## Source and sampling
 
 Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [analysis.mjs](../../scripts/ci-dashboard/analysis.mjs); [static client](../../scripts/ci-dashboard/site/).
 
-1. The browser queries up to two recent pages of repository pull_request Actions runs (up to 200 records). A run is attributable only when `run.head_sha` is a valid executed source SHA and GitHub associates it with exactly one distinct PR number. The mutable `pull_requests[].head.sha` is not used for grouping. Runs with missing or ambiguous source/PR identity are excluded and counted as unresolved.
-2. Group by PR number and executed `run.head_sha`. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound the display to 20 PR revisions and 20 workflow runs to stay within GitHub's unauthenticated API rate limit. If the workflow cap cuts a group, keep Verify visible, mark the group as truncated, and exclude it from comparable history. Mark truncated history.
-3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the view on incomplete job pagination; never infer skipped or cancelled work as successful validation.
-4. Only public run/job/step metadata is held in the browser for display. No downloaded logs, tokens, artifacts or executable PR code.
+1. The browser initially queries one page of repository `pull_request` Actions runs (100 records). The full-history control requests additional pages until the API stops returning pages or an error interrupts the scan. After ten full pages in one filtered GitHub search (the 1,000-result search window), it advances a dated `created` cursor to continue with older runs and deduplicates overlapping boundary records. Runs are deduplicated by run ID across pages. The status reports fetched runs, GitHub's reported total when supplied, unresolved associations, and whether more history may exist.
+2. A run is attributable only when `run.head_sha` is a valid executed source SHA and GitHub associates it with exactly one distinct PR number. The mutable `pull_requests[].head.sha` is not used for grouping. Runs with missing or ambiguous PR/source identity are excluded and counted as unresolved. **No Verify requirement or fixed PR/workflow count may hide otherwise attributable revisions.**
+3. Group by PR number and executed `run.head_sha`; retain the newest attempt per workflow ID. Do not download every group's jobs during enumeration. Selecting a revision downloads its workflow attempts' job/step records, and the browser caches those observations by the exact run IDs and attempts. A new inventory page invalidates a cache entry if its run group changed.
+4. Historical comparison and diagnostic JSON use only revisions whose job/step metadata has actually been fetched. A revision without an observed Verify remains selectable, but is not a successful Verify comparison sample. Unloaded revisions have unknown timing, not zero.
+5. The browser fetches only public run/job/step metadata. No downloaded logs, tokens, artifacts or executable PR code. An API rate-limit or pagination failure retains already enumerated revisions but must not certify a complete history. The UI's full-history control means **attempt to enumerate all GitHub API-accessible history**, not a guarantee that every historical PR commit or expired run exists in the API.
 
-The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` while it remains in the observation window. Each workflow links to its recorded run. Expanding a job shows its recorded steps, including steps with unavailable timing.
+The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` while GitHub still exposes its run. A direct link scans subsequent inventory pages until that revision is found or the available API history is exhausted. Each workflow links to its recorded run. Expanding a job shows its recorded steps, including steps with unavailable timing.
 
 ## Bottleneck attribution (first-attempt successful Verify only)
 
@@ -34,15 +35,15 @@ The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` wh
 
 ## Copyable diagnostic JSON
 
-**診断JSONをコピー** copies a complete,
-source-bound `codexia-ci-diagnostics/v1` JSON document for the selected PR revision
+**診断JSONをコピー** copies a source-bound, selected-revision
+`codexia-ci-diagnostics/v1` JSON document for the selected PR revision
 using the browser's HTTPS clipboard API. It adds no alternate publisher, file export,
 GitHub token, new API fetch, CI task or certification gate. Copy failure is reported,
 not silently treated as success.
 
 The copied diagnostic model aggregates:
 
-- Executed source SHA, PR number, observation timestamp, bounded history/identity
+- Executed source SHA, PR number, observation timestamp, enumerated history/identity
   coverage, workflow IDs, attempts, outcomes, timing and current-attempt job/step evidence.
 - Per-job queue and execution elapsed seconds, GitHub runner labels, raw step timestamps
   and durations, classified phase totals, validation start/end, container initialization,
@@ -51,7 +52,7 @@ The copied diagnostic model aggregates:
   last canonical leaf, latest-finishing competing leaves, remaining finish-time slack,
   certification tail, longest jobs/steps and measured runner time by step phase.
 - Bounded historical comparisons: first-attempt complete successful Verify runs
-  with the **same executed job-name set**, plus sample count, p50/p90/min/max/mean
+  with the **same executed job-name set**, among previously inspected revisions, plus sample count, p50/p90/min/max/mean
   for certification/queue/runner and each job. Matching names do not prove matching
   selected tasks, cache state, VM/image, source input closure or runner load.
 - Explicit `interpretation.notMeasured` reasons for unavailable telemetry.
@@ -75,11 +76,11 @@ speedup predictions.
 | Queue intervals | Sum of recorded job creation-to-start intervals. Does not isolate runner capacity, dependency waiting or network pulls. |
 | Blocking chain | Walk the current Verify YAML needs graph backwards from successful certification, selecting each latest completed predecessor. The DAG comes from the workflow file; dynamic job names are matched to its templates. |
 | Longest steps | API step start-to-end intervals. Install/container phases are not pure download timings. |
-| History p50 / p90 | Nearest-rank of complete initial-attempt PR/source groups containing Verify and not cut by the workflow cap; truncated or Verify-less groups are excluded. Not normalized for full/affected plans, runner/image, cache or missing external checks. |
+| History p50 / p90 | Nearest-rank of **inspected** complete initial-attempt PR/source groups containing Verify; uninspected, incomplete or Verify-less groups are excluded. Not normalized for full/affected plans, runner/image, cache or missing external checks. |
 
 The chain is the **observed latest-finishing dependency chain**, not a calculated counterfactual critical path or guaranteed saving. For unavailable or ambiguous DAG/timestamps, show unknown rather than inventing a value. A long job outside the certification path may still affect total workflow completion but not the certification gate.
 
-The sample does **not** establish all required checks: bounded history can omit workflows; third-party checks/branch rules are not enumerated; some runs lack PR head association. Verify is canonical certification, not the repository's whole merge-protection policy. **Never use the dashboard as release or merge authority.** See [CI/CD contract](CI-CD.md).
+The inventory does **not** establish all required checks: API history retention, partial pagination and unresolved associations can omit workflows; third-party checks/branch rules are not enumerated; some runs lack PR head association. Verify is canonical certification, not the repository's whole merge-protection policy. **Never use the dashboard as release or merge authority.** See [CI/CD contract](CI-CD.md).
 
 ## Optimization procedure
 
