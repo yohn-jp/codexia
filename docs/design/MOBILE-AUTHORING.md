@@ -1,5 +1,7 @@
 # Codexia — Mobile執筆・読書の設計
 
+**画面遷移の正本:** [利用画面の遷移設計](USER-SCREEN-FLOW.md)。Mobile の `?view=` と参照シートは原稿保護と同じ作者 scope を共有し、専用の保存正本を持たない。
+
 ## 位置付け
 
 [情報設計](INFORMATION-ARCHITECTURE.md)、[UX contract](UX-CONTRACT.md) と [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) の具体化。既存の独立Mobile shell、Ionic React、CodeMirror、共通authoring/recovery coordinatorを維持する。Desktopの縮小表示ではない。

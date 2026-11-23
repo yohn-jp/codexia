@@ -1,5 +1,7 @@
 # Codexia — Desktop執筆環境の設計
 
+**画面遷移の正本:** [利用画面の遷移設計](USER-SCREEN-FLOW.md)。本書は Desktop の配置と操作詳細を定め、画面遷移・下書き保護・原稿状態の規範を変更しない。
+
 ## 位置付け
 
 [情報設計](INFORMATION-ARCHITECTURE.md) と [UX contract](UX-CONTRACT.md) を具体化する再設計提案。React、CodeMirror、Radix、既存Workspaceと共通authoring coordinatorを維持する。

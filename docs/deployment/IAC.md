@@ -1,5 +1,7 @@
 # Infrastructure as code
 
+**Lifecycle authority:** [Initial VM deployment flow](INITIAL-DEPLOYMENT-FLOW.md) and [Compatible image update flow](UPDATE-FLOW.md), with the [system design](../architecture/SYSTEM-DESIGN.md) defining control-plane separation. The listed Ansible stages reflect the currently supported interface; a single bootstrap stage is an accepted design target until integrated and accepted.
+
 The sole backend delivery path is **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**. Cloudflare Tunnel remains application ingress, not the administration channel. No pull updater, polling timer, signed release channel, reverse-proxy selector or alternate writer controller is maintained.
 
 The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires encrypted off-VM backup and probes readiness. Pull-request validation receives no production credentials.

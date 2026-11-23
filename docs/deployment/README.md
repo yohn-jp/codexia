@@ -1,6 +1,8 @@
 # Codexia deployment
 
-This directory describes the deployable boundary in [CODEXIA-REBOOT-RFC.md](../architecture/CODEXIA-REBOOT-RFC.md). The React/Vite application is released as Cloudflare Workers Static Assets. The API is a separate rootless Podman service; Cloudflare Tunnel is its only public origin path.
+**Normative lifecycle transitions:** [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) and [Compatible backend update / rollback](UPDATE-FLOW.md) define the required state machines. Runbooks describe how to operate the approved transition; the current script is implementation evidence, not the design authority.
+
+This directory implements the deployable boundary specified by [System design](../architecture/SYSTEM-DESIGN.md) and [Infrastructure as code](IAC.md). The React/Vite application is released as Cloudflare Workers Static Assets. The API is a separate rootless Podman service; Cloudflare Tunnel is its only public origin path.
 
 ## Request and release paths
 

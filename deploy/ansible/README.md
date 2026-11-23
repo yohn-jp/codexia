@@ -1,5 +1,7 @@
 # Codexia Ansible push deployment
 
+The [initial deployment design](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [update/rollback design](../../docs/deployment/UPDATE-FLOW.md) are normative. This file documents supported Ansible operations; the design-target combined bootstrap stage must not be mistaken for a currently supported command.
+
 The protected GitHub Actions → Tailscale → SSH workflow is the only deployment controller. Under the rootless `codexia` service account, Ansible converges PostgreSQL, API and Tunnel Quadlets. `site.yml` rejects the obsolete pull-updater stages.
 
 Use a private inventory with pinned SSH host keys, externally supplied protected secrets and an explicit stage:

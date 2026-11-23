@@ -1,5 +1,7 @@
 # Push deployment
 
+**Normative lifecycle diagrams:** [Pristine VM / first owner activation](INITIAL-DEPLOYMENT-FLOW.md) and [Certified compatible update / rollback](UPDATE-FLOW.md). These diagrams distinguish accepted target behavior from the already-implemented stages; this runbook must not silently promise an unmerged bootstrap or automatic schema migration.
+
 The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job then checks the live UI/API epoch and Access boundary, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
 The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the service identity, data, secrets, backup destination and rollback path have passed target-host acceptance. The push path is the sole backend activation path.

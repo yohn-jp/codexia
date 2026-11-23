@@ -1,5 +1,7 @@
 # CI/CD architecture and certification contract
 
+The [canonical system design](../architecture/SYSTEM-DESIGN.md) specifies deployment ownership, [initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) specifies first activation, and [compatible update](../deployment/UPDATE-FLOW.md) specifies candidate admission and rollback. CI provides source-bound evidence and cannot redefine the design.
+
 This is the normative execution and release architecture. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement and test design; [Verification](README.md) owns local commands; [Deployment](../deployment/README.md), [OCI releases](OCI-RELEASE.md), [Infrastructure as code](../deployment/IAC.md) and [Push deployment](../deployment/PUSH-DEPLOYMENT.md) own artifact formats, operator procedures and compatibility policy. This contract describes required behavior, including requirements not yet implemented; a green run is evidence only for the checks actually performed.
 
 ## Single machine authority
