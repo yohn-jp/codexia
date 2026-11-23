@@ -109,7 +109,7 @@ export async function openWritingProject(authorizeAuthor: AuthorizeAuthor, page:
 }
 
 export async function createOAuthWritingFixture(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile" = "desktop", title?: string, manuscript?: string): Promise<WritingFixture & { author: AuthorSession }> {
-  const initial = await authorizeAuthor(shell, page);
+  const initial = await authorizeAuthor(shell, undefined, { apiSetupOnly: true });
   const fixture = await seedWritingProject(initial.fetch, initial.origin, title, manuscript);
   const author = await openWritingProject(authorizeAuthor, page, shell, fixture.project, fixture.scene);
   return { ...fixture, author };

@@ -33,7 +33,7 @@ async function replaceEditor(page: Page, markdown: string): Promise<void> {
 }
 
 async function fixture(page: Page, authorizeAuthor: AuthorizeAuthor): Promise<Fixture> {
-  const author = await authorizeAuthor("desktop");
+  const author = await authorizeAuthor("desktop", undefined, { apiSetupOnly: true });
   const projectResponse = await author.fetch(rootPath, { method: "POST", data: { title: `Core acceptance ${randomUUID()}` } });
   expect(projectResponse.status()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string } };
