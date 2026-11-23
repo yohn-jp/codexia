@@ -64,6 +64,51 @@ async function assertReflow(page, label) {
   assert.ok(content <= viewport, `${label} overflows at ${viewport}px (content width ${content}px)`);
 }
 
+// A page can have no document-level overflow while clipping an individual SHA.
+// Verify the actual text geometry and clipboard result, not a particular CSS rule.
+async function assertVisibleCopyableSha(page, selector, expected, label) {
+  const sentinel = 'codexia-clipboard-sentinel';
+  assert.notEqual(sentinel, expected);
+  await page.evaluate(value => navigator.clipboard.writeText(value), sentinel);
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), sentinel, `${label}: clipboard preflight failed`);
+  const locator = page.locator(selector);
+  assert.equal(await locator.count(), 1, `${label}: expected one SHA`);
+  await locator.scrollIntoViewIfNeeded();
+  assert.ok(await locator.isVisible(), `${label}: SHA is not visible`);
+  assert.equal(await locator.innerText(), expected, `${label}: incorrect SHA text`);
+  const result = await locator.evaluate(element => {
+    const text = element.firstChild;
+    if (!text || text.nodeType !== Node.TEXT_NODE || element.childNodes.length !== 1) return { error: 'SHA is not selectable text' };
+    const clips = [];
+    for (let parent = element; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const x = ['hidden', 'clip'].includes(style.overflowX);
+      const y = ['hidden', 'clip'].includes(style.overflowY);
+      if (x || y) clips.push({ rect: parent.getBoundingClientRect(), x, y });
+    }
+    const range = document.createRange();
+    for (let index = 0; index < text.length; index++) {
+      range.setStart(text, index); range.setEnd(text, index + 1);
+      const rects = [...range.getClientRects()];
+      if (rects.length === 0) return { error: `SHA character ${index} has no rendered geometry` };
+      for (const rect of rects) {
+        if (rect.width <= 0 || rect.left < -1 || rect.right > innerWidth + 1 ||
+            clips.some(clip => (clip.x && (rect.left < clip.rect.left - 1 || rect.right > clip.rect.right + 1)) ||
+              (clip.y && (rect.top < clip.rect.top - 1 || rect.bottom > clip.rect.bottom + 1)))) {
+          return { error: `SHA character ${index} is clipped or outside the viewport` };
+        }
+      }
+    }
+    range.selectNodeContents(element);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    return { selected: selection.toString(), copied: document.execCommand('copy') };
+  });
+  assert.equal(result.error, undefined, `${label}: ${result.error}`);
+  assert.equal(result.selected, expected, `${label}: full SHA cannot be selected`);
+  assert.equal(result.copied, true, `${label}: browser copy failed`);
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected, `${label}: copied SHA differs`);
+}
+
 async function expandContainingDisclosure(locator) {
   const disclosure = locator.locator('xpath=ancestor::details[1]');
   if (await disclosure.count() && !(await disclosure.evaluate(details => details.open))) {
@@ -88,6 +133,7 @@ try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce', hasTouch: viewport.width <= 390 });
     page.setDefaultTimeout(8000);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     const capture = async name => {
       if (!screenshots) return;
       await page.evaluate(() => document.fonts.ready);
@@ -298,6 +344,13 @@ try {
         await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
         await assertReflow(page, `${url.slice(base.length) || 'Portal'} with 200% text`);
         assert.ok(await page.getByRole('heading', { level: 1 }).first().isVisible());
+        if (viewport.width === 320 && url === base) {
+          await assertVisibleCopyableSha(page, '.cx-pages-source-line code', source.sourceSha, 'Portal source SHA at 200%');
+        } else if (viewport.width === 320 && url === base + 'graph/') {
+          await assertVisibleCopyableSha(page, '.cx-pages-mode code', source.sourceSha, 'Code Map source SHA at 200%');
+        } else if (viewport.width === 320 && url === snapshotUrl.href) {
+          await assertVisibleCopyableSha(page, '.cx-pages-hero .cx-pages-meta code', main.sha, 'Snapshot source SHA at 200%');
+        }
         const menu = page.locator('.cx-pages-menu-button');
         if (url === base && await menu.isVisible()) {
           await menu.press('Enter');
