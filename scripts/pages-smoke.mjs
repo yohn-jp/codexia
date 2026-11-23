@@ -9,6 +9,7 @@ assert.ok(site && playwright && chromiumPath, 'Usage: pages-smoke.mjs SITE PLAYW
 
 const root = resolve(site);
 const prefix = '/codexia/';
+const destinations = ['architecture/', 'graph/', 'ci/', 'audit/'];
 const contentTypes = {
   '.css': 'text/css',
   '.html': 'text/html',
@@ -39,6 +40,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(resolve(playwright));
 const source = JSON.parse(await readFile(resolve(root, 'graph/source.json'), 'utf8'));
 const atlas = JSON.parse(await readFile(resolve(root, 'architecture/manifest.json'), 'utf8'));
+const audit = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
 const diagram = atlas.diagrams.find(item => item.id === 'admin-5');
 assert.ok(diagram, 'Established Atlas #admin-5 deep link must be in the manifest');
 
@@ -66,6 +68,8 @@ try {
     assert.equal(home.status(), 200);
     assert.ok(await page.getByRole('heading', { level: 1 }).isVisible());
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Horizontal overflow at Portal');
+    const siteMapLinks = await page.locator('main a[href]').evaluateAll(links => links.map(link => link.href));
+    for (const destination of destinations) assert.ok(siteMapLinks.includes(base + destination), 'Portal site map omits ' + destination);
 
     await page.keyboard.press('Tab');
     const skipTarget = await page.locator('.cx-pages-skip:focus').getAttribute('href');
@@ -75,7 +79,7 @@ try {
     assert.ok(await page.locator(skipTarget).isVisible());
     assert.ok(await page.locator(skipTarget).evaluate(target => document.activeElement === target));
 
-    for (const destination of ['architecture/', 'graph/', 'ci/', 'audit/']) {
+    for (const destination of destinations) {
       await page.goto(base);
       const primary = page.locator('.cx-pages-navigation');
       if (viewport.width === 320) {
@@ -111,7 +115,7 @@ try {
 
     assert.ok(source.files?.length, 'Graph source metadata must contain indexed paths');
     const graphLink = new URL('graph/', base);
-    const firstFile = typeof source.files[0] === 'string' ? source.files[0] : source.files[0].path;
+    const { path: firstFile } = source.files[0];
     graphLink.searchParams.set('file', firstFile);
     await page.goto(graphLink.href);
     await page.reload();
@@ -120,6 +124,23 @@ try {
     const selection = page.locator('#file-list .file-button[aria-current="true"]');
     await selection.waitFor();
     assert.equal(new URL(page.url()).searchParams.get('file'), firstFile);
+
+    const main = audit.branches.find(branch => branch.branch === 'main');
+    assert.ok(main && ['ready', 'partial'].includes(audit.snapshots[main.sha]?.status));
+    const snapshotUrl = new URL('snapshots/' + main.sha + '/', base);
+    await page.goto(base + 'audit/');
+    const snapshotAnchor = page.locator('main a').filter({ hasText: /snapshot/i });
+    assert.ok(await snapshotAnchor.evaluateAll((links, href) => links.some(link => link.href === href), snapshotUrl.href));
+    assert.equal((await page.goto(snapshotUrl.href)).status(), 200);
+    assert.ok(await page.locator('a[download][href$="repomix.json"]').first().isVisible());
+
+    const review = Object.entries(audit.reviews).find(([, item]) => ['ready', 'partial'].includes(item.status));
+    if (review) {
+      const [sha] = review;
+      const reviewUrl = new URL('reviews/' + sha + '/', base);
+      assert.equal((await page.goto(reviewUrl.href)).status(), 200);
+      assert.ok(await page.locator('a[download][href$="gemini-review.md"]').first().isVisible());
+    }
     assert.deepEqual(errors, [], 'Browser or generated asset errors at width ' + viewport.width);
     await page.close();
   }
