@@ -543,6 +543,14 @@ async function loadDashboard() {
       return;
     }
     const match = requestedSelection(all);
+    if (requestedPR > 0 && /^[a-f0-9]{40}$/iu.test(requestedSHA ?? '') && match < 0) {
+      selected = null;
+      select.selectedIndex = -1;
+      resetPanels('指定されたPR・リビジョンは取得できたActions履歴にありません。');
+      setStatus('指定されたPR #' + requestedPR + ' / ' + requestedSHA.slice(0, 9) +
+        ' は取得できたActions履歴にありません。履歴保持・API制限・PR対応不明の可能性があります。', 'empty');
+      return;
+    }
     await chooseRevision(all[match >= 0 ? match : 0]);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
