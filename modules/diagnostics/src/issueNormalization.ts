@@ -23,13 +23,20 @@ export function collectDiagnosticIssues(
   let counter = 0;
   const nextId = (prefix: string) => `${prefix}-${++counter}`;
   const thresholds = resolveDiagnosticSeverityThresholds(severityThresholds);
-  const severityFromCount = (count: number, limits: { infoMin: number; mediumMin: number }): DiagnosticIssue["severity"] => count >= limits.mediumMin ? "medium" : "info";
+  const severityFromCount = (count: number, limits: { infoMin: number; mediumMin: number }): DiagnosticIssue["severity"] | undefined => {
+    if (count >= limits.mediumMin) return "medium";
+    return count >= limits.infoMin ? "info" : undefined;
+  };
   const issues: DiagnosticIssue[] = [];
 
-  for (const warning of analysis.rhythmWarnings) issues.push({
-    id: nextId("rhythm"), kind: "rhythm", severity: severityFromCount(warning.count, thresholds.rhythm),
-    message: `語尾「${warning.ending}」が${warning.count}文連続（文${warning.startSentenceIndex}〜）`, sentenceIndex: warning.startSentenceIndex,
-  });
+  for (const warning of analysis.rhythmWarnings) {
+    const severity = severityFromCount(warning.count, thresholds.rhythm);
+    if (!severity) continue;
+    issues.push({
+      id: nextId("rhythm"), kind: "rhythm", severity,
+      message: `語尾「${warning.ending}」が${warning.count}文連続（文${warning.startSentenceIndex}〜）`, sentenceIndex: warning.startSentenceIndex,
+    });
+  }
 
   for (const warning of analysis.lintWarnings) issues.push({
     id: nextId("lint"), kind: "lint", severity: "medium", message: warning.message,
@@ -37,10 +44,14 @@ export function collectDiagnosticIssues(
     meta: { ruleId: warning.ruleId, excerpt: warning.excerpt },
   });
 
-  for (const warning of analysis.habitualPhraseWarnings) for (const sentenceIndex of warning.sentenceIndices) issues.push({
-    id: nextId("habitual"), kind: "habitual-phrase", severity: severityFromCount(warning.count, thresholds.habitualPhrase),
-    message: warning.message, sentenceIndex, meta: { phrase: warning.phrase, band: warning.band, count: warning.count },
-  });
+  for (const warning of analysis.habitualPhraseWarnings) {
+    const severity = severityFromCount(warning.count, thresholds.habitualPhrase);
+    if (!severity) continue;
+    for (const sentenceIndex of warning.sentenceIndices) issues.push({
+      id: nextId("habitual"), kind: "habitual-phrase", severity,
+      message: warning.message, sentenceIndex, meta: { phrase: warning.phrase, band: warning.band, count: warning.count },
+    });
+  }
 
   for (const warning of analysis.toneWarnings) issues.push({
     id: nextId("tone"), kind: "tone", severity: "medium", message: warning.message,
