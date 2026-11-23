@@ -19,6 +19,27 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ALLOWED = /^(flowchart|stateDiagram-v2|erDiagram)(?:\s|$)/u;
 const MAX_SOURCE_BYTES = 24 * 1024;
 const MAX_SVG_BYTES = 4 * 1024 * 1024;
+// Curated links to code that directly owns the matching route or screen surface.
+// These are related-source pointers, not proof that the design contract is accepted.
+export const SCREEN_IMPLEMENTATION_PATHS = Object.freeze({
+  'ENTRY-01': ['app/src/launcher.tsx'],
+  'AUTH-01': ['app/src/OAuthLoginPage.tsx', 'app/src/oauth-login.ts'],
+  'AUTH-02': ['app/src/OAuthConsentPage.tsx', 'app/src/oauth-consent.ts'],
+  'LIB-01': ['app/src/persistence/PersistenceEntry.tsx', 'app/src/application/LibraryOutline.tsx'],
+  'WRT-01': ['app/src/persistence/PersistenceWorkspace.tsx'],
+  'READ-01': ['app/src/editor/MobileReadingPager.tsx'],
+});
+export const SCREEN_CONTROL_PATH = 'docs/design/SCREEN-CONTROL-CATALOG.md';
+
+export function parseScreenContracts(markdown, screenIds) {
+  const lines = markdown.split(/\r?\n/u);
+  return screenIds.flatMap(id => {
+    const index = lines.findIndex(line => new RegExp('^\\|\\s*' + id + '\\s*\\|', 'u').test(line));
+    if (index < 0) return [];
+    const cells = lines[index].split('|').slice(1, -1).map(cell => cell.trim());
+    return [{ id, line: index + 1, status: cells.at(-1)?.replaceAll('*', '') ?? '記載なし' }];
+  });
+}
 
 export function parseMermaidDiagrams(markdown, section) {
   assert.ok(section && /^[a-z]+$/u.test(section.id), 'Invalid section identity');
@@ -39,6 +60,8 @@ export function parseMermaidDiagrams(markdown, section) {
       'Missing or oversized diagram in ' + section.path);
     assert.match(source, ALLOWED, 'Unexpected diagram type in ' + section.path);
     const index = diagrams.length + 1;
+    const screenIds = [...new Set([...heading.matchAll(/\b(?:ENTRY|AUTH|LIB|OUT|WRT|READ|REC|KNO|REV|TOOL|JOB|DISPLAY|PREF|PUB|CON|OPS)-\d{2}\b/gu)].map(match => match[0]))];
+    const implementationPaths = [...new Set(screenIds.flatMap(id => SCREEN_IMPLEMENTATION_PATHS[id] ?? []))];
     diagrams.push({
       id: section.id + '-' + index,
       group: section.id,
@@ -47,6 +70,9 @@ export function parseMermaidDiagrams(markdown, section) {
       markdown: section.path,
       line: start,
       kind: source.split(/\s/u, 1)[0],
+      screenIds,
+      designStatus: /【([^】]+)】/u.exec(heading)?.[1] ?? null,
+      implementationPaths,
       image: 'svg/' + section.id + '-' + index + '.svg',
       source,
     });
@@ -54,7 +80,7 @@ export function parseMermaidDiagrams(markdown, section) {
   return diagrams;
 }
 
-export function createManifest(sha, sources) {
+export function createManifest(sha, sources, screenCatalog = '') {
   assert.match(sha, /^[a-f0-9]{40}$/u, 'Expected a source commit SHA');
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
   assert.ok(diagrams.length >= 40 && diagrams.length <= 64, 'Incomplete or excessive architecture diagram catalog');
@@ -66,7 +92,10 @@ export function createManifest(sha, sources) {
   return {
     format: 'codexia-architecture-atlas/v1',
     sourceSha: sha,
-    diagrams: diagrams.map(({ source, ...published }) => published),
+    diagrams: diagrams.map(({ source, ...published }) => ({
+      ...published,
+      screenContracts: parseScreenContracts(screenCatalog, published.screenIds),
+    })),
   };
 }
 
@@ -74,7 +103,8 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
   assert.ok(typeof rendererPath === 'string' && rendererPath.length, 'A pinned Mermaid CLI is required');
   const sources = await Promise.all(DIAGRAM_DOCUMENTS.map(async section =>
     ({ section, markdown: await readFile(join(root, section.path), 'utf8') })));
-  const manifest = createManifest(sha, sources);
+  const screenCatalog = await readFile(join(root, SCREEN_CONTROL_PATH), 'utf8');
+  const manifest = createManifest(sha, sources, screenCatalog);
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
   const output = join(resolve(siteDir), 'architecture');
   const stage = await mkdtemp(join(tmpdir(), 'codexia-mermaid-'));
@@ -84,7 +114,9 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
       const input = join(stage, diagram.id + '.mmd');
       const dest = join(output, diagram.image);
       await writeFile(input, diagram.source + '\n');
-      execFileSync(rendererPath, ['-i', input, '-o', dest, '-t', 'neutral', '-b', 'white'], {
+      const rendererArgs = ['-i', input, '-o', dest, '-t', 'neutral', '-b', 'white'];
+      execFileSync(rendererPath.endsWith('.mjs') ? process.execPath : rendererPath,
+        rendererPath.endsWith('.mjs') ? [rendererPath, ...rendererArgs] : rendererArgs, {
         stdio: 'pipe', timeout: 90000, maxBuffer: 2 * 1024 * 1024,
       });
       const rendered = await readFile(dest);
