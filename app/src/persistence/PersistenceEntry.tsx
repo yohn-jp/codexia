@@ -4,6 +4,8 @@ import { ApiError } from "../api-error";
 import { beginOAuthAuthorization, completeOAuthAuthorization, webOAuthConfig, type OAuthWebConfig } from "../oauth";
 import { authClient } from "../auth-client";
 import { PersistenceWorkspace } from "./PersistenceWorkspace";
+import { createConsoleReturnLocation } from "../console/console-return";
+import { CONSOLE_NAVIGATION_REQUEST } from "../console/console-navigation";
 import { attemptNativeLogout } from "./nativeLogout";
 import type { NativeSignOutResult } from "../../native/plugins/codexia-auth/src/index.mjs";
 
@@ -27,6 +29,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   const protectionRef = useRef<(() => Promise<boolean>) | null>(null);
   const registerProtection = useCallback((guard: (() => Promise<boolean>) | null) => { protectionRef.current = guard; }, []);
   const [sessionBlocked, setSessionBlocked] = useState(false);
+  const [consoleNavigationError, setConsoleNavigationError] = useState("");
 
   const inspect = useCallback(async () => {
     const sequence = ++inspectSequenceRef.current;
@@ -111,7 +114,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     return () => { mounted = false; inspectSequenceRef.current += 1; window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
   }, [inspect, mode, nativeShell]);
 
-  async function protectBeforeAuthTransition(action: string): Promise<boolean> {
+  const protectBeforeAuthTransition = useCallback(async (action: string): Promise<boolean> => {
     if (workspaceScopeRef.current === null) return true;
     try {
       if (protectionRef.current && await protectionRef.current()) return true;
@@ -120,7 +123,25 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     }
     setMessage(`入力を保護できないため${action}を停止しました。接続と保存状態を確認してください。`);
     return false;
-  }
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "desktop" || nativeShell) return;
+    const requestNavigation = () => {
+      setConsoleNavigationError("");
+      void (async () => {
+        if (!await protectBeforeAuthTransition("管理コンソールへの移動")) return;
+        try {
+          const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          window.location.assign(createConsoleReturnLocation(currentPath, window.sessionStorage));
+        } catch {
+          setConsoleNavigationError("下書きは保護しましたが、戻り先を保存できないためコンソールへの移動を停止しました。");
+        }
+      })();
+    };
+    window.addEventListener(CONSOLE_NAVIGATION_REQUEST, requestNavigation);
+    return () => window.removeEventListener(CONSOLE_NAVIGATION_REQUEST, requestNavigation);
+  }, [mode, nativeShell, protectBeforeAuthTransition]);
 
   async function startOAuthSignIn(): Promise<void> {
     if (!oauthConfig || busy) return;
@@ -208,6 +229,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
         if (oauthConfig) void completeWebOAuthLogout();
       }} />
     </div>
+    {consoleNavigationError && <div className="codexia-console-nav-error" role="alert">
+      <p>{consoleNavigationError}</p>
+      <button type="button" className="quiet-button" onClick={() => setConsoleNavigationError("")}>閉じる</button>
+    </div>}
     {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
       <h1 id="pg-recheck-title">認証・接続を再確認してください</h1>
       <p role="alert">{message}</p>

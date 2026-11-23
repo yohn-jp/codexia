@@ -51,6 +51,70 @@ test("an unauthenticated standalone browser without Web OAuth configuration cann
   await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
 });
 
+test("Desktop console requires the Better Auth owner cookie and returns to a protected draft", async ({ page, authorizeAuthor }) => {
+  const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Console return draft", "Original manuscript.");
+  const draft = "コンソールへ移動しても保護される原稿。";
+  await fillDraft(page, draft);
+  const authoringUrl = page.url();
+  const origin = new URL(authoringUrl).origin;
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    const scope = window as Window & { __consoleDraftFailure?: boolean };
+    scope.__consoleDraftFailure = true;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore["put"]>) {
+      if (this.name === "persistenceDrafts" && scope.__consoleDraftFailure) throw new DOMException("Injected console guard failure", "QuotaExceededError");
+      return original.apply(this, args);
+    };
+  });
+  await manuscriptEditor(page).fill("保護が失敗した場合も画面に残る原稿。");
+  await page.getByRole("button", { name: "管理コンソール", exact: true }).click();
+  await expect.poll(() => page.url()).toBe(authoringUrl);
+  await expect(manuscriptEditor(page)).toContainText("保護が失敗した場合も画面に残る原稿。");
+  await expect(page.getByRole("alert").filter({ hasText: "管理コンソールへの移動" })).toBeVisible();
+  await page.evaluate(() => { (window as Window & { __consoleDraftFailure?: boolean }).__consoleDraftFailure = false; });
+  await fillDraft(page, draft);
+  await page.route(url => url.origin === origin && url.pathname.startsWith("/console/"), route => route.fulfill({
+    path: resolve(shellAssets, "desktop/index.html"),
+    contentType: "text/html; charset=utf-8",
+  }));
+  await page.route(url => url.origin === origin && url.pathname === "/console", route => route.fulfill({
+    path: resolve(shellAssets, "desktop/index.html"),
+    contentType: "text/html; charset=utf-8",
+  }));
+
+  const ownerCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
+  await page.getByRole("button", { name: "管理コンソール", exact: true }).click();
+  const confirmed = await ownerCheck;
+  expect(confirmed.status()).toBe(200);
+  expect(await confirmed.json()).toEqual({ authenticated: true });
+  await expect(page.getByRole("heading", { name: "管理コンソール", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "管理コンソール" }).getByRole("link", { name: "バックアップ" })).toHaveAttribute("href", "/console/backups");
+  await page.setViewportSize({ width: 320, height: 720 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).click();
+  await expect.poll(() => page.url()).toBe(authoringUrl);
+  expect((await readPersistenceDrafts(page)).some(record => record.documentId === fixture.scene.id && record.markdown === draft)).toBe(true);
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+  await expect(manuscriptEditor(page)).toContainText(draft);
+  await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
+
+  let ownerStatus = 401;
+  await page.context().clearCookies();
+  await page.route("**/api/auth/codexia/owner-session", route => route.fulfill({
+    status: ownerStatus,
+    contentType: "application/json",
+    body: JSON.stringify({ error: ownerStatus === 401 ? "Authentication required" : "Forbidden" }),
+  }));
+  await page.goto(`${origin}/console/security`);
+  await expect(page.getByRole("heading", { name: "所有者としてサインイン", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Passkeyでサインイン", exact: true })).toBeVisible();
+  ownerStatus = 403;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "管理権限がありません", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "管理コンソール" })).toHaveCount(0);
+});
+
 test("a failed OAuth logout keeps the editor protected and lets the author retry", async ({ page, authorizeAuthor }) => {
   await createOAuthWritingFixture(authorizeAuthor, page);
   let logoutRequests = 0;
