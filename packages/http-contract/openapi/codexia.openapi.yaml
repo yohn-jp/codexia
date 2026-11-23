@@ -2463,6 +2463,16 @@ paths:
             type: integer
             format: int32
           explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 1000
+            default: 500
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
