@@ -12,8 +12,8 @@ on:
       - app/src/entries/mobile-native.tsx
       - app/src/oauth.ts
       - app/src/persistence/PersistenceEntry.tsx
-      - scripts/html-document.mjs
-      - scripts/read-regular-file.mjs
+      - scripts/shared/html-document.mjs
+      - scripts/shared/read-regular-file.mjs
   workflow_dispatch:
     inputs:
       profile:
@@ -84,7 +84,7 @@ jobs:
           CODEXIA_PROFILE: ${{ matrix.profile }}
         run: |
           node scripts/ci-workspace.mjs build-workspace
-          node scripts/profile-build.mjs --profile "$CODEXIA_PROFILE"
+          node scripts/build/packaging/profile-build.mjs --profile "$CODEXIA_PROFILE"
           pnpm --filter @codexia/app build
 
       - name: Build native Mobile bundle

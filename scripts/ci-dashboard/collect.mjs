@@ -3,7 +3,7 @@
 import { cp, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-export { collect, identity, selectRuns } from './collection.mjs';
+export { collectInventoryPage, collectRevision, identity, selectRuns } from './collection.mjs';
 
 const SOURCE = fileURLToPath(new URL('./site/', import.meta.url));
 

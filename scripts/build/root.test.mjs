@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createRootBuildCommands } from './root-build.mjs';
+import { createRootBuildCommands } from './root.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const packageManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 
 test('omitted and explicit Core profiles build the API and browser with a Core registry and no optional producers', async () => {
@@ -26,7 +26,7 @@ test('omitted and explicit Core profiles build the API and browser with a Core r
 });
 
 test('Full root builds keep the existing workspace graph', () => {
-  assert.equal(packageManifest.scripts.build, 'node scripts/root-build.mjs');
+  assert.equal(packageManifest.scripts.build, 'node scripts/build/root.mjs');
   assert.equal(typeof packageManifest.scripts['build:workspace'], 'string');
   assert.deepEqual(createRootBuildCommands('full'), [{
     command: 'pnpm',

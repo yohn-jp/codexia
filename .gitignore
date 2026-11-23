@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+!/scripts/build/
 coverage/
 .turbo/
 .env

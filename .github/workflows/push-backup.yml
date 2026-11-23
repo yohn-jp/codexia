@@ -29,7 +29,7 @@ jobs:
   backup-contract:
     name: Verify push backup locks, writer quiescence and interrupted deployment recovery
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
       actions: read
@@ -48,6 +48,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/reuse-pr-verification.mjs dedicated
+      - uses: actions/setup-python@v6.1.0
+        if: steps.reuse.outputs.eligible != 'true'
+        with:
+          python-version: '3.12.12'
       - name: Check backup and recovery shell syntax
         if: steps.reuse.outputs.eligible != 'true'
         run: |
@@ -56,3 +60,9 @@ jobs:
       - name: Verify push backup lock and recovery contract
         if: steps.reuse.outputs.eligible != 'true'
         run: node --test scripts/push-deployment-backup.test.mjs scripts/push-deployment-recovery.test.mjs
+      - name: Verify S3 transfer unit contract
+        if: steps.reuse.outputs.eligible != 'true'
+        run: python3 -m unittest deploy/backup/test_s3_transfer.py -v
+      - name: Verify pinned S3-compatible transfer and isolated restore fixture
+        if: steps.reuse.outputs.eligible != 'true'
+        run: bash deploy/backup/s3-fixture.sh

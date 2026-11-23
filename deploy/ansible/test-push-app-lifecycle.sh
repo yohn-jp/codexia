@@ -20,7 +20,7 @@ environment_generator_installed=false
 fixture_ip=''
 backup_mounted=false
 build_context=''
-docker_fixture_image_created=false
+fixture_image=''
 manager_configured=false
 registry_configured=false
 user_created=false
@@ -58,6 +58,18 @@ value.updatedAt=new Date().toISOString();
 fs.writeFileSync(path,JSON.stringify(value,null,2)+'\n',{mode:0o600});
 NODE
 }
+record_phase_timing() {
+  local key=$1 started=$2 duration
+  duration=$(( $(date +%s%3N) - started ))
+  node - "$report" "$key" "$duration" <<'PHASE'
+const fs=require('node:fs');const [p,key,ms]=process.argv.slice(2);
+const r=JSON.parse(fs.readFileSync(p,'utf8'));
+r.timings ||= {};r.timings.phases ||= {};
+r.timings.phases[key]={durationMs:Number(ms)};
+fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+PHASE
+  echo "LIFECYCLE_TIMING ${key}=${duration}ms"
+}
 redact_log() {
   local source=$1 target=$2
   sed -E \
@@ -77,7 +89,7 @@ capture_failure_runtime() {
     done
     printf '\nRootless container state\n'
     rootless_podman ps --all --format '{{.Names}} {{.Status}} {{.Image}}' 2>&1 || true
-    for name in codexia-api codexia-db; do
+    for name in codexia-api codexia-db codexia-backup-sshfs codexia-lifecycle-registry; do
       if rootless_podman container exists "$name" >/dev/null 2>&1; then
         printf '\nContainer log tail: %s\n' "$name"
         rootless_podman logs --tail 60 "$name" 2>&1 || true
@@ -151,7 +163,16 @@ codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
-  run_playbook "$tmp/deploy-vars.yml" "$log_name"
+  local begin_ms elapsed_ms status=0
+  begin_ms=$(date +%s%3N)
+  run_playbook "$tmp/deploy-vars.yml" "$log_name" || status=$?
+  elapsed_ms=$(( $(date +%s%3N) - begin_ms ))
+  node - "$report" "$log_name" "$elapsed_ms" "$status" <<'TIMING'
+const fs=require('node:fs');const [p,label,ms,exit]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(p,'utf8'));
+r.timings ||= {}; (r.timings.ansible ||= []).push({label,durationMs:Number(ms),exitCode:Number(exit)});
+fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+TIMING
+  return "$status"
 }
 observe_runtime() {
   local key=$1 role=$2
@@ -250,22 +271,16 @@ cleanup() {
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name secret absence verification"
     done
-    rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
-    if (( rc == 0 )); then rootless_podman rmi codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_failed "$LINENO"; fi
-    rc=0; rootless_podman image exists codexia-sshfs-fixture >/dev/null 2>&1 || rc=$?
-    (( rc == 1 )) || cleanup_failed "$LINENO"
     if [[ -n "$build_context" ]] && rootless test -d "$build_context"; then
       rootless rm -r "$build_context" || cleanup_failed "$LINENO"
       rootless test ! -e "$build_context" || cleanup_failed "$LINENO"
     fi
   fi
-  if [[ "$docker_fixture_image_created" == true ]]; then
-    docker image rm codexia-sshfs-fixture >/dev/null 2>&1 || cleanup_failed "$LINENO"
-    docker image inspect codexia-sshfs-fixture >/dev/null 2>&1 && cleanup_failed "$LINENO"
-  fi
+  # The alias is a disposable network-namespace address used by the canonical
+  # backup destination guard, not the SSH transport endpoint.
   if [[ -n "$fixture_ip" ]]; then
-    sudo sed -i "\\|^$fixture_ip codexia-backup-fixture$|d" /etc/hosts || cleanup_failed "$LINENO"
-    grep -q "^$fixture_ip codexia-backup-fixture$" /etc/hosts && cleanup_failed "$LINENO"
+    sudo sed -i "\\|^${fixture_ip//./\\.} codexia-backup-fixture$|d" /etc/hosts || cleanup_failed "$LINENO" 'SSHFS fixture host mapping removal'
+    grep -Fxq "$fixture_ip codexia-backup-fixture" /etc/hosts && cleanup_failed "$LINENO" 'SSHFS fixture host mapping remains'
   fi
   if [[ "$registry_configured" == true ]]; then
     rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_failed "$LINENO"
@@ -309,19 +324,25 @@ cleanup() {
   fi
   rm -rf -- "$tmp" || cleanup_failed "$LINENO"
   node - "$report" "$status" "$cleanup_status" <<'NODE'
-const fs=require('node:fs');const [path,status,cleanup]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(path,'utf8'));r.cleanup={status:Number(cleanup)===0?'PASS':'FAIL',exitCode:Number(cleanup)};r.states ||= {};if(Number(cleanup)===0)r.states.fixture_cleanup={status:'PASS',detail:'fixture resources removed'};else r.states.fixture_cleanup={status:'FAIL',detail:'fixture cleanup left a resource or mount'};if(Number(status)!==0&&r.states.backup_remote_filesystem?.status==='IN_PROGRESS')r.states.backup_remote_filesystem={status:'NOT_CHECKED',detail:'deployment did not reach backup artifact creation'};r.logs=fs.readdirSync(require('node:path').dirname(path)).filter(name=>name.endsWith('-bounded.log')).map(name=>({file:name,redacted:true}));if(Number(cleanup)!==0)r.status='FAIL';else if(Number(status)===78)r.status='NOT_CHECKED';else if(Number(status)!==0)r.status=r.status==='NOT_CHECKED'?'NOT_CHECKED':'FAIL';else {const required=['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback','fixture_cleanup'];r.status=required.every(key=>r.states[key]?.status==='PASS')?'PASS':'NOT_CHECKED';}fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});}catch{}
+const fs=require('node:fs');const [path,status,cleanup]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(path,'utf8'));r.cleanup={status:Number(cleanup)===0?'PASS':'FAIL',exitCode:Number(cleanup)};r.states ||= {};if(Number(cleanup)===0)r.states.fixture_cleanup={status:'PASS',detail:'fixture resources removed'};else r.states.fixture_cleanup={status:'FAIL',detail:'fixture cleanup left a resource or mount'};if(Number(status)!==0&&r.states.backup_remote_filesystem?.status==='IN_PROGRESS')r.states.backup_remote_filesystem={status:'NOT_CHECKED',detail:'deployment did not reach backup artifact creation'};r.logs=fs.readdirSync(require('node:path').dirname(path)).filter(name=>name.endsWith('-bounded.log')).map(name=>({file:name,redacted:true}));if(Number(cleanup)!==0)r.status='FAIL';else if(Number(status)===78)r.status='NOT_CHECKED';else if(Number(status)!==0)r.status=r.status==='NOT_CHECKED'?'NOT_CHECKED':'FAIL';else {const app=['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem'];const auth=['better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback'];const required=r.scenario==='app'?app:r.scenario==='auth'?auth:[];r.status=required.length>0&&[...required,'fixture_cleanup'].every(key=>r.states[key]?.status==='PASS')?'PASS':'NOT_CHECKED';}fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});}catch{}
 NODE
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
+  # A job must never be green when a required transition is NOT_CHECKED.
+  if (( status == 0 )) && ! node -e 'const r=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.exit(r.status==="PASS"?0:1)' "$report"; then
+    echo 'Lifecycle report has unverified required transitions' >&2
+    status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
 
 mkdir -p "$(dirname "$report")"
 node - "$report" "$source_sha" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'NODE'
-const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);const states={};for(const key of ['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback','fixture_cleanup'])states[key]={status:'NOT_CHECKED'};fs.mkdirSync(require('node:path').dirname(path),{recursive:true,mode:0o700});fs.writeFileSync(path,JSON.stringify({schemaVersion:1,sourceSha:sha,runId:Number(run),runAttempt:Number(attempt),status:'IN_PROGRESS',states,images:[],observations:{},logs:[],capabilities:{},createdAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
+const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);const scenario=process.env.CODEXIA_LIFECYCLE_SCENARIO;const states={};for(const key of ['first_activation','same_digest_reapply','compatible_update','failed_candidate_rollback','durable_interruption_recovery','database_volume_writer_quadlet_release_continuity','backup_remote_filesystem','better_auth_activation','better_auth_same_digest','better_auth_compatible_update','better_auth_rollback','fixture_cleanup'])states[key]={status:'NOT_CHECKED'};fs.mkdirSync(require('node:path').dirname(path),{recursive:true,mode:0o700});fs.writeFileSync(path,JSON.stringify({schemaVersion:1,sourceSha:sha,runId:Number(run),runAttempt:Number(attempt),scenario,status:'IN_PROGRESS',states,images:[],observations:{},timings:{},logs:[],capabilities:{},createdAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
 NODE
 trap 'record_failure "$?" "${BASH_LINENO[0]:-0}" "$BASH_COMMAND"' ERR
 set_state first_activation NOT_CHECKED 'runtime fixture not started'
+bootstrap_started=$(date +%s%3N)
 if [[ "${GITHUB_ACTIONS:-}" != true ]]; then
   mark_fixture_unavailable 'execution is not on an isolated GitHub Actions runner'
   exit 78
@@ -458,68 +479,37 @@ node - "$report" "$podman_version" "$podman_rootless" "$systemd_version" "$postg
 const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 CAPABILITIES
 
+record_phase_timing host_bootstrap "$bootstrap_started"
+sshfs_started=$(date +%s%3N)
 # Use a dedicated rootless SSHFS server container. Its IP is distinct from host
 # interfaces; backup.sh retains its normal remote-filesystem and same-host checks.
 rootless_podman network create codexia-lifecycle-backup >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$tmp/backup_key"
 build_context="$fixture_home/.local/state/codexia-lifecycle-build"
-docker_build_context="$tmp/sshfs-build-context"
-docker pull docker.io/library/debian:stable-slim >/dev/null
-debian_image_digest=$(docker image inspect --format '{{json .RepoDigests}}' docker.io/library/debian:stable-slim | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^(docker\.io\/library\/)?debian@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v.startsWith("docker.io/")?v:"docker.io/library/"+v)})')
+# The source-bound fixture is built and SSH-smoked in a separate producer job.
+# A unique run key is installed only here, never in the OCI layers or artifact.
+: "${CODEXIA_LIFECYCLE_FIXTURE_DIR:?}"
+node "$repo_root/scripts/verify-sshfs-fixture-artifact.mjs" "$CODEXIA_LIFECYCLE_FIXTURE_DIR"
+fixture_manifest="$CODEXIA_LIFECYCLE_FIXTURE_DIR/manifest.json"
+fixture_image=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image' "$fixture_manifest")
+fixture_image_id=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).imageId' "$fixture_manifest")
 rootless mkdir -p "$build_context"
-mkdir -p "$docker_build_context"
-cat > "$tmp/sshfs.Dockerfile" <<'DOCKERFILE'
-ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
-RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash codexia-backup && mkdir -p /home/codexia-backup/.ssh /backups && chown -R codexia-backup:codexia-backup /home/codexia-backup/.ssh /backups && chmod 0700 /home/codexia-backup/.ssh
-COPY --chown=codexia-backup:codexia-backup authorized_keys /home/codexia-backup/.ssh/authorized_keys
-RUN chmod 0600 /home/codexia-backup/.ssh/authorized_keys
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod 0755 /entrypoint.sh
-EXPOSE 22
-ENTRYPOINT ["/entrypoint.sh"]
-DOCKERFILE
-cat > "$tmp/sshfs.entrypoint.sh" <<'ENTRYPOINT'
-#!/bin/sh
-set -eu
-mkdir -p /run/sshd
-ssh-keygen -A
-chown -R codexia-backup:codexia-backup /backups
-exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o AllowUsers=codexia-backup
-ENTRYPOINT
-install -m 0644 "$tmp/sshfs.Dockerfile" "$docker_build_context/Dockerfile"
-install -m 0644 "$tmp/backup_key.pub" "$docker_build_context/authorized_keys"
-install -m 0755 "$tmp/sshfs.entrypoint.sh" "$docker_build_context/entrypoint.sh"
-# The helper server is built outside rootless Podman's fuse-overlayfs because
-# system package postinst ACLs are not supported there. The app lifecycle below
-# still runs only in the service user's rootless Podman store.
-if docker build --build-arg "BASE_IMAGE=$debian_image_digest" -t codexia-sshfs-fixture -f "$docker_build_context/Dockerfile" "$docker_build_context" >"$tmp/sshfs-build.log" 2>&1; then
-  :
-else
-  build_status=$?
-  record_failure "$build_status" "$LINENO" 'SSHFS fixture image build'
-  exit "$build_status"
+sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/authorized_keys"
+# Bind-mounted authorized_keys must belong to the sshd account (container UID 1000).
+# Map ownership through the service user's rootless user namespace, not host root.
+rootless_podman unshare chown 1000:1000 "$build_context/authorized_keys"
+sudo install -o codexia -g codexia -m 0644 "$CODEXIA_LIFECYCLE_FIXTURE_DIR/sshfs-fixture.tar" "$build_context/sshfs-fixture.tar"
+rootless_podman load --input "$build_context/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1
+imported_fixture_image_id=$(rootless_podman image inspect "$fixture_image" --format '{{.Id}}')
+if [[ ! "$imported_fixture_image_id" =~ ^(sha256:)?[a-f0-9]{64}$ ]] ||
+   [[ "${imported_fixture_image_id#sha256:}" != "${fixture_image_id#sha256:}" ]]; then
+  printf 'Imported SSHFS image ID differs: producer=%s consumer=%s\n' "$fixture_image_id" "$imported_fixture_image_id" >&2
+  exit 1
 fi
-docker_fixture_image_created=true
-if docker save --output "$tmp/sshfs-fixture.tar" codexia-sshfs-fixture >"$tmp/sshfs-save.log" 2>&1; then
-  :
-else
-  save_status=$?
-  record_failure "$save_status" "$LINENO" 'SSHFS fixture image archive'
-  exit "$save_status"
-fi
-sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs-fixture.tar" "$build_context/sshfs-fixture.tar"
-if rootless_podman load --input "$build_context/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1; then
-  :
-else
-  load_status=$?
-  record_failure "$load_status" "$LINENO" 'SSHFS fixture image import into rootless Podman'
-  exit "$load_status"
-fi
-rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup -p 127.0.0.1:2222:22 codexia-sshfs-fixture >/dev/null
-fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
-test -n "$fixture_ip"
-printf '%s codexia-backup-fixture\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
+rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup \
+  -p 127.0.0.1:2222:2222 \
+  --volume "$build_context/authorized_keys:/home/codexia-backup/.ssh/authorized_keys:ro" \
+  "$fixture_image" >/dev/null
 rootless mkdir -p "$fixture_home/.ssh" "$fixture_home/.local/state/codexia-backup-mount"
 rootless chmod 0700 "$fixture_home/.ssh"
 sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key" "$fixture_home/.ssh/codexia-backup-key"
@@ -535,13 +525,39 @@ Host codexia-backup-fixture
   StrictHostKeyChecking yes
 SSH_CONFIG
 sudo install -o codexia -g codexia -m 0600 "$tmp/ssh-config" "$fixture_home/.ssh/config"
-server_key=$(rootless_podman exec codexia-backup-sshfs cat /etc/ssh/ssh_host_ed25519_key.pub)
+# The container generates its host key on startup. Its detached run can finish
+# before ssh-keygen -A, so wait for the real key instead of racing sshd startup.
+ssh_host_key_ready=false
+for attempt in $(seq 1 30); do
+  if rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub >/dev/null 2>&1; then
+    ssh_host_key_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$ssh_host_key_ready" != true ]]; then
+  echo 'Prebuilt SSHFS fixture did not generate its SSH host key' >&2
+  rootless_podman logs --tail 50 codexia-backup-sshfs >&2 || true
+  exit 1
+fi
+server_key=$(rootless_podman exec codexia-backup-sshfs cat /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub)
 printf 'codexia-backup-fixture %s\n' "$server_key" > "$tmp/known_hosts"
 sudo install -o codexia -g codexia -m 0600 "$tmp/known_hosts" "$fixture_home/.ssh/known_hosts"
 if ! rootless ssh -F "$fixture_home/.ssh/config" -o BatchMode=yes codexia-backup-fixture true; then
   echo 'The isolated SSHFS endpoint failed its pinned-key SSH capability check' >&2
   exit 1
 fi
+# The production backup guard resolves the SSHFS mount *source* and must find
+# a non-local peer. Name the actual isolated container address, while SSH
+# continues to reach that same container over its mapped 127.0.0.1:2222 port.
+fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
+[[ "$fixture_ip" =~ ^([0-9]{1,3}[.]){3}[0-9]{1,3}$ ]] || { echo 'SSHFS container has no verifiable network address' >&2; exit 1; }
+printf '%s codexia-backup-fixture\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
+getent ahosts codexia-backup-fixture | awk '{print $1}' | grep -Fxq "$fixture_ip" || {
+  echo 'SSHFS fixture hostname did not resolve to its isolated container address' >&2
+  exit 1
+}
+
 if ! rootless sshfs codexia-backup@codexia-backup-fixture:/backups "$fixture_home/.local/state/codexia-backup-mount" -o reconnect -o ServerAliveInterval=15 -o ServerAliveCountMax=3 2>"$tmp/sshfs.log"; then
   redact_log "$tmp/sshfs.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/sshfs-bounded.log"
   if grep -Eqi 'fuse|operation not permitted|permission denied' "$tmp/sshfs.log"; then
@@ -553,13 +569,17 @@ fi
 backup_mounted=true
 rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount"
 set_state backup_remote_filesystem IN_PROGRESS 'isolated SSHFS container mounted; waiting for the canonical deployment backup'
+record_phase_timing sshfs_fixture "$sshfs_started"
 age-keygen -o "$tmp/age-identity" >/dev/null
 backup_recipient=$(sed -n 's/^# public key: //p' "$tmp/age-identity")
 test "$backup_recipient" != ''
 
 # Resolve and verify published images before installing the disposable registry map.
 # This keeps public GHCR pulls pointed at GHCR, never at the empty test registry.
+candidate_started=$(date +%s%3N)
 node "$repo_root/scripts/push-app-lifecycle.mjs" prepare
+record_phase_timing backend_candidate "$candidate_started"
+registry_started=$(date +%s%3N)
 
 # The service user's OCI registry map points the production image name at a
 # disposable local registry. No image or package is published to GHCR.
@@ -585,14 +605,23 @@ for _ in $(seq 1 30); do
 done
 curl --fail --silent http://127.0.0.1:5000/v2/ >/dev/null
 node "$repo_root/scripts/push-app-lifecycle.mjs" mirror
+record_phase_timing registry_mirror "$registry_started"
 database_image_name=$(rootless_podman inspect --format '{{.ImageName}}' codexia-db)
 database_image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-db)
 database_repo_digests=$(rootless_podman image inspect --format '{{json .RepoDigests}}' "$database_image_name")
-sshfs_image_id=$(rootless_podman image inspect --format '{{.Id}}' codexia-sshfs-fixture)
+sshfs_image_id=$(rootless_podman image inspect --format '{{.Id}}' "$fixture_image")
 registry_image_id=$(rootless_podman image inspect --format '{{.Id}}' "$registry_image_digest")
-sshfs_context_sha=$(cat "$docker_build_context/Dockerfile" "$docker_build_context/entrypoint.sh" "$docker_build_context/authorized_keys" | sha256sum | cut -d' ' -f1)
-node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$debian_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
-const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',builder:'host Docker; archive loaded into rootless Podman',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$fixture_manifest" "$sshfs_image_id" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
+const fs=require('node:fs');
+const [p,dbName,dbId,dbDigests,manifestPath,sshfsId,registry,registryId]=process.argv.slice(2);
+const r=JSON.parse(fs.readFileSync(p,'utf8')),m=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+r.infrastructureImages=[
+  {role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},
+  {role:'backup-sshfs-server',image:m.image,imageId:sshfsId,sourceIdentity:{kind:'same-run prebuilt artifact',sourceSha:m.sourceSha,
+    runId:m.runId,runAttempt:m.runAttempt,archiveSha256:m.archiveSha256,baseImage:m.baseImage,dockerfileSha256:m.dockerfileSha256,entrypointSha256:m.entrypointSha256}},
+  {role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}
+];r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+
 IMAGE_INVENTORY
 
 disable_fixture_tunnel() {
@@ -607,8 +636,32 @@ disable_fixture_tunnel() {
   fi
 }
 
+prepare_app_update() {
+  # When no compatible published release exists, create an independent, same-identity
+  # test-only digest. This must not depend on the Better Auth lane's database.
+  local from candidate tag digest_file digest
+  from=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).candidates.head.image' "$evidence")
+  candidate="$build_context/app-update"
+  rootless mkdir -p "$candidate"
+  cat > "$tmp/app-update.Dockerfile" <<'DOCKERFILE'
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+LABEL org.codexia.lifecycle-scenario="app-update"
+DOCKERFILE
+  sudo install -o codexia -g codexia -m 0644 "$tmp/app-update.Dockerfile" "$candidate/Dockerfile"
+  tag="localhost:5000/yohn-jp/codexia-backend:app-update-$source_sha"
+  rootless_podman build --pull=never --build-arg "BASE_IMAGE=$from" -t "$tag" -f "$candidate/Dockerfile" "$candidate" >"$tmp/app-update-build.log" 2>&1
+  digest_file="$candidate/digest"
+  rootless_podman push --digestfile "$digest_file" "$tag" >"$tmp/app-update-push.log" 2>&1
+  digest=$(rootless cat "$digest_file")
+  rootless rm -f "$digest_file"
+  node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
+}
 run_application_lifecycle() {
   local initial_key update_key update_image failed_image
+  if [[ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).transition.kind' "$evidence")" == test-only-digest ]]; then
+    prepare_app_update
+  fi
   read -r initial_key update_key update_image < <(node - "$evidence" <<'TRANSITION'
 const fs = require('node:fs');
 const { transition, candidates } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -617,7 +670,7 @@ if (candidates[from].image === candidates[to].image) throw new Error('The update
 console.log(from, to, candidates[to].image);
 TRANSITION
   )
-  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:auth-update ]]
+  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:app-update ]]
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
@@ -690,7 +743,7 @@ fi
 exit "$status"
 FAULT_SYSTEMCTL
 sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/systemctl"
-if run_deploy auth-primary false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
+if run_deploy "$initial_key" false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
 rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 run_deploy "$update_key" false
 observe_runtime interrupted-recovery "$update_key"
@@ -698,8 +751,23 @@ rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
 }
-source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
-run_better_auth_lifecycle
+scenario_started=$(date +%s%3N)
+case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
+  app)
+    # The standalone API requires the same approved Better Auth bootstrap as the auth lane.
+    source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
+    run_better_auth_lifecycle app
+    ;;
+  auth)
+    source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
+    run_better_auth_lifecycle
+    ;;
+  *)
+    echo "Unknown lifecycle scenario" >&2
+    exit 1
+    ;;
+esac
+record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$scenario_started"
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE
