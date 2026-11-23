@@ -81,6 +81,7 @@ test('disposable app lifecycle is not admitted by isolated workspace tests', () 
     'packages/persistence-postgres/tests/db-contract/runner.test.mjs',
     'packages/http-contract/test/fastify-persistence-registration.test.ts',
     'packages/core/src/snapshot-reuse.test.ts',
+    // Other compiled test sources in this contract still contribute to the final dist, not host state.
     'modules/mcp/src/tool-catalog.test.ts',
   ]) assert.equal(matchesWorkflowPaths(paths, [path]), false, path);
   for (const path of [
@@ -161,6 +162,8 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     ['Real-model fixture', ['tests/integration/model-oci-lifecycle-arguments.test.mjs'], true],
     ['Profile packager', ['scripts/build/packaging/profile-package.mjs'], true],
     ['Model admission policy', ['scripts/ci-impact.mjs'], true],
+    ['API emitted test', ['packages/api/src/server.test.ts'], true],
+    ['Persistence contract emitted test', ['packages/persistence-contracts/src/index.test.ts'], true],
     ['Mixed source and test', ['modules/mcp/src/tool-catalog.test.ts', 'packages/api/src/server.ts'], true],
   ]) {
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);

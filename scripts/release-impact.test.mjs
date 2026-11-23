@@ -24,6 +24,10 @@ test('test-only changes do not request runtime component release builds', () => 
     assert.equal(componentReleaseAffected('backend', [file]), false, `backend: ${file}`);
     assert.equal(componentReleaseAffected('frontend', [file]), false, `frontend: ${file}`);
   }
+  // Both source trees emit selected test files into the production dist closure.
+  assert.equal(componentReleaseAffected('backend', ['packages/api/src/server.test.ts']), true);
+  assert.equal(componentReleaseAffected('backend', ['packages/persistence-contracts/src/index.test.ts']), true);
+  assert.equal(componentReleaseAffected('frontend', ['packages/persistence-contracts/src/index.test.ts']), true);
   for (const [component, file] of [
     ['backend', 'packages/api/src/server.ts'],
     ['backend', 'modules/mcp/src/tools.ts'],

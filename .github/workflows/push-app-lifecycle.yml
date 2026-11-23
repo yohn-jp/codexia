@@ -22,6 +22,9 @@ on:
       - '!packages/**/tests/**'
       - '!packages/**/*.test.*'
       - '!packages/**/*.spec.*'
+      # Emitted test files are still inputs to the deployed package dist.
+      - 'packages/api/src/**/*.test.*'
+      - 'packages/persistence-contracts/src/**/*.test.*'
       - profiles/**
       - package.json
       - pnpm-lock.yaml
