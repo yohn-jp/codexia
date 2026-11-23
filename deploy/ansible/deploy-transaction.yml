@@ -591,8 +591,12 @@
         if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
           install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
           systemctl --user daemon-reload || restore_status=1
-          # Notify=healthy makes this unit start block until the prior API is ready.
-          systemctl --user start codexia-api.service || restore_status=1
+          # Candidate startup failures can exhaust the unit start limit. Clear
+          # that failure state only after restoring the known-good Quadlet.
+          systemctl --user reset-failed codexia-api.service || restore_status=1
+          if [[ "$restore_status" == 0 ]]; then
+            systemctl --user start codexia-api.service || restore_status=1
+          fi
           if [[ "$restore_status" == 0 ]] &&
              ! podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then
             restore_status=1

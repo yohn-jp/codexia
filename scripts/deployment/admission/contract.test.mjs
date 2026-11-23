@@ -200,6 +200,29 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
+test('rollback clears candidate start-limit failures before restarting the prior API', () => {
+  const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'].cmd;
+  const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('if { [[ "$tunnel_present" == true ]]'));
+  const install = restore.indexOf('install -m 0644 "$state_dir/rollback-api.container" "$active_unit"');
+  const reload = restore.indexOf('systemctl --user daemon-reload', install);
+  const reset = restore.indexOf('systemctl --user reset-failed codexia-api.service', reload);
+  const start = restore.indexOf('systemctl --user start codexia-api.service', reset);
+  const health = restore.indexOf('podman inspect --format', start);
+  assert.ok(install >= 0 && reload > install && reset > reload && start > reset && health > start,
+    'rollback must restore and reload the prior unit, reset candidate start-limit state, then start and verify health');
+
+  const recovery = readFileSync(new URL('../../../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
+  const recoveryInstall = recovery.indexOf('install -m 0644 -- "$state_dir/rollback-api.container" "$active_unit"');
+  const recoveryReload = recovery.indexOf('systemctl --user daemon-reload', recoveryInstall);
+  const recoveryReset = recovery.indexOf('systemctl --user reset-failed codexia-api.service', recoveryReload);
+  const recoveryStart = recovery.indexOf('systemctl --user start codexia-api.service', recoveryReset);
+  const recoveryHealth = recovery.indexOf('podman inspect --format', recoveryStart);
+  assert.ok(recoveryInstall >= 0 && recoveryReload > recoveryInstall && recoveryReset > recoveryReload &&
+    recoveryStart > recoveryReset && recoveryHealth > recoveryStart,
+    'interrupted transaction recovery must clear start limits only after restoring the prior unit');
+});
+
 test('deployment requires the rootless base runtime under the lock before activation', () => {
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
