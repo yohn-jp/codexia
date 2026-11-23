@@ -152,6 +152,7 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.match(await page.locator('#expansion-list').innerText(), /beta/);
   await page.setViewportSize({ width: 320, height: 800 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'long source evidence should wrap within 320px shell');
+  await page.waitForFunction(() => !document.getElementById('file-explorer').open, null, { timeout: 5_000 });
   assert.equal(await page.locator('#file-explorer').evaluate(element => element.open), false, 'mobile file explorer starts collapsed so the selected graph remains primary');
   await page.locator('.file-explorer-summary').click();
   assert.equal(await page.locator('#search').isVisible(), true);
