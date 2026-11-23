@@ -45,13 +45,14 @@ function page(site, route) {
 function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
-  const rootLinks = ['architecture/','graph/','ci/','audit/','manifest.json',
+  const rootLinks = ['architecture/','graph/','ci/','security/','audit/','manifest.json',
     ...snapshotBranches.flatMap(sha => [`snapshots/${sha}/`,`snapshots/${sha}/repomix.json`]), ...reviewBranches.map(sha => `reviews/${sha}/index.html`)];
   const routes = [
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
     { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
     { route:'/graph/', label:'Code Map', description:'Static code relationships extracted by Graphify.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['../','communities.html'] },
     { route:'/ci/', label:'CI Observatory', description:'Public GitHub Actions run and job observations, fetched by the browser.', category:'Verification', generationStatus: existsSync(page(site,'/ci/')) ? 'ready':'unavailable', coverageStatus:'live-public-actions-api', dataKind:'browser-live', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/actions', internalLinks:['../'] },
+    { route:'/security/', label:'Code scanning export', description:'Authorized GitHub Code scanning alerts, downloadable as JSON or CSV. Findings are never published by Pages.', category:'Security', generationStatus: existsSync(page(site,'/security/')) ? 'ready':'unavailable', coverageStatus:'authorized-main-alerts', dataKind:'browser-authenticated', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/security/code-scanning', internalLinks:['../'] },
     { route:'/audit/', label:'Source Audit', description:'Repomix branch snapshots and OCR-selected review input materials. Review input is not an AI review result.', category:'Audit', generationStatus: existsSync(page(site,'/audit/')) ? 'ready':'unavailable', coverageStatus: audit.branches?.length ? 'branch-head-snapshots':'empty', dataKind:'branch-head-snapshot', observedAt:audit.observedAt, internalLinks:['../','../manifest.json'] },
     { route:'/graph/communities.html', label:'Community Overview', description:'Graphify community view.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/communities.html')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['./','../'] },
   ];
@@ -73,6 +74,8 @@ function renderPortal(manifest,audit) {
   const labels={
     'build-snapshot':'Build snapshot',
     'browser-live':'Live public data',
+    'browser-authenticated':'Authorized in browser',
+    'authorized-main-alerts':'Read-only GitHub API · main',
     'branch-head-snapshot':'Branch snapshots',
     'see-manifest':'Coverage in manifest',
     'see-graph-data':'Coverage in graph data',
@@ -80,7 +83,7 @@ function renderPortal(manifest,audit) {
     'branch-head-snapshots':'Observed branch heads',
   };
   const label=value=>esc(labels[value]??value);
-  const cards = manifest.routes.filter(x => ['/architecture/','/graph/','/ci/','/audit/'].includes(x.route)).map(item => {
+  const cards = manifest.routes.filter(x => ['/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
     const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
@@ -93,7 +96,7 @@ function renderPortal(manifest,audit) {
     const community=item.route==='/graph/'?`<p><a href="graph/communities.html">Community overview</a></p>`:'';
     return `<article class="cx-pages-card"><div class="cx-pages-card-heading"><h2>${esc(item.label)}</h2>${statusBadge(available?'ready':'unavailable')}</div><p class="cx-pages-card-description">${esc(item.description)}</p><p class="cx-pages-card-meta">${label(item.dataKind)} · ${label(item.coverageStatus)}</p><div class="cx-pages-card-actions"><a class="cx-pages-action cx-pages-action--primary" href="${esc(target)}">Open ${esc(item.label)}</a></div>${community}${detail}</article>`;
   }).join('\n');
-  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, code relationships, CI activity, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
+  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, code relationships, CI activity, security exports, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
   return overview;
 }
 
@@ -294,7 +297,7 @@ function verifyAuditArtifacts(site,audit) {
 }
 
 function validateRegistry(site,manifest,audit,origin) {
-  const base=['/','/architecture/','/graph/','/ci/','/audit/','/graph/communities.html'];
+  const base=['/','/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
   const expected=[...base,...snapshotRoutes,...reviewRoutes];
@@ -309,7 +312,7 @@ function validateRegistry(site,manifest,audit,origin) {
   for (const item of manifest.routes) {
     assert.ok(typeof item.label==='string' && typeof item.description==='string' && typeof item.category==='string','Invalid route metadata');
     assert.ok(['ready','unavailable'].includes(item.generationStatus),'Invalid route generation status');
-    const sourceIsIndependent=['/ci/','/audit/'].includes(item.route);
+    const sourceIsIndependent=['/ci/','/audit/','/security/'].includes(item.route);
     if (sourceIsIndependent) assert.ok(item.sourceSha===undefined,'Live or aggregate route was assigned a misleading source SHA');
     else assert.ok(typeof item.sourceSha==='string' && SHA.test(item.sourceSha),'Invalid route source SHA');
     const target=page(site,item.route);
@@ -361,6 +364,13 @@ function validateRegistry(site,manifest,audit,origin) {
     assert.ok(graph.sourceSha===sourceSha,'Graph source SHA differs from Pages build');
     assert.deepEqual(readdirSync(join(site,'graph')).sort(),['analysis.mjs','communities.html','index.html','source.json'],'Unexpected Graph build output');
   }
+  const securityRoute=manifest.routes.find(item=>item.route==='/security/');
+  assert.ok(securityRoute.generationStatus==='ready' && securityRoute.sourceSha===undefined &&
+    securityRoute.dataKind==='browser-authenticated','Security export must not claim a source snapshot');
+  const securityDir=join(site,'security');
+  assert.deepEqual(readdirSync(securityDir).sort(),['api.mjs','app.mjs','index.html','security.css'],'Unexpected Security export artifact');
+  const securityHtml=readPageFile(join(securityDir,'index.html'),'utf8');
+  assert.ok(securityHtml.includes('Content-Security-Policy') && securityHtml.includes('connect-src https://api.github.com'),'Security export CSP is required');
   const auditRoute=manifest.routes.find(item=>item.route==='/audit/');
   assert.ok(auditRoute.generationStatus==='ready' && auditRoute.sourceSha===undefined && auditRoute.observedAt===audit.observedAt,'Source Audit route does not preserve branch observation provenance');
   for (const sha of snapshotRoutes.map(route=>route.split('/')[2])) {

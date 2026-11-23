@@ -58,12 +58,15 @@ try {
 
   let reference = baseReference();
   if (!isValidCommit(reference)) reference = fetchReference(reference);
+  const resolvedBase = git(["rev-parse", "--verify", `${reference}^{commit}`]);
+  if (resolvedBase.status !== 0) throw new Error(`unable to resolve oasdiff base commit ${reference}: ${resolvedBase.stderr || resolvedBase.stdout}`);
+  const baseSha = resolvedBase.stdout.trim();
   const baseFile = path.join(tempRoot, "base.openapi.yaml");
   const baseResult = git(["show", `${reference}:${packageContractPath}`]);
   if (baseResult.status !== 0) {
     const pathExistsInBase = git(["cat-file", "-e", `${reference}:${packageContractPath}`]).status === 0;
     if (!pathExistsInBase) {
-      console.log(`No approved OpenAPI artifact exists at ${reference}; this first contract establishes the generated baseline.`);
+      console.log(`No approved OpenAPI artifact exists at ${reference} (${baseSha}); this first contract establishes the generated baseline.`);
       process.exitCode = 0;
     } else {
       throw new Error(`unable to read oasdiff base ${reference}:${packageContractPath}: ${baseResult.stderr}`);
@@ -82,7 +85,7 @@ try {
     if (comparison.status !== 0) {
       throw new Error(`oasdiff detected a breaking OpenAPI change against ${reference}`);
     }
-    console.log(`oasdiff found no breaking changes at API epoch ${baseApiEpoch}.`);
+    console.log(`oasdiff found no breaking changes at API epoch ${baseApiEpoch}, comparing approved ${packageContractPath} from ${reference} (${baseSha}).`);
   }
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });

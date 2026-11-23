@@ -2,71 +2,315 @@
   "schemaVersion": 1,
   "coverageStatus": "PARTIAL",
   "scope": {
-    "routes": ["packages/api/src/server.ts","packages/api/src/persistence-routes.ts"],
-    "tools": ["modules/mcp/src/tools/project.ts"],
-    "databaseObjects": ["packages/persistence-postgres/migrations/0001-initial.sql"],
+    "routes": [
+      "packages/api/src/server.ts",
+      "packages/api/src/persistence-routes.ts"
+    ],
+    "tools": [
+      "modules/mcp/src/tools/project.ts"
+    ],
+    "databaseObjects": [
+      "packages/persistence-postgres/migrations/0001-initial.sql"
+    ],
     "method": "The verifier derives route/method pairs from literal routePath or url.pathname equality blocks, tool names from literal server.tool registrations, and named top-level SQL CREATE TABLE/FUNCTION/TRIGGER/INDEX plus ALTER TABLE ADD CONSTRAINT declarations in the listed files.",
     "discovery": "Source-derived. The verifier inspects the listed files independently of this classification manifest."
   },
   "classifications": [
-    {"kind":"route","id":"GET /api/projects","classification":"candidate REQ-AUTH-002; conformance remains unverified"},
-    {"kind":"route","id":"POST /api/projects","classification":"UNMAPPED: route-specific obligation not decomposed"},
-    {"kind":"route","id":"GET /api/v1/persistence/projects","classification":"UNMAPPED: legacy persistence route retirement compatibility requires review"},
-    {"kind":"route","id":"POST /api/v1/persistence/import","classification":"UNMAPPED: route-specific obligation not decomposed"},
-    {"kind":"route","id":"GET /api/v1/persistence/status","classification":"UNMAPPED: route-specific obligation not decomposed"},
-    {"kind":"tool","id":"list_projects","classification":"candidate REQ-AUTH-003; conformance remains unverified"},
-    {"kind":"tool","id":"discover_actions","classification":"candidate REQ-AUTH-003; conformance remains unverified"},
-    {"kind":"tool","id":"invoke_action","classification":"candidate REQ-AUTH-003; conformance remains unverified"},
-    {"kind":"databaseObject","id":"public.project","classification":"candidate REQ-DATA-003; conformance remains unverified"},
-    {"kind":"databaseObject","id":"public.document","classification":"candidate REQ-DATA-001; conformance remains unverified"},
-    {"kind":"databaseObject","id":"public.document_revision","classification":"candidate REQ-DATA-002; conformance remains unverified"},
-    {"kind":"databaseObject","id":"public.reject_document_revision_mutation()","classification":"candidate REQ-DATA-002; conformance remains unverified"},
-    {"kind":"databaseObject","id":"public.document_revision_immutable","classification":"candidate REQ-DATA-002; conformance remains unverified"},
-    {"kind":"route","id":"ANY /api/auth/token","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /.well-known/oauth-authorization-server/api/auth","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /.well-known/openid-configuration/api/auth","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/auth/oauth2/get-consents","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/health","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/inbox","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/jobs","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/jobs/events","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/projects/events","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/ready","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/review-queue","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /api/session","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /health/live","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /health/ready","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"GET /health/startup","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"HEAD /api/health","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"HEAD /api/ready","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"HEAD /health/live","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"HEAD /health/ready","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"HEAD /health/startup","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"POST /api/auth/oauth2/consent-context","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"POST /api/inbox/read-all","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"route","id":"POST /api/v1/persistence/projects","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.anchor_history","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.assertion","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.assertion_evidence","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.change_set","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.change_set_project_status_created_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.document.document_head_revision_fk","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.document_parent_order_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.document_revision_history_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.edit_operation","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.edit_operation_document_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_alias","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_alias_lookup_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_alias_same_node_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_node","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_node_name_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_relation","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_relation_source_type_target_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.knowledge_relation_target_type_source_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.mention_link","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.mention_link_node_evidence_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.text_anchor","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"},
-    {"kind":"databaseObject","id":"public.text_anchor_document_revision_position_idx","classification":"UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"}
+    {
+      "kind": "route",
+      "id": "GET /api/projects",
+      "classification": "candidate REQ-AUTH-002; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects",
+      "classification": "UNMAPPED: legacy persistence route retirement compatibility requires review"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/import",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/status",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "tool",
+      "id": "list_projects",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+    },
+    {
+      "kind": "tool",
+      "id": "discover_actions",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+    },
+    {
+      "kind": "tool",
+      "id": "invoke_action",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.project",
+      "classification": "candidate REQ-DATA-003; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document",
+      "classification": "candidate REQ-DATA-001; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.reject_document_revision_mutation()",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision_immutable",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "ANY /api/auth/token",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /.well-known/oauth-authorization-server/api/auth",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /.well-known/openid-configuration/api/auth",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/auth/oauth2/get-consents",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/health",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/inbox",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/jobs",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/jobs/events",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/events",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/review-queue",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/session",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/live",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/startup",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/health",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/live",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/startup",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/owner-session",
+      "classification": "candidate REQ-AUTH-005 / API-OWNER-SESSION-001: cookie-only owner confirmation, no API bearer elevation; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/oauth2/consent-context",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/inbox/read-all",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.anchor_history",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.assertion",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.assertion_evidence",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.change_set",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.change_set_project_status_created_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document.document_head_revision_fk",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_parent_order_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision_history_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.edit_operation",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.edit_operation_document_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias_lookup_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias_same_node_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_node",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_node_name_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation_source_type_target_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation_target_type_source_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.mention_link",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.mention_link_node_evidence_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.text_anchor",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.text_anchor_document_revision_position_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+    }
   ],
   "limitations": [
     "Route discovery covers literal path-equality dispatch blocks and the methods declared within them. Regex-expanded project/document routes, VERSION_PATHS arrays, auth-provider catchalls, module contributions, and runtime-composed routes remain for #671.",

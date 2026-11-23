@@ -198,7 +198,11 @@ function renderTimeline(pr) {
   const jobs = pr.runs.flatMap(run => run.jobs);
   const starts = [pr.createdAt, ...pr.runs.map(run => run.createdAt)].map(date).filter(x => x !== null);
   const ends = jobs.map(job => date(job.completedAt)).filter(x => x !== null);
-  if (!starts.length || !ends.length) { out.append(node('p', 'empty', '表示可能なジョブ時刻がありません。')); return; }
+  if (!starts.length || !ends.length) {
+    el('timeline-foot').textContent = '未計測';
+    out.append(node('p', 'empty', '表示可能なジョブ時刻がありません。'));
+    return;
+  }
   const first = Math.min(...starts), last = Math.max(...ends), span = Math.max(1, last - first);
   const pos = time => Math.min(100, Math.max(0, ((time - first) / span) * 100));
   const slot = (left, right, cls, title) => {
