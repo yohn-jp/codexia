@@ -64,6 +64,9 @@ public struct OAuthConfiguration: Sendable {
             .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"),
         ]
+        // The authorization endpoint decodes query parameters as form data.
+        // Form decoding treats an unescaped plus in an opaque client ID as space.
+        parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = parts.url else { throw OAuthError.invalidConfiguration }
         return url
     }

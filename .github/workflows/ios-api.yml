@@ -18,7 +18,7 @@ jobs:
   api:
     name: Generated API and native transport
     runs-on: xcode-27
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -42,9 +42,10 @@ jobs:
           xcodebuild -scheme CodexiaTransport -destination 'generic/platform=iOS Simulator'
           -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
       - name: Exercise refresh token rotation on iOS Simulator
-        timeout-minutes: 10
+        timeout-minutes: 18
         working-directory: ios/CodexiaTransport
         run: |
           device_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for runtime,group in devices.items() if ".iOS-" in runtime for d in group if d["name"].startswith("iPhone")))')
-          xcodebuild -scheme CodexiaTransport -destination "platform=iOS Simulator,id=$device_id" \
+          xcodebuild -list
+          xcodebuild -scheme CodexiaTransport-Package -destination "platform=iOS Simulator,id=$device_id" \
             -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO test

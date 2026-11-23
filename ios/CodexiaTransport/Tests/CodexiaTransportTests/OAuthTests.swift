@@ -32,6 +32,12 @@ private let config = try! OAuthConfiguration(origin: URL(string: "https://api.ex
     }
 }
 
+@Test func authorizationURLPreservesAnOpaqueClientID() throws {
+    let plusClient = try OAuthConfiguration(origin: config.origin, clientID: "registered+ios")
+    let url = try plusClient.authorizationURL(state: "state", nonce: "nonce", challenge: "challenge")
+    #expect(url.absoluteString.contains("client_id=registered%2Bios"))
+}
+
 @Test func rejectsUntrustedProviderMetadata() throws {
     let metadata = """
         {"issuer":"https://api.example.test/api/auth",        "authorization_endpoint":"https://api.example.test/api/auth/oauth2/authorize",        "token_endpoint":"https://api.example.test/api/auth/oauth2/token",        "jwks_uri":"https://api.example.test/api/auth/jwks",        "response_types_supported":["code"],"grant_types_supported":["authorization_code","refresh_token"],        "code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none"],        "scopes_supported":["codexia:api","openid","offline_access"]}
