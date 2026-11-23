@@ -191,6 +191,11 @@ test('lifecycle readiness uses real conditions without time-based sleep loops', 
   const api = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
   const db = readFileSync(new URL('../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
   assert.match(api, /^Notify=healthy$/mu);
+  const health = api.match(/^HealthCmd=(.+)$/mu)?.[1];
+  const startup = api.match(/^HealthStartupCmd=(.+)$/mu)?.[1];
+  assert.ok(health && startup, 'the real readiness probe is required in both modes');
+  assert.equal(startup, health, 'startup and steady-state health must use the same readiness contract');
+  assert.match(api, /^HealthInterval=30s$/mu, 'steady-state probe cadence remains unchanged');
   assert.match(api, /^HealthStartupInterval=2s$/mu);
   assert.match(api, /^StartLimitBurst=3$/mu);
   assert.match(db, /^Tmpfs=\/run\/postgresql:rw,nosuid,nodev,noexec,size=16m$/mu);
