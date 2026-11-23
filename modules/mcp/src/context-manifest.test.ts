@@ -56,6 +56,20 @@ test("writing context preserves source identity, bounds, and selection provenanc
   assert.deepEqual(context.draft, { status: "not_shared" });
   assert.equal(context.manifest.scope, "arcadia_provided_context");
   assert.equal(context.manifest.external_host_final_prompt_observed, false);
+
+  const omittedManuscript = createMcpWritingContext({ ...input, manifestOnly: true })
+    .manifest.parts.find((part) => part.kind === "saved_manuscript");
+  assert.partialDeepStrictEqual(omittedManuscript, {
+    kind: "saved_manuscript",
+    source: "arcadia",
+    metadata_included: true,
+    dropped: true,
+    size: {
+      source_character_count: 50_002,
+      included_character_count: 0,
+      included_byte_count: 0,
+    },
+  });
 });
 
 test("writing context truncates Unicode by character and validates selection identity", () => {
