@@ -13,6 +13,10 @@
 
 矛盾が判明したら、実装側の設計逸脱または設計変更要求として記録する。既存コードへ合わせて設計を黙って書き換えない。詳細な変更規律は [設計書の正本・保守規則](DOCUMENTATION-AUTHORITY.md)。
 
+## 採用済みツール移行目標と現行実装の区別
+
+[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Hono/Orval/Zodへ生成すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡**を採用目標とする。これは2026-11-23時点で**仕様選定済み・実装未完了**であり、下記の図と本文に記されたFastifyは現行実装を表す。Honoへの完全切替えまでは、同じAPI/OAuth/MCP権限とPostgreSQL単一正本を維持する。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
+
 ## 製品・システム境界
 
 - 製品は単一作者の小説執筆・知識管理・提案レビューを提供する。作品本文・構成・Revision・Knowledge・Evidence・ChangeSet・module record の永続正本は **PostgreSQL** のみ。
