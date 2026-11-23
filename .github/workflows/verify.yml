@@ -465,13 +465,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          # Compact proofs bind independently verified merge parents and their trees.
+          # Affected PR plans must recheck the exact diff independently; compact main proof needs merge parents.
           fetch-depth: >-
-            ${{ (needs.plan.outputs.reuse == 'true' ||
-                 (needs.plan.outputs.plan != '' &&
-                  fromJSON(needs.plan.outputs.plan).taskInputReuse.coverage.proofSourceSha !=
-                  fromJSON(needs.plan.outputs.plan).taskInputReuse.coverage.sourceSha))
-                && '0' || '1' }}
+            ${{ (github.event_name == 'pull_request' || needs.plan.outputs.reuse == 'true') && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
@@ -512,6 +508,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_EXPECTED_BASE: ${{ github.event.pull_request.base.sha || '' }}
           CODEXIA_REQUIRED_RESULTS: ${{ toJSON(needs) }}
           CODEXIA_CI_EVIDENCE_DIR: ${{ runner.temp }}/ci-evidence
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
