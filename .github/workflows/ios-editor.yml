@@ -29,7 +29,7 @@ jobs:
         working-directory: ios/CodexiaEditor
         run: swift test
       - name: Build fixture app for Simulator
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaApp -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
       - name: Select and boot Simulator
         id: simulator_boot
         timeout-minutes: 10
