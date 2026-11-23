@@ -300,7 +300,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
         const pageNumber = new URL(route.request().url()).searchParams.get('page');
         if (pageNumber === '1') return route.fulfill({ json: { total_count: 101, workflow_runs:
           Array.from({length:100},(_,index)=>({
-            ...run({id:1000+index,created_at:at(200-index),
+            ...run({id:1000+index,created_at:at(-index),
               head_sha:String(index+1).padStart(40,'0')}),
             workflow_id:7,pull_requests:[{number:1000+index}],
           })) } });
@@ -399,7 +399,10 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.waitForFunction(() => document.querySelectorAll('#pr option').length === 101);
   assert.equal(jobRequests,beforeInventoryExpansion,'Listing revisions must not fetch every workflow job');
   assert.equal(await page.locator('#load-all').isVisible(),false);
-  await page.locator('#pr').selectOption('100');
+  const revisionOptions = await page.locator('#pr option').allTextContents();
+  const requestedIndex = revisionOptions.findIndex(value => value.startsWith('#42 / '));
+  assert.ok(requestedIndex >= 0, 'Older PR must be present after full-history loading');
+  await page.locator('#pr').selectOption(String(requestedIndex));
   await page.locator('#timeline-foot').filter({hasText:'Range:'}).waitFor();
   assert.equal(new URL(page.url()).searchParams.get('pr'),'42');
 
