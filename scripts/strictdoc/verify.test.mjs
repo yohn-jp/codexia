@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -55,6 +55,52 @@ test('reports discovered runtime surfaces that lack an explicit classification',
 
   assert.match(violations.join('\n'), /DELETE \/api\/v1\/projects/);
   assert.match(violations.join('\n'), /public\.document_revision/);
+});
+
+test('discovers an unclassified SQL object from source instead of trusting cached inventory data', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-inventory-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'packages', 'persistence-postgres', 'migrations'), { recursive: true });
+  await mkdir(path.join(root, 'packages', 'api', 'src'), { recursive: true });
+  await mkdir(path.join(root, 'modules', 'mcp', 'src'), { recursive: true });
+  await writeFile(path.join(root, 'packages', 'api', 'src', 'server.ts'), [
+    'if (routePath === "/api/projects" && method === "GET") { return; }',
+    'if (routePath === "/api/spec01-inventory-fixture" && method === "POST") { return; }',
+  ].join('\n'));
+  await writeFile(path.join(root, 'modules', 'mcp', 'src', 'tools.ts'), [
+    'server.tool("list_projects", "existing tool", {});',
+    'server.tool("spec01_inventory_fixture", "unclassified tool", {});',
+  ].join('\n'));
+  await writeFile(path.join(root, 'packages', 'persistence-postgres', 'migrations', '0001-initial.sql'), [
+    'CREATE TABLE project (id integer PRIMARY KEY);',
+    'CREATE FUNCTION fixture_guard() RETURNS void AS $$',
+    'CREATE TABLE hidden_inside_function_body (id integer PRIMARY KEY);',
+    '$$ LANGUAGE plpgsql;',
+    'CREATE TABLE spec01_inventory_review_fixture (id integer PRIMARY KEY);',
+  ].join('\n'));
+
+  const verifier = await import('./verify.mjs');
+  assert.equal(typeof verifier.verifySourceInventory, 'function', 'the verifier must expose the same source-bound inventory check used by runVerifier');
+  const result = await verifier.verifySourceInventory(root, {
+    scope: {
+      routes: ['packages/api/src/server.ts'],
+      tools: ['modules/mcp/src/tools.ts'],
+      databaseObjects: ['packages/persistence-postgres/migrations/0001-initial.sql'],
+    },
+    classifications: [
+      { kind: 'route', id: 'GET /api/projects', classification: 'reviewed baseline' },
+      { kind: 'tool', id: 'list_projects', classification: 'reviewed baseline' },
+      { kind: 'databaseObject', id: 'public.project', classification: 'reviewed baseline' },
+    ],
+  });
+
+  assert.ok(result.discovered.databaseObjects.includes('public.spec01_inventory_review_fixture'));
+  assert.ok(!result.discovered.databaseObjects.includes('public.hidden_inside_function_body'));
+  assert.ok(result.discovered.routes.includes('POST /api/spec01-inventory-fixture'));
+  assert.ok(result.discovered.tools.includes('spec01_inventory_fixture'));
+  assert.match(result.violations.join('\n'), /Unclassified databaseObject public\.spec01_inventory_review_fixture/);
+  assert.match(result.violations.join('\n'), /Unclassified route POST \/api\/spec01-inventory-fixture/);
+  assert.match(result.violations.join('\n'), /Unclassified tool spec01_inventory_fixture/);
 });
 
 test('requires each TEST-ID to resolve to a declared requirement and a real test case', async (t) => {

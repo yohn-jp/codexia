@@ -837,7 +837,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **Design owner**: [Requirements governance](README.md)、[Traceability register](../verification/TRACEABILITY-REGISTER.md)
 **Implementation identifiers**: この台帳とAPI・DB・外部IFの初期契約
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
-**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001
+**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／**構築中**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -910,6 +910,23 @@ Reject a deleted File relation and a line range outside the referenced source fi
 **Exact-run reference**: NOT_RUN
 
 Keep a discovered route or database object visible as unclassified until it has a reasoned requirement or non-requirement classification.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-TRACE-001
+- **Type**: File
+  **Path**: scripts/strictdoc/verify.test.mjs
+
+## TEST-TRC-04-002
+
+**Type**: TEST
+**MID**: 08934503ff235c4aeddbf3cfbefc600f
+**UID**: TEST-TRC-04-002
+**Case name**: discovers an unclassified SQL object from source instead of trusting cached inventory data
+**Exact-run reference**: NOT_RUN
+
+Derive bounded inventory entries from current source files so an unclassified SQL table or route fixture cannot be hidden by an unchanged cached discovered list.
 
 **Relations**:
 

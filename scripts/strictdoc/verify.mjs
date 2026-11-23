@@ -194,6 +194,252 @@ export function validateInventory(discovered, classifications) {
   return violations;
 }
 
+function stripSourceComments(source) {
+  const characters = source.split('');
+  let state = 'code';
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    const next = characters[index + 1];
+    if (state === 'line-comment') {
+      if (character === '\n' || character === '\r') state = 'code';
+      else characters[index] = ' ';
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (character === '*' && next === '/') {
+        characters[index] = ' ';
+        characters[index + 1] = ' ';
+        index += 1;
+        state = 'code';
+      } else if (character !== '\n' && character !== '\r') {
+        characters[index] = ' ';
+      }
+      continue;
+    }
+    if (state === 'single' || state === 'double' || state === 'template') {
+      if (character === '\\') {
+        index += 1;
+        continue;
+      }
+      if ((state === 'single' && character === "'") || (state === 'double' && character === '"') ||
+          (state === 'template' && character === '`')) state = 'code';
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      characters[index] = ' ';
+      characters[index + 1] = ' ';
+      index += 1;
+      state = 'line-comment';
+    } else if (character === '/' && next === '*') {
+      characters[index] = ' ';
+      characters[index + 1] = ' ';
+      index += 1;
+      state = 'block-comment';
+    } else if (character === "'") state = 'single';
+    else if (character === '"') state = 'double';
+    else if (character === '`') state = 'template';
+  }
+  return characters.join('');
+}
+
+function findClosingBrace(source, openIndex) {
+  let depth = 0;
+  let quote;
+  for (let index = openIndex; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === '\\') index += 1;
+      else if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '{') depth += 1;
+    else if (character === '}' && --depth === 0) return index;
+  }
+  throw new Error('Unclosed source block while discovering route families');
+}
+
+const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+
+function methodsInRouteBlock(text) {
+  const methods = new Set();
+  for (const match of text.matchAll(/\b(?:input\.)?method\s*===\s*(["'])([A-Z]+)\1/gu)) {
+    if (!HTTP_METHODS.has(match[2])) throw new Error(`Unsupported HTTP method in bounded route source: ${match[2]}`);
+    methods.add(match[2]);
+  }
+  if (/\bisRead\b/u.test(text)) {
+    methods.add('GET');
+    methods.add('HEAD');
+  }
+  // In the supported dispatch style, `method !== X` immediately returns 405,
+  // so X is the accepted method for that branch.
+  for (const match of text.matchAll(/\bif\s*\(([^()]*)\)\s*return\s*\{\s*status\s*:\s*405\b/gu)) {
+    for (const rejected of match[1].matchAll(/\b(?:input\.)?method\s*!==\s*(["'])([A-Z]+)\1/gu)) {
+      if (!HTTP_METHODS.has(rejected[2])) throw new Error(`Unsupported HTTP method in bounded route source: ${rejected[2]}`);
+      methods.add(rejected[2]);
+    }
+  }
+  return methods;
+}
+
+function discoverRouteFamilies(source) {
+  const code = stripSourceComments(source);
+  const found = new Set();
+  const pathPattern = /\b(?:routePath|url\.pathname)\s*===\s*(["'])(\/[^"']*)\1/gu;
+  const ifPattern = /\bif\s*\(([^()]*)\)\s*\{/gu;
+  for (const match of code.matchAll(ifPattern)) {
+    const condition = match[1];
+    const paths = [...condition.matchAll(pathPattern)].map((pathMatch) => pathMatch[2]);
+    if (paths.length === 0) continue;
+    const openIndex = match.index + match[0].lastIndexOf('{');
+    const closeIndex = findClosingBrace(code, openIndex);
+    const methods = methodsInRouteBlock(`${condition}\n${code.slice(openIndex + 1, closeIndex)}`);
+    if (methods.size === 0) methods.add('ANY');
+    for (const routePath of paths) {
+      for (const method of methods) found.add(`${method} ${routePath}`);
+    }
+  }
+  return [...found].sort();
+}
+
+function discoverMcpToolNames(source) {
+  const code = stripSourceComments(source);
+  const names = [];
+  for (const match of code.matchAll(/\bserver\.tool\s*\(/gu)) {
+    const argument = code.slice(match.index + match[0].length);
+    const nameMatch = /^\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/u.exec(argument);
+    if (!nameMatch) throw new Error('MCP server.tool registration must use a literal tool name in the supported inventory scope');
+    names.push(nameMatch[2]);
+  }
+  return names;
+}
+
+function qualifySqlObject(identifier) {
+  if (!/^(?:[A-Za-z_][A-Za-z0-9_$]*\.)?[A-Za-z_][A-Za-z0-9_$]*$/u.test(identifier)) {
+    throw new Error(`Unsupported SQL object identifier in bounded migration: ${identifier}`);
+  }
+  return identifier.includes('.') ? identifier : `public.${identifier}`;
+}
+
+function maskSqlLiterals(source) {
+  const characters = source.split('');
+  const mask = (start, end) => {
+    for (let index = start; index < end; index += 1) {
+      if (characters[index] !== '\n' && characters[index] !== '\r') characters[index] = ' ';
+    }
+  };
+  for (let index = 0; index < source.length;) {
+    if (source[index] === "'") {
+      const start = index++;
+      while (index < source.length) {
+        if (source[index] === '\\') index += 2;
+        else if (source[index] === "'" && source[index + 1] === "'") index += 2;
+        else if (source[index] === "'") { index += 1; break; }
+        else index += 1;
+      }
+      mask(start, Math.min(index, source.length));
+      continue;
+    }
+    if (source[index] === '$' && (index === 0 || !/[A-Za-z0-9_$]/u.test(source[index - 1]))) {
+      const delimiter = /^\$[A-Za-z0-9_]*\$/u.exec(source.slice(index))?.[0];
+      if (delimiter) {
+        const start = index;
+        const endDelimiter = source.indexOf(delimiter, index + delimiter.length);
+        if (endDelimiter < 0) throw new Error(`Unterminated SQL dollar-quoted body ${delimiter}`);
+        index = endDelimiter + delimiter.length;
+        mask(start, index);
+        continue;
+      }
+    }
+    index += 1;
+  }
+  return characters.join('');
+}
+
+function discoverSqlObjects(source) {
+  const objects = [];
+  const identifier = '[A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)?';
+  const createPattern = new RegExp(`^\\s*CREATE\\s+(?:(?:OR\\s+REPLACE)\\s+)?(?:UNIQUE\\s+)?(TABLE|FUNCTION|TRIGGER|INDEX)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(${identifier})\\b`, 'iu');
+  const constraintPattern = new RegExp(`^\\s*ALTER\\s+TABLE\\s+(${identifier})\\s+ADD\\s+CONSTRAINT\\s+(${identifier})\\b`, 'iu');
+  const lines = maskSqlLiterals(stripSourceComments(source)).split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index];
+    if (!/^\s*(?:CREATE|ALTER|DROP)\b/iu.test(line)) continue;
+    const create = createPattern.exec(line);
+    if (create) {
+      const objectName = qualifySqlObject(create[2]);
+      if (create[1].toUpperCase() === 'FUNCTION') {
+        if (!/^\s*\(\s*\)/u.test(line.slice(create[0].length))) {
+          throw new Error(`Unsupported SQL function signature in bounded migration at line ${index + 1}`);
+        }
+        objects.push(`${objectName}()`);
+      } else objects.push(objectName);
+      continue;
+    }
+    if (/^\s*ALTER\b/iu.test(line) && !line.includes(';')) {
+      while (index + 1 < lines.length && !line.includes(';')) line += `\n${lines[++index]}`;
+    }
+    const constraint = constraintPattern.exec(line);
+    if (constraint) {
+      const table = qualifySqlObject(constraint[1]);
+      const name = qualifySqlObject(constraint[2]);
+      objects.push(`${table}.${name.slice(name.lastIndexOf('.') + 1)}`);
+      continue;
+    }
+    throw new Error(`Unsupported SQL object declaration in bounded migration at line ${index + 1}: ${line.trim()}`);
+  }
+  return objects;
+}
+
+async function readScopedSourceFiles(root, paths, kind) {
+  if (!Array.isArray(paths) || paths.length === 0) throw new Error(`Inventory scope must list at least one ${kind} source file`);
+  const repositoryRoot = await realpath(root);
+  const seen = new Set();
+  const files = [];
+  for (const relativePath of paths) {
+    if (typeof relativePath !== 'string' || relativePath.length === 0 || path.isAbsolute(relativePath)) {
+      throw new Error(`Inventory ${kind} source must use a repository-relative path`);
+    }
+    const normalized = relativePath.split(path.sep).join('/');
+    if (seen.has(normalized)) throw new Error(`Duplicate inventory ${kind} source: ${normalized}`);
+    seen.add(normalized);
+    const absolutePath = path.resolve(repositoryRoot, relativePath);
+    if (absolutePath !== repositoryRoot && !absolutePath.startsWith(`${repositoryRoot}${path.sep}`)) {
+      throw new Error(`Inventory ${kind} source escapes the repository: ${relativePath}`);
+    }
+    const sourcePath = await realpath(absolutePath);
+    if (!sourcePath.startsWith(`${repositoryRoot}${path.sep}`) || !(await stat(sourcePath)).isFile()) {
+      throw new Error(`Inventory ${kind} source is missing or not a repository file: ${relativePath}`);
+    }
+    files.push({ relativePath: normalized, source: await readFile(sourcePath, 'utf8') });
+  }
+  return files;
+}
+
+export async function discoverSourceInventory(root, scope) {
+  const routeFiles = await readScopedSourceFiles(root, scope?.routes, 'route');
+  const toolFiles = await readScopedSourceFiles(root, scope?.tools, 'tool');
+  const databaseFiles = await readScopedSourceFiles(root, scope?.databaseObjects, 'database object');
+  const discovered = {
+    routes: routeFiles.flatMap(({ source }) => discoverRouteFamilies(source)),
+    tools: toolFiles.flatMap(({ source }) => discoverMcpToolNames(source)),
+    databaseObjects: databaseFiles.flatMap(({ source }) => discoverSqlObjects(source)),
+  };
+  for (const [bucket, values] of Object.entries(discovered)) {
+    discovered[bucket] = [...new Set(values)].sort();
+  }
+  return discovered;
+}
+
+export async function verifySourceInventory(root, inventory) {
+  const discovered = await discoverSourceInventory(root, inventory?.scope);
+  const violations = validateInventory(discovered, inventory?.classifications ?? []);
+  return { discovered, violations };
+}
+
 export function resolveRunIdentity(env) {
   if (env.GITHUB_ACTIONS !== 'true') return { status: 'NOT_RUN' };
   const required = [
@@ -558,7 +804,7 @@ async function runVerifier(args) {
     if (relationViolations.length > 0) throw new Error(relationViolations.join('\n'));
 
     const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
-    const inventoryViolations = validateInventory(inventory.discovered, inventory.classifications);
+    const { discovered, violations: inventoryViolations } = await verifySourceInventory(root, inventory);
     if (inventoryViolations.length > 0) throw new Error(inventoryViolations.join('\n'));
     const stableMids = [...requirementNodes, ...scenarioNodes].map((node) => node.MID);
     const determinism = await compareExports(run1, run2, stableMids);
@@ -619,7 +865,10 @@ async function runVerifier(args) {
       },
       inventory: {
         classificationCount: inventory.classifications.length,
-        discoveredCounts: Object.fromEntries(Object.entries(inventory.discovered).map(([key, values]) => [key, values.length])),
+        sourceFiles: [...inventory.scope.routes, ...inventory.scope.tools, ...inventory.scope.databaseObjects],
+        discoveryMethod: inventory.scope.method,
+        discovered,
+        discoveredCounts: Object.fromEntries(Object.entries(discovered).map(([key, values]) => [key, values.length])),
         status: inventory.coverageStatus ?? 'PARTIAL',
         limitations: inventory.limitations ?? [],
       },
