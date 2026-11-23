@@ -508,9 +508,6 @@ rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-b
   -p 127.0.0.1:2222:2222 \
   --volume "$build_context/authorized_keys:/home/codexia-backup/.ssh/authorized_keys:ro" \
   "$fixture_image" >/dev/null
-fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
-test -n "$fixture_ip"
-printf '%s codexia-backup-fixture\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
 rootless mkdir -p "$fixture_home/.ssh" "$fixture_home/.local/state/codexia-backup-mount"
 rootless chmod 0700 "$fixture_home/.ssh"
 sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key" "$fixture_home/.ssh/codexia-backup-key"
