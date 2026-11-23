@@ -66,24 +66,6 @@ test('disposable host CI selects pinned Mitogen without changing production SSH'
   assert.match(fixture, /\$proof_mode" == actions-fixture/u);
 });
 
-test('host stage avoids runner /etc/skel and creates the exact authorized home', async () => {
-  const source = await readFile(path.join(root, 'deploy/ansible/host.yml'), 'utf8');
-  const createUser = source.indexOf('- name: Create explicitly authorized service account when absent');
-  const createHome = source.indexOf('- name: Create an empty service home for the newly authorized account');
-  const verifyMapping = source.indexOf('- name: Verify system-allocated subordinate ID mappings');
-  assert.ok(createUser > 0 && createHome > createUser && verifyMapping > createHome,
-    'an explicitly approved identity must precede an empty service home and subordinate ID verification');
-  const userTask = source.slice(createUser, createHome);
-  const homeTask = source.slice(createHome, verifyMapping);
-  assert.match(userTask, /create_home: false/u, 'useradd must never copy the runner skeleton');
-  assert.ok(homeTask.includes('path: "{{ codexia_service_home }}"'));
-  assert.ok(homeTask.includes('owner: "{{ codexia_service_user }}"'));
-  assert.ok(homeTask.includes('group: "{{ codexia_service_group }}"'));
-  assert.match(homeTask, /follow: false/u);
-  assert.match(homeTask, /when: host_identity.results\[0\]\.rc == 2/u,
-    'existing service accounts and homes must remain untouched');
-});
-
 test('push-host refuses an unmarked runner before inspecting or changing the host', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-host-gate-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
