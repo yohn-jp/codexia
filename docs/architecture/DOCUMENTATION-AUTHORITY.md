@@ -22,6 +22,8 @@
 | XState採用対象・machineとAPI/DB副作用の境界 | [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md)（Webクライアントの対象。ネイティブSwiftUIにはReact/XState runtimeを要求しない） |
 | Desktop ReactとネイティブiOS SwiftUIの画面基盤・モバイルWeb廃止 | [System design](SYSTEM-DESIGN.md)（製品境界）・[iOS SwiftUI architecture](IOS-SWIFTUI-ARCHITECTURE.md)（ネイティブ実装正本） |
 | 仕様駆動移行の実装分割/依存関係/検証引渡し | [実装契約と統合計画](SPECIFICATION-IMPLEMENTATION-CONTRACT.md)（製品要求の第二正本ではない） |
+| ファイル命名・ソース配置の規範 | [Source layout and naming](SOURCE-LAYOUT-CONVENTIONS.md)（全リポジトリの新規・移動ファイルの配置と例外） |
+| scripts移行の作業分割・完全対応表 | [Scripts migration plan](SCRIPTS-MIGRATION-PLAN.md)・[Path map](SCRIPTS-MIGRATION-MAP.md)（移行計画。設計正本を上書きせず、移動完了の証拠でもない） |
 | 外部ライブラリの選定・最新版方針・依存境界 | [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)・[既存依存と固定根拠の台帳](DEPENDENCY-INVENTORY.md) |
 | 要求管理/StrictDoc移行 | [StrictDoc traceability](../requirements/STRICTDOC-TRACEABILITY.md)（REQ-ID内容の正本は要求登録簿） |
 | HTTP実行基盤/生成器の移行目標 | [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)（認可の意味は Route authorization） |
