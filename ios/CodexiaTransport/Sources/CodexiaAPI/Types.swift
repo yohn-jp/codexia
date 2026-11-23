@@ -9,6 +9,12 @@
 public import Foundation
 /// A type that performs HTTP operations defined by the OpenAPI document.
 public protocol APIProtocol: Sendable {
+    /// - Remark: HTTP `GET /api/auth/codexia/auth-methods`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/auth-methods/get(auth_methods_get)`.
+    func auth_methods_get(_ input: Operations.auth_methods_get.Input) async throws -> Operations.auth_methods_get.Output
+    /// - Remark: HTTP `POST /api/auth/codexia/owner-session`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)`.
+    func owner_session_confirm_post(_ input: Operations.owner_session_confirm_post.Input) async throws -> Operations.owner_session_confirm_post.Output
     /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
     /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
     func owner_setup_authorize_post(_ input: Operations.owner_setup_authorize_post.Input) async throws -> Operations.owner_setup_authorize_post.Output
@@ -352,6 +358,22 @@ public protocol APIProtocol: Sendable {
 
 /// Convenience overloads for operation inputs.
 extension APIProtocol {
+    /// - Remark: HTTP `GET /api/auth/codexia/auth-methods`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/auth-methods/get(auth_methods_get)`.
+    public func auth_methods_get(headers: Operations.auth_methods_get.Input.Headers = .init()) async throws -> Operations.auth_methods_get.Output {
+        try await auth_methods_get(Operations.auth_methods_get.Input(headers: headers))
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/owner-session`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)`.
+    public func owner_session_confirm_post(
+        headers: Operations.owner_session_confirm_post.Input.Headers,
+        body: Operations.owner_session_confirm_post.Input.Body
+    ) async throws -> Operations.owner_session_confirm_post.Output {
+        try await owner_session_confirm_post(Operations.owner_session_confirm_post.Input(
+            headers: headers,
+            body: body
+        ))
+    }
     /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
     /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
     public func owner_setup_authorize_post(

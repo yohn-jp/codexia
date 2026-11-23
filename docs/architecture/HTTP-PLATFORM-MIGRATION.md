@@ -1,15 +1,17 @@
 # TypeSpec / Fastify / Orval HTTP契約移行設計
 
-**種別: 採用済み設計。Fastifyは継続採用、Schema-firstへの改修は未実装。** HTTPワイヤ契約は [API contract](API-CONTRACT.md)、principal・method・resource・effect認可は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuthは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) が所有する。[Toolchain](SPECIFICATION-TOOLCHAIN.md) に基づき、**TypeSpec → OpenAPI 3.1 → Fastify JSON Schema/Ajvと生成クライアント**へ一方向に接続する。Honoへのランタイム移行は採用しない。
+**種別: 採用済み設計。** HTTPワイヤ契約は [API contract](API-CONTRACT.md)、principal・method・resource・effect認可は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuthは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) が所有する。[Toolchain](SPECIFICATION-TOOLCHAIN.md) に基づき、**TypeSpec → OpenAPI 3.1 → Fastify JSON Schema/Ajvと生成クライアント**へ一方向に接続する。Honoへのランタイム移行は採用しない。
 
-観測ベースライン: main@e02933aead466b14cbcd336905b9c2a2a2b39f06。現在の `packages/api/src/server.ts` はFastifyを使用する一方、Node `IncomingMessage/ServerResponse`、共通catch-allと手動method/path分岐、CSP nonce、CORS、body parsing、SSE、Abort、shutdownを持つ。`packages/api/src/persistence-routes.ts` は手動検証とdispatchを持つ。**現在のFastify利用と目標Schema-first Fastifyの達成を混同しない。**
+TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract` が所有する。
+現在のAPIにはFastifyの明示routeのほか、共通catch-allと `packages/api/src/persistence-routes.ts` の手動分岐がある。
+生成スキーマによる隔離Fastifyの試験と、本番ハンドラーのschema-first移行は個別に受け入れる。
 
 ## 二択の結論
 
 | 対象 | 採用 | 不採用と理由 |
 | --- | --- | --- |
 | HTTP runtime | **Fastify v5系（導入時に最新安定を確認）** | Hono: Web標準とOrval Hono server generatorは利点だが、VM上のNode専用APIではFastifyのAjv validation、response serializer、encapsulated plugins、onClose等の既存機能を置き換える利益が限定的。全面移行は不要 |
-| Wire契約 | **TypeSpec + OpenAPI 3.1** | OpenAPI YAMLの独立手書き: DTO/operationを重複管理する |
+| Wire契約 | **TypeSpec + OpenAPI 3.1.0** | OpenAPI YAMLの独立手書き: DTO/operationを重複管理する |
 | HTTP検証 | **Fastify JSON Schema/Ajv + response serializer** | ZodをHTTP wireの第二の手書き正本にする方式: schemaの二重定義が発生する |
 | 生成client | **Web TypeScript: Orval / iOS SwiftUI: 同一OpenAPIからSwift生成client** | OrvalをSwift generatorとみなさず、iOS wire DTOの第二手書き正本を作らない。詳細は[iOS Native設計](IOS-SWIFTUI-ARCHITECTURE.md) |
 | 業務/MCP schema | **Zod v4** | TypeBoxを別のHTTP schema正本として導入する方式: 生成されたJSON Schemaと二重化する |
@@ -35,9 +37,15 @@
 ```
 
 - TypeSpecが所有: method/path、operationId、request/response DTO、status/error、headers、content type、OAuth security schemeの**ワイヤ表現**。
-- TypeSpecの出力をFastifyのroute `schema` に適合させるための**一方向の変換**を導入する。OpenAPI 3.1 SchemaとFastify/Ajvが受け付けるJSON Schema方言の差（nullable、oneOf/anyOf、discriminator、additionalProperties、formats、coercion、default、response status別schema）を明示して検査する。**OpenAPIのcomponentsをFastifyへそのまま渡せるとは仮定しない。**
+- `packages/http-contract/src/fastify-schema.mjs` は、OpenAPI 3.1のJSON SchemaをFastify v5のDraft-07ルートスキーマへ変換する。
+  コンポーネント参照をFastifyに登録できるIDに変換し、合成を伴わない閉じたobjectの制約を引き継ぐ。
+  nullable、`oneOf`、`additionalProperties`、format、入力のcoercionとdefault、status別の応答を検査する。
+  意味を保持できない制約は変換エラーにする。
 - `@codexia/contracts` はCoreの業務契約、TypeSpecはHTTP wire契約。重なるDTOは生成またはadapterで接続し、同じwire DTOを二つの独立編集可能な正本にしない。
-- OrvalはWeb TypeScriptの生成client専用。iOS Native Swiftは同じOpenAPI 3.1からSwift clientを生成し、OAuth、headers、Idempotency-Key、abort/retry、status別error/receipt、streamingを個別に検証する。iOS実装は[iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md)が所有する。
+- Desktop WebのOrvalとiOSのSwift OpenAPI Generatorは、同じ生成OpenAPIを入力とする。
+  Orvalは選択したoperationのmethod、pathとIDを比較し、Swiftは全operation IDを比較する。
+  現行Swift生成のnullable正規化は同じ3.1方言内で型とnullの和を表し、扱えない形では失敗する。
+  OAuth、headers、Idempotency-Key、abort/retry、status別応答、streamingの受入は [iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md) に従う。
 - Fastifyが所有: request lifecycle、content parser、Ajv validation、response serializer、route registration、error handling、streaming/abort、graceful shutdown。schema validationが成功しても認可成功とはみなさない。
 - 既存Core/DBが所有: project/object/revision/effect、author-only approve/apply、idempotency、transaction、receipt。これをHTTP schema/validatorへ移管しない。
 
@@ -51,7 +59,7 @@
 | `/mcp` とmodule MCP HTTP | MCP SDK v2公式Web handlerをFastify adapterで呼ぶ | MCP-CLIENTのresource/audience、scope、project、effectを毎request確認 |
 | `/api/public/projects/*` | share reader専用route | share capability以外のprivate情報を返さない |
 | module HTTP contribution | manifestから明示method/pathを登録するhost-owned adapter | module access/effectとcentral admission。未知routeはfail closed |
-| 将来のsetup API | [初期導入設計](../deployment/INITIAL-DEPLOYMENT-FLOW.md) に従い別routeで登録 | SETUP限定。現時点では未実装 |
+| setup API | [初期導入設計](../deployment/INITIAL-DEPLOYMENT-FLOW.md) に従うsetup専用Fastifyのroute | SETUPに限定した操作と公開可否応答を区別する。稼働環境での登録受入は別途確認する |
 
 **中央認可の順序:** path/methodの正規化 → Origin/Host/CORS/CSRF → credential検証とprincipal分類 → project assignment → object/revision/effect → transaction precondition。Plugin encapsulationでルートのscopeを隔離するが、Fastifyのpluginに登録しただけで権限が保証されたとみなさない。親hookと子pluginの順序、onRequest/preValidation/preHandler、raw response経路を**全routeで検証**する。
 
@@ -75,4 +83,6 @@
 
 **Fastify vs Honoの実装ベンチマークは選定条件としない。** Fastifyを維持した状態での性能回帰（p50/p95/p99、RSS、SSE、起動・drain）は別途確認する。仕様からの生成、認可、stream、response serializer、DB semanticsが成立しない場合は未完了と判定する。
 
-依存は導入PRで最新安定版とpeer compatibilityを確認し、TypeSpec compiler/emitter、OpenAPI変換器、Orval、Fastify、Ajvのversionをlockfileと変更理由に記録する。**本PRでは依存・ルート・実行テストは変更しない。**
+バージョン選定の根拠は [仕様ツールチェーン](SPECIFICATION-TOOLCHAIN.md) が所有する。
+TypeSpec、Redocly、Orval、Fastifyと間接依存のAjvは `pnpm-lock.yaml` で固定する。
+Swiftは `ios/CodexiaTransport/Package.resolved` を使用し、oasdiffは取得する公式バイナリのバージョンとSHA-256を検査する。

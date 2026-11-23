@@ -11,9 +11,10 @@ export const persistenceAnchorCreatedResponseAnchorFromUtf16Min = 0;
 export const persistenceAnchorCreatedResponseAnchorToUtf16Min = 0;
 
 export const persistenceAnchorCreatedResponseAnchorQuoteSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const persistenceAnchorCreatedResponseAnchorVersionMin = 1;
 
 
-export const PersistenceAnchorCreatedResponse = zod.looseObject({
+export const PersistenceAnchorCreatedResponse = zod.object({
   "anchor": zod.looseObject({
   "id": zod.string(),
   "projectId": zod.string(),
@@ -23,7 +24,7 @@ export const PersistenceAnchorCreatedResponse = zod.looseObject({
   "toUtf16": zod.int().min(persistenceAnchorCreatedResponseAnchorToUtf16Min),
   "quoteSha256": zod.string().regex(persistenceAnchorCreatedResponseAnchorQuoteSha256RegExp),
   "status": zod.enum(['proposed', 'confirmed', 'needs_review', 'orphaned']),
-  "version": zod.int().min(1),
+  "version": zod.int().min(persistenceAnchorCreatedResponseAnchorVersionMin),
   "createdAt": zod.iso.datetime({"offset":true}),
   "updatedAt": zod.iso.datetime({"offset":true})
 }),

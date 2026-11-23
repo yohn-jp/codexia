@@ -33,6 +33,18 @@ The upstream OIDC issuer is **deploy-time configuration in the current implement
 - Use a stable identity key such as **(`iss`, `sub`)**. E-mail addresses are display/verification attributes, not a secure or stable authorization primary key. In dedicated single-author mode, bind the accepted identity to the explicitly configured owner; a valid token for a different identity does **not** acquire owner rights.
 - Prefer short-lived access tokens; clients renew through the Codexia OAuth provider's refresh flow. Never publish refresh tokens in browser assets, logs, the IPA, a CI artifact or GitHub Secrets. Logout/revocation semantics must match the tested provider behavior; JWT signature validation alone cannot guarantee instant revocation.
 
+### HTTP contract ownership
+
+The [TypeSpec contract](../../packages/http-contract/src/main.tsp) defines Codexia-owned HTTP adapters and their credential requirements.
+Better Auth owns the OAuth, Passkey and session protocol schemas it implements.
+Its official OpenAPI generator is for isolated contract inspection.
+The development API reference publishes statically approved contract definitions and does not initiate sign-in, take credentials or call the installed API.
+
+The owner-session confirmation adapter is available only through the normal API.
+It requires the owner session cookie and an exact same-origin request.
+The setup-only listener admits only the operations needed for enrollment, including its separately guarded Better Auth Passkey routes.
+The [route authorization contract](ROUTE-AUTHORIZATION-CONTRACT.md) defines the applicable conditions in each mode.
+
 ## API authorization (including BOLA)
 
 Authentication and OAuth scopes are **necessary but not sufficient** for resource access. Central admission resolves an authenticated principal with a trusted author/permission context, then checks the action and actual resource ownership/membership. Do not derive membership, project choice, author approval or permissions solely from `projectId`, a document path, an ID in a payload, `email`, or client-side UI state.
