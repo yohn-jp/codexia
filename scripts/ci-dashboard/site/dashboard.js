@@ -355,7 +355,7 @@ function updateCoverage() {
   const unresolvedRunCount = inventoryRuns.filter(run => identity(run) === null).length;
   coverage = {
     scannedRuns: inventoryRuns.length,
-    selectedRuns: [...observed.values()].reduce((sum, item) => sum + item.summary.runs.length, 0),
+    selectedRuns: all.reduce((sum, item) => sum + item.runs.length, 0),
     selectedPRs: all.length,
     scannedPages: inventoryPage,
     unresolvedRunCount,
