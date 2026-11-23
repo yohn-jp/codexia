@@ -59,7 +59,7 @@ export async function resolveOasdiffBinary() {
     const extracted = path.join(temp, "extracted");
     await mkdir(extracted);
     // Integrity-bound archive bytes are streamed to tar; no downloaded archive is persisted.
-    run("tar", ["-xz", "-C", extracted], archive);
+    run("tar", ["-xzf", "-", "-C", extracted], archive);
     const extractedBinary = path.join(extracted, asset.binary);
     await stat(extractedBinary);
     await chmod(extractedBinary, 0o755);
