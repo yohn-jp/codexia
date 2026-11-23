@@ -1,4 +1,4 @@
-// Visual acceptance for the generated, self-contained diagram component.
+// Visual acceptance for the generated Atlas and its shared Pages assets.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -16,6 +16,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
   const atlasManifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
   const relatedPaths = [...new Set(atlasManifest.diagrams.flatMap(diagram => diagram.implementationPaths ?? []))];
+  const sharedRoot = resolve(root, '../pages-ui');
   const server = createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
@@ -32,9 +33,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         }));
         return;
       }
-      const path = resolve(root, '.' + decodeURIComponent(pathname === '/' ? '/index.html' : pathname));
-      if (!(path === root || path.startsWith(root + sep))) {
-        res.writeHead(403).end();
+      const prefix = pathname.startsWith('/pages-ui/') ? '/pages-ui/' : '/architecture/';
+      if (!pathname.startsWith(prefix)) {
+        res.writeHead(404).end();
+        return;
+      }
+      const directory = prefix === '/pages-ui/' ? sharedRoot : root;
+      const path = resolve(directory, decodeURIComponent(pathname.slice(prefix.length)) || 'index.html');
+      if (!path.startsWith(directory + sep)) {
+        res.writeHead(404).end();
         return;
       }
       const bytes = await readFile(path);
@@ -50,7 +57,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const base = 'http://127.0.0.1:' + server.address().port;
+    const base = 'http://127.0.0.1:' + server.address().port + '/architecture';
+    page.on('response', response => {
+      const path = new URL(response.url()).pathname;
+      if (response.status() >= 400 && (path.startsWith('/pages-ui/') || path.startsWith('/architecture/'))) {
+        errors.push(response.status() + ' ' + path);
+      }
+    });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(base + '/#entry-does-not-exist', { waitUntil: 'networkidle' });
     await page.locator('#svg-image:not([hidden])').waitFor({ timeout: 20000 });
@@ -103,7 +116,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await page.unroute('**/graph/source.json');
     await page.setViewportSize({ width: 320, height: 740 });
     assert.ok(await page.locator('#main-content').isVisible());
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 320), '320px viewport must not overflow horizontally');
+    const mobileWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(mobileWidth <= 320, '320px viewport must not overflow horizontally (document width ' + mobileWidth + 'px)');
     if (process.env.ATLAS_PREVIEW_PATH) {
       await page.screenshot({ path: resolve(process.env.ATLAS_PREVIEW_PATH), fullPage: true });
     }

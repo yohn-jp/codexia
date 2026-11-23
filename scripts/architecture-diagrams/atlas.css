@@ -18,8 +18,8 @@ button:focus-visible,a:focus-visible,.canvas:focus-visible {outline:3px solid va
 h1 {font-weight:650;font-family:Georgia,"Noto Serif CJK JP",serif;font-size:clamp(32px,4vw,52px);letter-spacing:-.045em;line-height:1.15;margin:0}
 .period{color:var(--accent)}
 .intro{max-width:75ch;color:var(--muted);margin:13px 0 0;font-size:13px}
-.revision{display:grid;gap:2px;flex:none;text-align:right;color:var(--muted);font-size:11px}
-.revision code {font-family:ui-monospace,monospace;color:var(--fg);letter-spacing:0}
+.revision{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;flex:none;max-width:100%;text-align:right;color:var(--muted);font-size:11px}
+.revision code {font-family:ui-monospace,monospace;color:var(--fg);letter-spacing:0;overflow-wrap:anywhere}
 .count {margin-top:5px}
 .workspace{display:grid;grid-template-columns:minmax(235px,295px) minmax(0,1fr);min-height:calc(100vh - 230px)}
 .rail{background:var(--rail);border-right:1px solid var(--line);padding:25px 14px 24px 20px}
