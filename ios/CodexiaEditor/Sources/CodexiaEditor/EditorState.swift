@@ -8,6 +8,11 @@ public struct EditorState {
         public let version: UInt64
     }
 
+    public struct RemoteRequest {
+        fileprivate let snapshot: Snapshot
+        fileprivate let generation: UInt64
+    }
+
     public let documentID: String
     public private(set) var text: String
     private let session = UUID()
@@ -15,7 +20,8 @@ public struct EditorState {
     private var protectedVersion: UInt64 = 0
     private var focused = false
     public private(set) var isComposing = false
-    private var pendingRemote: (String, Snapshot)?
+    private var pendingRemote: (String, RemoteRequest)?
+    private var requestGeneration: UInt64 = 0
 
     public init(documentID: String, text: String) {
         self.documentID = documentID
@@ -48,9 +54,16 @@ public struct EditorState {
         _ = applyRemote(pending.0, for: pending.1)
     }
 
+    public mutating func beginRemoteRequest() -> RemoteRequest {
+        requestGeneration += 1
+        pendingRemote = nil
+        return RemoteRequest(snapshot: snapshot, generation: requestGeneration)
+    }
+
     @discardableResult
-    public mutating func applyRemote(_ text: String, for request: Snapshot) -> Bool {
-        guard request == snapshot, version == protectedVersion else { return false }
+    public mutating func applyRemote(_ text: String, for request: RemoteRequest) -> Bool {
+        guard request.snapshot == snapshot, request.generation == requestGeneration,
+              version == protectedVersion else { return false }
         if focused || isComposing {
             pendingRemote = (text, request)
             return true

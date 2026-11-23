@@ -37,9 +37,32 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         window.isHidden = true
     }
 
+    func testCancelMarkedTextKeepsCommittedText() {
+        let box = Box()
+        let binding = Binding(get: { box.state }, set: { box.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: binding)
+        let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        view.selectedRange = NSRange(location: 2, length: 0)
+        view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+        coordinator.textViewDidChange(view)
+        view.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+        view.unmarkText()
+        coordinator.textViewDidChange(view)
+        XCTAssertEqual(box.state.text, "原稿")
+        XCTAssertTrue(box.state.canLeave)
+        view.resignFirstResponder()
+        window.isHidden = true
+    }
+
     func testFocusDefersRemoteUntilEditingEnds() {
         let box = Box()
-        let request = box.state.snapshot
+        let request = box.state.beginRemoteRequest()
         let binding = Binding(get: { box.state }, set: { box.state = $0 })
         let coordinator = ManuscriptEditor.Coordinator(state: binding)
         let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)

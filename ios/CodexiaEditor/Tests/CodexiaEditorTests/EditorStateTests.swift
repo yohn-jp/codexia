@@ -4,7 +4,7 @@ import XCTest
 final class EditorStateTests: XCTestCase {
     func testResponseCannotOverwriteNewerInput() {
         var state = EditorState(documentID: "a", text: "initial")
-        let request = state.snapshot
+        let request = state.beginRemoteRequest()
         state.edit("new input")
         XCTAssertFalse(state.applyRemote("old response", for: request))
         XCTAssertEqual(state.text, "new input")
@@ -13,8 +13,9 @@ final class EditorStateTests: XCTestCase {
 
     func testOlderResponseCannotOverwriteNewerResponse() {
         var state = EditorState(documentID: "a", text: "initial")
-        let first = state.snapshot
-        let second = state.snapshot
+        let first = state.beginRemoteRequest()
+        let second = state.beginRemoteRequest()
+        XCTAssertFalse(state.applyRemote("older response", for: first))
         XCTAssertTrue(state.applyRemote("newer response", for: second))
         XCTAssertFalse(state.applyRemote("older response", for: first))
         XCTAssertEqual(state.text, "newer response")
@@ -22,7 +23,7 @@ final class EditorStateTests: XCTestCase {
 
     func testResponseCannotOverwriteAnotherDocument() {
         var state = EditorState(documentID: "a", text: "first")
-        let request = state.snapshot
+        let request = state.beginRemoteRequest()
         state = EditorState(documentID: "b", text: "second")
         XCTAssertFalse(state.applyRemote("old response", for: request))
         XCTAssertEqual(state.text, "second")
@@ -39,7 +40,7 @@ final class EditorStateTests: XCTestCase {
 
     func testFocusedRemoteIsDeferredAndCannotOverwriteTyping() {
         var state = EditorState(documentID: "a", text: "original")
-        let request = state.snapshot
+        let request = state.beginRemoteRequest()
         state.setFocused(true)
         XCTAssertTrue(state.applyRemote("remote", for: request))
         XCTAssertEqual(state.text, "original")
@@ -50,7 +51,7 @@ final class EditorStateTests: XCTestCase {
 
     func testFocusedRemoteAppliesAfterFocusEndsWhenNoTypingOccurs() {
         var state = EditorState(documentID: "a", text: "original")
-        let request = state.snapshot
+        let request = state.beginRemoteRequest()
         state.setFocused(true)
         XCTAssertTrue(state.applyRemote("remote", for: request))
         state.setFocused(false)
