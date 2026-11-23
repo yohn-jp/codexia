@@ -1,6 +1,8 @@
 # 初期デプロイの遷移設計
 
-**種別: 正本・規範的設計。** **採用済みの目標:** SSH可能なVMをAnsibleで構築し、Cloudflare Workersの`/console/setup`から、登録キー＋Passkeyによって初回所有者を確定する。**現行のSSH一時登録サーバーは移行前の実装であって目標の利用者導線ではない。**  新規 VM を所望状態へ収束し、PostgreSQL、本人認証、API、Cloudflare 経由の利用を安全に開始するための状態・遷移・停止条件を定義する。全体の境界は [システム基本設計](../architecture/SYSTEM-DESIGN.md)、所有手順は [IaC](IAC.md)、[Push deployment](PUSH-DEPLOYMENT.md)、[Ansible 運用](../../deploy/ansible/README.md)、[認証初期化](../../deploy/ansible/AUTH-RUNTIME.md) が定める。
+新規 VM を Ansible で構成し、Cloudflare Workers の `/console/setup` から登録キーと Passkey で初回所有者を登録する。
+本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。
+SSH ポートフォワード方式も移行中の運用手順として利用できる。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
 
 ## 初期構築・公開までの状態遷移
 
@@ -50,7 +52,7 @@ flowchart TD
 | `secrets` | mode 0400/0600 の保護 credential ファイルと承認 | Podman secret の内容・所有が一致 | 不足・異なる secret を自動修復・rotation しない |
 | `base` | network/volume/PG/Tunnel の所望状態 | 固定 volume、Podman、PostgreSQL 17 の同一性 | 既存 DB・container drift を拒否 |
 | `auth-runtime` | 審査済み Full digest、DB・認証初期化承認 | 原稿 migration ledger、別 auth role/schema、秘密設定 | API は非公開のまま停止 |
-| 初回キー発行（設計目標） | Ansibleの承認済み新規構築、空の正本DB、CSPRNG | 256-bit一回限りキーのハッシュ保存、期限と配送先の明示、setup-only入口の検証 | 既存owner・復旧中なら発行禁止。ログ/CI artifactに平文キーを出さない |
+| 初回キー発行 | Ansibleの承認済み新規構築、空の正本DB、CSPRNG | 256-bit一回限りキーのハッシュ保存、期限と配送先の明示、setup-only入口の検証 | 既存owner・復旧中なら発行禁止。ログ/CI artifactに平文キーを出さない |
 | owner・client 登録（設計目標） | Workersの`/console/setup`、有効な初期キー、本人のWebAuthn | Better Authの永続owner、Passkey、Web/iOS/内省client照合。キー即時失効 | 中断・再送・競合でもowner一人。未完成時は業務APIを有効化しない |
 | `deploy` | protected GitHub Environment と証明済み Full digest | migration・auth・origin・API ready | durable transaction record に従い復旧 |
 | 公開受入 | 実 VM、Cloudflare、実ブラウザー、独立復元ホスト | API・OAuth・reboot・バックアップの観測 | fixture 成功だけで受入扱いしない |
@@ -71,7 +73,14 @@ flowchart TD
 | 5 | 構築担当/保護されたAPI | Web/iOS/内省クライアントの登録とresource/redirectをAPI側で照合。OIDCは任意で、認証後に`/console/identity`から設定 | 保護された初回deployの入力条件と確認状態 |
 | 6 | 保護されたGitHub Actions | 配備承認、証明済みdigest、DB schema/backup、Cloudflare/Tunnel、health確認 | 本番owner login可能な`/console`。setup側の登録権限を閉じる |
 
-**新規の起動モード:** `auth-runtime`後に、既存のFastify/Better Authプロセスの**setup-onlyモード**（設計目標）をCloudflare Tunnel経由で限定公開する。許可するのはセットアップ状態・キー認可・Passkey ceremony・登録完了確認に必要な狭い認証APIとreadinessのみ。通常の作品API・MCP・owner設定変更・任意のsignup・一般向けOAuth client登録は403/503等で**フェイルクローズ**する。別の永久稼働認証サーバーは新設しない。公開前にWorkersの静的ルート、Access経路・origin境界、正確なWebAuthn RP ID/HTTPS originを検証する。Accessの保護下でもセットアップキーは独立して必須で、Accessの利用者をownerとはみなさない。初期キーをpublic URLのquery/fragmentに埋め込まない。
+**初回登録時の起動モード**
+
+`auth-runtime` 後に、通常運用と同じ Fastify と Better Auth を **setup-only モード**で起動し、Cloudflare Tunnel 経由で限定公開する。
+許可するのは、セットアップ状態の取得、キーの認可、Passkey の登録、登録完了確認に必要な認証 API と readiness に限る。
+作品 API、MCP、owner 設定変更、任意のサインアップ、一般向け OAuth クライアント登録は 403 や 503 で拒否する。
+公開前に Workers の静的ルート、Access の経路とオリジン境界、WebAuthn の RP ID と HTTPS オリジンを検証する。
+Access に加えてセットアップキーによる認可を要求し、キーは登録フォームに入力する。
+登録した Passkey と対応する owner は、登録が完了した時点で確定する。
 
 **登録キーの権威:** Ansibleによる発行操作は、アプリが提供する制限付きbootstrap操作を利用し、平文を永続DB/Ansible fact/ログ/CI artifact/Workers assetへ書かない。正本DBにハッシュ、発行時刻、24時間の期限、失効・消費状態を記録する。繰り返しのAnsible適用は平文キーを再生成せず、失効や紛失からの再発行には**owner未登録を再検証した運用者の別承認**を要する。キー総当たりに対するレート制限、TLS、CSRF/Origin、競合時のDBロック・一意制約を備える。所有者の生成・Passkey確認・キー失効は再試行・競合でも**単一owner**という不変条件を守る。通常ログイン・OAuth/MCP認可にこのキーを流用しない。
 
