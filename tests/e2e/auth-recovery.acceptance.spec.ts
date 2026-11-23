@@ -93,6 +93,7 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   await fillDraft(page, draft);
   const authoringUrl = page.url();
   const origin = new URL(authoringUrl).origin;
+  expect(new URL(origin).hostname, "This WebAuthn scenario requires a valid localhost RP ID").toBe("localhost");
   await page.evaluate(() => {
     const original = IDBObjectStore.prototype.put;
     const scope = window as Window & { __consoleDraftFailure?: boolean };
