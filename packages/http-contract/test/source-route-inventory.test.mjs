@@ -155,6 +155,109 @@ function normalizePathParameters(pathname) {
   return pathname.replace(/\{[^}]+\}/gu, "{param}");
 }
 
+function hasAstIdentifier(node, name) {
+  if (ts.isIdentifier(node) && node.text === name) return true;
+  let found = false;
+  ts.forEachChild(node, (child) => { found ||= hasAstIdentifier(child, name); });
+  return found;
+}
+
+function serverBoundaryEvidence(source) {
+  const sourceFile = ts.createSourceFile("server.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const readMethods = new Set();
+  const healthPaths = new Set();
+  const versionPaths = new Set();
+  let versionReadGuard = false;
+  let standaloneMcpSelector = false;
+  let standaloneMcpRewrite = false;
+  let contributionMethodFilter = false;
+  let ownerContributionGuard = false;
+  let publicReadContributionGuard = false;
+  const invokeHttp = [];
+  const hostRoles = new Set();
+  const walk = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      if (node.name.text === "isRead") {
+        for (const child of [node.initializer]) {
+          const collect = (part) => {
+            if (ts.isBinaryExpression(part) && part.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+                ts.isIdentifier(part.left) && part.left.text === "method" && ts.isStringLiteral(part.right)) readMethods.add(part.right.text);
+            ts.forEachChild(part, collect);
+          };
+          collect(child);
+        }
+      }
+      if (node.name.text === "VERSION_PATHS" && ts.isArrayLiteralExpression(node.initializer)) {
+        for (const element of node.initializer.elements) if (ts.isStringLiteral(element)) versionPaths.add(element.text);
+      }
+      if (node.name.text === "standaloneMcpRoute" && ts.isBinaryExpression(node.initializer) &&
+          node.initializer.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+          ts.isIdentifier(node.initializer.left) && node.initializer.left.text === "routePath" &&
+          ts.isStringLiteral(node.initializer.right) && node.initializer.right.text === "/mcp") standaloneMcpSelector = true;
+      if (node.name.text === "host" && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
+          node.initializer.expression.text === "actionHost" && ts.isStringLiteral(node.initializer.arguments[4])) hostRoles.add(node.initializer.arguments[4].text);
+      if (node.name.text === "contributionFor" && node.initializer) {
+        const visitContribution = (part) => {
+          if (ts.isCallExpression(part) && ts.isPropertyAccessExpression(part.expression) && part.expression.name.text === "includes" &&
+              ts.isPropertyAccessExpression(part.expression.expression) && part.expression.expression.name.text === "methods" &&
+              hasAstIdentifier(part.arguments[0], "method")) contributionMethodFilter = true;
+          ts.forEachChild(part, visitContribution);
+        };
+        visitContribution(node.initializer);
+      }
+    }
+    if (ts.isIfStatement(node)) {
+      if (hasAstIdentifier(node.expression, "isRead") && hasAstIdentifier(node.expression, "VERSION_PATHS") &&
+          hasAstIdentifier(node.expression, "routePath")) versionReadGuard = true;
+      const pathComparisons = new Set();
+      const collectPaths = (part) => {
+        if (ts.isBinaryExpression(part) && part.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+            ts.isIdentifier(part.left) && part.left.text === "routePath" && ts.isStringLiteral(part.right)) pathComparisons.add(part.right.text);
+        ts.forEachChild(part, collectPaths);
+      };
+      collectPaths(node.expression);
+      if (hasAstIdentifier(node.expression, "isRead")) for (const pathname of pathComparisons) healthPaths.add(pathname);
+      const hasComparison = (leftName, rightValue) => {
+        let matched = false;
+        const inspect = (part) => {
+          if (ts.isBinaryExpression(part) && part.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+              ts.isPropertyAccessExpression(part.left) && ts.isIdentifier(part.left.expression) &&
+              part.left.expression.text === "contribution" && part.left.name.text === leftName &&
+              ts.isStringLiteral(part.right) && part.right.text === rightValue) matched = true;
+          ts.forEachChild(part, inspect);
+        };
+        inspect(node.expression);
+        return matched;
+      };
+      if (hasComparison("access", "owner")) ownerContributionGuard = true;
+      if (hasComparison("access", "public") && hasComparison("effect", "read")) publicReadContributionGuard = true;
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "runtime" && node.expression.name.text === "invokeHttp") {
+      const [moduleArg, contributionArg, requestArg, hostArg] = node.arguments;
+      const idForwarded = ts.isPropertyAccessExpression(contributionArg) && ts.isIdentifier(contributionArg.expression) &&
+        contributionArg.expression.text === "contribution" && contributionArg.name.text === "id";
+      const requestKind = ts.isIdentifier(requestArg) && requestArg.text === "webRequest" ? "owner" :
+        ts.isCallExpression(requestArg) && ts.isIdentifier(requestArg.expression) && requestArg.expression.text === "makeWebRequest" ? "public" : "unknown";
+      invokeHttp.push({ idForwarded, moduleArgument: ts.isIdentifier(moduleArg) && moduleArg.text === "moduleId", requestKind,
+        hostForwarded: ts.isIdentifier(hostArg) && hostArg.text === "host" });
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left) && node.left.text === "routePath" && ts.isTemplateExpression(node.right) &&
+        node.right.getText(sourceFile).includes("/modules/mcp/streamable")) {
+      let ancestor = node.parent;
+      while (ancestor && !(ts.isIfStatement(ancestor) && hasAstIdentifier(ancestor.expression, "standaloneMcpRoute"))) ancestor = ancestor.parent;
+      if (ancestor) standaloneMcpRewrite = true;
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes" &&
+        ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === "method") contributionMethodFilter = true;
+    ts.forEachChild(node, walk);
+  };
+  walk(sourceFile);
+  return { contributionMethodFilter, healthPaths, hostRoles, invokeHttp, ownerContributionGuard, publicReadContributionGuard, readMethods,
+    standaloneMcpRewrite, standaloneMcpSelector, versionPaths, versionReadGuard };
+}
+
 function sourceRegexToTemplate(pattern) {
   return `/${sourceRegexForSuffix(pattern).replace(/\(\[\^\/\]\+\)/gu, "{param}").replace(/\(\.\*\)/gu, "{param}")}`;
 }
@@ -376,6 +479,65 @@ test("main dispatcher literal method/path predicates are admitted or explicitly 
   assert.equal(unique.size, actual.length, "dispatcher route predicates must not duplicate method/path pairs");
   const openapi = new Set(operationKeys(contract));
   for (const key of actual) assert.equal(openapi.has(key), current.has(key), `${key} is either a contracted Codexia route or Better Auth metadata`);
+});
+
+test("health/version read selectors and standalone MCP method dispatch match the contract", () => {
+  const serverPath = path.resolve(repositoryRoot, "packages", "api", "src", "server.ts");
+  const server = readFileSync(serverPath, "utf8");
+  const evidence = serverBoundaryEvidence(server);
+  const healthPaths = ["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup"];
+  assert.deepEqual([...evidence.readMethods].sort(), ["GET", "HEAD"]);
+  assert.deepEqual([...evidence.healthPaths].sort(), healthPaths.sort());
+  assert.deepEqual([...evidence.versionPaths].sort(), ["/api/browser/version", "/api/version"]);
+  assert.ok(evidence.versionReadGuard, "version route dispatch must be protected by the isRead selector");
+  const readPaths = [...healthPaths, ...evidence.versionPaths];
+  const expectedReads = inventory.current.filter((key) => {
+    const split = key.indexOf(" ");
+    return readPaths.includes(key.slice(split + 1));
+  });
+  const actualReads = readPaths.flatMap((pathname) => [...evidence.readMethods].map((method) => `${method} ${pathname}`));
+  assert.deepEqual(actualReads.sort(), expectedReads.sort(), "health and version GET/HEAD routes must match the admitted inventory");
+
+  assert.ok(evidence.standaloneMcpSelector, "the standalone MCP selector must match exactly /mcp");
+  assert.ok(evidence.standaloneMcpRewrite, "standalone /mcp requests must forward to the project MCP streamable adapter");
+  assert.ok(evidence.contributionMethodFilter, "the server must filter HTTP contributions by the incoming method");
+  const mcp = readFileSync(path.resolve(repositoryRoot, "modules", "mcp", "src", "http.ts"), "utf8");
+  const mcpOperations = contributionOperations(mcp, "/api/projects/{projectId}/modules/mcp/");
+  assert.deepEqual(mcpOperations.sort(), [
+    "DELETE /api/projects/{projectId}/modules/mcp/streamable",
+    "GET /api/projects/{projectId}/modules/mcp/streamable",
+    "POST /api/projects/{projectId}/modules/mcp/streamable",
+  ]);
+  assert.deepEqual(mcpOperations.filter((key) => key.includes("/streamable")), inventory.current.filter((key) => key.includes("/api/projects/{projectId}/modules/mcp/streamable")).sort());
+
+  const readMutation = server.replace('method === "GET" || method === "HEAD"', 'method === "GET" || method === "PUT"');
+  assert.notEqual(readMutation, server);
+  assert.deepEqual([...serverBoundaryEvidence(readMutation).readMethods].sort(), ["GET", "PUT"], "changing the HEAD read selector must alter health/version admission");
+  const rewriteMutation = server.replace(
+    "routePath = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;",
+    "routePath = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/wrong`;",
+  );
+  assert.notEqual(rewriteMutation, server);
+  assert.equal(serverBoundaryEvidence(rewriteMutation).standaloneMcpRewrite, false, "changing the standalone MCP rewrite path must fail the source check");
+});
+
+test("private and public module contributions reach the server host with their descriptors", () => {
+  const sourcePath = path.resolve(repositoryRoot, "packages", "api", "src", "server.ts");
+  const source = readFileSync(sourcePath, "utf8");
+  const evidence = serverBoundaryEvidence(source);
+  assert.equal(evidence.invokeHttp.length, 2, "the Core server must expose one owner and one public module forwarding path");
+  assert.deepEqual(evidence.invokeHttp.map(({ requestKind }) => requestKind).sort(), ["owner", "public"]);
+  assert.ok(evidence.invokeHttp.every(({ moduleArgument, idForwarded, hostForwarded }) => moduleArgument && idForwarded && hostForwarded),
+    "both forwarding branches must pass module ID, selected contribution ID, and constructed host");
+  assert.ok(evidence.ownerContributionGuard, "private forwarding must retain the owner contribution access check");
+  assert.ok(evidence.publicReadContributionGuard, "public forwarding must retain the public read-only contribution check");
+  assert.deepEqual([...evidence.hostRoles].sort(), ["owner", "public"], "forwarded hosts must preserve private owner and public access modes");
+
+  const mutatedId = source.replace("runtime.invokeHttp(moduleId, contribution.id, webRequest, host)",
+    'runtime.invokeHttp(moduleId, "wrong", webRequest, host)');
+  assert.notEqual(mutatedId, source, "negative forwarding mutation must find the owner adapter call");
+  assert.ok(!serverBoundaryEvidence(mutatedId).invokeHttp.every(({ idForwarded }) => idForwarded),
+    "dropping the selected contribution ID must fail the source evidence check");
 });
 
 test("Core dispatcher project suffix and literal regex branches match admitted routes", () => {
