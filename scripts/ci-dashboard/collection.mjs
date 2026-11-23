@@ -34,9 +34,15 @@ export function selectRuns(runs) {
   }));
 }
 
-export async function collectInventoryPage(request, page = 1) {
-  if (!Number.isSafeInteger(page) || page < 1) throw new Error('Invalid inventory page');
-  const data = await request('actions/runs?event=pull_request&per_page=' + PAGE_SIZE + '&page=' + page);
+export async function collectInventoryPage(request, page = 1, createdBefore = null) {
+  if (!Number.isSafeInteger(page) || page < 1 || page > 10) throw new Error('Invalid inventory page');
+  if (createdBefore !== null && (typeof createdBefore !== 'string' ||
+    !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/u.test(createdBefore))) {
+    throw new Error('Invalid inventory cursor');
+  }
+  const cursor = createdBefore === null ? '' : '&created=' + encodeURIComponent('<=' + createdBefore);
+  const data = await request('actions/runs?event=pull_request&per_page=' + PAGE_SIZE +
+    '&page=' + page + cursor);
   if (!Array.isArray(data.workflow_runs) || data.workflow_runs.length > PAGE_SIZE) {
     throw new Error('Invalid workflow inventory');
   }
