@@ -4,23 +4,20 @@
 
 読み方: 四角は画面/状態、ひし形は認証・入力・保存の分岐、矢印は実操作やサーバー結果による遷移。例外時は元の作業・下書き・認可の境界を保ち、隠れた別の書込経路へ転換しない。各画面のボタン名は `CTRL ID` を参照。共通の操作禁止/403/409/失敗の契約は台帳に委任し、各図ではその画面特有の戻り先を記載する。
 
-## ENTRY-01 — 明示的なShell選択【実装】
+## ENTRY-01 — Desktop React Web / iOS SwiftUI起動【採用目標】
 
 ```mermaid
 flowchart TD
-    START["/ 画面選択"] --> REMEMBER{"モードを保存済み?"}
-    REMEMBER -->|Desktop| DESKTOP["/desktop/"]
-    REMEMBER -->|Mobile| MOBILE["/mobile/"]
-    REMEMBER -->|未選択| PICK["選択画面"]
-    PICK -->|Desktopボタン| DESKTOP
-    PICK -->|Mobileボタン| MOBILE
-    DESKTOP --> SESSION["APIと認証を照合"]
-    MOBILE --> SESSION
+    WEB["Web /desktop/"] --> SESSION["APIと認証を照合"]
+    IOS["iOS Native SwiftUI App"] --> PKCE["System OAuth + PKCE"]
+    PKCE --> SESSION
     SESSION -->|未認証| SIGNIN["AUTH-01"]
     SESSION -->|ownerかつDB可| LIBRARY["LIB-01"]
     SESSION -->|DB/認証不明| RETRY["接続と認可を再確認"]
     RETRY --> SESSION
 ```
+
+現行mainに残る`/mobile/`選択は旧実装であり、採用目標ではない。Native iOSは別NavigationStackとprotected draft journalを所有する。
 
 ## AUTH-01 — Passkey / OIDC本人ログイン【実装】
 
@@ -285,7 +282,7 @@ flowchart TD
     CHECK -->|いいえ| NOTICE["保存失敗を表示 / 原稿は維持"]
     TYPE -->|認証・セキュリティ| OWNER{"Better Auth owner session?"}
     OWNER -->|いいえ| LOGIN["下書きを守って再認証"]
-    OWNER -->|はい| PANEL["現行dialog/Mobile設定"]
+    OWNER -->|はい| PANEL["Desktop Web dialog（旧Mobile設定は廃止対象）"]
     PANEL -->|Passkey/session操作| VERIFY["server認可・fresh proof・結果再取得"]
     VERIFY --> PANEL
     PANEL -->|閉じる| RETURN

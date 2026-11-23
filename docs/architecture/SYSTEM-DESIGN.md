@@ -22,7 +22,7 @@
 ## 製品・システム境界
 
 - 製品は単一作者の小説執筆・知識管理・提案レビューを提供する。作品本文・構成・Revision・Knowledge・Evidence・ChangeSet・module record の永続正本は **PostgreSQL** のみ。
-- Desktop Web、Mobile Web、インストール型 iOS は同じ Core/API 契約を使用し、表示・入力の実装だけを分ける。ブラウザーの IndexedDB は未確定下書きと提案回復のローカル保護領域であり、サーバーの正本ではない。
+- **採用目標は Desktop Web (React/CodeMirror) とインストール型 iOS (SwiftUI + 必要なUIKit/TextKit 2) の2クライアント。** Mobile Web/PWA、Ionic/Capacitorを用いるモバイル執筆は製品対象から撤去する。両者は画面、UIコンポーネント、ルーティング、クライアントの状態管理を共有しない。**Core/API契約・作者権限・保存とRevisionの意味論のみ共通**。DesktopのIndexedDBとiOSの保護されたローカルdraft journalは未確定の回復領域であり、PostgreSQLの第二正本ではない。ネイティブ詳細は [iOS SwiftUI](IOS-SWIFTUI-ARCHITECTURE.md)。現行Mobile React/Capacitor実装は移行未完了であり、完成済みとみなさない。
 - オプション module は Core の読取・提案境界を利用する。module 側の解析キャッシュ・索引・モデルは再構築可能な派生物。Core だけで作品作成、執筆、保存、履歴、復元が成立する。
 - AI の推論・生成は外部クライアントで実施し、Codexia は MCP 経由で文脈、読取、検証、提案と作者承認を提供する。内部生成モデル API の拡張は凍結する。
 - Git レポジトリを原稿ストア、同期、復旧、デプロイ制御として復活させない。内部のファイル状投影は過渡的な読み取り表現であり、独立した正本または永久互換性の根拠にしない。
@@ -30,8 +30,8 @@
 ```mermaid
 flowchart TB
     subgraph Clients["利用・外部クライアント"]
-        D["Desktop Web / Mobile Web"]
-        I["iOS クライアント"]
+        D["Desktop Web<br/>React + CodeMirror"]
+        I["iOS native<br/>SwiftUI + TextKit 2"]
         M["外部 AI / MCP client"]
     end
     subgraph Edge["公開プレーン"]
@@ -45,12 +45,14 @@ flowchart TB
         P["PostgreSQL persistence adapter"]
     end
     DB[("PostgreSQL<br/>canonical author data + auth schema")]
-    J[("IndexedDB<br/>recoverable drafts only")]
+    JW[("Web IndexedDB<br/>recoverable draft only")]
+    JI[("iOS protected local files<br/>recoverable draft only")]
     D --> A
     D --> T
     I --> T
     M --> T
-    D <--> J
+    D <--> JW
+    I <--> JI
     T --> H
     H --> C
     C <--> R
@@ -82,8 +84,8 @@ UI 配信と API の外部認可は分離して管理する。Access の通過�
 
 | レイヤー | 主なパッケージ・構成 | 責務 |
 | --- | --- | --- |
-| 表示 | `app`、`app/src/shells/*`、`app/src/settings/*` | 操作、状態表示、アクセシビリティ。直接 SQL・作者以外の承認を行わない |
-| クライアント状態 | `app/src/application/*`、`app/src/storage/journal.ts` | 入力保護、ナビゲーション guard、回復、サーバー receipt 照合 |
+| 表示 | Desktop React（現行 `app`）、iOS native SwiftUI（導入対象） | プラットフォーム別UIとアクセシビリティ。DOM/React状態、SwiftUI状態、画面部品は共有しない。直接SQL・作者以外の承認を行わない |
+| クライアント状態 | Web：既存 `app/src/application/*`・IndexedDB journal。iOS：Swift native authoring coordinator・保護draft journal（新規） | 両端末に同等の入力保護・ナビゲーションguard・receipt照合の振舞いを実装するが、コード共有しない |
 | HTTP・認証 | `packages/api`、`modules/mcp` | 入場、token 検証、対象資源認可、HTTP/MCP DTO、サービスライフサイクル |
 | ドメイン | `packages/core`、`packages/contracts`、`packages/persistence-contracts` | Domain ID・snapshot・提案・操作の規約。任意実装へ依存しない |
 | 永続化 | `packages/persistence-postgres` | SQL・スキーマ・履歴・冪等処理・トランザクション |
@@ -114,7 +116,7 @@ flowchart LR
 
 ## UI 契約・設計受入
 
-- [利用画面の遷移図](../design/USER-SCREEN-FLOW.md) は起動、OAuth、作品、執筆、知識、レビュー、保存・復旧、Desktop/Mobile 間の遷移を定義する。
+- [利用画面の遷移図](../design/USER-SCREEN-FLOW.md) は Desktop Web とネイティブiOSの起動、OAuth、作品、執筆、知識、レビュー、保存・復旧を定義する。React Mobile Webの画面/viewport検証は対象外。
 - [管理画面の遷移図](../design/ADMIN-SCREEN-FLOW.md) は owner の Passkey・セッション、連携 OIDC の目標設計、および Web 管理画面とは別の運用プレーンを定義する。
 - [UX 契約](../design/UX-CONTRACT.md) は原稿保護、IME、可用性、アクセシビリティの受入基準を定義する。
 

@@ -19,7 +19,8 @@
 | 対象 | 設計上の所有先 |
 | --- | --- |
 | 採用済み仕様ツールチェーンと移行の比較・合格条件 | [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)（設計正本は本書と各領域に従う） |
-| XState採用対象・machineとAPI/DB副作用の境界 | [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md)（業務上の状態の意味は各画面/Interaction/Core正本） |
+| XState採用対象・machineとAPI/DB副作用の境界 | [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md)（Webクライアントの対象。ネイティブSwiftUIにはReact/XState runtimeを要求しない） |
+| Desktop ReactとネイティブiOS SwiftUIの画面基盤・モバイルWeb廃止 | [System design](SYSTEM-DESIGN.md)（製品境界）・[iOS SwiftUI architecture](IOS-SWIFTUI-ARCHITECTURE.md)（ネイティブ実装正本） |
 | 仕様駆動移行の実装分割/依存関係/検証引渡し | [実装契約と統合計画](SPECIFICATION-IMPLEMENTATION-CONTRACT.md)（製品要求の第二正本ではない） |
 | 外部ライブラリの選定・最新版方針・依存境界 | [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)・[既存依存と固定根拠の台帳](DEPENDENCY-INVENTORY.md) |
 | 要求管理/StrictDoc移行 | [StrictDoc traceability](../requirements/STRICTDOC-TRACEABILITY.md)（REQ-ID内容の正本は要求登録簿） |
@@ -42,7 +43,7 @@
 | 所有者の管理 UI | [管理画面遷移](../design/ADMIN-SCREEN-FLOW.md)・[API authentication](API-AUTHN-AUTHZ.md)・[バックアップ管理・S3制御](BACKUP-CONSOLE-CONTRACT.md)（運用設定/ワイヤ/責務。具体画面遷移はScreen State Atlas） |
 | 初期導入・VM の収束 | [初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)・[IaC](../deployment/IAC.md) |
 | 自動更新・復旧 | [更新遷移](../deployment/UPDATE-FLOW.md)・[Push deployment](../deployment/PUSH-DEPLOYMENT.md) |
-| GitHub Pagesの機能棚卸し・統合ポータル案 | [Pages機能台帳](../verification/PAGES-FUNCTION-INVENTORY.md)（現状観測）・[Pagesサイトマップ/UX](../design/DEVELOPMENT-PAGES-UX.md)（設計提案）・[CI/CD](../verification/CI-CD.md)（公開/証拠の現行契約） |
+| GitHub Pages の画面設計、機能、公開 | [Pages サイトマップと UX](../design/DEVELOPMENT-PAGES-UX.md)（設計詳細）／ [Pages 機能台帳](../verification/PAGES-FUNCTION-INVENTORY.md)（観測）／ [CI/CD](../verification/CI-CD.md)（公開と証拠の契約） |
 | CI・証明・実測 | [CI/CD](../verification/CI-CD.md)・[Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) |
 
 ## 設計変更の順序

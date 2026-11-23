@@ -49,6 +49,8 @@
 
 ### Web UI・ルーター・エディター
 
+**Platform decision / inventory status:** 以下のIonic/Capacitor依存は**現行legacy実装の観測値**であり、採用目標ではない。DesktopはReact、iOSはSwiftUI Nativeであり、Mobile Web/PWA authoringは廃止対象。旧依存の更新・CI維持を新規製品要件として扱わず、ネイティブ実機受入後に旧ビルドとともに撤去する。Native Swiftの依存選定は [iOS SwiftUI設計](IOS-SWIFTUI-ARCHITECTURE.md) を参照する。
+
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
@@ -109,6 +111,6 @@
 1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
 2. **判定**: 更新対象／連動／制約／整理対象／要検証を振り分ける。「今のビルドは通る」「過去から固定されている」だけで意図的なピンとしない。廃止予定の機能・不要な直接依存なら先に削除を評価する。
 3. **制約の証拠**: 固定する場合、対象パッケージ・許可範囲、最新候補、具体的な再現条件・失敗ログ・依存境界、解除条件をPRに記録する。期限なしの例外は設けない。代替案や上流の修正を評価する。
-4. **更新の単位**: 同期必須の依存（Better Auth群、Capacitor群、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
+4. **更新の単位**: 同期必須の依存（Better Auth群、**既存Capacitor群はNative SwiftUI cutoverまでの旧実装としてのみ検証**、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
 5. **受入**: main HEADに更新して差分・実行時依存・型／unit／E2E／OCI・CodeQL・GitHub Actionsを検証する。古いbranchのチェックを現在のmainの合格とみなさない。CodeQLの抑制、依存除外、セキュリティ規約の緩和で通さない。
 6. **台帳の同期**: マニフェスト変更に合わせ、該当行の宣言と判定・制約根拠を改訂する。異なるバージョンが正当に共存する場合は用途と移行基準を記録する。過去の失敗ログ、SHA、日付、個別PR番号等の経時証拠は**当該PR**に保存し、製品の規範文書へ混入させない。

@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Codexia
-description: Owner-confirmed visual design targets for Desktop and Mobile Web/PWA, including the Capacitor iOS wrapper that displays the Mobile Web UI.
+description: Owner-confirmed visual design targets for Desktop React Web only; native iOS SwiftUI is specified separately.
 colors:
   light:
     accent: "#70452F"
@@ -49,13 +49,13 @@ Full: .impeccable/design-full.md (expanded rationale and requirements; read sect
 
 **静かで文学的、明晰。** Writingは本文優先。他作業は情報密度と効率を高め、視認性・発見性・accessibilityを保つ。
 
-Desktop・Mobile Web/PWAとCapacitor Mobile Web UI（`web`）。shell別、意味token共通。native UI対象外。
+**対象はDesktop React Webのみ**（Impeccable platform: `web`）。Mobile Web/PWA・Capacitor authoring UIは採用目標から除外。iOSは独立したSwiftUI設計であり、本WebデザイントークンやReact部品の共通化を要求しない。詳細は[iOS SwiftUI設計](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
 本書の値は目標で実装証拠ではない。[詳細](.impeccable/design-full.md)。UX/a11yは[UX contract](../docs/design/UX-CONTRACT.md)、過去案は[Visual history](../docs/design/VISUAL-SYSTEM.md)、製品目的は[Product](PRODUCT.md)。
 
 ## Colors
 
-YAMLの3テーマを共有。surface/status等は未決定。色変更時に再計算（文字4.5:1、操作表示3:1以上）。色だけで伝えず、飾り線を操作境界にしない。
+Desktop WebでYAMLの3テーマを使用する。surface/status等は未決定。色変更時に再計算（文字4.5:1、操作表示3:1以上）。色だけで伝えず、飾り線を操作境界にしない。iOSネイティブ側の値は独立設計で定める。
 
 ## Typography
 
@@ -63,7 +63,7 @@ UIは和文sans。原稿は明朝／ゴシック選択可（16px・1.8・最大9
 
 ## Layout
 
-WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）。狭幅はタブ等へ適応。余白共通、touch target 44×44 CSS px。幅だけでshellを変えない。
+Desktop WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）。ブラウザーの拡大・リサイズとアクセシビリティを保つが、Mobile React専用レイアウトやモバイルviewportスクリーンショットは本製品の受入対象外。iOSのタッチ目標はネイティブUI契約で検証する。
 
 ## Elevation & Depth
 

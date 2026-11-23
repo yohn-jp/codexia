@@ -20,15 +20,15 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Operating Context
 
-- The product covers Desktop and Mobile Web/PWA, plus a Capacitor iOS client that reuses the Mobile shell.
-- The owner wants one design system to cover Desktop/Mobile Web/PWA and a Capacitor iOS wrapper that displays the Mobile Web UI. Impeccable platform is `web`; a website or web UI in a native wrapper remains web, and this does not claim native iOS UI or Android support.
+- **Accepted target:** Desktop Web (React/CodeMirror) and a separate **native iOS app (SwiftUI, with UIKit/TextKit where justified)**. Mobile Web/PWA authoring and Capacitor/WebView authoring are retired targets, pending implementation removal.
+- Desktop and iOS **do not share UI components or client-side state implementation**. They share only the server API/domain requirements and manuscript protection semantics. The web Impeccable design system applies to Desktop Web; native iOS design/acceptance is governed by [iOS SwiftUI architecture](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md). Android support is not implied.
 - Writing, reading, reference, and review are ways to work with the same manuscript context, not separate manuscript authorities.
 
 ## Capabilities and Constraints
 
 - Manuscripts are organized as works with volume, chapter, and scene structure.
 - PostgreSQL is the sole manuscript authority. Git persistence, synchronization, history, and compatibility fallbacks are retired.
-- Desktop and Mobile have distinct presentation and interaction shells. Authoring, durability, recovery, and authorization responsibilities remain shared at their established boundaries.
+- Desktop Web and native iOS have independent presentation, interaction and client-side authoring/recovery implementations. Both satisfy the same Core/API authorization, revision, durability and recovery contracts; PostgreSQL is the only authoritative manuscript store.
 - Search, analysis, and assistant tools are optional; local writing must not depend on their availability. Sending manuscript content to an external assistant requires explicit consent.
 - Preserve Japanese text entry and composition, reading position, manuscript formatting, and safe recovery across navigation and platform surfaces.
 
@@ -50,7 +50,7 @@ The product name is Codexia. The accepted brand icon is an **open leather-bound 
 - Keep the author's current manuscript and creative context at the center of work.
 - Show manuscript protection and recovery truthfully; never imply a save or recovery that has not been confirmed.
 - Let authors move among writing, reading, references, and review without losing their place or editing context.
-- Keep Desktop and Mobile suited to their distinct interaction contexts while preserving the same manuscript and authorization boundaries.
+- Design Desktop Web and native iOS independently for their input contexts; preserve the same manuscript and API authorization boundaries without forcing a shared UI implementation.
 - Keep optional analysis and external assistance from becoming prerequisites for writing.
 
 ## Accessibility & Inclusion

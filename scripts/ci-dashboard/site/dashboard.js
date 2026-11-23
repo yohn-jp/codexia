@@ -8,13 +8,13 @@ const WORKFLOW_SOURCE = './verify.yml';
 
 const el = id => document.getElementById(id);
 const date = input => { const d = Date.parse(input ?? ''); return Number.isFinite(d) ? d : null; };
-const duration = sec => sec == null || !Number.isFinite(sec) ? '—'
+const duration = sec => sec == null || !Number.isFinite(sec) ? '未計測'
   : sec >= 3600 ? (sec / 3600).toFixed(1) + 'h'
     : sec >= 60 ? (sec / 60).toFixed(1) + 'm' : sec.toFixed(0) + 's';
 const formatTime = input => input ? new Intl.DateTimeFormat('ja-JP', {
   timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit',
-}).format(new Date(input)) + ' JST' : '—';
+}).format(new Date(input)) + ' JST' : '未計測';
 const node = (type, cls, text) => {
   const n = document.createElement(type);
   if (cls) n.className = cls;
@@ -22,6 +22,28 @@ const node = (type, cls, text) => {
   return n;
 };
 const clear = target => target.replaceChildren();
+function setStatus(message, state = 'info') {
+  document.querySelector('.status').dataset.state = state;
+  el('status').textContent = message;
+}
+function setMetric(id, value) {
+  const target = el(id);
+  const measured = value != null && value !== '' && value !== '未計測';
+  target.textContent = measured ? value : '未計測';
+  target.dataset.measure = measured ? 'measured' : 'unmeasured';
+}
+function resetPanels(message = 'この観測範囲にデータがありません。') {
+  for (const id of ['timeline', 'history', 'steps']) {
+    el(id).replaceChildren(node('p', 'empty', message));
+  }
+  el('timeline-foot').textContent = '未計測';
+  el('history-stat').textContent = '比較可能な観測がありません。';
+  el('chain').replaceChildren(node('li', '', '依存チェーン未計測'));
+  el('chain-note').textContent = message;
+  clear(el('context'));
+  for (const id of ['wall', 'gate', 'runner', 'queue']) setMetric(id, null);
+  resetSelectionSummary();
+}
 const validLink = url => typeof url === 'string' &&
   /^https:\/\/github\.com\/yohn-jp\/codexia\/actions\/runs\/\d+(?:\/job\/\d+)?(?:\/attempts\/\d+)?$/u.test(url);
 function link(text, url) {
@@ -62,6 +84,34 @@ function jobState(job) {
   if (job.status === 'in_progress') return { label: 'running', className: 'running' };
   if (job.status === 'queued') return { label: 'queued · cause unknown', className: 'unknown' };
   return { label: job.conclusion ? 'unknown · ' + job.conclusion : 'unknown', className: 'unknown' };
+}
+function resetSelectionSummary() {
+  const result = el('selection-result');
+  result.textContent = '未計測';
+  result.className = 'summary-state';
+  el('selection-bottleneck').textContent = '未計測';
+  const href = el('verify-link');
+  href.hidden = true;
+  href.removeAttribute('href');
+}
+function renderSelectionSummary(pr) {
+  const verify = pr.runs.find(run => run.id === pr.verifyId);
+  const result = el('selection-result');
+  const state = verify ? jobState(verify) : { label: 'unknown', className: 'unknown' };
+  result.textContent = verify?.conclusion ?? verify?.status ?? 'Verify未計測';
+  result.className = 'summary-state ' + state.className;
+  const bottleneck = verify?.bottleneck;
+  el('selection-bottleneck').textContent = bottleneck?.available
+    ? bottleneck.leafName + ' · ' + duration(bottleneck.leafSeconds)
+    : '未計測 · ' + (bottleneck?.reason ?? verify?.chain?.reason ?? 'Verifyデータがありません');
+  const href = el('verify-link');
+  if (verify?.url && validLink(verify.url)) {
+    href.href = verify.url;
+    href.hidden = false;
+  } else {
+    href.hidden = true;
+    href.removeAttribute('href');
+  }
 }
 function renderContext(pr) {
   const out = el('context'); clear(out);
@@ -153,8 +203,8 @@ function renderTimeline(pr) {
   const pos = time => Math.min(100, Math.max(0, ((time - first) / span) * 100));
   const slot = (left, right, cls, title) => {
     const bar = node('div', 'bar ' + cls);
-    bar.style.left = pos(left) + '%';
-    bar.style.width = Math.max(0.15, pos(right) - pos(left)) + '%';
+    bar.style.insetInlineStart = pos(left) + '%';
+    bar.style.inlineSize = Math.max(0.15, pos(right) - pos(left)) + '%';
     bar.title = title;
     return bar;
   };
@@ -164,11 +214,14 @@ function renderTimeline(pr) {
     for (const job of rows) {
       const row = node('div', 'timeline-row');
       const left = node('div', 'timeline-label');
-      if (job.critical) left.append(node('span', 'flag', '◆ '));
+      if (job.critical) left.append(node('span', 'flag', 'CHAIN'));
       const state = jobState(job);
-      left.append(link(job.name, job.url), node('span', 'state ' + state.className, state.label));
+      const jobLink = link(job.name, job.url);
+      if (job.name.length > 18) jobLink.className = 'timeline-name-long';
+      left.append(jobLink, node('span', 'state ' + state.className, state.label));
       left.title = job.name + ' · ' + job.runner;
       const track = node('div', 'timeline-track');
+      track.setAttribute('aria-hidden', 'true');
       const created = date(job.createdAt), started = date(job.startedAt), finished = date(job.completedAt);
       if (created !== null && started !== null && started >= created) {
         track.append(slot(created, started, 'wait', 'Queue: ' + duration(job.queueSeconds)));
@@ -178,7 +231,11 @@ function renderTimeline(pr) {
           ? job.critical ? 'critical' : 'exec' : state.className,
         'Execution: ' + duration(job.durationSeconds)));
       }
-      row.append(left, track, node('div', 'timeline-time', duration(job.durationSeconds)));
+      row.setAttribute('role', 'group');
+      const elapsed = job.conclusion === 'skipped' ? null : job.durationSeconds;
+      row.setAttribute('aria-label', job.name + ': ' + state.label + ', ' + duration(elapsed) +
+        (job.critical ? ', 推定依存チェーン' : ''));
+      row.append(left, track, node('div', 'timeline-time', duration(elapsed)));
       const detailRow = node('details', 'job-steps');
       const summary = node('summary', '', 'Steps (' + job.steps.length + ') · ' + state.label);
       detailRow.append(summary);
@@ -187,7 +244,8 @@ function renderTimeline(pr) {
         for (const step of job.steps) {
           const stepState = step.conclusion ?? (job.status === 'in_progress' ? 'running' : 'unknown');
           const item = node('li', 'job-step');
-          item.append(node('span', '', step.name), node('span', 'step-meta', stepState + ' · ' + duration(step.durationSeconds)));
+          const elapsed = step.conclusion === 'skipped' ? null : step.durationSeconds;
+          item.append(node('span', '', step.name), node('span', 'step-meta', stepState + ' · ' + duration(elapsed)));
           list.append(item);
         }
         detailRow.append(list);
@@ -254,12 +312,13 @@ function render() {
   const pr = selected;
   if (!pr) return;
   const verify = pr.runs.find(run => run.id === pr.verifyId);
-  el('wall').textContent = duration(pr.elapsedSeconds);
-  el('gate').textContent = duration(verify?.timing.certificationSeconds);
-  el('runner').textContent = duration(pr.runnerSeconds);
+  renderSelectionSummary(pr);
+  setMetric('wall', duration(pr.elapsedSeconds));
+  setMetric('gate', duration(verify?.timing.certificationSeconds));
+  setMetric('runner', duration(pr.runnerSeconds));
   const queueValues = pr.runs.map(run => run.timing.queueSeconds);
-  el('queue').textContent = queueValues.every(v => v !== null)
-    ? duration(queueValues.reduce((a,b) => a+b, 0)) : '—';
+  setMetric('queue', queueValues.length > 0 && queueValues.every(v => v !== null)
+    ? duration(queueValues.reduce((a,b) => a+b, 0)) : null);
   renderTimeline(pr);
   renderChain(pr);
   renderSteps(pr);
@@ -295,8 +354,9 @@ async function loadDashboard() {
   retry.hidden = true;
   copyButton.disabled = true;
   select.disabled = true;
-  el('status').textContent = '実測データを読み込んでいます。';
+  setStatus('実測データを読み込んでいます。', 'loading');
   all = []; selected = null;
+  resetPanels('データを読み込んでいます。');
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
       signal: AbortSignal.timeout(20_000),
@@ -315,9 +375,9 @@ async function loadDashboard() {
     }
     select.disabled = !all.length;
     if (!all.length) {
-      el('status').textContent = (coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
-        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.';
-      for (const id of ['timeline','history','steps']) el(id).replaceChildren(node('p','empty','データなし'));
+      resetPanels('この観測範囲にPRデータがありません。');
+      setStatus((coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
+        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.', 'empty');
       return;
     }
     const index = requestedSelection(all);
@@ -326,15 +386,22 @@ async function loadDashboard() {
     select.disabled = false;
     select.value = String(index);
     updateSelectionUrl(selected);
-    el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
+    setStatus('Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
       ((coverage.unresolvedRunCount ?? 0) > 0
         ? ' · ' + coverage.unresolvedRunCount + ' runs excluded: PR/source mapping unresolved' : '') +
-      ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。';
+      ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。', 'success');
     render();
   } catch (error) {
-    el('status').textContent = 'CIデータを読み込めませんでした: ' + (error instanceof Error ? error.message : error);
+    const detail = error instanceof Error ? error.message : String(error);
+    const guidance = /HTTP 429/u.test(detail)
+      ? 'GitHub APIのレート制限に達しました。時間をおいて再試行してください。'
+      : /HTTP 403/u.test(detail)
+        ? 'GitHub APIへのアクセスが拒否されました。公開リポジトリの状態を確認して再試行してください。'
+        : 'データを取得できませんでした。接続状態を確認して再試行してください。';
+    resetPanels(guidance);
+    setStatus('CIデータを読み込めませんでした。' + guidance + ' (' + detail + ')', 'error');
     retry.hidden = false;
   } finally {
     retry.disabled = false;

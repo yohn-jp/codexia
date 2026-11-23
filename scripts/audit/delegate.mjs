@@ -126,15 +126,20 @@ function emit(dir, name, content, outputs) {
   outputs.push({ name, bytes: bytes.length, sha256: sha256(bytes) });
 }
 
-function indexHtml(sha, rows) {
+export function renderReviewIndex(sha, rows) {
   const escape = value => String(value).replace(/[&<>"]/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gemini review ' + sha + '</title></head><body><main>' +
-    '<h1>Gemini review input</h1><p>Source SHA: <code>' + sha + '</code>. Review input, not an AI review result.</p>' +
-    '<p><a href="../../audit/#sha-' + sha + '">Back to branch ' + sha + ' in Source Audit</a></p>' +
-    '<p><a href="gemini-review.md" download="codexia-' + sha + '-review.md">Download full review Markdown (one file)</a> · ' +
-    '<a href="gemini-diff.md" download="codexia-' + sha + '-diff.md">Download compact diff Markdown (one file)</a></p>' +
-    '<p><a href="manifest.json">Coverage manifest</a> · <a href="preview.json">OCR preview</a> · <a href="rules.json">Rules</a></p><ol>' +
-    rows.map(row => '<li>' + escape(row.path) + ' (' + escape(row.status) + ')</li>').join('') + '</ol></main></body></html>\n';
+  const files = rows.map(row => '<li><span class="cx-pages-code">' + escape(row.path) + '</span><span class="cx-pages-badge" data-state="info">' + escape(row.status) + '</span></li>').join('');
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gemini review ' + sha + '</title></head><body><main><div class="cx-pages-container cx-pages-main">' +
+    '<header class="cx-pages-hero"><h1>Gemini review input</h1><p class="cx-pages-lede">OCR-selected source files, rules, and diffs for a manual review.</p>' +
+    '<div class="cx-pages-meta"><span class="cx-pages-meta-label">Source SHA</span><code class="cx-pages-code">' + sha + '</code><span class="cx-pages-badge" data-state="info">' + rows.length + ' files selected</span></div>' +
+    '<p class="cx-pages-footnote">Review input, not an AI review result.</p></header>' +
+    '<div class="cx-pages-actions"><a class="cx-pages-action cx-pages-action--primary" href="gemini-review.md" download="codexia-' + sha + '-review.md">Download full review Markdown (one file)</a>' +
+    '<a class="cx-pages-action" href="gemini-diff.md" download="codexia-' + sha + '-diff.md">Download compact diff Markdown (one file)</a>' +
+    '<a class="cx-pages-action" href="../../audit/#sha-' + sha + '">Back to this branch in Source Audit</a></div>' +
+    '<section><h2>Review coverage</h2><p class="cx-pages-footnote">The manifest and preview describe selected, published, skipped, and OCR-excluded inputs.</p>' +
+    '<div class="cx-pages-actions"><a class="cx-pages-action" href="manifest.json">Coverage manifest</a><a class="cx-pages-action" href="preview.json">OCR preview</a><a class="cx-pages-action" href="rules.json">Rules</a></div>' +
+    (rows.length ? '<details class="cx-pages-disclosure"><summary>' + rows.length + ' selected source files</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-file-list">' + files + '</ul></div></details>' : '<div class="cx-pages-empty"><p>No reviewable files were published for this packet.</p><a class="cx-pages-action" href="manifest.json">Open coverage manifest</a></div>') +
+    '</section></div></main></body></html>\n';
 }
 
 function oneBranch({ root, site, bin, base, head, mainFiles, headFiles }) {
@@ -190,7 +195,7 @@ function oneBranch({ root, site, bin, base, head, mainFiles, headFiles }) {
     files.map(file => '- ' + JSON.stringify(file.path) + ' (' + file.status + ')').join('\n') + '\n\n' +
     (skipped.length ? '## Not published\n\n' + skipped.map(x => '- ' + JSON.stringify(x.path) + ': ' + x.reason).join('\n') + '\n' : '') +
     '\nRefer to `preview.json` for OCR-excluded files and `manifest.json` for publication coverage.\n', outputs);
-  emit(dest, 'index.html', indexHtml(head, files), outputs);
+  emit(dest, 'index.html', renderReviewIndex(head, files), outputs);
   const summary = { status: skipped.length ? 'partial' : 'ready', sourceSha: head, baseSha: base, mergeBase,
     ocrVersion: OCR_VERSION, packetSchema: 2, completePacketId: complete.packetId, diffPacketId: compact.packetId,
     selected: preview.reviewable_count, published: files.length,
