@@ -36,7 +36,7 @@
 | REQ-AUTH-001 | [API auth](../architecture/API-AUTHN-AUTHZ.md) | packages/api/src/oauth-owner.ts、oauth-token.ts、server.ts | tests/e2e/oauth-web.acceptance.spec.ts | MAPPED_UNVERIFIED |
 | REQ-AUTH-002 | [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) | packages/api/src/server.ts、persistence-routes.ts | server.test.ts、oauth-mcp.test.ts | MAPPED_UNVERIFIED |
 | REQ-AUTH-003 | [MCP OAuth](../architecture/MCP-OAUTH.md) | packages/api/src/oauth-mcp.ts、modules/mcp/src/http.ts、tools.ts | tests/integration/mcp-acceptance.test.mjs | MAPPED_UNVERIFIED |
-| REQ-AUTH-004 | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | 目標の /console/setup と setup-only API は現行未実装。旧bootstrapを目標仕様と混同しない | passkey-bootstrap.acceptance.spec.ts は目標を証明しない | UNMAPPED |
+| REQ-AUTH-004 | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | `/console/setup` と `/api/auth/codexia/setup/*` の setup-only 登録経路を実装。旧SSH-forward登録と本番activateは独立の承認境界 | `tests/e2e/passkey-bootstrap.acceptance.spec.ts` と `packages/api/test/passkey-bootstrap.acceptance.test.ts` が隔離環境の候補。本番Edge・VM・owner登録は #168 で未受入 | MAPPED_UNVERIFIED |
 | REQ-AUTH-005 | [Admin flow](../design/ADMIN-SCREEN-FLOW.md) | /console、/console/security、/console/identity は現行未実装 | 受入テスト未特定 | UNMAPPED |
 | REQ-API-001 | [API contract](../architecture/API-CONTRACT.md) | packages/api/src/server.ts、persistence-routes.ts、各moduleのHTTP contribution | persistence-routes.test.ts。全DTO未収録 | PARTIAL |
 | REQ-API-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | persistence-routes.ts、postgres-store.ts、app/src/api.ts | tests/e2e/core.acceptance.spec.ts | MAPPED_UNVERIFIED |
