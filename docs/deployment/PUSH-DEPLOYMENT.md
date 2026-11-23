@@ -68,11 +68,26 @@ The exact certified image packages `node /app/node_modules/@codexia/api/dist/mai
 
 ## Coordinated API epoch cutover
 
-The standalone OAuth cutover requires API epoch 2 for both the Full backend and the static frontend. The frontend gate rejects an epoch 2 frontend against an epoch 1 backend. Backend admission checks both the installed API and deployed frontend epochs. The native Publishing release declares persistence format 2 because it uses typed episode and share-grant records. An installation on format 1 requires the approved one-way data migration before the format 2 writer serves requests. Ordinary image-only updates require matching persistence formats. Coordinate both artifact activation and any data migration through separately reviewed and approved maintenance.
+The standalone OAuth cutover pairs the epoch 2 Full backend with the epoch 2 static frontend and moves installations on persistence format 1 to format 2. The normal frontend workflow requires an already compatible live backend. The backend workflow requires an already compatible live UI and refuses an epoch, persistence-format or migration-fingerprint change to an installed API. Neither workflow implements the public ingress fence, paired activation or cross-component recovery. Keep the ordinary gates in place and use a separately reviewed, explicitly approved maintenance plan for these operations. First-install approvals apply only to an absent API and must never be used to replace an existing installation.
 
-Before cutover, record the prior certified backend digest, frontend artifact and approved authentication configuration. Quiesce the application and make a verified encrypted PostgreSQL and private history backup on independent storage. Rehearse restoration before relying on the backup. With public ingress closed, validate the new pair, including matching Full profile and epoch identities, database readiness, owner sign-in and denial of unauthorized access. Reopen ingress after both artifacts have switched and those checks have passed.
+**Pin and stage both releases.** Record the certified Full image digest and certificate, the verified frontend archive digest and producer identity, and the frontend's approved public OAuth configuration. Use the [existing artifact check](../../.github/workflows/frontend-release.yml) to verify the exact frontend archive before using its extracted `app/dist`. Retain the prior backend digest, private authentication configuration, frontend archive and active Worker version ID. From the verified checkout, a separately authorized production operator can use the pinned Wrangler with the existing Worker credentials. `deployments status` records the active version and traffic allocation. `versions upload` returns the candidate UUID without switching traffic.
 
-If either component or its authentication checks fail, keep ingress closed. Follow the approved recovery procedure to restore the prior matching pair and its associated configuration. Verify the recovered identities, readiness, access controls and data before reopening ingress. Use the tested backup restore procedure if the maintenance operation changed database state in a way the prior release cannot read safely.
+```sh
+npm ci --prefix edge/frontend
+edge/frontend/node_modules/.bin/wrangler deployments status --json --config edge/frontend/wrangler.jsonc
+edge/frontend/node_modules/.bin/wrangler versions upload --config edge/frontend/wrangler.jsonc
+```
+
+**Rehearse the conversion and recovery off the VM.** On the isolated recovery host, use the verified encrypted PostgreSQL and private history backup, the external recovery identity file and the exact Full image already loaded by digest. Set the shell variables below to those three reviewed inputs. Preserve the backup checksum-manifest digest, candidate image digest and successful [rehearsal receipt](BACKUP.md#rehearse-a-reviewed-full-candidate). Confirm recovery of the prior PostgreSQL roles, Podman secrets and authentication configuration separately.
+
+```sh
+bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
+  --candidate-full-image "$certified_full_image"
+```
+
+**Fence, quiesce and activate.** Pause both ordinary deployment paths. Have the zone owner fence the entire public application hostname, covering the static Worker and Tunnel routes, including any enabled OAuth/MCP paths that bypass the parent Access application. Allow only the exact GETs for `/api/version` and `/desktop/update-identity.json` under their existing Access policies and approved, restricted functional acceptance. Verify that ordinary traffic is blocked before stopping the writer. Under the host lock, stop the Tunnel and old writer and retain a verified encrypted pre-change backup off the VM. Apply the approved conversion with the certified image and require its maintenance check to return 0. Start the certified backend. Restore Tunnel connectivity behind the fence and switch the candidate Worker UUID to 100%. Verify the running backend digest and readiness on the host, both live Full/epoch 2 identities, the exact deployed frontend identity, owner sign-in, and the authorized and denied paths for the approved public configuration. Reopen ingress only after both components and their access controls pass.
+
+**Keep the fence on failure.** Restore the retained Worker version to 100%, the prior backend digest and its authentication configuration, and the verified pre-change database and history when the prior release cannot read the converted state. Verify the restored identities, readiness, access controls and data before reopening ingress or resuming ordinary releases.
 
 ## Acceptance order
 
