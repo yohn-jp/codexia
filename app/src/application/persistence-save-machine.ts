@@ -116,6 +116,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
       readyDraftProtected: ({ event }) => event.type === "RECOVERY.READY" && (event.recovery === "clean" || event.draftProtected === true),
       readyNeedsProtection: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "draft" && event.draftProtected !== true,
       matchingIdentity: ({ context, event }) => !("identity" in event) || !event.identity || sameIdentity(context.identity, event.identity),
+      recoveredConflict: ({ event }) => event.type === "RECOVERY.READY" && event.remoteConflict === true,
       canSaveCurrentGeneration: ({ context, event }) => event.type === "SAVE.MANUAL" &&
         sameIdentity(context.identity, event.identity ?? context.identity) && context.dirty &&
         !context.remoteConflict &&
@@ -169,6 +170,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
         receiptGeneration: null,
         error: "",
       } : {}),
+      clearSupersededOperation: assign(() => ({ operationIdentity: null, operationId: null, operationGeneration: null, reconcileReplay: false })),
       clearConflict: assign(() => ({ error: "", remoteConflict: false, operationIdentity: null, operationId: null, operationGeneration: null, reconcileReplay: false })),
       observeConflict: assign(({ context, event }) => event.type === "SAVE.CONFLICT.OBSERVED" && sameIdentity(context.identity, event.identity)
         ? { remoteConflict: true, error: "PostgreSQL has a newer revision" } : {}),
@@ -283,6 +285,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                 on: {
                   "RECOVERY.READY": [
                     { guard: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "pending-save" && Boolean(event.operationId), target: "saving", actions: "acceptReady" },
+                    { guard: "recoveredConflict", target: "conflict", actions: "acceptReady" },
                     { actions: "acceptReady" },
                   ],
                   "SAVE.CONFLICT.OBSERVED": { target: "conflict", actions: "observeConflict" },
@@ -314,6 +317,11 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                     { guard: ({ context, event }) => outcomeIsCurrent(context, event.output) && event.output.kind === "conflict", target: "conflict", actions: assign(() => ({ error: "PostgreSQL reported a revision conflict" })) },
                     { guard: ({ context, event }) => outcomeIsCurrent(context, event.output) && event.output.kind === "unknown", target: "unknown", actions: assign(() => ({ error: "Save result is unknown; retry the same operation identity" })) },
                     {
+                      guard: ({ context, event }) => context.remoteConflict && matchesOperation(context, event.output),
+                      target: "conflict",
+                      actions: "clearSupersededOperation",
+                    },
+                    {
                       guard: ({ context, event }) => Boolean(context.operationIdentity && context.operationId && context.operationGeneration !== null &&
                         sameIdentity(context.identity, context.operationIdentity) && !matchesOperation(context, event.output)),
                       target: "saving",
@@ -335,6 +343,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                   "SAVE.CONFLICT.OBSERVED": { target: "conflict", actions: "observeConflict" },
                   "RECOVERY.READY": [
                     { guard: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "pending-save" && Boolean(event.operationId), target: "saving", actions: "acceptReady" },
+                    { guard: "recoveredConflict", target: "conflict", actions: "acceptReady" },
                     { target: "idle", actions: "acceptReady" },
                   ],
                 },
@@ -346,6 +355,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                   "DRAFT.CHANGED": { actions: "acceptDraftChange" },
                   "RECOVERY.READY": [
                     { guard: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "pending-save" && Boolean(event.operationId), target: "saving", actions: "acceptReady" },
+                    { guard: "recoveredConflict", target: "conflict", actions: "acceptReady" },
                     { target: "idle", actions: "acceptReady" },
                   ],
                   "SAVE.CONFLICT.OBSERVED": { actions: "observeConflict" },
@@ -356,7 +366,10 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                   "SAVE.CONFLICT.OBSERVED": { actions: "observeConflict" },
                   "SAVE.CONFLICT.RESOLVED": { target: "idle", actions: "clearConflict" },
                   "DRAFT.CHANGED": { actions: "acceptDraftChange" },
-                  "RECOVERY.READY": { target: "idle", actions: "acceptReady" },
+                  "RECOVERY.READY": [
+                    { guard: "recoveredConflict", target: "conflict", actions: "acceptReady" },
+                    { target: "idle", actions: "acceptReady" },
+                  ],
                 },
               },
             },

@@ -121,6 +121,94 @@ test("a 412 precondition response remains a conflict instead of becoming an unkn
   actor.stop();
 });
 
+test("reloaded stale recovery initializes conflict state and can save after explicit rebase", async () => {
+  const calls: string[] = [];
+  const actor = createActor(createPersistenceSaveMachine({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) {
+      calls.push(input.operationId);
+      return { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "revision-3" };
+    },
+  }), { input: { identity } });
+  actor.start();
+  actor.send({
+    type: "RECOVERY.READY", identity, recovery: "draft", generation: 2,
+    draftProtected: true, remoteConflict: true,
+  });
+  assert.equal(actor.getSnapshot().matches({ active: { server: "conflict" } }), true);
+
+  actor.send({ type: "SAVE.CONFLICT.RESOLVED" });
+  actor.send({ type: "DRAFT.CHANGED", identity, generation: 3, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "rebased-draft", generation: 3 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, ["rebased-draft"]);
+  actor.stop();
+});
+
+test("a selected document keeps its recovered conflict while another conflict state is active", async () => {
+  const calls: string[] = [];
+  const actor = createActor(createPersistenceSaveMachine({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) {
+      calls.push(input.identity.documentId);
+      return { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "revision-3" };
+    },
+  }), { input: { identity } });
+  actor.start();
+  actor.send({ type: "RECOVERY.READY", identity, recovery: "clean", generation: 0 });
+  actor.send({ type: "SAVE.CONFLICT.OBSERVED", identity });
+  const nextIdentity = { projectId: "project-1", documentId: "document-2" };
+  actor.send({
+    type: "RECOVERY.READY", identity: nextIdentity, recovery: "draft", generation: 7,
+    draftProtected: true, remoteConflict: true,
+  });
+  assert.equal(actor.getSnapshot().matches({ active: { server: "conflict" } }), true);
+
+  actor.send({ type: "SAVE.CONFLICT.RESOLVED" });
+  actor.send({ type: "DRAFT.CHANGED", identity: nextIdentity, generation: 8, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity: nextIdentity, operationId: "rebased-document-2", generation: 8 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, ["document-2"]);
+  actor.stop();
+});
+
+test("a stale save result leaves the newly selected document in its recovered conflict state", async () => {
+  const calls: string[] = [];
+  let releaseFirstSave!: (result: { kind: "conflict"; operationId: string; generation: number }) => void;
+  const actor = createActor(createPersistenceSaveMachine({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) {
+      calls.push(input.identity.documentId);
+      if (input.operationId === "save-document-1") return await new Promise((resolve) => { releaseFirstSave = resolve; });
+      return { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "revision-3" };
+    },
+  }), { input: { identity } });
+  actor.start();
+  actor.send({ type: "RECOVERY.READY", identity, recovery: "clean", generation: 0 });
+  actor.send({ type: "DRAFT.CHANGED", identity, generation: 1, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "save-document-1", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "saving" } }), { timeout: 1_000 });
+
+  const nextIdentity = { projectId: "project-1", documentId: "document-2" };
+  actor.send({
+    type: "RECOVERY.READY", identity: nextIdentity, recovery: "draft", generation: 7,
+    draftProtected: true, remoteConflict: true,
+  });
+  releaseFirstSave({ kind: "conflict", operationId: "save-document-1", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "conflict" } }), { timeout: 1_000 });
+
+  actor.send({ type: "SAVE.CONFLICT.RESOLVED" });
+  actor.send({ type: "DRAFT.CHANGED", identity: nextIdentity, generation: 8, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity: nextIdentity, operationId: "rebased-document-2", generation: 8 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, ["document-1", "document-2"]);
+  actor.stop();
+});
+
 test("a stale conflict from the previous document does not block the newly selected draft", async () => {
   const calls: string[] = [];
   let releaseFirstSave!: (result: { kind: "conflict"; operationId: string; generation: number }) => void;
