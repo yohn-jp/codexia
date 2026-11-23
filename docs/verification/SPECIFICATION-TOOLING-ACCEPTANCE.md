@@ -25,7 +25,7 @@
 | G1 HTTPスキーマ | TypeSpec→OpenAPI 3.1.0、Redocly、oasdiff、Fastify route/JSON Schemaの生成・整合、Orval client再生成diff、TypeScript typecheck | 実routeの未定義、破壊的変更の無承認、二重schema、非決定的生成 | API/contracts/client変更時 |
 | G2 実行時契約 | 使い捨てPostgreSQLのAPIでSchemathesis、owner/BOLA/競合/冪等性/receiptとMCP conformance | 仕様違反/認可迂回/保存不一致、未実行対象の偽PASS | API/MCP/DB変更時 |
 | G3 データ契約 | migration適用→pgTAP/pg_catalog、Better Auth schema、復元、tbls生成 | 物理差分/不一致、schema identity異常、復元失敗 | DB/auth/migration/依存変更時 |
-| G4 UX/host | 既存Playwright（Chromium/WebKit）、OCI、Ansible/Cloudflare config/probes | UI保存/復旧、session/auth、edge/deploy回帰 | 既存impact rulesに従う |
+| G4 UX/host | 既存Playwright（Chromium/WebKit）、XState v5の状態遷移義務、OCI、Ansible/Cloudflare config/probes、S3互換fixture | UI保存/復旧、session/auth、backup config/保全job/復元証拠、edge/deploy回帰 | 既存impact rulesに従う |
 | G5 設計図/脅威 | LikeC4 validation、Threagile risk、公開の可否と画像/文書リンク | 不正なモデル、設計不整合、秘密露出 | docs/security/deploy変更時 |
 | G6 性能 | k6 threshold、現行比較baseline、起動/stream/DB負荷 | 承認済みp95/p99、RPS、RSS、SSE維持等のbudget違反 | cheap smokeはPR、長時間は明示したisolated run |
 | G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装 | 部分的にはPR、全量認定はrelease前 |
@@ -97,7 +97,7 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 - 追加検証がselectedなら、実行されたjob/attempt/artifactを同じplan digestとsource SHAに束縛する。selectedタスクがskipなら成功判定しない。
 - Node `node:test`、Playwright、Schemathesis、pgTAP、conformance、k6の出力は、**実際の情報が含まれる形式で**保持する。report形式に合わせて成功結果をでっち上げない。
 - StrictDocへの実行証拠リンクはexternal CI run/artifactを参照し、CI artifactのないソースコード参照をTEST PASSと誤認しない。
-- 初期導入PRでは、mockデータ・既存要求30件の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
+- 初期導入PRでは、mockデータ・登録済み全要求の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
 
 ## このPRの完了と次の受入
 

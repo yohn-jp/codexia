@@ -57,6 +57,9 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 | API-AUTH-001 | /api/auth/* およびOAuth/.well-known公開metadata | protocol別 | packages/api/src/better-auth.ts、auth-schema.ts | INCOMPLETE（library定義と照合） |
 | API-MCP-001 | /mcp、/api/projects/:p/modules/mcp/streamable | MCP-CLIENT + assign/scope | modules/mcp/src/http.ts、packages/api/src/server.ts | INCOMPLETE |
 | API-PUBLIC-001 | GET /api/public/projects/:p/modules/:module/* | SHARE-READER | packages/api/src/server.ts、各公開module | INCOMPLETE |
+| API-BACKUP-CONSOLE-001 | GET /api/console/backups/status、GET /api/console/backups/config、PUT /api/console/backups/config/draft | OWNER-SESSION、If-Matchと書込時のfresh | [Backup console](BACKUP-CONSOLE-CONTRACT.md)・将来のFastify route | **目標/未実装。BKC-001〜003** |
+| API-BACKUP-CONSOLE-002 | POST /api/console/backups/config/probes、GET .../config/probes/:id、POST .../config/{activate,disable} | OWNER-SESSION＋probe/revisionとfreshの適用 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-004〜007** |
+| API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET /api/console/backups/runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-008〜010** |
 | API-SETUP-001 | /api/auth/codexia/setup/* | SETUP等・厳密な状態別 | [AuthN/AuthZ](API-AUTHN-AUTHZ.md) | **ACCEPTED TARGET / NOT IMPLEMENTED** |
 
 **展開必須:** 集約表の波括弧表記・wildcardは設計概要でしかない。最終版では全メソッド＋実pathに対してID、schema、権限、code symbol、testを独立に記録する。現在の family IDで全ルートをカバーしたと報告しない。既存の [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) には全般の個別認可表があり、それを漏れ検査の入力にする。
@@ -116,3 +119,11 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 3. 仕様→handler・型・DB object・test、handler→要求の双方を [Traceability](../verification/TRACEABILITY-REGISTER.md) に記録する。
 4. **採用済み目標:** [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)に従ってTypeSpecをAPIワイヤの編集正本とし、OpenAPI 3.1.0を生成、Fastify標準ルート/JSON Schema/Ajv、Orval生成client、Redocly/Scalar/oasdiff/Schemathesisで実装・表示・検証する。Better Authのライブラリ管理OAuth endpointは別生成ソースとして検証する。**実導入・全route網羅は未完了**であり、コードに合わせた仕様の追認を禁止する。
 5. 稼働環境のOpenAPI/HTTP検証が未実行ならVERIFIEDとしない。設計書の追加自体ではCIやhandlerの改修を要求しない。
+
+## バックアップ管理API（採用済み目標・未実装）
+
+`/api/console/backups/*` は通常の `OWNER-API` bearer用作品APIでもMCPのtool/actionでもない。Cloudflare Workers配信 `/console/backups` から**OWNER-SESSION専用・CSRF/Origin保護**で呼ぶ。fresh proofが必要なmutationと、各method、status/error、version/idempotency、secretの非表示は [Backup console contract](BACKUP-CONSOLE-CONTRACT.md) の `BKC-001`〜`BKC-010` が所有する。
+
+- 契約DTOはTypeSpec→OpenAPI3.1で生成するが、現時点ではOperation-ID索引だけ。秘密を含むcredential inputはwriteOnlyであり、OpenAPI公開例やScalarの静的Pagesに実値を含めない。
+- `202`のprobe・activate・manual backup要求は`operationId`/`probeId`/`runId`を返し、成功は**実executor receiptをGETで再取得して**初めて判断する。別にPOST本番復元エンドポイントは存在しない。
+- 異常系として401/403/404/409/412/422/429/503と、重複/応答不明、S3 credential失効、metadata SSRF、bucket越境、CSRF、owner session expirationを実APIで検証する。

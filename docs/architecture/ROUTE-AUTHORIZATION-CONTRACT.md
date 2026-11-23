@@ -31,8 +31,12 @@
 | `/console/setup` | 初回だけの本人登録ウィザード | SETUP＋DBが新規構築承認済みかつowner未登録 | **合意済み目標・未実装** |
 | `/console/security` | Passkey/sessionの本人管理 | OWNER-SESSION＋危険操作のfresh再認証 | **合意済み目標・未実装** |
 | `/console/identity` | 連携OIDC、OAuth clients/grantsの管理 | OWNER-SESSION＋owner確認＋対象別権限 | **合意済み目標・未実装** |
+| `/console/backups` | S3保管先設定、remote保全・復元証拠、手動保全要求 | OWNER-SESSION、危険変更はfresh reauth | **合意済み目標・未実装** |
+| `/console/backups/destination` | S3 draftとwrite-only secretの設定 | OWNER-SESSION。credential登録と有効化はfresh | **目標・未実装** |
+| `/console/backups/verification` | 接続試験、probeとactiveの独立結果照合 | OWNER-SESSION。activationはfresh | **目標・未実装** |
+| `/console/backups/history`、`/console/backups/recovery` | 保全receipt、隔離復旧の**表示のみ** | OWNER-SESSION | **目標・未実装** |
 | その他 `/console/*` | 404。認可エラーをhomeへ誤誘導しない | なし | 目標 |
-| VM/Cloudflare設定 | **専用Web画面を設けない** | OPERATORだけの管理プレーン | 合意済み |
+| VM/Cloudflare設定、本番データ復元 | **専用Web画面を設けない** | OPERATORだけの管理プレーン。例外としてS3保管先/保全要求はowner consoleからtyped APIで指定可能だがVM操作権限ではない | 合意済み |
 
 Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadataをTunnel経由でFastifyへ通す。**URLごとのAccess policyとWAF除外は明示的に設計・検証する**。author画面のAccess制御を、公開share、setup、必要なOAuth protocolに機械的に継承しない。逆に公開例外は作者API全体へ広げない。静的画面が表示できても、APIから認可済みデータが返ることを意味しない。
 
@@ -58,6 +62,10 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `/mcp[?projectId=:id]` | 登録MCP-CLIENT＋OAuth resource/audience、effect scope＋assigned project。複数作品なら明示選択 | owner OAuth clientのMCP流用、他project、作者だけの操作 |
 | `GET /api/public/projects/:id/modules/:module/*` | SHARE-READERのcapability、共有版・失効チェック | private drafts、ownerAPI、公開しなかったEvidence |
 | `/api/jobs*`、`/api/inbox*`、`/api/projects/events` | OWNER-APIの私有ジョブ/通知/全作品stream | MCPのowner-wide eventや個人通知へのアクセス |
+| `GET /api/console/backups/{status,config,runs,recovery}`と `GET /api/console/backups/config/probes/:id` | **OWNER-SESSIONのみ**。CSRF/Origin、server owner subject、no-store。実行resultは別途receipt照合 | OWNER-API bearer、MCP-CLIENT、SETUP、ANON、SHARE-READER、EDGE-CI、secret平文返却 |
+| `PUT /api/console/backups/config/draft` | OWNER-SESSION＋fresh（credential登録時）、If-Match revision、write-only secretとoperator allowlist | 認証不足、任意S3 endpoint egress、任意VM path、Podman/SSH/Ansible引数、秘密再取得 |
+| `POST /api/console/backups/config/{probes,activate,disable}` | OWNER-SESSION。activate/disableはfresh再認証、probeとrevision一致、必要な確認。全operationはbounded requestとdurable receipt | 未検証設定のactive化、required off-VM不成立で無承認disable、S3 object削除・IAM管理 |
+| `POST /api/console/backups/runs` | OWNER-SESSION＋fresh・writer停止の影響確認。202はdurable request受付のみ | MCP/外部OAuth bearerからのbackup要求、実行未確認の成功、任意コマンドや本番restore |
 | `OPTIONS /api/*` | 明示したCORS origin/method/headerのみ | preflight 204を認証成功と解釈。cross-origin Cookie |
 
 **重要:** `/api/auth/codexia/setup/*` は合意済みの**目標endpoint名**であり、現行mainで動作していない。公開APIのSchema/operation/状態は実装PRで固定し、Better Authを迂回する別の認証サーバーを作らない。MCPのallowlistとproject assignmentは現状の保護されたサーバー設定が正本であり、認証clientの表示・登録だけを更新しても有効権限を変更したことにしてはならない。
@@ -154,3 +162,9 @@ cookie利用のmutationはCSRF/SameSite/Originを検証、cross-origin APIは明
 [画面・操作台帳](../design/SCREEN-CONTROL-CATALOG.md) のcontrol IDは本書のprincipal・HTTP method・object guardを参照し、[画面ごとの遷移図](../design/SCREEN-STATE-ATLAS.md) と一致する。承認済み設計が画面から呼べても、APIで拒否されなければ未達である。
 
 最低限、ANON/SETUP/OWNER-SESSION/OWNER-API/MCP-CLIENT/SHARE-READER/EDGE-CIを交差実行し、正常・クロス作品・expired・revoked・stale・並列・不正Origin・同時setup・DB障害を実APIで確認する。**PRのCIと実Cloudflare/実VMの受入は別**。検証しない経路をPASSとみなさない。
+
+### バックアップ専用操作の分離（合意済み目標）
+
+`BKC-001`〜`BKC-010`の全method/path・入力/結果・proxy境界は [Backup console contract](BACKUP-CONSOLE-CONTRACT.md) が詳細化する。owner sessionを検証したFastify APIは、専用の運用schemaへ**設定・durable request**だけを書き、実際のS3送受信・writer停止・host lock・backup.sh・復元はoperator provisioned executorへ委任する。Web APIで秘密鍵を読取/配布したり任意のshell実行を行わせない。S3 provider egress allowlistとTLS/SSRF保護はAPI入力検証だけでなくexecutorでも独立に強制する。
+
+**否定テスト:** ANON、OWNER-API、MCP-CLIENT（mcp:propose含む）、SETUP、SHARE-READER、EDGE-CIのすべてで`/api/console/backups/*`を拒否。owner sessionでもCSRF、Origin、古いrevision、古いprobe、credential未登録、reauth期限切れ、required保存先disable、二重run、unknown endpointは拒否し、秘密/API成功状態/遠隔削除を漏らさない。

@@ -315,6 +315,8 @@ flowchart TD
     SESSION -->|owner| HOME["認証方法・client・session状態"]
     HOME -->|セキュリティ| SECURITY["CON-10/11"]
     HOME -->|連携先| IDENTITY["CON-20/21"]
+    HOME -->|バックアップ| BACKUPS["CON-30"]
+    BACKUPS --> HOME
     HOME -->|元の作品| AUTHOR["元の執筆画面"]
     SECURITY --> HOME
     IDENTITY --> HOME
@@ -397,6 +399,74 @@ flowchart TD
     ACTIVATE --> MENU
     MCP --> MENU
 ```
+
+## CON-30 — バックアップ管理トップ【目標・未実装】
+
+```mermaid
+flowchart TD
+    ENTRY["/console/backups"] --> GUARD{"owner session / API owner確認"}
+    GUARD -->|認証不足| AUTH["再認証して戻る・原稿下書き維持"]
+    GUARD -->|許可| FETCH["status + configを再取得"]
+    FETCH --> STATUS{"設定と遠隔保全の観測"}
+    STATUS -->|未設定 / 未検証| CFG["CON-31 保存先設定"]
+    STATUS -->|ACTIVE| READY["設定は適用済み<br/>保全実績とは独立"]
+    STATUS -->|DEGRADED / UNKNOWN| WARN["不明・劣化の理由表示<br/>実測まで保護済みとしない"]
+    READY -->|manual request + fresh| REQ["BKC-008 202 受付のみ"]
+    REQ --> RUN["CON-33 run ID照合"]
+    READY --> HIST["CON-33 保全履歴"]
+    READY --> REC["CON-34 復旧演習の証拠"]
+    CFG --> FETCH
+    RUN --> FETCH
+    HIST --> FETCH
+    REC --> FETCH
+```
+
+## CON-31・CON-32 — S3設定・接続検証・有効化【目標・未実装】
+
+```mermaid
+stateDiagram-v2
+    [*] --> LoadDraft
+    LoadDraft --> Editing : existing draft / new
+    Editing --> Saving : BKC-003 + If-Match
+    Saving --> Editing : 412 stale / 422 invalid
+    Saving --> DraftSaved : revision確定
+    DraftSaved --> Probing : BKC-004 / probe ID
+    Probing --> ProbeFailed : FAILED / BLOCKED
+    ProbeFailed --> Editing : 修正
+    Probing --> ProbePassed : PASSED 同一revision
+    ProbePassed --> Reauth : owner明示確認
+    Reauth --> ActivationPending : BKC-006 / 202 operation ID
+    Reauth --> Editing : reauth失敗・取消
+    ActivationPending --> Active : actual executor ACTIVE receipt
+    ActivationPending --> Unknown : timeout / reconnect
+    Unknown --> ActivationPending : 同じoperation IDで照合
+    ActivationPending --> Editing : 409 / 412 / FAILED
+    Active --> [*]
+```
+
+draft保存・probe成功・202受理のどれも遠隔暗号文の保全済み証拠にはならない。資格情報はAPIへwrite-only送信され、再取得した応答に含まれない。起動時のlocal staging、age受取公開鍵、VM/IAM管理権限はUIから変更不可。検証用S3 probeと実backup objectは一意のprefix/IDで区別する。
+
+## CON-33・CON-34 — バックアップ履歴・隔離復旧証拠【目標・未実装】
+
+```mermaid
+flowchart TD
+    ENTRY["/console/backups/history"] --> LOAD["BKC-009 run一覧"]
+    LOAD --> PICK["run IDを選択"]
+    PICK --> STATE{"server receiptのstatus"}
+    STATE -->|QUEUED / RUNNING| POLL["同じrun IDで状態再取得"]
+    STATE -->|UNKNOWN / 接続断| POLL
+    POLL --> STATE
+    STATE -->|FAILED / BLOCKED| DIAG["理由区分・保全不能を表示"]
+    STATE -->|REMOTE_VERIFIED| REMOTE["暗号文/manifestと独立receipt一致<br/>off-VM保全点として表示"]
+    REMOTE --> RESTORE["/console/backups/recovery"]
+    RESTORE --> PROOF{"隔離hostでrestore drill済み?"}
+    PROOF -->|はい| DR["DRILL_PASSED 対象と日時の証拠"]
+    PROOF -->|いいえ| NODR["DR未認定。operator運用手順への導線"]
+    DR --> DENY["本番復元ボタンは設けない"]
+    NODR --> DENY
+```
+
+本図は実ジョブのreceiptを表示するUI状態の正本。実executor・復号・データ復元は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) と [Backup](../deployment/BACKUP.md) が所有し、画面状態を運用成功の証拠へ昇格しない。
 
 ## Cross-shell — 原稿を保持した端末と画面遷移【実装・目標の共通契約】
 
