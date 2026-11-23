@@ -8,7 +8,7 @@ const MAX_PAGES = 50;
 export async function fetchAlerts(token, request = fetch) {
   if (typeof token !== 'string' || !token.trim()) throw new Error('読み取り専用トークンを入力してください。');
   const all = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  for (let page = 1; page <= MAX_PAGES + 1; page++) {
     const url = new URL(ENDPOINT);
     url.searchParams.set('ref', SOURCE_REF);
     url.searchParams.set('per_page', String(PAGE_SIZE));
@@ -38,6 +38,10 @@ export async function fetchAlerts(token, request = fetch) {
     const batch = await response.json();
     if (!Array.isArray(batch) || batch.length > PAGE_SIZE || batch.some(item => !item || !Number.isSafeInteger(item.number))) {
       throw new Error('GitHub API のアラート形式が不正です。');
+    }
+    if (page > MAX_PAGES) {
+      if (batch.length) break;
+      return all;
     }
     all.push(...batch);
     if (batch.length < PAGE_SIZE) return all;

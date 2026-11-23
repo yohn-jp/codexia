@@ -65,3 +65,20 @@ test('CSV escapes spreadsheet formula injection and preserves unicode, quotes, C
   assert.ok(csv.includes('"' + String.fromCharCode(39) + '-injection.ts'));
   assert.ok(csv.endsWith('\r\n'));
 });
+
+test('accepts exactly 5000 results, rejects overflow without a partial export', async () => {
+  const batch = Array.from({ length: 100 }, (_, index) => alert(index + 1));
+  let page = 0;
+  const complete = await fetchAlerts('token', async () => {
+    page++;
+    return response(page <= 50 ? batch : []);
+  });
+  assert.equal(complete.length, 5000);
+  assert.equal(page, 51);
+  page = 0;
+  await assert.rejects(fetchAlerts('token', async () => {
+    page++;
+    return response(page <= 50 ? batch : [alert(5001)]);
+  }), /5000件を超えた/);
+  assert.equal(page, 51);
+});
