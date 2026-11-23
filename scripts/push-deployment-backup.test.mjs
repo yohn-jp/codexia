@@ -69,8 +69,10 @@ function invokeValidation(fixture, operation, artifactPath) {
   });
 }
 
-test('S3 transfer verifies requested Object Lock retention on exact versions', () => {
-  const result = spawnSync('python3', ['-B', '-m', 'unittest', 'deploy.backup.test_s3_retention', '-v'], {
+test('S3 transfer checks canonical checksums, direct HTTPS, and exact-version retention', () => {
+  const result = spawnSync('python3', [
+    '-B', '-m', 'unittest', 'deploy.backup.test_s3_admission', 'deploy.backup.test_s3_retention', '-v',
+  ], {
     cwd: root,
     encoding: 'utf8',
   });

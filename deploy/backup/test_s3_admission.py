@@ -1,0 +1,142 @@
+"""Checks for canonical backup bytes and direct S3 endpoint access."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.util import find_spec
+import os
+from pathlib import Path
+import ssl
+import subprocess
+import sys
+import tempfile
+from threading import Thread
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from deploy.backup.test_s3_transfer import FakeS3Client, profile, s3_transfer, sha256
+
+
+class ChecksumAdmissionTests(unittest.TestCase):
+    def test_noncanonical_checksum_manifests_are_rejected_before_s3_access(self):
+        with tempfile.TemporaryDirectory(prefix="codexia-v2-checksum-") as temporary:
+            artifact = Path(temporary)
+            checksum_lines = []
+            for name in s3_transfer.ARTIFACT_FILES:
+                data = f"synthetic ciphertext for {name}".encode("ascii")
+                (artifact / name).write_bytes(data)
+                checksum_lines.append(f"{sha256(data)}  {name}\n".encode("ascii"))
+            canonical = b"".join(checksum_lines)
+            manifest = artifact / "SHA256SUMS"
+            manifest.write_bytes(canonical)
+            self.assertEqual(s3_transfer.validate_artifact(artifact)["sha256sumsSha256"], sha256(canonical))
+
+            for variant, content in (
+                ("different order", b"".join(reversed(checksum_lines))),
+                ("CRLF", canonical.replace(b"\n", b"\r\n")),
+                ("missing final newline", canonical[:-1]),
+            ):
+                with self.subTest(variant=variant):
+                    manifest.write_bytes(content)
+                    client = FakeS3Client()
+                    transfer = s3_transfer.S3BackupTransfer(profile(), client=client)
+                    receipt = artifact / f"receipt-{variant}.json"
+                    with self.assertRaisesRegex(s3_transfer.TransferError, "checksum"):
+                        transfer.upload_artifact(
+                            artifact, backup_id="checksum-test", source_identity="a" * 40,
+                            receipt_path=receipt,
+                        )
+                    self.assertEqual(client.events, [])
+                    self.assertFalse(receipt.exists())
+
+
+class EndpointHandler(BaseHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def do_HEAD(self):
+        self.server.received.append(self.path)
+        self.send_response(200)
+        self.end_headers()
+
+
+class ProxyTrapHandler(EndpointHandler):
+    def do_CONNECT(self):
+        self.server.received.append(self.path)
+        self.send_error(502)
+
+
+@contextmanager
+def serve_loopback(handler, *, tls_context=None):
+    with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+        server.received = []
+        if tls_context:
+            server.socket = tls_context.wrap_socket(server.socket, server_side=True)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"127.0.0.1:{server.server_port}", server.received
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+class ProxyAdmissionTests(unittest.TestCase):
+    def test_s3_sdk_config_explicitly_disables_proxies(self):
+        sdk_config = Mock()
+        sdk_client = SimpleNamespace(meta=SimpleNamespace(endpoint_url=profile()["endpointUrl"], events=Mock()))
+        fake_session = Mock(return_value=SimpleNamespace(client=Mock(return_value=sdk_client)))
+        with patch.dict(sys.modules, {
+            "boto3": SimpleNamespace(session=SimpleNamespace(Session=fake_session)),
+            "botocore.config": SimpleNamespace(Config=sdk_config),
+        }):
+            s3_transfer.S3BackupTransfer(profile())
+
+        self.assertEqual(sdk_config.call_args.kwargs.get("proxies"), {})
+
+    @unittest.skipUnless(find_spec("boto3"), "install the pinned S3 runtime for the real SDK test")
+    def test_pinned_sdk_uses_direct_tls_with_ambient_proxies_set(self):
+        with tempfile.TemporaryDirectory(prefix="codexia-direct-s3-") as temporary:
+            directory = Path(temporary)
+            certificate = directory / "fixture.crt"
+            key = directory / "fixture.key"
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+                "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+                "-out", str(certificate), "-keyout", str(key),
+            ], check=True, capture_output=True)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certificate, key)
+            with serve_loopback(EndpointHandler, tls_context=context) as (endpoint, direct_requests):
+                with serve_loopback(ProxyTrapHandler) as (trap, proxy_requests):
+                    origin = f"https://{endpoint}"
+                    proxy = f"http://{trap}"
+                    environment = {
+                        "AWS_ACCESS_KEY_ID": "synthetic-fixture-id",
+                        "AWS_SECRET_ACCESS_KEY": "synthetic-fixture-key",
+                        "AWS_EC2_METADATA_DISABLED": "true",
+                        "AWS_CONFIG_FILE": str(directory / "unused-config"),
+                        "AWS_SHARED_CREDENTIALS_FILE": str(directory / "unused-credentials"),
+                        "HTTP_PROXY": proxy, "HTTPS_PROXY": proxy, "ALL_PROXY": proxy,
+                        "http_proxy": proxy, "https_proxy": proxy, "all_proxy": proxy,
+                        "NO_PROXY": "", "no_proxy": "",
+                    }
+                    with patch.dict(os.environ, environment, clear=True):
+                        transfer = s3_transfer.S3BackupTransfer(
+                            profile(endpointUrl=origin, allowedOrigins=[origin], caBundle=str(certificate)),
+                            _allow_private_test_addresses=True,
+                        )
+                        try:
+                            result = transfer.client.head_bucket(Bucket="codexia-fixture")
+                        except Exception as error:
+                            raise AssertionError(
+                                f"Direct TLS request failed ({type(error).__name__}), "
+                                f"proxy connections: {len(proxy_requests)}"
+                            ) from None
+                        finally:
+                            transfer.client.close()
+                    self.assertEqual(result["ResponseMetadata"]["HTTPStatusCode"], 200)
+                    self.assertEqual(proxy_requests, [])
+                    self.assertEqual(direct_requests, ["/codexia-fixture"])

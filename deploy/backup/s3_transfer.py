@@ -36,7 +36,6 @@ PROFILE_FIELDS = {
 BACKUP_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SOURCE_ID_RE = re.compile(r"^[a-f0-9]{40}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
-SUM_LINE_RE = re.compile(r"^([a-f0-9]{64})  ([A-Za-z0-9._-]+)$")
 UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9+/=_-]{1,2048}$")
 MIN_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 DEFAULT_MULTIPART_THRESHOLD_BYTES = 16 * 1024 * 1024
@@ -214,31 +213,20 @@ def validate_artifact(directory: Path) -> dict[str, Any]:
         if not stat.S_ISREG(file_stat.st_mode) or stat.S_ISLNK(file_stat.st_mode):
             _fail("Backup artifact contains an unsafe file")
     try:
-        sums_text = (directory / "SHA256SUMS").read_text(encoding="ascii")
-    except (OSError, UnicodeError) as error:
+        sums_bytes = (directory / "SHA256SUMS").read_bytes()
+    except OSError as error:
         raise TransferError("Backup checksum manifest cannot be read") from error
-    lines = sums_text.splitlines()
-    if len(lines) != len(ARTIFACT_FILES):
-        _fail("Backup checksum manifest does not identify the exact v2 artifact set")
-    listed: dict[str, str] = {}
-    for line in lines:
-        match = SUM_LINE_RE.fullmatch(line)
-        if match is None:
-            _fail("Backup checksum manifest has an unsupported entry")
-        digest, name = match.groups()
-        if name not in ARTIFACT_FILES or name in listed:
-            _fail("Backup checksum manifest does not identify the exact v2 artifact set")
-        listed[name] = digest
-    if set(listed) != set(ARTIFACT_FILES):
-        _fail("Backup checksum manifest does not identify the exact v2 artifact set")
     files: dict[str, dict[str, Any]] = {}
+    canonical_sums = []
     for name in ARTIFACT_FILES:
         digest, size = _sha256_file(directory / name)
-        if digest != listed[name]:
-            _fail("Backup ciphertext checksum mismatch")
         files[name] = {"sha256": digest, "size": size}
-    sums_digest, sums_size = _sha256_file(directory / "SHA256SUMS")
-    files["SHA256SUMS"] = {"sha256": sums_digest, "size": sums_size}
+        canonical_sums.append(f"{digest}  {name}\n")
+    # The restore drill compares raw sha256sum output in this same fixed order.
+    if sums_bytes != "".join(canonical_sums).encode("ascii"):
+        _fail("Backup ciphertext checksum mismatch")
+    sums_digest = hashlib.sha256(sums_bytes).hexdigest()
+    files["SHA256SUMS"] = {"sha256": sums_digest, "size": len(sums_bytes)}
     return {"files": files, "sha256sumsSha256": sums_digest}
 
 
@@ -903,6 +891,7 @@ def _make_client(profile: dict[str, Any], *, _allow_private_test_addresses: bool
         raise TransferError("Pinned Boto3 runtime is not installed; run install-s3-runtime.sh") from error
     config = Config(
         signature_version="s3v4",
+        proxies={},
         s3={"addressing_style": profile["addressingStyle"]},
         retries={"mode": "standard", "total_max_attempts": 3},
         connect_timeout=5,

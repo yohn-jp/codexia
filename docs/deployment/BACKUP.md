@@ -45,9 +45,9 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 ### OPS-01 transfer adapter
 
-`deploy/backup/s3_transfer.py` は既存の `backup.sh` が作成したv2 artifact一式だけを読み、`database.dump.age`、`history.tar.age`、`manifest.age`、`SHA256SUMS` をアップロードする。第二のdumpや暗号化形式は作らない。AWS S3署名・retryはhash-locked Boto3 SDKへ委譲する。
+`deploy/backup/s3_transfer.py` は既存の `backup.sh` が作成したv2 artifact一式だけを読み、`database.dump.age`、`history.tar.age`、`manifest.age`、`SHA256SUMS` をアップロードする。転送と復元ドリルは、生成時の `SHA256SUMS` と照合結果がバイト単位で一致することを要求する。第二のdumpや暗号化形式は作らない。AWS S3署名・retryはhash-locked Boto3 SDKへ委譲する。
 
-Profileは `schemaVersion`, `provider`, `region`, `bucket`, `prefix`, `endpointUrl`, `allowedOrigins`, `addressingStyle` を含むprivate JSON fileで、所有者が実行user、mode `0400` または `0600` であることを検査する。Credentialはprofileに置かず、Boto3の標準credential provider chainから取得する。HTTPS検証とredirect拒否を維持し、S3側のETagをSHA-256の代用にしない。
+Profileは `schemaVersion`, `provider`, `region`, `bucket`, `prefix`, `endpointUrl`, `allowedOrigins`, `addressingStyle` を含むprivate JSON fileで、所有者が実行user、mode `0400` または `0600` であることを検査する。Credentialはprofileに置かず、Boto3の標準credential provider chainから取得する。S3リクエストは環境のHTTPプロキシ設定を使用せず、選択したHTTPS endpointへ直接送信する。HTTPS検証とredirect拒否を維持し、S3側のETagをSHA-256の代用にしない。
 
 例として、operatorが保護設定したprofile、artifact directory、独立したreceipt pathから実行する。
 
