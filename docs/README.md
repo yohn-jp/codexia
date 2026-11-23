@@ -7,7 +7,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
 | Approved specification toolchain and alternative decisions | [Toolchain architecture](architecture/SPECIFICATION-TOOLCHAIN.md) — selected targets, implementation not yet certified |
 | Requirements tool migration | [StrictDoc traceability](requirements/STRICTDOC-TRACEABILITY.md) — Markdown-to-requirements conversion and code/test/evidence gates |
-| HTTP/API schema-first target | [TypeSpec → Hono/Orval](architecture/HTTP-PLATFORM-MIGRATION.md) — source-to-server/client generation and migration safety gates |
+| HTTP/API schema-first target | [TypeSpec → Fastify/Orval](architecture/HTTP-PLATFORM-MIGRATION.md) — schema-first Fastify routes, generated client and acceptance gates |
 | PostgreSQL schema verification target | [PostgreSQL verification](architecture/POSTGRES-CONTRACT-VERIFICATION.md) — SQL/pgTAP/catalog/tbls and isolated restore |
 | MCP protocol modernization | [MCP SDK v2 migration](architecture/MCP-V2-MIGRATION.md) — 2026-era stateless transport, OAuth and conformance |
 | Specification verification and public documentation | [Tooling acceptance](verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) — CI gates, LikeC4, Threagile, k6, Scalar, single Pages publisher |
