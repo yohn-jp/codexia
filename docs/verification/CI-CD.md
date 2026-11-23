@@ -25,6 +25,14 @@ This is the normative execution and release architecture. [Test architecture](TE
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
 
+## Declarative waits and controlled time
+
+**Default: no `sleep` for synchronization.** A fixed-duration `sleep`, `delay`, or equivalent time-based polling is not evidence that a service is ready, that a process has failed, or that an asynchronous operation has completed. CI runners, integration and browser tests, and deployment scripts must wait on the actual contract: a systemd unit and health notification, Podman/Docker state or health event, PostgreSQL readiness, an HTTP status, a process exit, an emitted event, or a resolvable promise. Use injectable/virtual clocks for application timer semantics. A finite timeout caps failure latency; reaching it is a failure, not proof of success.
+
+A genuine exception requires an explicit timing requirement in the specification or an irreducible protocol interval. Document the provider/requirement, the shortest justifiable bound, the real condition being observed and why an event/condition-based wait cannot replace it. Do not conceal unconditional sleeps behind retry wrappers or choose a shorter arbitrary interval in place of the original arbitrary 60 seconds.
+
+This rule is the **repository-wide target and review contract**. Existing fixed-sleep loops outside the deployment transaction and lifecycle paths are not claimed to be migrated by this policy. Migrate them in their owning components without weakening tests, production behavior, or the single CI task/impact authority. The [push-deployment lifecycle contract](../deployment/PUSH-DEPLOYMENT.md#disposable-app-lifecycle-ci) is already enforced by targeted tests for its critical paths.
+
 ## CI admission, execution and resource policy
 
 This section is the **normative scheduling and resource contract**. The canonical task
