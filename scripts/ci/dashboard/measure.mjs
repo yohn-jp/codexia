@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Read-only observed timings. Unseparated legacy phases remain NOT_CHECKED.
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { seconds, summarizeCiTiming } from './timing.mjs';
 const args = process.argv.slice(2);
 const options = new Map();

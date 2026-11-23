@@ -84,7 +84,7 @@ export function taskInvocation(task, executable = process.execPath) {
   if (task === 'coverage') return { executable, arguments: ['scripts/ci/execution/workspace.mjs', 'coverage'], environmentKeys };
   if (task.startsWith('build-')) return { executable: 'pnpm', arguments: ['build'], environmentKeys };
   if (task === 'audit-core') return { executable: 'pnpm', arguments: ['audit:core'], environmentKeys };
-  if (task.startsWith('oci-')) return { executable: 'bash', arguments: ['scripts/verify-oci.sh'], environmentKeys };
+  if (task.startsWith('oci-')) return { executable: 'bash', arguments: ['scripts/verification/runtime/oci.sh'], environmentKeys };
   if (task.startsWith('browser-')) {
     const [, profile, ...suite] = task.split('-');
     return { executable, arguments: ['scripts/ci/browser/run-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'], environmentKeys };

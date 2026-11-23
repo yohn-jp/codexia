@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { validateVerificationPlan, assertExactPrImpact } from '../impact/plan.mjs';
 import { assertPlanEvidence } from '../evidence/validation.mjs';

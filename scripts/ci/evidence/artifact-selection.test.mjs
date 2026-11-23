@@ -9,7 +9,7 @@ import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { assertPlanEvidence } from './validation.mjs';
 import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './artifact-selection.mjs';
-import { collectGitHubArrayPages, collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubArrayPages, collectGitHubPages } from '../../release/components/policy.mjs';
 import { listProducerArtifacts } from './producer-artifact.mjs';
 
 const sourceSha = 'a'.repeat(40);

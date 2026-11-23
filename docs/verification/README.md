@@ -61,7 +61,7 @@ From the clean candidate checkout, after installing Chromium on the verification
 ```sh
 git worktree add --detach /tmp/codexia-prior-ui "$PRIOR_SOURCE_SHA"
 export CODEXIA_E2E_DATABASE_URL='postgres://user:password@127.0.0.1:5432/codexia_e2e_compat_test'
-node scripts/verify-mixed-version.mjs /tmp/codexia-prior-ui full
+node scripts/release/frontend/verify-mixed-version.mjs /tmp/codexia-prior-ui full
 ```
 
 Set `PRIOR_SOURCE_SHA` and replace the database credentials with the actual prior release source and a fresh disposable database. Use the deployed profile (Core or Full). The runner verifies distinct clean ancestor/candidate sources and the unchanged epoch, builds the prior frontend separately, validates its generated identity, builds the candidate, and uses only the prior frontend assets in the current E2E server. The browser exercises actual API and PostgreSQL login, editing, save/receipt, immutable revision reads and conflict recovery. Record the source pair, profile, epoch, test results and limitations. A failure caused by a historical UI locator change requires investigation, not weakening the assertions.

@@ -47,10 +47,10 @@ on:
       - scripts/build/packaging/profile-build.mjs
       - scripts/shared/read-regular-file.mjs
       - scripts/build/packaging/profile-package.mjs
-      - scripts/verify-oci.sh
-      - scripts/verify-oci-http.mjs
-      - scripts/oci-better-auth-fixture.sh
-      - scripts/push-auth-lifecycle-oidc.mjs
+      - scripts/verification/runtime/oci.sh
+      - scripts/verification/runtime/oci-http.mjs
+      - scripts/verification/runtime/better-auth-fixture.sh
+      - scripts/deployment/lifecycle/auth-oidc.mjs
       - tests/integration/model-oci-lifecycle.acceptance.mjs
       - tests/integration/model-oci-lifecycle-arguments.mjs
       - tests/integration/model-oci-lifecycle-arguments.test.mjs

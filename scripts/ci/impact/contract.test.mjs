@@ -341,7 +341,7 @@ test('browser lanes cover each profile and use compatible browser images', () =>
 
 
 test('compact main proof is resolved only on main push, skips all heavy families and independently certifies', async () => {
-  const { REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('../../release-policy.mjs');
+  const { REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('../../release/components/policy.mjs');
   const plan = workflow.jobs.plan;
   const reuse = plan.steps.find(step => step.id === 'reuse');
   assert.equal(reuse.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");

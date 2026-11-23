@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { selectLatestPlanArtifact } from '../evidence/artifact-selection.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_OUTPUT, RUNNER_TEMP, CODEXIA_EXPECTED_SHA } = process.env;

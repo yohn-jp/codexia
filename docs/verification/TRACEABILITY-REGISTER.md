@@ -48,7 +48,7 @@
 | REQ-UI-004 | [UX](../design/UX-CONTRACT.md) | app/src/editor/、app/src/shells/ | core.acceptance.spec.ts。IME実機は別証拠 | MAPPED_UNVERIFIED |
 | REQ-UI-005 | [UX](../design/UX-CONTRACT.md) | app/src/components/、app/src/shells/ | redesign-visual.acceptance.spec.ts。支援技術は別証拠 | PARTIAL |
 | REQ-UI-006 | [XState machine](../design/XSTATE-STATE-MACHINE-CONTRACT.md)・[Screen Atlas](../design/SCREEN-STATE-ATLAS.md) | machine未導入。原稿保存/復旧は既存app controllerが観測開始点 | XST-001〜006。v5 actor/machineと独立のブラウザー受入が未実施 | UNMAPPED |
-| REQ-EXT-001 | [External IF](../architecture/EXTERNAL-INTERFACES.md) | deploy/cloudflare/ui-routes.json、public-protocol-paths.json、terraform/ | scripts/verify-deployment-config.mjs | MAPPED_UNVERIFIED |
+| REQ-EXT-001 | [External IF](../architecture/EXTERNAL-INTERFACES.md) | deploy/cloudflare/ui-routes.json、public-protocol-paths.json、terraform/ | scripts/verification/infrastructure/deployment-config.mjs | MAPPED_UNVERIFIED |
 | REQ-EXT-002 | [External IF](../architecture/EXTERNAL-INTERFACES.md) | packages/contracts/src/oauth-metadata.ts、packages/api/src/better-auth.ts、modules/mcp/src/http.ts | oauth-metadata.test.ts | MAPPED_UNVERIFIED |
 | REQ-OPS-001 | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | deploy/ansible/site.yml、auth-runtime.yml | test-auth-runtime-integration.sh。setup-onlyが未実装 | PARTIAL |
 | REQ-OPS-002 | [Update flow](../deployment/UPDATE-FLOW.md) | deploy/update-compatibility.json、frontend-compatibility.json、.github/workflows/backend-release.yml | deploy/ansible/test-push-app-lifecycle.sh | MAPPED_UNVERIFIED |

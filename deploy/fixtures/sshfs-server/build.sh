@@ -84,5 +84,5 @@ value = {
 }
 (folder / 'manifest.json').write_text(json.dumps(value, indent=2) + '\n')
 PY
-node scripts/verify-sshfs-fixture-artifact.mjs "$work"
+node scripts/verification/artifacts/sshfs-fixture.mjs "$work"
 echo "Prebuilt SSHFS fixture validated: $image"

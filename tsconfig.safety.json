@@ -19,7 +19,7 @@
     "app/src/api-response.ts",
     "packages/api/src/authorization-error.ts",
     "modules/mcp/src/session-lifetime.ts",
-    "scripts/release-policy.mjs",
-    "scripts/verify-unpublished-image.mjs"
+    "scripts/release/components/policy.mjs",
+    "scripts/verification/artifacts/unpublished-image.mjs"
   ]
 }

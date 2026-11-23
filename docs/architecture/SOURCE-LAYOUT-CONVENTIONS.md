@@ -1,6 +1,6 @@
 # Source layout and file naming — normative contract
 
-**Status: accepted target architecture; code relocation has not been implemented.**  
+**Status: accepted target architecture; W1 and W2 are adopted on main, and W3–W5 paths are implemented in the Issue #690 migration PR.**
 **Owner:** source layout, naming and script responsibility boundaries. **Audience:** contributors, implementation agents and reviewers.  
 **Authority:** [Documentation authority](DOCUMENTATION-AUTHORITY.md) and [Internal boundaries](INTERNAL-BOUNDARIES.md). Runtime and CI contracts remain owned by [CI/CD](../verification/CI-CD.md), [Dependency policy](DEPENDENCY-POLICY.md) and their respective domain designs. This document defines **where code belongs**, not a second implementation, task inventory or deployment interface.
 
@@ -55,11 +55,16 @@ scripts/
 │   ├── handoff/           # backend and promotion handoff verification
 │   └── recovery/          # interrupted deployment and backup recovery checks
 ├── verification/
+│   ├── run.mjs             # top-level local verification runner
 │   ├── runtime/           # OCI/runtime verification and fixtures
 │   ├── dependencies/      # dependency closure and runtime dependency audit
 │   ├── artifacts/         # artifact, Pages, migration ledger validation
 │   └── infrastructure/    # deployment config and public identity probes
 ├── shared/                # only proven cross-owner helpers
+├── architecture/          # retained diagram/source contract verifier
+├── code-scanning-pages/   # retained static security report publisher
+├── postgres-contract/     # retained database contract runner
+├── strictdoc/             # retained requirements trace toolchain
 ├── audit/                 # retain existing audit subdomain
 ├── performance/           # retain existing performance subdomain
 ├── branding/              # retain existing branding subdomain

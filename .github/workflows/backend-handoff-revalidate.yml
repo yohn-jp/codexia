@@ -3,11 +3,11 @@ on:
   pull_request:
     paths:
       - .github/workflows/backend-handoff-revalidate.yml
-      - scripts/prepare-backend-handoff-revalidation.mjs
-      - scripts/run-manual-backend-handoff-revalidation.mjs
-      - scripts/backend-handoff-revalidation.test.mjs
+      - scripts/deployment/handoff/prepare-revalidation.mjs
+      - scripts/deployment/handoff/run-revalidation.mjs
+      - scripts/deployment/handoff/revalidation.test.mjs
       - docs/deployment/BACKEND-HANDOFF-REVALIDATION.md
-      - scripts/verify-backend-push-handoff.mjs
+      - scripts/deployment/handoff/verify-push.mjs
   workflow_dispatch:
     inputs:
       publisher_run_id:
@@ -46,7 +46,7 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Test exact-run selection and read-only workflow contract
-        run: node --test scripts/backend-handoff-revalidation.test.mjs
+        run: node --test scripts/deployment/handoff/revalidation.test.mjs
 
   revalidate:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
           CODEXIA_PUBLISHER_SHA: ${{ inputs.publisher_sha }}
-        run: node scripts/prepare-backend-handoff-revalidation.mjs
+        run: node scripts/deployment/handoff/prepare-revalidation.mjs
       - name: Check out exact publisher source for source binding
         uses: actions/checkout@v7.0.1
         with:
@@ -98,7 +98,7 @@ jobs:
           CODEXIA_PUBLISHER_SHA: ${{ inputs.publisher_sha }}
           CODEXIA_MANUAL_REVALIDATION: 'true'
         working-directory: publisher-source
-        run: node "$GITHUB_WORKSPACE/scripts/run-manual-backend-handoff-revalidation.mjs"
+        run: node "$GITHUB_WORKSPACE/scripts/deployment/handoff/run-revalidation.mjs"
       - name: Record the target evidence boundary
         if: success()
         run: |

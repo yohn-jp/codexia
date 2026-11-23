@@ -8,7 +8,7 @@ on:
       - Dockerfile.backend.dockerignore
       - deploy/backend/**
       - deploy/fixtures/sshfs-server/**
-      - scripts/verify-sshfs-fixture-artifact*.mjs
+      - scripts/verification/artifacts/sshfs-fixture*.mjs
       - packages/**
       - modules/**
       - '!modules/story/src/browser.tsx'
@@ -30,36 +30,41 @@ on:
       - scripts/build/packaging/profile-build.mjs
       - scripts/shared/read-regular-file.mjs
       - scripts/build/packaging/profile-package.mjs
-      - scripts/runtime-package-closure.mjs
-      - scripts/verify-backend-image.sh
-      - scripts/backend-update-identity*.mjs
-      - scripts/component-release-version*.mjs
-      - scripts/record-component-release.mjs
-      - scripts/backend-registry-tag.mjs
+      - scripts/verification/dependencies/runtime-package-closure.mjs
+      - scripts/verification/runtime/backend-image.sh
+      - scripts/release/backend/update-identity*.mjs
+      - scripts/release/components/version*.mjs
+      - scripts/release/components/record.mjs
+      - scripts/release/backend/registry-tag.mjs
       - deploy/update-compatibility.json
-      - scripts/verify-release-source.mjs
-      - scripts/release-policy.mjs
+      - scripts/release/components/verify-source.mjs
+      - scripts/release/components/policy.mjs
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
-      - scripts/verify-backend-artifacts*.mjs
-      - scripts/resolve-backend-promotion*.mjs
-      - scripts/verify-backend-promotion-handoff.mjs
-      - scripts/verify-existing-backend-release.mjs
-      - scripts/verify-existing-backend-release.test.mjs
-      - scripts/backend-image-inspection.mjs
-      - scripts/backend-image-inspection.test.mjs
-      - scripts/verify-backend-image-identity.mjs
-      - scripts/push-deployment-admission.mjs
-      - scripts/push-deployment-certificate.mjs
-      - scripts/create-backend-deployment-certificates.mjs
-      - scripts/verify-backend-push-handoff.mjs
-      - scripts/push-deployment-*.test.mjs
-      - scripts/backend-deployment-handoff-contract.test.mjs
-      - scripts/verify-backend-push-handoff.test.mjs
+      - scripts/verification/artifacts/backend*.mjs
+      - scripts/release/backend/resolve-promotion*.mjs
+      - scripts/deployment/handoff/verify-promotion.mjs
+      - scripts/release/backend/verify-existing.mjs
+      - scripts/release/backend/verify-existing.test.mjs
+      - scripts/release/backend/image-inspection.mjs
+      - scripts/release/backend/image-inspection.test.mjs
+      - scripts/release/backend/verify-image-identity.mjs
+      - scripts/deployment/admission/validate.mjs
+      - scripts/deployment/admission/certificate.mjs
+      - scripts/deployment/admission/create-certificates.mjs
+      - scripts/deployment/handoff/verify-push.mjs
+      - scripts/deployment/admission/validate.test.mjs
+      - scripts/deployment/admission/certificate.test.mjs
+      - scripts/deployment/admission/contract.test.mjs
+      - scripts/deployment/admission/documentation.test.mjs
+      - scripts/deployment/recovery/backup.test.mjs
+      - scripts/deployment/recovery/recovery.test.mjs
+      - scripts/deployment/handoff/backend-contract.test.mjs
+      - scripts/deployment/handoff/verify-push.test.mjs
       - .github/workflows/backend-deployment-handoff.yml
-      - scripts/component-release-record.test.mjs
-      - scripts/verify-frontend-artifact.mjs
+      - scripts/release/components/record-model.test.mjs
+      - scripts/verification/artifacts/frontend.mjs
       - scripts/ci/certification/reuse-merged-pr.mjs
       - package.json
       - pnpm-lock.yaml
@@ -67,10 +72,10 @@ on:
       - tsconfig.base.json
       - .github/workflows/backend-release.yml
       - deploy/release-impact-paths.json
-      - scripts/release-impact.mjs
-      - scripts/release-impact.test.mjs
-      - scripts/release-source-gate.mjs
-      - scripts/release-source-gate.test.mjs
+      - scripts/release/components/impact.mjs
+      - scripts/release/components/impact.test.mjs
+      - scripts/release/components/source-gate.mjs
+      - scripts/release/components/source-gate.test.mjs
       - .github/workflows/push-app-lifecycle.yml
       - deploy/ansible/**
       - deploy/backup/**
@@ -78,10 +83,10 @@ on:
       - deploy/quadlet/**
       - docs/deployment/PUSH-DEPLOYMENT.md
       - docs/deployment/IAC.md
-      - scripts/component-release-record.mjs
-      - scripts/push-app-lifecycle*.mjs
-      - scripts/push-auth-lifecycle-oidc.mjs
-      - scripts/oci-better-auth-fixture.sh
+      - scripts/release/components/record-model.mjs
+      - scripts/deployment/lifecycle/app*.mjs
+      - scripts/deployment/lifecycle/auth-oidc.mjs
+      - scripts/verification/runtime/better-auth-fixture.sh
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]
@@ -127,7 +132,7 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-source-gate.mjs backend
+        run: node scripts/release/components/source-gate.mjs backend
   promotion:
     name: Resolve verified backend promotion
     needs: source
@@ -169,7 +174,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
-        run: node scripts/resolve-backend-promotion.mjs
+        run: node scripts/release/backend/resolve-promotion.mjs
       - uses: actions/upload-artifact@v7.0.2
         id: handoff
         if: steps.resolve.outputs.promoted == 'true'
@@ -215,18 +220,18 @@ jobs:
           PROFILE: ${{ matrix.profile }}
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          version="$(node scripts/component-release-version.mjs backend)"
+          version="$(node scripts/release/components/version.mjs backend)"
           echo "CODEXIA_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_RELEASE_VERSION=$version" --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" --build-arg "PROFILE=$PROFILE" --tag codexia-backend-ci --file Dockerfile.backend .
       - name: Verify API image before publication
         env:
           PROFILE: ${{ matrix.profile }}
-        run: bash scripts/verify-backend-image.sh docker codexia-backend-ci "$(git rev-parse HEAD)" "$PROFILE"
+        run: bash scripts/verification/runtime/backend-image.sh docker codexia-backend-ci "$(git rev-parse HEAD)" "$PROFILE"
       - name: Verify embedded identity without starting image code
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           PROFILE: ${{ matrix.profile }}
-        run: node scripts/verify-backend-image-identity.mjs codexia-backend-ci "$SOURCE_SHA" "$CODEXIA_RELEASE_VERSION" "$PROFILE"
+        run: node scripts/release/backend/verify-image-identity.mjs codexia-backend-ci "$SOURCE_SHA" "$CODEXIA_RELEASE_VERSION" "$PROFILE"
       - name: Save the exact tested image for publication
         run: docker save codexia-backend-ci | gzip > "$RUNNER_TEMP/codexia-backend-image.tar.gz"
       - uses: actions/upload-artifact@v7.0.2
@@ -269,14 +274,14 @@ jobs:
         id: freshness
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-source-gate.mjs backend
+        run: node scripts/release/components/source-gate.mjs backend
       - name: Verify exact tested Core and Full image artifacts
         if: ${{ steps.freshness.outputs.affected == 'true' && (needs.promotion.result != 'success' || needs.promotion.outputs.promoted != 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_BACKEND_ARTIFACT_DIR: ${{ runner.temp }}/backend-images
           CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
-        run: node scripts/verify-backend-artifacts.mjs
+        run: node scripts/verification/artifacts/backend.mjs
       - uses: actions/download-artifact@v8.0.2
         if: ${{ steps.freshness.outputs.affected == 'true' && needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
         with:
@@ -289,7 +294,7 @@ jobs:
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
         run: |
-          if ! node scripts/verify-backend-promotion-handoff.mjs; then
+          if ! node scripts/deployment/handoff/verify-promotion.mjs; then
             echo 'Post-selection promotion recheck failed. The build matrix was skipped, so this run will not fall back to rebuilding.' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -315,7 +320,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$PROMOTED" != true ]]; then
-            PRODUCER_VERSION="$(node scripts/component-release-version.mjs backend)"
+            PRODUCER_VERSION="$(node scripts/release/components/version.mjs backend)"
             PRODUCER_EVENT=workflow_run
             PRODUCER_SHA="$MAIN_SHA"
           fi
@@ -334,11 +339,11 @@ jobs:
             tag="sha-$MAIN_SHA"
             if [[ "$profile" == full ]]; then tag="$tag-full"; fi
             tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
-            digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+            digest="$(node scripts/release/backend/registry-tag.mjs "$tag")"
             if [[ "$digest" == absent ]]; then
               docker tag codexia-backend-ci "$IMAGE:$tag"
               docker push "$IMAGE:$tag"
-              digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+              digest="$(node scripts/release/backend/registry-tag.mjs "$tag")"
               [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
               docker pull "$IMAGE@$digest"
               test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
@@ -347,7 +352,7 @@ jobs:
               [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
               docker pull "$IMAGE@$digest"
               if [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" != "$tested_id" ]]; then
-                node scripts/verify-existing-backend-release.mjs "$IMAGE@$digest" "$MAIN_SHA" "$PRODUCER_SHA" "$PRODUCER_VERSION" "$profile" "$PRODUCER_EVENT"
+                node scripts/release/backend/verify-existing.mjs "$IMAGE@$digest" "$MAIN_SHA" "$PRODUCER_SHA" "$PRODUCER_VERSION" "$profile" "$PRODUCER_EVENT"
               fi
             fi
             if [[ "$profile" == core ]]; then
@@ -370,7 +375,7 @@ jobs:
           CODEXIA_BACKEND_PRODUCER_VERSION: ${{ steps.push-image.outputs.producer-version }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
           CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
-        run: node scripts/record-component-release.mjs backend
+        run: node scripts/release/components/record.mjs backend
 
       - name: Create certified Core and Full push handoff
         if: steps.freshness.outputs.affected == 'true'
@@ -383,7 +388,7 @@ jobs:
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
           CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
           CODEXIA_DEPLOYMENT_CERTIFICATE_DIR: ${{ runner.temp }}/backend-deployment-certificates
-        run: node scripts/create-backend-deployment-certificates.mjs
+        run: node scripts/deployment/admission/create-certificates.mjs
       - uses: actions/upload-artifact@v7.0.2
         if: steps.freshness.outputs.affected == 'true'
         with:

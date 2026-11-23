@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
-import { componentReleaseAffected } from '../../release-impact.mjs';
+import { componentReleaseAffected } from '../../release/components/impact.mjs';
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 
@@ -539,8 +539,8 @@ test('push backup changes retain root and independent exact-head verification', 
     'deploy/ansible/deploy.yml',
     'deploy/ansible/restore-drill.yml',
     'deploy/ansible/push-deployment-recover.sh',
-    'scripts/push-deployment-backup.test.mjs',
-    'scripts/push-deployment-recovery.test.mjs',
+    'scripts/deployment/recovery/backup.test.mjs',
+    'scripts/deployment/recovery/recovery.test.mjs',
     '.github/workflows/push-backup.yml',
   ];
   for (const file of source) {
@@ -557,7 +557,7 @@ test('push backup changes retain root and independent exact-head verification', 
   const steps = backup.jobs['backup-contract'].steps;
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(steps.some(s => s.run?.includes('bash -n deploy/backup/backup.sh')));
-  assert.ok(steps.some(s => s.run?.includes('scripts/push-deployment-backup.test.mjs')));
+  assert.ok(steps.some(s => s.run?.includes('scripts/deployment/recovery/backup.test.mjs')));
   assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
 });

@@ -50,7 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PUBLISHER_RUN_ID: ${{ github.event.workflow_run.id }}
-        run: node scripts/verify-backend-push-handoff.mjs
+        run: node scripts/deployment/handoff/verify-push.mjs
 
   deploy-production:
     name: Deploy certified Full backend to production
@@ -110,7 +110,7 @@ jobs:
         if: steps.deployment-gate.outputs.enabled == 'true'
         env:
           CODEXIA_VERIFIED_MAIN_SHA: ${{ needs.verify-handoff.outputs.verified-main-sha }}
-        run: node scripts/release-source-gate.mjs backend-deployment
+        run: node scripts/release/components/source-gate.mjs backend-deployment
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'
@@ -139,7 +139,7 @@ jobs:
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
           CODEXIA_EXPECTED_BACKEND_API_EPOCH: ${{ needs.verify-handoff.outputs.certified-full-api-epoch }}
-        run: node scripts/verify-frontend-compatibility.mjs backend-preflight
+        run: node scripts/release/frontend/verify-compatibility.mjs backend-preflight
       - name: Install the pinned Ansible control environment
         if: steps.freshness.outputs.current == 'true'
         shell: bash

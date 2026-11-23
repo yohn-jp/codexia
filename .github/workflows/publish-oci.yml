@@ -26,7 +26,7 @@ jobs:
       - name: Require exact successful main source, native, OCI and browser verification
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release-source.mjs
+        run: node scripts/release/components/verify-source.mjs
   publish:
     name: Publish ${{ matrix.profile }}
     needs: verify-source
@@ -69,12 +69,12 @@ jobs:
           CODEXIA_PROFILE: ${{ matrix.profile }}
           CODEXIA_OCI_IMAGE: codexia-ci:${{ matrix.profile }}
         run: |
-          bash scripts/verify-oci.sh
+          bash scripts/verification/runtime/oci.sh
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CODEXIA_OCI_IMAGE")" = linux/amd64
       - name: Recheck immutable tag before publication
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release-source.mjs
+        run: node scripts/release/components/verify-source.mjs
       - uses: docker/login-action@v4.8.0
         with:
           registry: ghcr.io
@@ -87,7 +87,7 @@ jobs:
           TAG: ${{ steps.image.outputs.tag }}
           PROFILE: ${{ matrix.profile }}
         run: |
-          node scripts/verify-unpublished-image.mjs
+          node scripts/verification/artifacts/unpublished-image.mjs
           docker tag "codexia-ci:$PROFILE" "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
           docker buildx imagetools inspect "$IMAGE:$TAG"
@@ -112,7 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node scripts/verify-release-source.mjs
+          node scripts/release/components/verify-source.mjs
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Existing Release retained unchanged.'
           else

@@ -110,7 +110,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/verify-mixed-version.mjs') && '0' || '1' }}
+          fetch-depth: ${{ matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/release/frontend/verify-mixed-version.mjs') && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
@@ -138,7 +138,7 @@ jobs:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
       - name: Exercise mixed-version runner against prior PR base
-        if: matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/verify-mixed-version.mjs')
+        if: matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/release/frontend/verify-mixed-version.mjs')
         env:
           PRIOR_SOURCE_SHA: ${{ github.event.pull_request.base.sha }}
           POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
@@ -148,7 +148,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/prior-frontend" "$PRIOR_SOURCE_SHA"
           docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_e2e_compat_test
           pnpm exec playwright install --with-deps chromium
-          if node scripts/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full; then
+          if node scripts/release/frontend/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full; then
             echo "Mixed-version Chromium scenarios passed against the same API epoch." >> "$GITHUB_STEP_SUMMARY"
           else
             status=$?

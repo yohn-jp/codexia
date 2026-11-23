@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { assertPlanEvidence } from './validation.mjs';
 import { selectLatestEvidenceArtifacts, selectLatestPlanArtifact } from './artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-artifacts.mjs';
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { assertTaskProducerInventory, assertTrustedTaskInputProof, selectEquivalentTaskProofs } from './input-proof.mjs';
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
 import { VERIFICATION_TASKS } from '../impact/contract.mjs';
