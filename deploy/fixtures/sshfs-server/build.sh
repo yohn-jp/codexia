@@ -10,7 +10,13 @@ work="$RUNNER_TEMP/lifecycle-sshfs"
 mkdir -p "$work"
 base='docker.io/library/debian:bookworm-slim'
 docker pull "$base"
-pinned_base="$(docker image inspect "$base" --format '{{index .RepoDigests 0}}')"
+pinned_base="$(docker image inspect "$base" --format '{{json .RepoDigests}}' | node -e '
+let raw="";process.stdin.on("data",c=>raw+=c).on("end",()=>{
+  const refs=JSON.parse(raw);
+  const hit=refs.find(x=>/^(?:docker\\.io\\/library\\/)?debian@sha256:[a-f0-9]{64}$/.test(x));
+  if(!hit)process.exit(1);
+  console.log(hit.startsWith("docker.io/")?hit:"docker.io/library/"+hit);
+})')"
 [[ "$pinned_base" =~ ^docker.io/library/debian@sha256:[0-9a-f]{64}$ ]]
 image="codexia-sshfs-fixture:ci-$CODEXIA_LIFECYCLE_SOURCE_SHA"
 context=deploy/fixtures/sshfs-server
