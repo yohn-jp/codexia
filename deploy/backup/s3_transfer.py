@@ -524,7 +524,12 @@ class S3BackupTransfer:
                 return None
             raise TransferError("S3 object inspection failed") from error
 
-    def _get_verified(self, key: str, expected: dict[str, Any], *, version_id: str | None = None, output: BinaryIO | None = None) -> str | None:
+    def _get_verified(
+        self, key: str, expected: dict[str, Any], *,
+        version_id: str | None, retention: dict[str, Any],
+    ) -> None:
+        if retention and (not isinstance(version_id, str) or version_id in ("", "null")):
+            _fail("S3 object retention requires a unique version ID")
         request: dict[str, Any] = {"Bucket": self.profile["bucket"], "Key": key}
         if version_id:
             request["VersionId"] = version_id
@@ -535,14 +540,24 @@ class S3BackupTransfer:
                 if body is not None:
                     body.close()
                 _fail("S3 object size differs from its protected digest receipt")
-            digest, size = _read_stream(response["Body"], output=output)
+            digest, size = _read_stream(response["Body"])
         except TransferError:
             raise
         except Exception as error:
             raise TransferError("S3 object retrieval failed") from error
         if size != expected["size"] or digest != expected["sha256"]:
             _fail("S3 object SHA-256 differs from its protected digest receipt")
-        return response.get("VersionId")
+        if retention:
+            retain_until = response.get("ObjectLockRetainUntilDate")
+            if (
+                response.get("VersionId") != version_id
+                or response.get("ObjectLockMode") != retention["ObjectLockMode"]
+                or not isinstance(retain_until, datetime)
+                or retain_until.utcoffset() is None
+                or retain_until < retention["ObjectLockRetainUntilDate"]
+                or retain_until <= datetime.now(timezone.utc)
+            ):
+                _fail("S3 object retention did not match the requested mode and date on the selected version")
 
     def _inspect_capabilities(self) -> dict[str, Any]:
         try:
@@ -611,16 +626,16 @@ class S3BackupTransfer:
         backup_id: str,
         source_identity: str,
         journal_path: Path,
+        retention: dict[str, Any],
     ) -> dict[str, Any]:
         current = self._head(key)
         if current is not None:
             version_id = current.get("VersionId")
-            self._get_verified(key, expected, version_id=version_id)
+            self._get_verified(key, expected, version_id=version_id, retention=retention)
             self._abort_pending_upload(journal_path, backup_id, source_identity, key)
             return {"key": key, **expected, "versionId": version_id}
         path = directory / name
         metadata = {"codexia-sha256": expected["sha256"], "codexia-backup-id": backup_id}
-        retention = self._retention_args(backup_id)
         if expected["size"] < self.profile["multipartThresholdBytes"]:
             try:
                 with path.open("rb") as stream:
@@ -636,7 +651,7 @@ class S3BackupTransfer:
                 if current is None:
                     raise TransferError("S3 object upload conflict could not be inspected") from error
                 version_id = current.get("VersionId")
-                self._get_verified(key, expected, version_id=version_id)
+                self._get_verified(key, expected, version_id=version_id, retention=retention)
                 return {"key": key, **expected, "versionId": version_id}
             version_id = result.get("VersionId")
         else:
@@ -697,12 +712,12 @@ class S3BackupTransfer:
                     current = self._head(key)
                     if current is not None:
                         current_version = current.get("VersionId")
-                        self._get_verified(key, expected, version_id=current_version)
+                        self._get_verified(key, expected, version_id=current_version, retention=retention)
                         return {"key": key, **expected, "versionId": current_version}
                 if isinstance(error, TransferError):
                     raise
                 raise TransferError("S3 multipart upload failed") from error
-        self._get_verified(key, expected, version_id=version_id)
+        self._get_verified(key, expected, version_id=version_id, retention=retention)
         return {"key": key, **expected, "versionId": version_id}
 
     def _marker_key(self, source_identity: str, backup_id: str) -> str:
@@ -712,6 +727,7 @@ class S3BackupTransfer:
         backup_id = _safe_identifier(backup_id, BACKUP_ID_RE, "backup ID")
         source_identity = _safe_identifier(source_identity, SOURCE_ID_RE, "source identity")
         inventory = validate_artifact(directory)
+        retention = self._retention_args(backup_id)
         capabilities = self._inspect_capabilities()
         _safe_parent(receipt_path.parent)
         journal_path = _upload_journal_path(receipt_path, backup_id)
@@ -720,7 +736,7 @@ class S3BackupTransfer:
             key = _object_key(self.profile, source_identity, backup_id, name)
             object_records[name] = self._upload_one(
                 directory, name, key, inventory["files"][name], backup_id,
-                source_identity, journal_path,
+                source_identity, journal_path, retention,
             )
         marker_key = self._marker_key(source_identity, backup_id)
         marker = {
@@ -745,7 +761,7 @@ class S3BackupTransfer:
                     Bucket=self.profile["bucket"], Key=marker_key, Body=marker_bytes,
                     ContentLength=len(marker_bytes), ContentType="application/json",
                     Metadata={"codexia-sha256": marker_digest}, IfNoneMatch="*",
-                    **self._retention_args(backup_id),
+                    **retention,
                 )
                 marker_version = result.get("VersionId")
             except Exception as error:
@@ -757,12 +773,10 @@ class S3BackupTransfer:
                 marker_version = existing_marker.get("VersionId")
         else:
             marker_version = existing_marker.get("VersionId")
-        try:
-            remote_marker = self._get_bytes(marker_key, version_id=marker_version)
-        except Exception as error:
-            raise TransferError("S3 commit marker verification failed") from error
-        if hashlib.sha256(remote_marker).hexdigest() != marker_digest or remote_marker != marker_bytes:
-            _fail("Existing S3 commit marker conflicts with this backup ID")
+        self._get_verified(
+            marker_key, {"sha256": marker_digest, "size": len(marker_bytes)},
+            version_id=marker_version, retention=retention,
+        )
         receipt = {
             "format": "codexia-backup-receipt/v1",
             "backupId": backup_id,
@@ -782,13 +796,6 @@ class S3BackupTransfer:
             "verifiedByUid": os.getuid(),
         }
         return _write_receipt(receipt_path, receipt)
-
-    def _get_bytes(self, key: str, *, version_id: str | None = None) -> bytes:
-        request: dict[str, Any] = {"Bucket": self.profile["bucket"], "Key": key}
-        if version_id:
-            request["VersionId"] = version_id
-        response = self.client.get_object(**request)
-        return response["Body"].read()
 
     def _validate_receipt(self, value: dict[str, Any], backup_id: str) -> dict[str, Any]:
         if value.get("format") != "codexia-backup-receipt/v1" or value.get("backupId") != backup_id:
