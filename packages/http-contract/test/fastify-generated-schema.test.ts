@@ -17,6 +17,16 @@ test("generated Fastify schemas validate project creation and preserve actual pe
   for (const schema of schemas) app.addSchema(schema);
 
   let createHandlerCalls = 0;
+  let importHandlerCalls = 0;
+  const project = {
+    id: "project-1",
+    title: "A title",
+    settings: {},
+    version: 1,
+    createdAt: "2026-11-23T00:00:00Z",
+    updatedAt: "2026-11-23T00:00:00Z",
+  };
+  const importResult = { project, replayed: false, unresolvedAnchors: 0, omittedRecords: 0 };
   const createProject = routes.find(({ method, url }) => method === "POST" && url === "/api/v1/persistence/projects");
   const persistenceStatus = routes.find(({ method, url }) => method === "GET" && url === "/api/v1/persistence/status");
   const importRoute = routes.find(({ method, url }) => method === "POST" && url === "/api/v1/persistence/import");
@@ -32,14 +42,7 @@ test("generated Fastify schemas validate project creation and preserve actual pe
     schema: createProject.schema as FastifySchema,
     handler: async (_request, reply) => {
       createHandlerCalls++;
-      return reply.code(201).send({ project: {
-        id: "project-1",
-        title: "A title",
-        settings: {},
-        version: 1,
-        createdAt: "2026-11-23T00:00:00Z",
-        updatedAt: "2026-11-23T00:00:00Z",
-      } });
+      return reply.code(201).send({ project });
     },
   });
   app.route({
@@ -55,11 +58,13 @@ test("generated Fastify schemas validate project creation and preserve actual pe
     method: importRoute.method,
     url: importRoute.url,
     schema: importRoute.schema as FastifySchema,
-    handler: async (request, reply) => reply.code(201).send({
-      authorization: request.headers.authorization,
-      contentType: request.headers["content-type"],
-      idempotencyKey: request.headers["idempotency-key"],
-    }),
+    handler: async (request, reply) => {
+      importHandlerCalls++;
+      assert.equal(request.headers.authorization, "Bearer owner-token");
+      assert.equal(request.headers["content-type"], "application/json");
+      assert.equal(request.headers["idempotency-key"], "import-1");
+      return reply.code(201).send(importResult);
+    },
   });
 
   const missingTitle = await app.inject({ method: "POST", url: "/api/v1/persistence/projects", payload: {} });
@@ -86,6 +91,15 @@ test("generated Fastify schemas validate project creation and preserve actual pe
     code: "PERSISTENCE_UNAVAILABLE",
   });
 
+  const importPayload = { format: "codexia-work/v1", project: { title: project.title } };
+  const missingImportKey = await app.inject({
+    method: "POST",
+    url: "/api/v1/persistence/import",
+    payload: importPayload,
+  });
+  assert.equal(missingImportKey.statusCode, 400, missingImportKey.payload);
+  assert.equal(importHandlerCalls, 0, "the generated import schema must reject a missing idempotency key");
+
   const imported = await app.inject({
     method: "POST",
     url: "/api/v1/persistence/import",
@@ -94,14 +108,11 @@ test("generated Fastify schemas validate project creation and preserve actual pe
       "idempotency-key": "import-1",
       "content-type": "application/json",
     },
-    payload: {},
+    payload: importPayload,
   });
   assert.equal(imported.statusCode, 201, imported.payload);
-  assert.deepEqual(imported.json(), {
-    authorization: "Bearer owner-token",
-    contentType: "application/json",
-    idempotencyKey: "import-1",
-  });
+  assert.equal(importHandlerCalls, 1);
+  assert.deepEqual(imported.json(), importResult);
 });
 
 test("generated Fastify document response schema preserves PostgreSQL DTOs and additive fields", async (t) => {

@@ -1,6 +1,6 @@
 # 仕様駆動アーキテクチャ移行：実装契約と並列統合計画
 
-**種別: 採用済み実装計画・技術仕様の補助。** 合意済み技術選定の正本は [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)、要求・検証は [Requirements](../requirements/README.md) と [Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)。HTTP、DB、MCP、バックアップ、画面の個別意味はそれぞれの領域正本が優先。本書は**実装workstreamの境界、依存関係、最小受入と統合条件**だけを所有し、製品要求や状態を独立して二重記載しない。実装前の計画であり、記載したツールが導入済みという意味ではない。
+**種別: 採用済み実装計画・技術仕様の補助。** 合意済み技術選定の正本は [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)、要求・検証は [Requirements](../requirements/README.md) と [Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)。HTTP、DB、MCP、バックアップ、画面の個別意味はそれぞれの領域正本が優先。本書は**作業の境界、依存関係、受入と統合条件**を定める。導入状態と検証結果は各領域の実装と実行証拠から判断する。
 
 ## 変更しない不変条件
 
@@ -16,7 +16,7 @@
 | ID | 成果 | 主な所有パス | 先行条件 |
 | --- | --- | --- | --- |
 | SPEC-01 | StrictDocへ初期30件と追加採用REQの全IDを一回限り移行、source/test relation、逆引きPoC | docs/requirements/、trace専用scripts | なし |
-| SPEC-02 | TypeSpec→OpenAPI3.1生成、Redocly/oasdiff、Fastify schema変換契約の検査 | 新規HTTP contract package、spec scripts | なし |
+| SPEC-02 | TypeSpec、OpenAPI 3.1.0、Redoclyとoasdiff、Fastifyスキーマ変換、ルート照合 | `packages/http-contract/`、既存Verifyの契約検証 | なし |
 | SPEC-03 | pgTAP＋pg_catalog、SQL migrationとauth schemaの物理検証、tbls生成 | packages/persistence-postgres/tests、DB検証scripts | なし |
 | STATE-01 | XState v5による原稿保存・復旧の実行機械と実DB/ブラウザー受入 | appのauthoring/save/recovery機能 | なし |
 | OPS-01 | age v2 artifactのS3互換送受信、checksum、独立receipt、isolated restore fixture | deploy/backup/、S3 fixture tests | なし |
@@ -31,13 +31,14 @@
 | BKC-02 | /console/backups配置・設定フォーム・検証・activate・status/history/recovery UI | app console backup screens | CON-01、BKC-01、BKC-03 |
 | BKC-03 | 手動/maintenance-window保全、単一host lock・writer停止・復帰・run receipt・deploy admission接続 | protected backup executor、Ansible backup stage、run tests | OPS-01、BKC-01 |
 | STATE-02 | ChangeSet/認証/backupへのXState適用（状態契約・非同期・中断） | 当該UI featureごとのmachine | STATE-01、CON-03/BKC-02とファイル排他 |
-| DOC-01 | StrictDoc/Scalar/LikeC4を唯一のRepository Audit Pagesへ公開・表示検証 | scripts/audit/pages/、repository-audit.yml | SPEC-01、SPEC-02、ARCH-01 |
+| DOC-01 | StrictDoc、Scalar、LikeC4を既存Repository Audit Pagesで生成、公開、表示検証 | `scripts/audit/`、`scripts/pages-ui/`、`.github/workflows/repository-audit.yml` | SPEC-01、SPEC-02、ARCH-01 |
 | QUAL-01 | k6性能budgetと異常負荷・streaming regression、現行比較 | scripts/performance/、性能契約 | HTTP-01、MCP-01の受入HEAD |
 | TRACE-01 | G0〜G7と実行source/run/artifact証拠、全REQと逆引き・未認定一覧の完成 | scripts/ci-contract等、trace evidence | SPEC-01/02/03と各実装完了 |
 
 ## 並列性・統合順序
 
-**スコープ整合が必要:** Issue #660の旧「Orval Web/iOS」はSwiftUI Native採用目標と矛盾する。HTTP-02実装着手前にそのIssueの所有範囲をWebに限定し、iOS Swift生成を独立した作業へ移すこと。設計変更だけで#652完了とはみなさない。
+HTTP-02はDesktop WebのOrval生成を所有する。
+iOSのSwift生成は [iOS設計](IOS-SWIFTUI-ARCHITECTURE.md) が所有し、どちらもSPEC-02のOpenAPIを入力にする。
 
 **初期並列6系列:** SPEC-01、SPEC-02、SPEC-03、STATE-01、OPS-01、ARCH-01。それぞれ専用branch/worktreeを使用してownerパスを競合させない。CON-01は画面・routerのファイル所有者を固定できれば第7系列として独立着手してよい。
 
