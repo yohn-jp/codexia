@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | EXT-OPS-001 | certified commitと署名されたhost identity、許可された環境、Ansible収束、VMのhealthy API・DB | SSH/Tailscale失敗で変更しない、host key mismatchを拒否、失敗したdeployの状態・再実行を判定 |
 | EXT-OPS-002 | exact-source artifactとGHCR image digest、Frontend/Backendのepoch/persistence互換 | 古い/不明/誤digestやschema違いを拒否、未認定mainを昇格しない |
-| EXT-OPS-003 | 鍵の権限、バックアップ内容と保存先の保護、リストア後のfingerprintと原稿/認証の一致 | 破損・鍵欠落・復旧先違い・古いbackupは安全停止。コンテナー戻しとDB restoreを混同しない |
+| EXT-OPS-003 | 鍵の権限、バックアップ内容と保存先の保護、**S3互換bucketへのage暗号文転送・checksum検証・再取得**、リストア後のfingerprintと原稿/認証の一致 | 破損・鍵欠落・復旧先違い・古いbackup・S3転送中断・資格情報失効は安全停止。S3は追加のオフVM保管先でありDB正本ではない。コンテナー戻しとDB restoreを混同しない |
 | EXT-SHARE-001 | 有効なshare capabilityと公開版のreadのみ | 期限切れ・撤回・別project・private Evidence・method違反を拒否 |
 | EXT-IOS-001 | OAuth callbackとToken scope、UIから同じAPI/Revisionへの到達 | OS認証中止、復帰、token失効、local draft保持、物理端末での再検証 |
 
