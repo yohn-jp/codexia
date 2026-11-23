@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page } from "@playwright/test";
 import { startBetterAuthFixture, type BetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 import { browserServerProfile } from "./browser-server-profile";
-import { authorBrowserBuildEnvironment, materializeAuthorBrowserAssets } from "./oauth-asset-template";
 
 export type Shell = "desktop" | "mobile";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
@@ -18,19 +17,24 @@ export function buildAuthorBrowserAssets(
   profile: string,
   assets: string,
   frontendSource?: string,
-  options: { reuseCiTemplate?: boolean } = {},
 ): void {
-  const template = process.env.CODEXIA_E2E_AUTH_ASSET_TEMPLATE;
-  if (template && !frontendSource && options.reuseCiTemplate !== false) {
-    materializeAuthorBrowserAssets(template, assets, profile, server);
-    return;
-  }
   const command = frontendSource ? "pnpm" : process.execPath;
   const args = frontendSource ? ["build:frontend"] : ["app/scripts/build-views.mjs"];
   const build = spawnSync(command, args, {
     cwd: frontendSource ?? root,
     encoding: "utf8",
-    env: authorBrowserBuildEnvironment(server, profile, assets),
+    env: {
+      ...process.env,
+      CODEXIA_PROFILE: profile,
+      CODEXIA_VITE_BUILD_OUTPUT_ROOT: assets,
+      VITE_CODEXIA_API_ORIGIN: server.apiOrigin,
+      VITE_CODEXIA_OAUTH_ISSUER: server.issuer,
+      VITE_CODEXIA_OAUTH_CLIENT_ID: server.webClientId,
+      VITE_CODEXIA_API_AUDIENCE: server.audience,
+      VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: `${server.apiOrigin}/desktop`,
+      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: `${server.apiOrigin}/mobile`,
+      VITE_CODEXIA_OAUTH_SCOPES: "openid codexia:api",
+    },
   });
   if (build.error) throw build.error;
   if (build.status !== 0) throw new Error(`Author browser fixture build failed:\n${build.stdout}\n${build.stderr}`);
