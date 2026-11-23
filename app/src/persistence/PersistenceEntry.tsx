@@ -130,7 +130,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     const requestNavigation = () => {
       setConsoleNavigationError("");
       void (async () => {
-        if (!await protectBeforeAuthTransition("管理コンソールへの移動")) return;
+        if (!await protectBeforeAuthTransition("管理コンソールへの移動")) {
+          setConsoleNavigationError("入力を保護できないため管理コンソールへの移動を停止しました。接続と保存状態を確認してください。");
+          return;
+        }
         try {
           const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
           window.location.assign(createConsoleReturnLocation(currentPath, window.sessionStorage));
