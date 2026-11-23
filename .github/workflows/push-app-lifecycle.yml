@@ -65,7 +65,6 @@ on:
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
       - scripts/release-policy.mjs
-      - scripts/ci/impact/contract.mjs
       - scripts/backend-image-inspection.mjs
       - scripts/push-deployment-admission.mjs
       - scripts/push-deployment-certificate.mjs

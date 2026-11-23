@@ -438,11 +438,9 @@ run_playbook "$tmp/bootstrap.yml" bootstrap
 rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
 service_uid=$(id -u codexia)
 [[ "$service_uid" == "$fixture_uid" ]]
-for _ in $(seq 1 30); do
-  if rootless_systemctl show --property=Version >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
+# Wait for the actual systemd user-manager unit, not an arbitrary retry delay.
+if ! sudo systemctl start "user@${fixture_uid}.service" ||
+   ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
   mark_fixture_unavailable 'user systemd manager is unavailable for the configured service identity'
   exit 78
 fi
@@ -463,12 +461,11 @@ podman_version=$(rootless_podman --version | awk '{print $3}')
 podman_rootless=$(rootless_podman info --format '{{.Host.Security.Rootless}}')
 systemd_version=$(rootless_systemctl --version | head -n 1)
 postgres_version=$(rootless_podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -U codexia_admin -d codexia -c "SHOW server_version"')
-postgres_health=''
-for _ in $(seq 1 12); do
-  postgres_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-db)
-  [[ "$postgres_health" == healthy ]] && break
-  sleep 5
-done
+# Podman handles the condition; timeout only bounds an unready fixture.
+if ! rootless /usr/bin/timeout 120s /usr/bin/podman wait --interval 250ms --condition healthy codexia-db >/dev/null; then
+  echo 'PostgreSQL did not become healthy within the service startup budget' >&2
+fi
+postgres_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-db)
 if [[ "$postgres_health" != healthy ]]; then
   printf 'PostgreSQL healthcheck did not become healthy (status: %s); health history follows:\n' "$postgres_health" >&2
   rootless_podman inspect --format '{{json .State.Health}}' codexia-db >&2
@@ -509,6 +506,8 @@ fi
 rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup \
   -p 127.0.0.1:2222:2222 \
   --volume "$build_context/authorized_keys:/home/codexia-backup/.ssh/authorized_keys:ro" \
+  --health-cmd 'test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub' \
+  --health-interval 1s --health-start-period 5s --health-retries 3 \
   "$fixture_image" >/dev/null
 rootless mkdir -p "$fixture_home/.ssh" "$fixture_home/.local/state/codexia-backup-mount"
 rootless chmod 0700 "$fixture_home/.ssh"
@@ -527,15 +526,8 @@ SSH_CONFIG
 sudo install -o codexia -g codexia -m 0600 "$tmp/ssh-config" "$fixture_home/.ssh/config"
 # The container generates its host key on startup. Its detached run can finish
 # before ssh-keygen -A, so wait for the real key instead of racing sshd startup.
-ssh_host_key_ready=false
-for attempt in $(seq 1 30); do
-  if rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub >/dev/null 2>&1; then
-    ssh_host_key_ready=true
-    break
-  fi
-  sleep 1
-done
-if [[ "$ssh_host_key_ready" != true ]]; then
+if ! rootless /usr/bin/timeout 30s /usr/bin/podman wait --interval 250ms --condition healthy codexia-backup-sshfs >/dev/null ||
+   ! rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub; then
   echo 'Prebuilt SSHFS fixture did not generate its SSH host key' >&2
   rootless_podman logs --tail 50 codexia-backup-sshfs >&2 || true
   exit 1
@@ -599,11 +591,9 @@ insecure = true
 REGISTRY
 registry_configured=true
 sudo install -o codexia -g codexia -m 0600 "$tmp/registries.conf" "$fixture_home/.config/containers/registries.conf"
-for _ in $(seq 1 30); do
-  if curl --fail --silent http://127.0.0.1:5000/v2/ >/dev/null; then break; fi
-  sleep 1
-done
-curl --fail --silent http://127.0.0.1:5000/v2/ >/dev/null
+# Retry the live HTTP readiness result, not elapsed time.
+curl --fail --silent --retry 20 --retry-all-errors --retry-connrefused \
+  --retry-delay 1 --connect-timeout 2 --max-time 3 http://127.0.0.1:5000/v2/ >/dev/null
 node "$repo_root/scripts/push-app-lifecycle.mjs" mirror
 record_phase_timing registry_mirror "$registry_started"
 database_image_name=$(rootless_podman inspect --format '{{.ImageName}}' codexia-db)
@@ -657,6 +647,12 @@ DOCKERFILE
   rootless rm -f "$digest_file"
   node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
 }
+seed_database_sentinel() {
+  rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
+CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT NULL);
+INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
+SENTINEL_SQL
+}
 run_application_lifecycle() {
   local initial_key update_key update_image failed_image
   if [[ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).transition.kind' "$evidence")" == test-only-digest ]]; then
@@ -689,10 +685,7 @@ run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
-rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
-CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT NULL);
-INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
-SENTINEL_SQL
+seed_database_sentinel
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"

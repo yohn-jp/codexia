@@ -188,12 +188,13 @@ YAML
   run_playbook "$tmp/auth-stage.yml" auth-stage-pending "$tmp/bootstrap.yml"
   rootless "$fixture_home/.local/bin/codexia-register-auth" --apply "$primary_image" >"$tmp/auth-bootstrap.log" 2>&1 &
   launcher_pid=$!
-  for _ in $(seq 1 60); do
-    grep -Fq 'Better Auth bootstrap is ready.' "$tmp/auth-bootstrap.log" && break
+  # Follow actual registration readiness output, bounded by a failure deadline.
+  if ! timeout 60s bash -c '(tail -n +1 -F -- "$1" || true) | grep -Fqm1 "Better Auth bootstrap is ready."' bash "$tmp/auth-bootstrap.log"; then
     kill -0 "$launcher_pid" || { wait "$launcher_pid"; return 1; }
-    sleep 1
-  done
-  grep -Fq 'Better Auth bootstrap is ready.' "$tmp/auth-bootstrap.log"
+    echo 'Better Auth registration did not become ready' >&2
+    return 1
+  fi
+  kill -0 "$launcher_pid" || { wait "$launcher_pid"; return 1; }
   auth_fixture register >"$tmp/auth-registration.json"
   owner=$(node - "$tmp/auth-registration.json" "$web" "$ios" "$introspection" <<'NODE'
 const assert = require('node:assert/strict');
@@ -242,14 +243,17 @@ NODE
   [[ "$(observe_auth_database)" == "$database_before" ]]
   rootless rm -- "$orphan_record"
   require_inactive_api
-  run_application_lifecycle
   if [[ "${1:-auth}" == app ]]; then
+    run_application_lifecycle
     # The independent auth lane owns the login/session-specific acceptance.
     set_state better_auth_activation NOT_CHECKED "tested by the separate auth scenario"
     return 0
   fi
 
-  run_deploy auth-primary false '' auth-verified-activation
+  # This lane uses its own pristine PostgreSQL cluster. Generic update,
+  # rollback and interruption transitions are proven by the app lane.
+  run_deploy auth-primary true '' auth-verified-activation
+  seed_database_sentinel
   auth_fixture authorize "$web" "$owner" >"$tmp/auth-session.json"
   token=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).accessToken' "$tmp/auth-session.json")
   proof=$(observe_auth "$primary_image")

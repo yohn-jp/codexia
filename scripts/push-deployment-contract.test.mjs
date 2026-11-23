@@ -353,7 +353,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   const stopApi = shell.indexOf('systemctl --user stop codexia-api.service');
   const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
   const startCandidate = shell.indexOf('systemctl --user start codexia-api.service', installCandidate);
-  const readiness = shell.indexOf('if [[ "$healthy" != true ]]');
+  const readiness = shell.indexOf('if [[ "$candidate_health" != healthy ]]');
   const startTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', readiness);
   const commitRelease = shell.indexOf('mv -f -- "$release_state.tmp" "$release_state"');
   for (const [name, position] of Object.entries({ stopTunnel, stopApi, installCandidate, startCandidate, readiness, startTunnel, commitRelease })) {

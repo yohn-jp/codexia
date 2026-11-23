@@ -169,16 +169,9 @@ if [[ "$had_unit" == true ]]; then
   }
   install -m 0644 -- "$state_dir/rollback-api.container" "$active_unit"
   systemctl --user daemon-reload
+  # The previously recorded canonical Quadlet must signal readiness through systemd.
   systemctl --user start codexia-api.service
-  healthy=false
-  for attempt in $(seq 1 30); do
-    if podman inspect --format '{{.State.Health.Status}}' codexia-api 2>/dev/null | grep -Fxq healthy; then
-      healthy=true
-      break
-    fi
-    sleep 2
-  done
-  [[ "$healthy" == true ]] || {
+  podman inspect --format '{{.State.Health.Status}}' codexia-api 2>/dev/null | grep -Fxq healthy || {
     echo 'Prior API did not recover from interrupted deployment' >&2
     exit 1
   }
