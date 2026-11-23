@@ -96,7 +96,9 @@ samples.
 
 Use the new output directory outside the checkout to retain the dataset
 manifest, source and build identities, runtime and database settings,
-seeding time, raw k6 samples, metric summary and SHA-256 inventory. Custom
+seeding time, raw k6 samples, metric summary and SHA-256 inventory. The run
+record stores the k6 process outcome. The runner reports success after the
+output files have been inventoried. Custom
 latency trends contain only checked responses. The PostgreSQL timing
 includes persistence and pool overhead. Stream timing covers first byte
 and full response receipt. The application RSS readings describe the

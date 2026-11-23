@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createInventory } from './artifacts.mjs';
-import { buildIdentity, sourceIdentity, writeNewJsonResult } from './common.mjs';
+import { buildIdentity, hashTree, sourceIdentity, writeNewJsonResult } from './common.mjs';
 import { generate } from './dataset.mjs';
 import { startFixture } from './k6-fixture.mjs';
 
@@ -42,7 +42,13 @@ async function run() {
   await mkdir(output, { mode: 0o700 });
   const startedAt = new Date().toISOString();
   const source = sourceIdentity();
-  const build = await buildIdentity();
+  const [build, contracts, persistenceContracts] = await Promise.all([
+    buildIdentity(),
+    hashTree('packages/contracts/dist'),
+    hashTree('packages/persistence-contracts/dist'),
+  ]);
+  build[contracts.root] = contracts;
+  build[persistenceContracts.root] = persistenceContracts;
   const scriptHashes = Object.fromEntries(await Promise.all(scripts.map(async file =>
     [file, sha256(await readFile(join(scriptDirectory, file)))])));
   const datasetPath = join(output, 'dataset');
@@ -98,18 +104,22 @@ async function run() {
       signal: stop.signal,
     });
     const [exitCode, signal] = await once(child, 'close');
-    const completed = exitCode === 0 && signal === null;
+    const application = {
+      rssBeforeBytes: rssBefore,
+      rssAfterBytes: process.memoryUsage().rss,
+      processLifetimeMaxRssKiB: process.resourceUsage().maxRSS,
+      cpuDuringK6Us: process.cpuUsage(cpuBefore),
+    };
     await writeNewJsonResult(join(output, 'run.json'), {
       profile, startedAt, finishedAt: new Date().toISOString(), source, build, scriptHashes,
       toolchain: { k6: version.trim(), k6BinarySha256: sha256(await readFile(binary)), node: process.version },
       host: { platform: platform(), arch: arch(), release: release(), logicalCpus: cpus().length },
       fixtureId: dataset.fixtureId, setupMs: seeded.setupMs, inventory: seeded.inventory,
       database: { image: postgresImage, ...seeded.database },
-      application: { rssBeforeBytes: rssBefore, rssAfterBytes: process.memoryUsage().rss,
-        processLifetimeMaxRssKiB: process.resourceUsage().maxRSS, cpuDuringK6Us: process.cpuUsage(cpuBefore) },
-      k6: { exitCode, signal, completed },
+      application,
+      k6: { exitCode, signal },
     });
-    if (!completed) throw new Error(`k6 exited with ${exitCode ?? signal}; evidence is in ${output}`);
+    if (exitCode !== 0 || signal !== null) throw new Error(`k6 exited with ${exitCode ?? signal}; evidence is in ${output}`);
     await createInventory(output, ['dataset.json', 'k6-samples.jsonl', 'k6-summary.json', 'run.json'], join(output, 'inventory.json'));
     console.log(`Synthetic k6 ${profile} evidence: ${output}`);
   } finally {
