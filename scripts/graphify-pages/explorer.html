@@ -180,9 +180,16 @@ import { expandGraph } from './analysis.mjs';
   const short = path => path.length > 42 ? '…' + path.slice(-41) : path;
   const matchesRelation = rel => !$('relation').value || rel.relations.includes($('relation').value);
   const relationCount = rel => $('relation').value && rel.relationCounts ? (rel.relationCounts[$('relation').value] || 0) : rel.count;
-  const evidenceUrl = item => { if(!item || !item.path || !Number.isInteger(item.line) || item.line < 1 || !/^[a-f0-9]{40}$/.test(data.sourceSha || '')) return null; return `https://github.com/yohn-jp/codexia/blob/${data.sourceSha}/${item.path.split('/').map(encodeURIComponent).join('/')}#L${item.line}`; };
+  function lineEvidenceLink(item) {
+    if (!Number.isSafeInteger(item?.line) || item.line < 1) return null;
+    const source = sourceLinkByPath.get(item.path);
+    if (!source) return null;
+    const link = source.cloneNode(false);
+    link.hash = 'L' + item.line;
+    link.hidden = false;
+    return link;
+  }
   const selectedSymbolRelations = (symbol, direction) => (direction === 'incoming' || direction === 'both' ? symbol.incoming || [] : []).concat(direction === 'outgoing' || direction === 'both' ? symbol.outgoing || [] : []).filter(edge => !$('relation').value || edge.relation === $('relation').value);
-  const symbolEvidenceUrl = symbol => Number.isInteger(symbol?.line) && symbol.line > 0 ? evidenceUrl({path:symbol.path,line:symbol.line}) : null;
   function updateUrl(mode = 'push') {
     if (!selected) return;
     const params = new URLSearchParams(location.search);
@@ -268,7 +275,13 @@ import { expandGraph } from './analysis.mjs';
     const filteredEvidence=$('relation').value?evidence.filter(item=>!item.relation||item.relation===$('relation').value):evidence;
     if(!filteredEvidence.length)return;
     const group=document.createElement('div');group.className='relation-evidence';
-    for(const item of filteredEvidence){const href=evidenceUrl(item);if(!href)continue;const a=document.createElement('a');a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`${item.path}:${item.line}`;a.setAttribute('aria-label',`GitHubソースを ${item.line} 行で開く`);group.append(a,document.createTextNode(' '));}
+    for (const item of filteredEvidence) {
+      const link = lineEvidenceLink(item);
+      if (!link) continue;
+      link.textContent = `${item.path}:${item.line}`;
+      link.setAttribute('aria-label', `GitHubソースを ${item.line} 行で開く`);
+      group.append(link, document.createTextNode(' '));
+    }
     if(group.querySelector('a'))root.append(group);
   }
   function renderRelations(id,rels,symbolMode=false) {
@@ -317,7 +330,17 @@ import { expandGraph } from './analysis.mjs';
     $('selected-path').textContent=f.path;
     const symbolDetail=$('symbol-detail');symbolDetail.hidden=!selectedSymbol;
     const symbolSource=$('symbol-source');symbolSource.hidden=true;
-    if(selectedSymbol){$('selected-symbol').textContent=selectedSymbol.label||`Symbol ${selectedSymbol.id}`;const line=Number.isInteger(selectedSymbol.line)&&selectedSymbol.line>0?`行 ${selectedSymbol.line}`:'行番号なし';$('symbol-location').textContent=`${selectedSymbol.path} · ${line} · ID ${selectedSymbol.id}`;const url=symbolEvidenceUrl(selectedSymbol);if(url){symbolSource.href=url;symbolSource.hidden=false;}}
+    if (selectedSymbol) {
+      $('selected-symbol').textContent = selectedSymbol.label || `Symbol ${selectedSymbol.id}`;
+      const link = lineEvidenceLink(selectedSymbol);
+      const line = link ? `行 ${selectedSymbol.line}` : '行番号なし';
+      $('symbol-location').textContent = `${selectedSymbol.path} · ${line} · ID ${selectedSymbol.id}`;
+      if (link) {
+        link.id = 'symbol-source';
+        link.textContent = symbolSource.textContent;
+        symbolSource.replaceWith(link);
+      }
+    }
     else {$('selected-symbol').textContent='';$('symbol-location').textContent='';}
     if (shownSourceLink) shownSourceLink.hidden=true;
     shownSourceLink=sourceLinkByPath.get(f.path);

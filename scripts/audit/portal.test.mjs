@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -144,5 +144,29 @@ test('rejects credential-like values and symlinked publication files',()=>{
     unlinkSync(join(site,'ci','leak.txt'));
     symlinkSync(join(site,'manifest.json'),join(site,'ci','redirect.json'));
     assert.throws(()=>verify(site,origin),/Symlink in Pages artifact/u);
+  } finally { cleanup(site); }
+});
+
+test('review finalization rejects symlinked files before updating integrity metadata', () => {
+  const site = fixture();
+  try {
+    generate(site, sha, origin);
+    const folder = join(site, 'reviews', sha);
+    for (const [name, message] of [
+      ['manifest.json', /Review manifest is not a regular file/u],
+      ['index.html', /Review index is not a regular file/u],
+    ]) {
+      const path = join(folder, name);
+      const original = join(site, name + '.original');
+      renameSync(path, original);
+      const bytes = readFileSync(original);
+      symlinkSync(original, path);
+      assert.throws(() => finalize(site, origin), message);
+      assert.deepEqual(readFileSync(original), bytes);
+      unlinkSync(path);
+      renameSync(original, path);
+    }
+    assert.deepEqual(finalize(site, origin), { finalizedReviews: 1 });
+    assert.equal(verify(site, origin).routes, 8);
   } finally { cleanup(site); }
 });

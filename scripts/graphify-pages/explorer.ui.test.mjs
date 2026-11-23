@@ -108,6 +108,8 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
   assert.equal(await page.locator('#outgoing-list .relation').count(), 1);
   assert.equal(await page.locator('#symbol-source').isVisible(), true);
+  assert.equal(await page.locator('#symbol-source').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L4`);
+  assert.equal(await page.locator('#outgoing-list .relation-evidence a').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L7`);
   await page.locator('#depth').selectOption('3');
   assert.match(await page.locator('#expansion-list').innerText(), /循環\/重複/);
   assert.ok(await page.locator('.relation-evidence a').count() > 0);

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
@@ -17,6 +17,20 @@ const REVIEW_OUTPUTS = new Set(['gemini-review.md','gemini-diff.md','preview.jso
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const esc = value => String(value).replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+
+function readPageFile(path, encoding, message = 'Expected a regular Pages file') {
+  let fd;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    assert.ok(fstatSync(fd).isFile(), message);
+    return readFileSync(fd, encoding);
+  } catch (error) {
+    if (['ENOENT', 'ELOOP', 'EMLINK'].includes(error.code)) throw new Error(message, { cause: error });
+    throw error;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
 
 function canonicalOrigin(value) {
   assert.ok(value===CANONICAL_ORIGIN,'Pages origin must be the canonical public repository site');
@@ -118,7 +132,7 @@ function inventory(site) {
 
 function inspectSecrets(files) {
   for (const file of files) {
-    const bytes = readFileSync(file.absolute);
+    const bytes = readPageFile(file.absolute);
     if (bytes.includes(0)) continue;
     const content = bytes.toString('utf8');
     assert.ok(!containsCredentialPattern(content), `Credential-like value in public artifact: ${file.rel}`);
@@ -158,10 +172,9 @@ function verifyOutputs(directory,outputs,allowed,extra=[]) {
   const names=allowedOutputs(outputs,allowed);
   assert.ok(names.size>0,'No declared outputs');
   for (const output of outputs) {
-    const file=join(directory,output.name), stat=lstatSync(file);
-    assert.ok(stat.isFile() && !stat.isSymbolicLink(),'Output is not a regular file');
-    assert.equal(stat.size,output.bytes,'Output size mismatch');
-    assert.equal(sha256(readFileSync(file)),output.sha256,'Output digest mismatch');
+    const bytes=readPageFile(join(directory,output.name),undefined,'Output is not a regular file');
+    assert.equal(bytes.length,output.bytes,'Output size mismatch');
+    assert.equal(sha256(bytes),output.sha256,'Output digest mismatch');
   }
   const actual=readdirSync(directory).sort();
   const expected=[...names,'manifest.json',...extra].sort();
@@ -317,11 +330,7 @@ function validateRegistry(site,manifest,audit,origin) {
       assert.ok(typeof diagram.image==='string' && /^svg\/[a-z]+-\d+\.svg$/u.test(diagram.image) && diagram.image===`svg/${diagram.id}.svg`,'Invalid Architecture SVG path');
       assert.ok(!images.includes(diagram.image),'Duplicate Architecture SVG path');
       images.push(diagram.image);
-      const svgPath=join(site,'architecture',diagram.image);
-      assert.ok(existsSync(svgPath),'Architecture SVG asset is missing');
-      const svgStat=lstatSync(svgPath);
-      assert.ok(svgStat.isFile() && !svgStat.isSymbolicLink(),'Architecture SVG asset is missing');
-      const svg=readFileSync(svgPath,'utf8');
+      const svg=readPageFile(join(site,'architecture',diagram.image),'utf8','Architecture SVG asset is missing or not a regular file');
       assert.ok(/<svg(?:\s|>)/u.test(svg.slice(0,2048)) && /<\/svg>/u.test(svg.slice(-2048)),'Invalid Architecture SVG asset');
     }
     const architectureEntries=readdirSync(join(site,'architecture')).sort();
@@ -354,21 +363,25 @@ export function finalize(siteDir,originValue) {
   const allowedShas=Object.entries(top.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha);
   for (const sha of allowedShas) {
     assert.ok(SHA.test(sha),'Invalid review source identifier');
-    const folder=join(site,'reviews',sha), manifestPath=join(folder,'manifest.json');
     const reviewsRoot=join(site,'reviews');
-    assert.ok(existsSync(reviewsRoot) && lstatSync(reviewsRoot).isDirectory() && !lstatSync(reviewsRoot).isSymbolicLink(),'Review root is not a regular directory');
-    assert.ok(existsSync(folder) && lstatSync(folder).isDirectory() && !lstatSync(folder).isSymbolicLink(),'Review SHA directory is not a regular directory');
-    assert.ok(existsSync(manifestPath),'Review manifest is missing');
-    assert.ok(lstatSync(manifestPath).isFile() && !lstatSync(manifestPath).isSymbolicLink(),'Review manifest is not a regular file');
-    const detail=JSON.parse(readFileSync(manifestPath,'utf8'));
+    const folder=join(reviewsRoot,sha), manifestPath=join(folder,'manifest.json');
+    assert.ok(lstatSync(reviewsRoot).isDirectory(),'Review root is not a regular directory');
+    assert.ok(lstatSync(folder).isDirectory(),'Review SHA directory is not a regular directory');
+    const detail=JSON.parse(readPageFile(manifestPath,'utf8','Review manifest is not a regular file'));
     assert.ok(detail.sourceSha===sha && detail.status===top.reviews[sha].status,'Review manifest identity mismatch');
     const names=allowedOutputs(detail.outputs,name=>REVIEW_OUTPUTS.has(name));
     assert.ok(names.has('index.html'),'Review index output is not declared');
-    const index=join(folder,'index.html'), stat=lstatSync(index);
-    assert.ok(stat.isFile() && !stat.isSymbolicLink(),'Review index is not a regular file');
-    const bytes=readFileSync(index), record=detail.outputs.find(output=>output.name==='index.html');
+    const bytes=readPageFile(join(folder,'index.html'),undefined,'Review index is not a regular file');
+    const record=detail.outputs.find(output=>output.name==='index.html');
     record.bytes=bytes.length; record.sha256=sha256(bytes);
-    writeFileSync(manifestPath,json(detail));
+    const staging=mkdtempSync(join(folder,'.review-manifest-'));
+    try {
+      const temporary=join(staging,'manifest.json');
+      writeFileSync(temporary,json(detail),{flag:'wx'});
+      renameSync(temporary,manifestPath);
+    } finally {
+      rmSync(staging,{recursive:true,force:true});
+    }
   }
   return { finalizedReviews:allowedShas.length };
 }
