@@ -755,7 +755,13 @@ export class CoreStore implements MutationCoordinator {
     return {snapshot:manifest.snapshot,scene:{id:this.logicalId(index,document),title:document.title,text:manuscriptBody(manuscript.content),revision:hash(metadata.content+"\0"+manuscript.content)},document:{path:manuscriptPath,content:manuscript.content,revision:manuscript.revision},metadata:{path:metadataPath,content:metadata.content,revision:metadata.revision}};
   }
   async readScene(projectId:string,sceneId:string):Promise<Scene> { return (await this.readSceneSnapshot(projectId,sceneId)).scene; }
-  async resolveDocumentScene(projectId:string,path:string,pinned?:SnapshotId) { safePath(path); const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const id=manifest.files[path]?.documentId; const document=id ? index.documentsById.get(id):undefined; return {snapshot:manifest.snapshot,sceneId:document ? this.logicalId(index,document):null}; }
+  async resolveSnapshotDocument(projectId: string, path: string, pinned?: SnapshotId) {
+    safePath(path);
+    const manifest = await this.manifest(projectId, pinned);
+    const id = manifest.files[path]?.documentId;
+    const document = id ? this.snapshotIndex(manifest).documentsById.get(id) : undefined;
+    return { snapshot: manifest.snapshot, documentId: document?.id ?? null };
+  }
   async searchSnapshot(projectId:string,query:string,limit=20,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;results:LiteralSearchResult[]}> {
     if (typeof query!=="string" || query.length>512 || !Number.isInteger(limit) || limit<1) fail(400,"invalid_search_query","Invalid search query or limit");
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const results:LiteralSearchResult[]=[];

@@ -241,8 +241,8 @@ test("native notes retain their manuscript and author identity without acquiring
   }));
   const next = await core.reader(p.id);
   assert.equal(await next.read(misleadingPath), null);
-  assert.equal((await core.resolveDocumentScene(p.id, bodyPath, next.snapshot)).sceneId, "author-note");
-  assert.equal((await core.resolveDocumentScene(p.id, bodyPath, reader.snapshot)).sceneId, note.document.id);
+  assert.equal((await core.resolveSnapshotDocument(p.id, bodyPath, next.snapshot)).documentId, note.document.id);
+  assert.equal((await core.resolveSnapshotDocument(p.id, bodyPath, reader.snapshot)).documentId, note.document.id);
   assert.deepEqual((await core.searchSnapshot(p.id, "Private note body")).results.map(({ id, type }) => ({ id, type })),
     [{ id: "author-note", type: "note" }]);
   await assert.rejects(core.readSceneSnapshot(p.id, "author-note"), { code: "scene_not_found" });

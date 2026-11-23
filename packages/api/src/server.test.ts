@@ -104,8 +104,8 @@ function makeSnapshotStore() {
           return { content: encoding === "base64" ? Buffer.from(document.content).toString("base64") : document.content, revision: document.revision };
         }, async list(prefix: string) { return prefix === "manuscript/" ? [document.path] : []; } };
     },
-    async resolveDocumentScene(_projectId: string, path: string, pinned?: SnapshotId) {
-      return { snapshot: pinned ?? SNAPSHOT, sceneId: path === document.path ? "scene-one" : null };
+    async resolveSnapshotDocument(_projectId: string, path: string, pinned?: SnapshotId) {
+      return { snapshot: pinned ?? SNAPSHOT, documentId: path === document.path ? "74182b28-459c-4bf1-b9bd-0ec48917ad4e" : null };
     },
     async readTreeSnapshot(_projectId: string, pinned?: SnapshotId) {
       snapshotReads.push({ kind: "tree", pinned }); return { snapshot: pinned ?? SNAPSHOT, tree: { title: "A Work", volumes: [] } };
@@ -2069,7 +2069,7 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { path: "manuscript/ms-one/scene-one.md" }, snapshot: overlay }),
     });
-    assert.deepEqual(await resolveResponse.json(), { ok: true, snapshot: overlay, data: { sceneId: "scene-one" } });
+    assert.deepEqual(await resolveResponse.json(), { ok: true, snapshot: overlay, data: { documentId: "74182b28-459c-4bf1-b9bd-0ec48917ad4e" } });
     const unsafeResolve = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.document.resolve`, {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ input: { path: "../secret" }, snapshot: overlay }),
     });
@@ -3040,13 +3040,13 @@ it("excludes preserved module files from live resolution while retaining portabl
         method: "POST", headers, body: JSON.stringify({ input: { path }, snapshot: pinned }),
       });
       assert.equal(response.status, 200);
-      const result = await response.json() as ActionResult<{ sceneId: null; document: { path: string; content: string } | null }>;
+      const result = await response.json() as ActionResult<{ documentId: null; document: { path: string; content: string } | null }>;
       assert.ok(result.ok, JSON.stringify(result));
       assert.deepEqual(result.snapshot, pinned);
       return result.data;
     };
-    assert.deepEqual(await resolvePath(archivePath), { sceneId: null, document: null });
-    assert.deepEqual(await resolvePath("meta/scriptorium/modules/story/missing.md"), { sceneId: null, document: null });
+    assert.deepEqual(await resolvePath(archivePath), { documentId: null, document: null });
+    assert.deepEqual(await resolvePath("meta/scriptorium/modules/story/missing.md"), { documentId: null, document: null });
     assert.equal((await resolvePath(currentPath)).document?.content, current.content);
   }
   const response = await fetch(`${api.base}/api/v1/persistence/projects/${project.id}/archive`, {
@@ -3164,11 +3164,11 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
       if (author) assert.ok(detail.ok && detail.data.proposal.proposal.id === privateIds[0], JSON.stringify(detail));
       else assert.ok(!detail.ok && detail.error.code === "PROPOSAL_NOT_FOUND", JSON.stringify(detail));
 
-      const resolved = await invoke<{ sceneId: null; document: { path: string; content: string } | null }>(
+      const resolved = await invoke<{ documentId: null; document: { path: string; content: string } | null }>(
         "core.document.resolve", { path: grantsPath }, legacySnapshot,
       );
       assert.ok(resolved.ok, JSON.stringify(resolved));
-      assert.equal(resolved.data.sceneId, null);
+      assert.equal(resolved.data.documentId, null);
       if (author) assert.equal(resolved.data.document?.content, grantBody);
       else assert.equal(resolved.data.document, null);
 
@@ -3420,6 +3420,50 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   assert.ok(appliedResult.ok && appliedResult.data.replayed);
   assert.equal(appliedResult.data.changeSet.id, changeSet.id);
   assert.equal(appliedResult.data.changeSet.status, "applied");
+});
+
+it("resolves the canonical document ID for a mapped manuscript at the requested pin", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Mapped manuscript navigation");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-mapped-manuscript-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const before = (await store.reader(project.id)).snapshot;
+  const logicalId = "search-opening";
+  const path = `manuscript/first-volume/first-chapter/${logicalId}.md`;
+  const manuscript = "Harbor opening for Search.";
+  for (const input of [
+    { kind: "volume", id: "first-volume", title: "Volume" },
+    { kind: "chapter", id: "first-chapter", title: "Chapter", volumeId: "first-volume" },
+    { kind: "scene", id: logicalId, title: "Mapped opening", volumeId: "first-volume", chapterId: "first-chapter", manuscriptBody: manuscript },
+  ] as const) {
+    const { snapshot } = await store.observe(project.id);
+    const { changeSet } = await store.proposeHierarchyCreate(project.id, input, {
+      projectVersion: snapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID(),
+    });
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "owner",
+    }));
+    await persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: approved.id, expectedVersion: approved.version,
+    }));
+  }
+  const pinned = (await store.reader(project.id)).snapshot;
+  const documents = await persistence.read(reader => reader.listDocuments(project.id));
+  const document = documents.find(item => item.kind === "scene");
+  assert.ok(document && document.id !== logicalId);
+  assert.equal((await store.searchSnapshot(project.id, manuscript, 5, pinned)).results[0]?.filePath, path);
+
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, staticDir, { persistence, ...testClientSettings(project.id, client.publicJwks, client.isActive) });
+  t.after(api.close);
+  const resolvePath = async (snapshot: SnapshotId) => {
+    const response = await fetch(`${api.base}/api/projects/${project.id}/actions/core.document.resolve`, {
+      method: "POST", headers: client.ownerHeaders(), body: JSON.stringify({ input: { path }, snapshot }),
+    });
+    assert.equal(response.status, 200);
+    return await response.json();
+  };
+  assert.deepEqual(await resolvePath(pinned), { ok: true, snapshot: pinned, data: { documentId: document.id } });
+  assert.deepEqual(await resolvePath(before), { ok: true, snapshot: before, data: { documentId: null, document: null } });
 });
 
 it("replays native hierarchy creation and deletion through authenticated PostgreSQL HTTP", async (t) => {

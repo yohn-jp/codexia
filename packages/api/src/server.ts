@@ -877,13 +877,13 @@ export function createServer(options: ApiServerOptions): Server {
         async invoke(input, context) {
           const { path } = input as { path: string };
           if (isModulePreservationArchivePath(path) || (!canReviewPrivateChangeSets && isPrivatePublishingPath(path))) {
-            return { ok: true, snapshot: context.reader.snapshot, data: { sceneId: null, document: null } };
+            return { ok: true, snapshot: context.reader.snapshot, data: { documentId: null, document: null } };
           }
-          if (!coreStore.resolveDocumentScene) return { ok: false, snapshot: context.reader.snapshot,
+          if (!coreStore.resolveSnapshotDocument) return { ok: false, snapshot: context.reader.snapshot,
             error: { code: "DOCUMENT_NAVIGATION_UNAVAILABLE", message: "Document navigation is unavailable", retryable: false } };
-          const result = await coreStore.resolveDocumentScene(projectId, path, context.reader.snapshot);
-          const document = result.sceneId === null ? await context.reader.read(path) : undefined;
-          return { ok: true, snapshot: result.snapshot, data: { sceneId: result.sceneId,
+          const result = await coreStore.resolveSnapshotDocument(projectId, path, context.reader.snapshot);
+          const document = result.documentId === null ? await context.reader.read(path) : undefined;
+          return { ok: true, snapshot: result.snapshot, data: { documentId: result.documentId,
             ...(document !== undefined ? { document: document ? { path, content: document.content, revision: document.revision } : null } : {}) } };
         },
       } },
