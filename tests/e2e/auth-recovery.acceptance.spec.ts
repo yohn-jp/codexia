@@ -88,11 +88,14 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   expect(confirmed.status()).toBe(200);
   expect(await confirmed.json()).toEqual({ authenticated: true });
   await expect(page.getByRole("heading", { name: "管理コンソール", exact: true })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "管理コンソール" }).getByRole("link", { name: "バックアップ" })).toHaveAttribute("href", "/console/backups");
+  const backupsLink = page.getByRole("navigation", { name: "管理コンソール" }).getByRole("link", { name: "バックアップ" });
+  await expect(backupsLink).toHaveAttribute("href", /^\/console\/backups\?return=[0-9a-f-]{36}$/u);
+  await backupsLink.click();
+  await expect(page.getByRole("heading", { name: "バックアップ", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 320, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
-  await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).click();
+  await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).first().click();
   await expect.poll(() => page.url()).toBe(authoringUrl);
   expect((await readPersistenceDrafts(page)).some(record => record.documentId === fixture.scene.id && record.markdown === draft)).toBe(true);
   await authorizeAuthor("desktop", page, { continueCurrentPage: true });
