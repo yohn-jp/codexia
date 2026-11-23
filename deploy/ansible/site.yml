@@ -42,7 +42,9 @@
 
     - name: Gather target host facts
       ansible.builtin.setup:
-        gather_subset: "{{ ['!all', '!min', 'user'] if codexia_stage in ['secrets', 'base', 'auth-runtime'] else ['all'] }}"
+        # Host inspection needs platform/service facts. Convergence and deployment
+        # require the effective user only; avoid full discovery per rollout.
+        gather_subset: "{{ ['!all', '!min', 'user', 'distribution', 'architecture', 'service_mgr'] if codexia_stage in ['inspect', 'host', 'bootstrap'] else ['!all', '!min', 'user'] }}"
       become: "{{ codexia_stage == 'deploy-lifecycle-fixture' }}"
       become_user: "{{ codexia_service_user | default('codexia') }}"
 
