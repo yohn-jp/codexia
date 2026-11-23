@@ -1,9 +1,8 @@
 # HTTP API 詳細契約・Operation台帳
 
-**種別: 規範的API設計。** この文書は **APIのmethod/path、入力・出力DTO、HTTP status・エラー、競合・冪等性、version、検証可能性** を所有する。principalとURLごとの許可・拒否は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuth/Better Authのプロトコルは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) と [MCP OAuth](MCP-OAUTH.md)、Coreの変更/receiptの意味は [Core](CORE.md) が正本である。ここで第二の権限モデルや代替writerを作らない。
+**種別: 規範的API設計。** この文書は操作の意味、競合・冪等性、互換性、検証義務を定める。principalとURLごとの許可・拒否は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuthとBetter Authのプロトコルは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) と [MCP OAuth](MCP-OAUTH.md)、Coreの変更とreceiptの意味は [Core](CORE.md) が正本である。
 
-Codexiaが所有するHTTPのワイヤ契約は [TypeSpec](../../packages/http-contract/src/main.tsp) で編集する。
-この文書は操作の意味、認可の責務、互換性の判断を定める。
+Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、エラー、securityの正本は [TypeSpec](../../packages/http-contract/src/main.tsp) とする。
 [生成したOpenAPI](../../packages/http-contract/openapi/codexia.openapi.yaml) から各操作のHTTP表現を参照できる。
 
 ## 契約境界
