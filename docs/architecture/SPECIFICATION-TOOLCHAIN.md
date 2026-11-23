@@ -23,6 +23,7 @@
 | HTTP runtime | **Fastify（Node.js、継続採用）** | Hono | Schema/response serialization、plugin encapsulation、hook/close lifecycleとNodeのストリーム境界を維持。HonoのWeb標準APIとOrval Hono generatorは魅力だが、VM上のAPIで置換する合理性は不足。現行catch-allの廃止はFastify標準routeへ移行して実施 |
 | server/client生成 | **Orval（client/Zod生成に限定）** | Hey API | TypeSpec由来OpenAPIからclient/Schema生成を行う。Orval Hono server generatorは採用しない。Fastifyのroute schemaはOpenAPI/JSON Schemaから生成・照合し、二重の手書きDTOを作らない |
 | runtime Schema | **Zod v4（業務/MCP/client）＋ Fastify JSON Schema/Ajv（HTTP境界）** | TypeBoxをHTTPの別正本とする方式 | ZodとJSON Schemaは異なる責務。HTTPワイヤ契約はTypeSpec→OpenAPI/JSON Schemaに一方向生成し、Fastifyの標準validator/serializerで実行。Zodを独立編集可能なHTTP正本にしない |
+| UI状態機械 | **XState v5（複雑な保存/復旧・ChangeSet・認証・backup UIに限定）** | React boolean/reducerによる独立した状態フラグの増殖 | 状態・event・guard/async actorと異常遷移を機械的に記述。単純なローカルUI stateはReactのまま。API/DB/Better Authの正本を置換しない |
 | OpenAPI品質 | **Redocly CLI 2** | Spectral | lint、bundle、ルール/Markdownチェックを集約。実API適合は別ツールで証明 |
 | OpenAPI互換 | **oasdiff** | OpenAPI Diff | breaking/change severity、format別出力とCIゲート。互換epochの設計判断は既存 deployment契約が所有 |
 | API契約の実動作 | **Schemathesis** | Dredd | schemaに基づくpositive/negative・stateful探索。意味的なBOLA/作者承認/保存テストは別途維持 |
@@ -45,7 +46,7 @@
 | 現行コード/仕様の実情 | 変更後の目標 | 必須の変更と不変条件 |
 | --- | --- | --- |
 | packages/api/src/server.tsはFastifyを生成するが、共通catch-all内でmethod/pathを手動分岐。Node IncomingMessage/ServerResponse、SSE、Abort、独自security headersを使用 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
-| packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | 生成Zod validatorを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない |
+| packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | TypeSpec/OpenAPI由来のFastify JSON Schema/Ajvを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない。Zodは業務/MCP/clientで維持 |
 | modules/mcp/src/http.tsはv1のstateful session map、Mcp-Session-Id、GET/POST/DELETE、idle timerを使う | SDK v2と2026 specのStateless HTTPをFastifyへ公式Web標準handler adapter経由で接続。必要な移行期間だけ正式に承認されたversionを扱う | owner/project/scopeの毎request再検証、CORS/headers、切断、stream、retry、旧session削除を実証 |
 | modules/mcp/src/stdio.tsはv1のStdioServerTransportへconnect、tool registrarはZod互換モード | v2のserveStdioとZod v4 | 入出力schema、同じaction/effect、STDOUT汚染なし、旧protocol拒否/許可の方針を明記 |
 | public schemaは3つのSQL migrationとchecksum ledger、認証schemaはBetter Auth専用 | SQLを物理詳細契約として維持しpgTAPで検証 | schema/checksum/trigger/roleと隔離restoreを維持。既存migrationを改変しない |
@@ -68,6 +69,9 @@
 - [要求/StrictDoc移行](../requirements/STRICTDOC-TRACEABILITY.md)
 - [TypeSpec/Fastify/Orval/API契約移行](HTTP-PLATFORM-MIGRATION.md)
 - [DB契約検証](POSTGRES-CONTRACT-VERIFICATION.md)
+- [XState v5状態機械](../design/XSTATE-STATE-MACHINE-CONTRACT.md)
+- [バックアップ管理UI・S3制御境界](BACKUP-CONSOLE-CONTRACT.md)
+- [全workstreamと依存・完了条件](SPECIFICATION-IMPLEMENTATION-CONTRACT.md)
 - [MCP v2と認証境界](MCP-V2-MIGRATION.md)
 - [CI・脅威・性能・Portalの受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)
 
