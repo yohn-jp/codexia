@@ -15,7 +15,7 @@
 
 | ID | 成果 | 主な所有パス | 先行条件 |
 | --- | --- | --- | --- |
-| SPEC-01 | StrictDocへ30初期REQの一回限り移行、source/test relation、逆引きPoC | docs/requirements/、trace専用scripts | なし |
+| SPEC-01 | StrictDocへ初期30件と追加採用REQの全IDを一回限り移行、source/test relation、逆引きPoC | docs/requirements/、trace専用scripts | なし |
 | SPEC-02 | TypeSpec→OpenAPI3.1生成、Redocly/oasdiff、Fastify schema変換契約の検査 | 新規HTTP contract package、spec scripts | なし |
 | SPEC-03 | pgTAP＋pg_catalog、SQL migrationとauth schemaの物理検証、tbls生成 | packages/persistence-postgres/tests、DB検証scripts | なし |
 | STATE-01 | XState v5による原稿保存・復旧の実行機械と実DB/ブラウザー受入 | appのauthoring/save/recovery機能 | なし |
