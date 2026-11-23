@@ -40,7 +40,7 @@ test('every cataloged product screen has an owned, rendered transition diagram',
   assert.ok(section, 'Screen diagram authority must be registered');
   const markdown = readFileSync(join(root, section.path), 'utf8');
   const diagrams = parseMermaidDiagrams(markdown, section);
-  const screens = [...catalog.matchAll(/^\\|\\s([A-Z]+-\\d\\d)\\s\\|/gmu)].map(match => match[1]);
+  const screens = [...catalog.matchAll(/^\|\s([A-Z]+-\d\d)\s\|/gmu)].map(match => match[1]);
   assert.ok(screens.length >= 28, 'Screen inventory must include product and security surfaces');
   const unmodeled = screens.filter(id => id !== 'OPS-01' &&
     !diagrams.some(diagram => diagram.title.includes(id)));
