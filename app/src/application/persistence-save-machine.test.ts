@@ -209,6 +209,36 @@ test("a stale save result leaves the newly selected document in its recovered co
   actor.stop();
 });
 
+test("a pending save recovered on a newly selected document replays its original identity", async () => {
+  const calls: Array<{ documentId: string; operationId: string; generation: number; reconcileReplay: boolean }> = [];
+  const actor = createActor(createPersistenceSaveMachine({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) {
+      calls.push({
+        documentId: input.identity.documentId,
+        operationId: input.operationId,
+        generation: input.generation,
+        reconcileReplay: input.reconcileReplay,
+      });
+      return { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "revision-3" };
+    },
+  }), { input: { identity } });
+  actor.start();
+  actor.send({ type: "RECOVERY.READY", identity, recovery: "draft", generation: 2, draftProtected: true, remoteConflict: true });
+  assert.equal(actor.getSnapshot().matches({ active: { server: "conflict" } }), true);
+
+  const nextIdentity = { projectId: "project-1", documentId: "document-2" };
+  actor.send({
+    type: "RECOVERY.READY", identity: nextIdentity, recovery: "pending-save", generation: 8,
+    draftProtected: true, operationId: "original-save-b", operationGeneration: 7,
+  });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, [{
+    documentId: "document-2", operationId: "original-save-b", generation: 7, reconcileReplay: true,
+  }]);
+  actor.stop();
+});
+
 test("a stale conflict from the previous document does not block the newly selected draft", async () => {
   const calls: string[] = [];
   let releaseFirstSave!: (result: { kind: "conflict"; operationId: string; generation: number }) => void;

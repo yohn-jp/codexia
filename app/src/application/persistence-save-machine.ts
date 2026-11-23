@@ -367,6 +367,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                   "SAVE.CONFLICT.RESOLVED": { target: "idle", actions: "clearConflict" },
                   "DRAFT.CHANGED": { actions: "acceptDraftChange" },
                   "RECOVERY.READY": [
+                    { guard: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "pending-save" && Boolean(event.operationId), target: "saving", actions: "acceptReady" },
                     { guard: "recoveredConflict", target: "conflict", actions: "acceptReady" },
                     { target: "idle", actions: "acceptReady" },
                   ],
