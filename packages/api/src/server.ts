@@ -22,7 +22,7 @@ export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostg
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
 import { HistoricalModelUsageStore } from "./historical-store.js";
-import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
+import { assertCurrentJobHistory, JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
@@ -484,6 +484,13 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
   propose(operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, signal?: AbortSignal): Promise<ChangeProposal>;
 };
 
+function resolveUsageDirectory(usageDirectory?: string): string {
+  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
+  const configured = usageDirectory ?? readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history");
+  if (!configured.trim()) throw new Error("Model usage history requires a non-empty usage directory");
+  return resolve(configured);
+}
+
 export function createServer(options: ApiServerOptions): Server {
   if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
   if (!options.betterAuth) throw new Error("Standalone authentication requires Better Auth");
@@ -501,11 +508,7 @@ export function createServer(options: ApiServerOptions): Server {
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const staticDir = options.staticDir ?? resolve(process.cwd(), "app/dist");
   const trustProxy = options.trustProxy ?? false;
-  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
-  const defaultUsageDirectory = process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history");
-  const configuredUsageDirectory = options.usageDirectory ?? readCodexiaEnvironment("USAGE_DIR") ?? defaultUsageDirectory;
-  if (!configuredUsageDirectory.trim()) throw new Error("Model usage history requires a non-empty usage directory");
-  const usageDirectory = resolve(configuredUsageDirectory);
+  const usageDirectory = resolveUsageDirectory(options.usageDirectory);
   const jobHistory = new JobHistoryStore(usageDirectory);
   const recentActivity = new RecentActivityStore(usageDirectory);
   const requestControllers = new Set<AbortController>();
@@ -2055,7 +2058,6 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
   const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
   const cacheDirectory = resolve(readCodexiaEnvironment("MODULE_CACHE_DIR") ?? "./data/module-cache");
-  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
   const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
   const deprecatedSettings = ["AUTH_TOKEN", "AUTH_TOKEN_FILE", "BROWSER_AUTH", "ACCESS_ISSUER", "ACCESS_AUDIENCE", "ACCESS_ORIGIN", "ACCESS_OWNER_EMAIL", "OAUTH_ISSUER", "OAUTH_AUDIENCE", "OAUTH_JWKS_URL"];
   if (deprecatedSettings.some(setting => readCodexiaEnvironment(setting) !== undefined)) {
@@ -2163,7 +2165,6 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
-      usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
       profile,
     });
 
@@ -2268,7 +2269,9 @@ async function loadProfileRuntimeOptions(
 }
 
 async function startServer(options: ApiServerOptions): Promise<Server> {
-  const server = createServer(options);
+  const usageDirectory = resolveUsageDirectory(options.usageDirectory);
+  await assertCurrentJobHistory(usageDirectory);
+  const server = createServer({ ...options, usageDirectory });
   const host = process.env.HOST ?? "127.0.0.1";
   const port = parsePositivePort(process.env.PORT);
   await new Promise<void>((resolveListen, reject) => {

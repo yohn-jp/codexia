@@ -14,7 +14,7 @@ import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions } from "@co
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
-import { createServer, importLegacyJobHistory, type ApiServerOptions } from "./server.js";
+import { createServer, importLegacyJobHistory, start, type ApiServerOptions } from "./server.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
 
 const ACCESS_TOKEN = "test-access-token-which-is-longer-than-32-characters";
@@ -381,6 +381,26 @@ async function startCustomApi(
   });
   return { server, base, close };
 }
+
+it("refuses to listen with old job history and leaves the offline input intact", async (t) => {
+  const usageDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-history-startup-"));
+  t.after(() => rm(usageDirectory, { recursive: true, force: true }));
+  const jobsDirectory = resolve(usageDirectory, "jobs");
+  const statePath = resolve(jobsDirectory, "jobs-state.json");
+  const state = '{ "version": 2, "jobs": [], "inbox": [], "legacySources": [] }\n';
+  await mkdir(jobsDirectory, { mode: 0o700 });
+  await writeFile(statePath, state, { mode: 0o600 });
+  const store = makeStore();
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings("project-1", client.publicJwks, client.isActive);
+  const cli = fileURLToPath(new URL("./maintain-job-history.js", import.meta.url));
+  await assert.rejects(async () => {
+    const server = await start({ store, persistence: admissionPersistence(store), usageDirectory, ...settings });
+    await new Promise<void>((close) => server.close(() => close()));
+  }, (error: unknown) => error instanceof JobHistoryError && error.code === "job_history_maintenance_required" &&
+    error.message.includes(`node ${cli} --check`) && error.message.includes("CODEXIA_USAGE_DIR"));
+  assert.equal(await readFile(statePath, "utf8"), state);
+});
 
 const TEST_ISSUER = "https://auth.codexia.test/api/auth";
 const TEST_AUDIENCE = "https://auth.codexia.test/api";
