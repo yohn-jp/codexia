@@ -32,7 +32,7 @@ op headLive(): HeadJsonResponse;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/ready") @get @operationId("health_ready_get")
-op getHealthReady(): ReadinessResponse;
+op getHealthReady(): ReadinessResponse | OwnerSetupRateLimited;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/ready") @head @operationId("health_ready_head")

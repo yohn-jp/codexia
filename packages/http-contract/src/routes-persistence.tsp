@@ -35,7 +35,12 @@ op exportPersistenceArchive(@path projectId: string): JsonResponse | { @statusCo
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
-op listPersistenceDocuments(@path projectId: string, @query parentId?: string, @query projectVersion?: int32): PersistenceDocumentListResponse | { @statusCode _: 400; @body body: ApiError; };
+op listPersistenceDocuments(
+  @path projectId: string,
+  @query parentId?: string,
+  @query projectVersion?: int32,
+  @query @minValue(1) @maxValue(1000) limit?: int32 = 500,
+): PersistenceDocumentListResponse | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @post @operationId("persistence_documents_post")
@@ -77,11 +82,11 @@ op listPersistenceDocumentAnchors(@path projectId: string, @path documentId: str
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors") @post @operationId("persistence_document_anchors_post")
-op createPersistenceAnchor(@path projectId: string, @path documentId: string, @body body: JsonObject): { @statusCode _: 201; @body body: JsonObject; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op createPersistenceAnchor(@path projectId: string, @path documentId: string, @body body: JsonObject): { @statusCode _: 201; @body body: PersistenceAnchorCreatedResponse; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}") @patch @operationId("persistence_document_anchor_patch")
-op updatePersistenceAnchor(@path projectId: string, @path documentId: string, @path anchorId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op updatePersistenceAnchor(@path projectId: string, @path documentId: string, @path anchorId: string, @body body: JsonObject): PersistenceEvidenceAnchor | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions") @post @operationId("persistence_anchor_assertions_post")

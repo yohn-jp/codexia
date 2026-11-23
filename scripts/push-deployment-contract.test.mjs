@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -57,10 +57,97 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
-  assert.match(ansible.run, /codexia_initial_install_approved:process\.env\.CODEXIA_INITIAL_INSTALL_APPROVED==="true"/u);
-  assert.match(ansible.run, /codexia_database_initialization_approved:process\.env\.CODEXIA_DATABASE_INITIALIZATION_APPROVED==="true"/u);
-  assert.match(ansible.run, /codexia_stage: deploy/u);
-  assert.match(ansible.run, /codexia_image:/u);
+});
+
+test('the convergence step forwards the certified identity, private certificate and typed approvals to Ansible', t => {
+  const converge = handoff.jobs['deploy-production'].steps.find(step => step.name === 'Converge certified backend digest');
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-handoff-converge-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const bin = path.join(directory, 'codexia-ansible', 'bin');
+  const invocation = path.join(directory, 'ansible-invocation');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, 'ansible-playbook'), '#!/bin/bash\nprintf "%s\\n" "$@" > "$RUNNER_TEMP/ansible-invocation"\n', { mode: 0o700 });
+  symlinkSync(process.execPath, path.join(bin, 'node'));
+  for (const command of ['base64', 'cat', 'chmod']) {
+    const lookup = spawnSync('sh', ['-c', 'command -v "$1"', 'sh', command], { encoding: 'utf8' });
+    assert.ifError(lookup.error);
+    assert.equal(lookup.status, 0, `${command} must be installed`);
+    symlinkSync(lookup.stdout.trim(), path.join(bin, command));
+  }
+
+  const digest = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
+  const verified = 'b'.repeat(40);
+  const producer = 'c'.repeat(40);
+  const certificateBytes = Buffer.from('{"fixture":"certified release receipt"}\n');
+  const admitted = {
+    PATH: bin,
+    RUNNER_TEMP: directory,
+    GITHUB_STEP_SUMMARY: path.join(directory, 'summary'),
+    CODEXIA_CERTIFIED_FULL_IMAGE: digest,
+    CODEXIA_DEPLOYMENT_CERTIFICATE_B64: certificateBytes.toString('base64'),
+    CODEXIA_VERIFIED_MAIN_SHA: verified,
+    CODEXIA_SOURCE_SHA: producer,
+    CODEXIA_PROFILE: 'full',
+    CODEXIA_DEPLOYED_UI_EPOCH: '17',
+    CODEXIA_BACKUP_DESTINATION: '/fixture/backups',
+    CODEXIA_BACKUP_AGE_RECIPIENT: 'age1fixture',
+    CODEXIA_INITIAL_INSTALL_APPROVED: 'true',
+    CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'false',
+  };
+  for (const [key, value] of Object.entries({
+    CODEXIA_CERTIFIED_FULL_IMAGE: 'ghcr.io/yohn-jp/codexia-backend:latest',
+    CODEXIA_DEPLOYMENT_CERTIFICATE_B64: '',
+    CODEXIA_VERIFIED_MAIN_SHA: 'main',
+    CODEXIA_SOURCE_SHA: 'main',
+    CODEXIA_DEPLOYED_UI_EPOCH: '0',
+    CODEXIA_BACKUP_DESTINATION: '',
+    CODEXIA_BACKUP_AGE_RECIPIENT: 'fixture',
+    CODEXIA_INITIAL_INSTALL_APPROVED: 'yes',
+    CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'yes',
+  })) {
+    const result = spawnSync('/bin/bash', ['-c', converge.run], {
+      cwd: directory, env: { ...admitted, [key]: value }, encoding: 'utf8',
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1, `invalid ${key} must be rejected`);
+    assert.equal(existsSync(invocation), false, `invalid ${key} reached Ansible`);
+  }
+
+  for (const [installApproved, databaseApproved] of [[false, false], [true, false], [false, true], [true, true]]) {
+    rmSync(invocation, { force: true });
+    const env = {
+      ...admitted,
+      CODEXIA_INITIAL_INSTALL_APPROVED: String(installApproved),
+      CODEXIA_DATABASE_INITIALIZATION_APPROVED: String(databaseApproved),
+    };
+    const result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env, encoding: 'utf8' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    const args = readFileSync(invocation, 'utf8').trimEnd().split('\n');
+    assert.equal(args.length, 5);
+    assert.equal(args[0], '-i');
+    assert.equal(args[2], 'deploy/ansible/site.yml');
+    assert.equal(args[3], '--extra-vars');
+    assert.match(args[4], /^@/u);
+
+    const inventory = parse(readFileSync(args[1], 'utf8'));
+    assert.equal(inventory.all.hosts.codexia.codexia_stage, 'deploy');
+    const { codexia_deployment_certificate_file: certificate, ...variables } =
+      JSON.parse(readFileSync(args[4].slice(1), 'utf8'));
+    assert.deepEqual(readFileSync(certificate), certificateBytes);
+    assert.equal(statSync(certificate).mode & 0o777, 0o600);
+    assert.deepEqual(variables, {
+      codexia_image: digest,
+      codexia_source_sha: producer,
+      codexia_profile: 'full',
+      codexia_verified_main_sha: verified,
+      codexia_deployed_ui_epoch: 17,
+      codexia_backup_destination: '/fixture/backups',
+      codexia_backup_recipient: 'age1fixture',
+      codexia_initial_install_approved: installApproved,
+      codexia_database_initialization_approved: databaseApproved,
+    });
+  }
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {

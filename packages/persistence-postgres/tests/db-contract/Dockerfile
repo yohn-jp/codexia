@@ -20,3 +20,7 @@ RUN tar -xzf /tmp/pgtap.tar.gz -C /tmp \
  && rm -rf /tmp/pgtap-${PGTAP_VERSION} /tmp/pgtap.tar.gz
 
 USER postgres
+
+# This fixture runs a PostgreSQL service; probe the actual server rather than a tool binary.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+  CMD pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" || exit 1

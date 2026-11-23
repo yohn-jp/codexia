@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
@@ -51,9 +54,6 @@ test('handoff consumer verifies successful same-repository main publication befo
   const deploymentGate = deploy.steps.find(step => step.id === 'deployment-gate');
   assert.ok(deploymentGate, 'the Environment-scoped deployment gate must run inside the protected job');
   assert.equal(deploymentGate.env.CODEXIA_PUSH_DEPLOYMENT_ENABLED, '${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}');
-  assert.match(deploymentGate.run, /enabled=true/u);
-  assert.match(deploymentGate.run, /safely skipped/u);
-  assert.match(deploymentGate.run, /GITHUB_STEP_SUMMARY/u);
   const freshness = deploy.steps.find(step => step.id === 'freshness');
   assert.equal(deployCheckout.with['fetch-depth'], 0);
   assert.equal(freshness.run, 'node scripts/release-source-gate.mjs backend-deployment');
@@ -66,6 +66,31 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step =>
     step.if === "steps.freshness.outputs.current == 'true'"),
     'Stale or disabled deployments must not connect to the target or run Ansible');
+});
+
+test('the protected enablement step opts in only for the literal true and records a skipped deployment', t => {
+  const step = handoff.jobs['deploy-production'].steps.find(step => step.id === 'deployment-gate');
+  const directory = mkdtempSync(join(tmpdir(), 'codexia-deployment-gate-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const output = join(directory, 'output');
+  const summary = join(directory, 'summary');
+  for (const value of [undefined, '', 'false', 'TRUE', 'true ', 'true']) {
+    writeFileSync(output, '');
+    writeFileSync(summary, '');
+    const env = { PATH: process.env.PATH, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary };
+    if (value !== undefined) env.CODEXIA_PUSH_DEPLOYMENT_ENABLED = value;
+    execFileSync('bash', ['-c', step.run], { cwd: directory, env });
+
+    const permission = readFileSync(output, 'utf8');
+    const report = readFileSync(summary, 'utf8');
+    if (value === 'true') {
+      assert.equal(permission, 'enabled=true\n');
+      assert.equal(report, '');
+    } else {
+      assert.equal(permission, 'enabled=false\n', `setting ${JSON.stringify(value)} must not enable deployment`);
+      assert.match(report, /deployment safely skipped/u);
+    }
+  }
 });
 
 test('backend release emits certificate files only after exact-source publish and component release recording', () => {

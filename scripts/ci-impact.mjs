@@ -223,6 +223,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       file === 'packages/http-contract/redocly.yaml'
     ) {
       add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
+      if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
       continue;
     }
     // API client source is read by the canonical deployment route assertion.
