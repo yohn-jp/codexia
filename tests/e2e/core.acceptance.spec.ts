@@ -637,7 +637,7 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
   });
   const f = await fixture(page, authorizeAuthor); let remoteWrites = 0;
   page.on("request", (request) => { if (request.method() === "PATCH" && new URL(request.url()).pathname === documentPath(f)) remoteWrites += 1; });
-  await editor(page).fill("Unsaved text must remain visible after quota failure.");
+  await replaceEditor(page, "Unsaved text must remain visible after quota failure.");
   await expect(page.getByRole("alert")).toContainText(/quota|容量|保存|database draft/i);
   await expect(page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/ })).toBeDisabled();
   expect(remoteWrites).toBe(0); expect((await read(f)).revision.id).toBe(f.one.revision.id);
