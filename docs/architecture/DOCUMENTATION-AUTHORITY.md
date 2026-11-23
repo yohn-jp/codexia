@@ -18,6 +18,12 @@
 
 | 対象 | 設計上の所有先 |
 | --- | --- |
+| 採用済み仕様ツールチェーンと移行の比較・合格条件 | [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)（設計正本は本書と各領域に従う） |
+| 要求管理/StrictDoc移行 | [StrictDoc traceability](../requirements/STRICTDOC-TRACEABILITY.md)（REQ-ID内容の正本は要求登録簿） |
+| HTTP実行基盤/生成器の移行目標 | [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)（認可の意味は Route authorization） |
+| DB契約検証ツールと対象 | [PostgreSQL contract verification](POSTGRES-CONTRACT-VERIFICATION.md)（Data modelとDB detailが正本） |
+| MCP v2 SDK・プロトコル移行 | [MCP v2 migration](MCP-V2-MIGRATION.md)（MCP OAuth/Coreの権限が正本） |
+| 新規CI検証と成果公開の受入 | [Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)（CI/CDが実行の正本） |
 | 要求ID・採用済み要件登録 | [Requirements governance](../requirements/README.md)・[Requirement register](../requirements/REQUIREMENT-REGISTER.md) |
 | 要件から実装・テスト・証拠への双方向追跡 | [Traceability](../verification/TRACEABILITY-REGISTER.md) |
 | HTTP APIのrequest/response/error・operation | [API contract](API-CONTRACT.md)（認可は Route authorization が正本） |
