@@ -55,12 +55,13 @@ try {
   if (group.startsWith('browser-')) await node('scripts/verify-browser-runtime.mjs');
 } catch (error) { preparationError = String(error); }
 const preparationStarted = Date.now();
-if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationError) {
+const preparationTasks = tasks.filter(task => task !== 'requirements-trace');
+if ((group.startsWith('types-') || group.startsWith('unit-')) && preparationTasks.length > 0 && !preparationError) {
   try {
     const filename = path.resolve(reportDirectory, 'workspace-preparation.json');
-    await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'selected-group', filename], { CODEXIA_CI_GROUP_TASKS: JSON.stringify(tasks) });
+    await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'selected-group', filename], { CODEXIA_CI_GROUP_TASKS: JSON.stringify(preparationTasks) });
     const report = JSON.parse(readFileSync(filename, 'utf8'));
-    if (report.length !== tasks.length || report.some((entry, i) => entry.task !== tasks[i])) throw new Error('Invalid workspace preparation report');
+    if (report.length !== preparationTasks.length || report.some((entry, i) => entry.task !== preparationTasks[i])) throw new Error('Invalid workspace preparation report');
     for (const entry of report) groupPreparation.set(entry.task, entry);
   } catch (error) { groupPreparationError = String(error); }
 }
@@ -130,6 +131,13 @@ async function executeTaskInContext(task, index, scope) {
         // These supplemental contract tests remain mandatory for affected plans even when the
         // static coverage check itself is safely reused.
         if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/ci-task-input-proof.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
+      } else if (task === 'requirements-trace') {
+        await run(process.execPath, ['scripts/strictdoc/verify.mjs'], {
+          CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task),
+          CODEXIA_CI_SOURCE_SHA: sha,
+          CODEXIA_CI_TASK: task,
+          STRICTDOC_BIN: process.env.STRICTDOC_BIN ?? path.join(process.env.RUNNER_TEMP ?? '', 'strictdoc/bin/strictdoc'),
+        });
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
