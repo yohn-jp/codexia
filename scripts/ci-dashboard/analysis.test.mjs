@@ -391,7 +391,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   // A full-history scan adds every attributable PR revision without eagerly downloading jobs.
   mode = 'large-inventory';
   await page.goto('http://localhost/ci/index.html');
-  await page.locator('#pr option').first().waitFor();
+  await page.locator('#pr option').first().waitFor({ state: 'attached' });
   await page.getByRole('button', { name: '残りのPR・リビジョンを全件読み込む' }).waitFor();
   assert.equal(await page.locator('#pr option').count(),100);
   t.diagnostic('first 100 revision inventory entries rendered');
