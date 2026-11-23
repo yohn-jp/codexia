@@ -43,6 +43,11 @@ const atlas = JSON.parse(await readFile(resolve(root, 'architecture/manifest.jso
 const audit = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
 const diagram = atlas.diagrams.find(item => item.id === 'admin-5');
 assert.ok(diagram, 'Established Atlas #admin-5 deep link must be in the manifest');
+assert.equal(source.sourceSha, atlas.sourceSha);
+const indexedFiles = new Set(source.files.map(file => file.path));
+const relatedDiagram = atlas.diagrams.find(item => item.implementationPaths?.some(path => indexedFiles.has(path)));
+assert.ok(relatedDiagram, 'Expected at least one Atlas diagram with same-SHA source evidence');
+const relatedFile = relatedDiagram.implementationPaths.find(path => indexedFiles.has(path));
 
 let browser;
 try {
@@ -112,6 +117,11 @@ try {
       return naturalWidth > 0 && naturalHeight > 0;
     });
     assert.equal(new URL(page.url()).hash, '#admin-5');
+
+    await page.goto(base + 'architecture/#' + relatedDiagram.id);
+    await page.locator('#implementation-evidence').getByRole('link', { name: relatedFile, exact: true }).click();
+    assert.equal(new URL(page.url()).searchParams.get('file'), relatedFile);
+    await page.waitForFunction(path => document.querySelector('#selected-path')?.textContent === path, relatedFile);
 
     assert.ok(source.files?.length, 'Graph source metadata must contain indexed paths');
     const graphLink = new URL('graph/', base);
