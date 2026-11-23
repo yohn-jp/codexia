@@ -81,7 +81,7 @@ const plan = async (files, event = 'pull_request') => {
 
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
   const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
-  assert.deepEqual(selection.tasks, ['unit-root', 'coverage']);
+  assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
 });
 
 test('StrictDoc authority and source files select only the trace task and its existing CI group', async () => {
@@ -192,6 +192,36 @@ test('test-only changes select their owner while non-executable documentation se
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
 });
 
+test('architecture design documents select G5 in the existing Verify unit matrix', async () => {
+  const { verificationPlanOutputs } = await import('./ci-impact.mjs');
+  const selected = await plan([
+    'docs/architecture/SYSTEM-DESIGN.md',
+    'docs/architecture/THREAT-MODEL.md',
+    'docs/verification/ARCHITECTURE-ATLAS.md',
+  ]);
+  assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5']);
+  assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests']);
+  const outputs = verificationPlanOutputs(selected);
+  assert.deepEqual(JSON.parse(outputs.unit), ['architecture']);
+  assert.deepEqual(JSON.parse(outputs.types), ['tests']);
+  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5']);
+  assert.deepEqual((await plan(['docs/security/authorization.md'])).tasks, ['coverage', 'architecture-g5']);
+  assert.deepEqual((await plan(['docs/deployment/IAC.md'])).tasks, ['unit-root', 'coverage', 'architecture-g5']);
+
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  for (const file of [
+    'docs/architecture/likec4/model.likec4',
+    'docs/architecture/threagile/model.yaml',
+    'scripts/architecture/verify.mjs',
+    'scripts/architecture/package-lock.json',
+    'scripts/architecture-diagrams/pack.mjs',
+  ]) {
+    const modelSource = await plan([file]);
+    assert.deepEqual(modelSource.tasks, VERIFICATION_TASKS, file);
+    assert.ok(modelSource.tasks.includes('architecture-g5'), file);
+  }
+});
+
 test('impact selection is independent of proof availability; unknown diffs still fail closed', async () => {
   const { createVerificationPlan, verificationPlanOutputs } = await import('./ci-impact.mjs');
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
@@ -205,6 +235,7 @@ test('impact selection is independent of proof availability; unknown diffs still
   const unknown = createVerificationPlan({ ...input, files: null });
   assert.equal(unknown.mode, 'full');
   assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
+  assert.deepEqual(JSON.parse(verificationPlanOutputs(unknown).unit), ['core', 'modules', 'architecture']);
   assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, VERIFICATION_TASKS);
   assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
 });
@@ -246,7 +277,8 @@ test('known operational inputs retain root proof without unrelated browser or OC
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
-    assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
+    assert.deepEqual(selected.tasks, file.startsWith('docs/deployment/')
+      ? ['unit-root', 'coverage', 'architecture-g5'] : ['unit-root', 'coverage'], file);
     assert.equal(selected.full_model_oci, false, file);
   }
   for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
