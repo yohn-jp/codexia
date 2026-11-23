@@ -80,6 +80,11 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 
 [CI/CD正本](../verification/CI-CD.md)の必須タスク・証拠・release gateを守り、Lintの成功が欠落・スキップしたセキュリティ検査の代替証拠にならないようにする。
 
+### 今回の確定済み追加採用ターゲット
+
+- **XState v5**：原稿保存・復旧等の複雑な状態遷移に採用。React 19の単純なlocal UI stateを全置換しない。状態の意味は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。実装PR時にv5最新stableとReact adapterの整合を検証し、宣言とlockfile、[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
+- **S3互換API client**：既存のage暗号化バックアップをoff-VMへ送る**バックアップ専用executor**で維持管理される公式SDK/成熟ライブラリを選ぶ。S3署名/リトライ/TLS/redirectを独自実装しない。AWS S3と互換providerの両方で検査し、具体的パッケージとバージョンを導入PRで確定。詳細は [バックアップ管理契約](BACKUP-CONSOLE-CONTRACT.md)。
+
 ## 4. 追加採用しないもの
 
 - **追加のOAuthフレームワーク／認証基盤**: Better Auth、AppAuth-iOS、`jose`、MCP SDKを維持し、ブラウザーのプロトコル処理だけを選定対象にする。
