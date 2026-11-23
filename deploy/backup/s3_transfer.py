@@ -721,6 +721,20 @@ class S3BackupTransfer:
         retention = self._retention_args(backup_id)
         capabilities = self._inspect_capabilities()
         _safe_parent(receipt_path.parent)
+        receipt_name_digest = hashlib.sha256(os.fsencode(receipt_path.name)).hexdigest()
+        pending_path = receipt_path.parent / f".codexia-{backup_id}-{receipt_name_digest}.commit.json"
+        prior_receipt = os.path.lexists(receipt_path)
+        record_path = receipt_path if prior_receipt else pending_path
+        prior = None
+        if os.path.lexists(record_path):
+            prior = self._validate_receipt(_read_json(record_path, require_private_file=True), backup_id)
+            if prior["sourceIdentity"] != source_identity:
+                _fail("Protected backup record belongs to a different source identity")
+            observed = prior.get("capabilities")
+            if not isinstance(observed, dict) or observed.get("requestedRetention") != capabilities["requestedRetention"]:
+                _fail("Requested S3 retention differs from the protected backup record")
+            # A retry must verify the original marker, even if capability discovery changes.
+            capabilities = observed
         journal_path = _upload_journal_path(receipt_path, backup_id)
         object_records: dict[str, Any] = {}
         for name in OBJECT_FILES:
@@ -745,7 +759,21 @@ class S3BackupTransfer:
         }
         marker_bytes = (json.dumps(marker, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
         marker_digest = hashlib.sha256(marker_bytes).hexdigest()
+        if prior is not None and prior["markerSha256"] != marker_digest:
+            _fail("S3 commit marker differs from the protected backup record")
+        receipt = {
+            **marker,
+            "format": "codexia-backup-receipt/v1",
+            "markerKey": marker_key,
+            "markerSha256": marker_digest,
+            "markerVersionId": None,
+        }
+        if not prior_receipt:
+            # Persist the candidate bytes' identity before the conditional S3 write.
+            _write_receipt(pending_path, receipt)
         existing_marker = self._head(marker_key)
+        if prior_receipt and existing_marker is None:
+            _fail("Existing external receipt conflicts with the missing S3 commit marker")
         if existing_marker is None:
             try:
                 result = self.client.put_object(
@@ -768,25 +796,12 @@ class S3BackupTransfer:
             marker_key, {"sha256": marker_digest, "size": len(marker_bytes)},
             version_id=marker_version, retention=retention,
         )
-        receipt = {
-            "format": "codexia-backup-receipt/v1",
-            "backupId": backup_id,
-            "sourceIdentity": source_identity,
-            "provider": self.profile["provider"],
-            "bucket": self.profile["bucket"],
-            "prefix": self.profile["prefix"],
-            "region": self.profile["region"],
-            "endpointOrigin": self.profile.get("endpointUrl"),
-            "markerKey": marker_key,
-            "markerSha256": marker_digest,
-            "markerVersionId": marker_version,
-            "objects": object_records,
-            "sha256sumsSha256": inventory["sha256sumsSha256"],
-            "capabilities": capabilities,
-            "verifiedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "verifiedByUid": os.getuid(),
-        }
-        return _write_receipt(receipt_path, receipt)
+        receipt["markerVersionId"] = marker_version
+        receipt["verifiedAt"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        receipt["verifiedByUid"] = os.getuid()
+        verified_receipt = _write_receipt(receipt_path, receipt)
+        pending_path.unlink(missing_ok=True)
+        return verified_receipt
 
     def _validate_receipt(self, value: dict[str, Any], backup_id: str) -> dict[str, Any]:
         if value.get("format") != "codexia-backup-receipt/v1" or value.get("backupId") != backup_id:
