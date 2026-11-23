@@ -41,7 +41,7 @@ if (run.event === 'pull_request') {
   assert.equal(plan.base, expectedBase, 'Impact plan PR base does not match the event');
   if (plan.mode === 'affected') {
     const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', `${expectedBase}...${plan.sha}`, '--'],
-      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\\0').filter(Boolean);
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
     assert.deepEqual(plan.files, changed, 'Impact plan does not match the exact PR diff');
   }
 }
