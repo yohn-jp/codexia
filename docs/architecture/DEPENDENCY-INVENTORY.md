@@ -102,6 +102,13 @@
 | `plist` | `^3.1.1` | app/native・Info.plist | **要検証** |
 | `wrangler` | `4.162.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
 
+### Architecture G5 isolated tooling
+
+| 対象 | 宣言・実装の基準 | 所有・用途 | 判定／更新条件 |
+| --- | --- | --- | --- |
+| `likec4` | `scripts/architecture/package.json`で`1.61.0` exact、推移依存は同じディレクトリの`package-lock.json`で固定 | G5・C4構造検査とMermaid派生生成 | **既存採用**: 実装時にnpm `latest`も`1.61.0`と確認。CIは`npm ci --ignore-scripts`で隔離インストールし、lock closureと生成差分を検証 |
+| Threagile | `docker.io/threagile/threagile@sha256:abb9eccb111a2059c4876759a24245db02ad295b1608d3a4634ec250f38d9640` | G5・脅威モデル検査 | **既存採用**: CIは不変OCI digestをpullし、ネットワークなし・read-onlyで実行。更新時は新しい公式digestと全リスク出力・失敗注入を再検証 |
+
 ## JavaScript以外／ツールチェーン
 
 | 対象 | 宣言・実装の基準 | 分類／更新条件 |
