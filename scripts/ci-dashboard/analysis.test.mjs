@@ -445,6 +445,12 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
   assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
+
+  mode = 'measured';
+  await page.goto('http://localhost/ci/index.html?pr=999&sha=' + 'f'.repeat(40));
+  await page.getByRole('status').filter({hasText:'指定されたPR #999'}).waitFor();
+  assert.equal(await copyButton.isDisabled(),true,'Unknown deep link must not show another PR result');
+  assert.equal(await page.locator('#pr').evaluate(element=>element.selectedIndex),-1);
 });
 
 test('browser JavaScript syntax is valid without requiring a DOM at test time', () => {
