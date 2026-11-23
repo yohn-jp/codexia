@@ -113,6 +113,8 @@
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
+| AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
+| S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 
 ## アップデートの審査・記録
 
