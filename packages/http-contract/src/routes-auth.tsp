@@ -5,6 +5,22 @@ using TypeSpec.OpenAPI;
 
 namespace Codexia.Http;
 
+@tag("auth-adapter") @useAuth(NoAuth)
+@extension("x-codexia-principal", "ANON; non-sensitive login capability summary")
+@route("/api/auth/codexia/auth-methods") @get @operationId("auth_methods_get")
+op getAuthMethods(): AuthMethodsResponse;
+
+@tag("auth-adapter") @useAuth(OwnerSessionCookie)
+@extension("x-codexia-principal", "OWNER-SESSION cookie only; exact same-origin Origin required; bearer credentials rejected")
+@extension("x-codexia-credential-policy", "Better Auth session cookie is checked against the configured owner subject. The cookie is not an OWNER-API bearer credential.")
+@route("/api/auth/codexia/owner-session") @post @operationId("owner_session_confirm_post")
+op confirmOwnerSession(
+  @header("Origin") origin: string,
+  @body body: OwnerSessionRequest,
+): OwnerSessionResponse | { @statusCode _: 400; @header("Cache-Control") cacheControl: "no-store"; @body body: ApiError; } |
+  { @statusCode _: 401; @header("Cache-Control") cacheControl: "no-store"; @body body: ApiError; } |
+  { @statusCode _: 403; @header("Cache-Control") cacheControl: "no-store"; @body body: ApiError; };
+
 model OAuthConsentContextRequest {
   oauth_query: string;
   ...Record<never>;
@@ -13,12 +29,14 @@ model OAuthConsentContextRequest {
 @tag("auth-adapter")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
+@extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.")
 @route("/api/auth/oauth2/consent-context") @post @operationId("auth_consent_context_post")
 op getOAuthConsentContext(@body body: OAuthConsentContextRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("auth-adapter")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
+@extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.")
 @route("/api/auth/oauth2/get-consents") @get @operationId("auth_list_consents_get")
 op listOAuthConsents(): JsonResponse | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
