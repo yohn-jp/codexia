@@ -41,6 +41,17 @@ function artifactText(value: JsonObject): string {
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
+function assertJsonbTextIsRepresentable(value: JsonObject): void {
+  // PostgreSQL JSONB rejects NUL and unpaired surrogates in both keys and values.
+  const unsupportedText = /[\u0000\uD800-\uDFFF]/u;
+  JSON.stringify(value, (key, item: unknown) => {
+    if (unsupportedText.test(key) || (typeof item === "string" && unsupportedText.test(item))) {
+      throw new TypeError("Record contains text that PostgreSQL JSONB cannot represent");
+    }
+    return item;
+  });
+}
+
 async function plannedRecords(
   reader: PersistenceReader, projectId: ProjectId, moduleId: string, label: string, recordFormats: readonly RecordFormat[],
 ) {
@@ -52,8 +63,10 @@ async function plannedRecords(
       throw new Error(`Project ${projectId} contains both source and canonical ${label} records for ${key}`);
     }
     let value: JsonObject;
-    try { value = convert(artifactText(legacy.value)); }
-    catch { throw new Error(`Project ${projectId} cannot convert its ${label} source record for ${key}`); }
+    try {
+      value = convert(artifactText(legacy.value));
+      assertJsonbTextIsRepresentable(value);
+    } catch { throw new Error(`Project ${projectId} cannot convert its ${label} source record for ${key}`); }
     plan.push({ path, key, legacyVersion: legacy.version, value });
   }
   return plan;
