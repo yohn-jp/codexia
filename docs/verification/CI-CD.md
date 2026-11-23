@@ -27,7 +27,7 @@ Review base-image digest updates through Dependabot, rebuild with smoke tests, a
 
 ## Verification execution
 
-PRs verify the exact source selected by the workflow, using the affected-task plan. Superseded runs of the same PR are cancelled immediately; main/manual runs have independent run identities. Documentation-only PRs retain coverage checks unless a document is an executable assertion input. Explicitly reviewed operational inputs select the root unit and coverage checks, with dedicated infrastructure, audit or static-delivery integration as applicable. Shared foundation/unknown paths or missing diff history select the full inventory. Browser and Hosted consumers pull in their prerequisites. Main pushes and manual verification plan every obligation. Manual runs always execute the full graph. A main push may certify existing complete PR source proof instead of executing the graph only under the merged-tree reuse contract below. A manual or PR success alone is not a main-push release certification.
+PRs verify the exact source selected by the workflow, using the affected-task plan. Superseded runs of the same PR are cancelled immediately; main/manual runs have independent run identities. Documentation-only PRs retain coverage checks unless a document is an executable assertion input. Explicitly reviewed operational inputs select the root unit and coverage checks, with dedicated infrastructure, audit or static-delivery integration as applicable. Shared foundation/unknown paths or missing diff history select the full inventory. Browser consumers pull in the build for their profile. Main pushes and manual verification plan every obligation. Manual runs always execute the full graph. A main push may certify existing complete PR source proof instead of executing the graph only under the merged-tree reuse contract below. A manual or PR success alone is not a main-push release certification.
 
 The certified verification graph groups tasks into at most twenty jobs including plan and certification. The cap is on execution jobs, not test coverage. Keep independent work parallel and fail-fast disabled for independent groups. Within a group retain individual results even after a sibling failure. Prefer reuse of one certified producer over repeated builds. Do not add a second workflow or runner inventory just to bypass the bound. The Full-model OCI workload is a supplemental high-cost reusable job: Verify calls it only for its exact pull-request input paths, while the standalone workflow runs it for matching main pushes or manual dispatch. It stays outside the artifact-evidence certification and release job inventory; a selected failure still fails the overall Verify workflow.
 
@@ -39,24 +39,18 @@ flowchart TD
   P --> C[Core build and audit]
   P --> F[Full build]
   P --> O[Core and Full OCI checks]
-  P --> H[Hosted catalog producer]
   C --> BC[Core browser lanes]
   F --> BF[Full browser lanes]
-  F --> N[Hosted composition]
-  H --> N
   U --> G[Certification]
   C --> G
   F --> G
   O --> G
   BC --> G
   BF --> G
-  H --> G
-  N --> G
 ```
 
 - Within a Runner, use at most two concurrent independent validations, retaining results in canonical task order. Build shared workspace prerequisites once per selected unit/type group; a failed build blocks only tasks that require its outputs. Serialize workspace writers, CPU-heavy model suites and performance measurement with respect to siblings. Browser specs own distinct disposable databases, API/control port pairs, state and trace output directories; do not increase worker count inside a spec. Keep profile generation after the workspace dependency build barrier.
 - Browser writing/reference/WebKit lanes consume the same-profile build output. The lane name does not redefine its test inventory. Each spec retains isolated DB, server, browser context, port and temporary state. Do not rebuild the workspace in each consumer.
-- Hosted catalog owns runtime-base and Build Kit OCI verification and catalog identity. Core/selected/full composition consumes the exact verified catalog and Full server/module build; each selection independently verifies its package closure and offline composition. Avoid rebuilding shared producer identities; measure transfer and disk cost before adding shared artifacts.
 - Standalone OCI checks still exercise the actual selected image, startup and shutdown. Browser build success does not certify an OCI image. Component release packaging may reuse a proven equivalent artifact but must verify the exact image or assets being released. The root unit's canonical `test:scripts` includes route/runtime configuration, release identity tests and Worker typecheck/request tests. The frontend release lane retains its distinct static asset packaging, Wrangler dry-run, browser delivery and exact main certification gate, but does not repeat these root checks. The dedicated infrastructure workflow owns Ansible syntax/fixtures and Terraform provider-schema checks, selecting only affected independent infrastructure scopes.
 - A common prerequisite failure blocks dependent work, not independent checks. The final certification always evaluates available evidence and fails closed.
 
