@@ -18,6 +18,10 @@ test('all branch refs, including slash and HTML characters, are data only', () =
   assert.ok(html.includes('feature/&lt;example&gt;'));
   assert.ok(!html.includes('<example>'));
   assert.ok(!html.includes('snapshots/' + sha));
+  assert.equal([...html.matchAll(new RegExp('id="sha-' + sha + '"','gu'))].length, 1);
+  assert.match(html, /<main>/u);
+  const readyHtml=renderIndex({ observedAt:'now', branches:[{branch:'main',sha}], snapshots:{[sha]:{status:'ready',outputs:[{name:'repomix.json',bytes:10}]}} });
+  assert.ok(readyHtml.includes('<a href="snapshots/' + sha + '/">Snapshot details</a>'));
 });
 test('only regular source blobs, not credentials, data or branch-controlled packer configuration', () => {
   for (const path of ['.env.production', 'nested/.npmrc', 'secret.pem', 'data/work.md', 'evidence/run/output.json', 'evidence/README.md', 'evidence/performance/run/seed/scene.md', '.repomixignore', 'repomix.config.ts', '../escape', '.git/config']) assert.ok(exclusion(path, '100644', 1), path);

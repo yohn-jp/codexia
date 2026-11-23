@@ -128,12 +128,13 @@ function emit(dir, name, content, outputs) {
 
 function indexHtml(sha, rows) {
   const escape = value => String(value).replace(/[&<>"]/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gemini review ' + sha + '</title></head><body>' +
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gemini review ' + sha + '</title></head><body><main>' +
     '<h1>Gemini review input</h1><p>Source SHA: <code>' + sha + '</code>. Review input, not an AI review result.</p>' +
+    '<p><a href="../../audit/#sha-' + sha + '">Back to branch ' + sha + ' in Source Audit</a></p>' +
     '<p><a href="gemini-review.md" download="codexia-' + sha + '-review.md">Download full review Markdown (one file)</a> · ' +
     '<a href="gemini-diff.md" download="codexia-' + sha + '-diff.md">Download compact diff Markdown (one file)</a></p>' +
     '<p><a href="manifest.json">Coverage manifest</a> · <a href="preview.json">OCR preview</a> · <a href="rules.json">Rules</a></p><ol>' +
-    rows.map(row => '<li>' + escape(row.path) + ' (' + escape(row.status) + ')</li>').join('') + '</ol></body></html>\n';
+    rows.map(row => '<li>' + escape(row.path) + ' (' + escape(row.status) + ')</li>').join('') + '</ol></main></body></html>\n';
 }
 
 function oneBranch({ root, site, bin, base, head, mainFiles, headFiles }) {
@@ -240,7 +241,8 @@ export function buildDelegation({ root, site, bin }) {
     } else remaining -= bytes;
   }
   writeFileSync(manifestPath, json(manifest));
-  writeFileSync(join(site, 'index.html'), renderIndex(manifest));
+  mkdirSync(join(site, 'audit'), { recursive: true });
+  writeFileSync(join(site, 'audit', 'index.html'), renderIndex(manifest, { base: '../' }));
   return manifest;
 }
 
