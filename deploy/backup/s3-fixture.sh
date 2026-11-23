@@ -200,6 +200,11 @@ docker run --rm --pull=never --network none --user 0:0 \
 
 "$script_dir/install-s3-runtime.sh" "$work/tools/python-env" >/dev/null
 python_bin="$work/tools/python-env/bin/python"
+(
+  cd -- "$repo_root"
+  "$python_bin" -B -m unittest -v \
+    deploy.backup.test_s3_admission.ProxyAdmissionTests.test_pinned_sdk_uses_direct_tls_with_ambient_proxies_set
+)
 age_dir="$work/tools/age"
 mkdir -m 0700 "$age_dir"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 10 --max-time 120 \
