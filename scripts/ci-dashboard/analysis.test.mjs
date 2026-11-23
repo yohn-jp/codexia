@@ -269,6 +269,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     return route.fulfill({ body: await readFile(join(output, path.slice(1))), contentType: contentTypes[name] });
   });
   let mode = 'measured';
+  let jobRequests = 0;
   const browserJobs = [...jobs,
     { id: 6, name: 'optional-skipped', status: 'completed', conclusion: 'skipped', run_attempt: 1,
       created_at: at(0), started_at: null, completed_at: null, html_url: 'https://github.com/yohn-jp/codexia/actions/runs/1/job/6',
@@ -286,6 +287,18 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/actions/runs')) {
       await inventoryReady;
+      if (mode === 'large-inventory') {
+        const pageNumber = new URL(route.request().url()).searchParams.get('page');
+        if (pageNumber === '1') return route.fulfill({ json: { total_count: 101, workflow_runs:
+          Array.from({length:100},(_,index)=>({
+            ...run({id:1000+index,created_at:at(200-index),
+              head_sha:String(index+1).padStart(40,'0')}),
+            workflow_id:7,pull_requests:[{number:1000+index}],
+          })) } });
+        return route.fulfill({ json: { total_count: 101, workflow_runs: [
+          {...run(),workflow_id:7,pull_requests:[{number:42}]},
+        ] } });
+      }
       if (mode === 'two-revisions') {
         return route.fulfill({ json: { workflow_runs: [
           { ...run({
@@ -298,6 +311,10 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
       if (mode === 'empty') return route.fulfill({ json: { workflow_runs: [] } });
       if (mode === '403' || mode === '429') return route.fulfill({ status: Number(mode) });
       return route.fulfill({ json: { workflow_runs: [{ ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] }] } });
+    }
+    if (path.includes('/attempts/') && path.endsWith('/jobs')) jobRequests++;
+    if (mode === 'large-inventory' && path.endsWith('/actions/runs/1000/attempts/1/jobs')) {
+      return route.fulfill({ json: { jobs: browserJobs } });
     }
     if (mode === 'two-revisions' && path.endsWith('/actions/runs/2/attempts/1/jobs')) {
       return route.fulfill({ json: { jobs: [{
@@ -360,6 +377,22 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.origin.executedSha, 'a'.repeat(40));
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
+
+  // A full-history scan adds every attributable PR revision without eagerly downloading jobs.
+  mode = 'large-inventory';
+  await page.goto('http://localhost/ci/index.html');
+  await page.locator('#pr option').first().waitFor();
+  await page.getByRole('button', { name: '残りのPR・リビジョンを全件読み込む' }).waitFor();
+  assert.equal(await page.locator('#pr option').count(),100);
+  await page.locator('#timeline-foot').filter({hasText:'Range:'}).waitFor();
+  const beforeInventoryExpansion = jobRequests;
+  await page.getByRole('button', { name: '残りのPR・リビジョンを全件読み込む' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#pr option').length === 101);
+  assert.equal(jobRequests,beforeInventoryExpansion,'Listing revisions must not fetch every workflow job');
+  assert.equal(await page.locator('#load-all').isVisible(),false);
+  await page.locator('#pr').selectOption('100');
+  await page.locator('#timeline-foot').filter({hasText:'Range:'}).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('pr'),'42');
 
   // Switching to a revision with no completed jobs must not retain the prior timeline range.
   mode = 'two-revisions';
