@@ -7,13 +7,14 @@
 import * as zod from 'zod';
 
 export const persistenceDocumentsGetParamsLimitDefault = 500;
+export const persistenceDocumentsGetParamsLimitMin = 1;
 export const persistenceDocumentsGetParamsLimitMax = 1000;
 
 
 export const PersistenceDocumentsGetParams = zod.object({
   "parentId": zod.string().optional(),
   "projectVersion": zod.int().optional(),
-  "limit": zod.int().min(1).max(persistenceDocumentsGetParamsLimitMax).default(persistenceDocumentsGetParamsLimitDefault)
+  "limit": zod.int().min(persistenceDocumentsGetParamsLimitMin).max(persistenceDocumentsGetParamsLimitMax).default(persistenceDocumentsGetParamsLimitDefault)
 })
 
 export type PersistenceDocumentsGetParams = zod.input<typeof PersistenceDocumentsGetParams>;

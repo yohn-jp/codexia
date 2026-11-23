@@ -70,27 +70,27 @@ op getSession(): JsonResponse;
 @route("/api/projects/events") @get @operationId("project_events_get")
 op getProjectEvents(): EventStream | { @statusCode _: 503; @body body: ApiError; };
 
-@tag("events") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("events") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs/events") @get @operationId("job_events_get")
 op getJobEvents(): EventStream | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
-@tag("jobs") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs") @get @operationId("jobs_list_get")
 op listJobs(): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
-@tag("jobs") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs/{jobId}") @get @operationId("job_get")
 op getJob(@path jobId: string): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
-@tag("jobs") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/inbox") @get @operationId("inbox_list_get")
 op listInbox(@query unread?: "1"): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
 
-@tag("jobs") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/inbox/read-all") @post @operationId("inbox_read_all_post")
 op readAllInbox(): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
 
-@tag("jobs") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/inbox/{inboxId}/read") @post @operationId("inbox_item_read_post")
 op readInboxItem(@path inboxId: string): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; };
 
@@ -98,7 +98,7 @@ op readInboxItem(@path inboxId: string): JsonResponse | { @statusCode _: 403; @b
 @route("/api/projects") @get @operationId("projects_list_get")
 op listProjects(@query limit?: int32, @query cursor?: string): ProjectPageResponse | { @statusCode _: 400; @body body: ApiError; };
 
-@tag("projects") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("projects") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects") @post @operationId("projects_create_post")
 op createProject(@body body: CoreProjectCreateRequest): { @statusCode _: 201; @body body: Project; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
@@ -110,11 +110,11 @@ op getReviewQueue(): JsonResponse | { @statusCode _: 503; @body body: ApiError; 
 @route("/api/projects/{projectId}") @get @operationId("project_get")
 op getProject(@path projectId: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
 
-@tag("projects") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("projects") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/recent-activity") @get @operationId("project_recent_activity_get")
 op getRecentActivity(@path projectId: string): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
 
-@tag("projects") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("projects") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/recent-activity") @put @operationId("project_recent_activity_put")
 op putRecentActivity(@path projectId: string, @body body: JsonObject, @header("X-Codexia-Recent-Activity-Order") order?: string): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
@@ -162,11 +162,11 @@ op listProposals(@path projectId: string): JsonResponse;
 @route("/api/projects/{projectId}/proposals/{proposalId}") @get @operationId("project_proposal_get")
 op getProposal(@path projectId: string, @path proposalId: string): JsonResponse;
 
-@tag("proposals") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("proposals") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/approvals") @post @operationId("project_approvals_post")
 op approveProposal(@path projectId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
 
-@tag("proposals") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("proposals") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/apply") @post @operationId("project_apply_post")
 op applyProposal(@path projectId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
 
@@ -194,42 +194,46 @@ op searchProject(@path projectId: string, @query q: string, @query limit?: int32
 @route("/api/projects/{projectId}/writing-stats") @get @operationId("project_writing_stats_get")
 op getWritingStats(@path projectId: string, @query snapshot?: string): JsonResponse;
 
-@tag("projects") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("projects") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/scratch") @post @operationId("project_scratch_post")
 op createScratch(@path projectId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
-@tag("reviews") @extension("x-codexia-principal", "OWNER-SESSION")
+@tag("reviews") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/review-queue") @get @operationId("project_review_queue_get")
 op getProjectReviewQueue(@path projectId: string): JsonResponse | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @get @operationId("mcp_root_get")
-op getStandaloneMcp(): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+op getStandaloneMcp(@header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Last-Event-ID") lastEventId?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @post @operationId("mcp_root_post")
-op postStandaloneMcp(@body body: JsonObject): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+op postStandaloneMcp(@body body: JsonObject | JsonObject[], @header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @delete @operationId("mcp_root_delete")
-op deleteStandaloneMcp(): McpJsonResponse | { @statusCode _: 401; @body body: ApiError; };
+op deleteStandaloneMcp(@header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string): McpJsonResponse | { @statusCode _: 401; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @get @operationId("project_mcp_stream_get")
-op getProjectMcpStream(@path projectId: string): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+op getProjectMcpStream(@path projectId: string, @header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Last-Event-ID") lastEventId?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @post @operationId("project_mcp_stream_post")
-op postProjectMcpStream(@path projectId: string, @body body: JsonObject): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonObject[], @header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @delete @operationId("project_mcp_stream_delete")
-op deleteProjectMcpStream(@path projectId: string): McpJsonResponse | { @statusCode _: 401; @body body: ApiError; };
+op deleteProjectMcpStream(@path projectId: string, @header("Mcp-Session-Id") sessionId?: string, @header("MCP-Protocol-Version") protocolVersion?: string): McpJsonResponse | { @statusCode _: 401; @body body: ApiError; };
 
 @tag("public-reader") @useAuth(NoAuth) @extension("x-codexia-principal", "SHARE-READER capability")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The runtime reader returns only `{ error: \"Share link is unavailable\" }` at 404; the baseline error schema still requires a code field pending an approved compatibility baseline correction.")
 @route("/api/public/projects/{projectId}/modules/publishing/share/{token}") @get @operationId("public_share_get")
-op getPublicShare(@path projectId: string, @path token: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPublicShare(@path projectId: string, @path token: string): PublicShareIndexResponse | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("public-reader") @useAuth(NoAuth) @extension("x-codexia-principal", "SHARE-READER capability")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The runtime reader returns only `{ error: \"Share link is unavailable\" }` at 404; the baseline error schema still requires a code field pending an approved compatibility baseline correction.")
 @route("/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}") @get @operationId("public_share_scene_get")
-op getPublicShareScene(@path projectId: string, @path token: string, @path sceneId: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPublicShareScene(@path projectId: string, @path token: string, @path sceneId: string): PublicShareSceneResponse | { @statusCode _: 404; @body body: ApiError; };

@@ -25,6 +25,20 @@ This is the normative execution and release architecture. [Test architecture](TE
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
 
+## HTTP contract verification
+
+The TypeSpec compiler, deterministic OpenAPI artifact check, Redocly lint,
+Fastify schema and route checks, and oasdiff run through the existing HTTP
+contract tasks. Changes to a shared contract select the affected downstream
+client checks under their existing owners. The Repository Audit Pages workflow
+validates and publishes the static API reference for its own checked-out SHA.
+
+Compare the candidate OpenAPI with the event's immutable base commit. Pull
+requests use `pull_request.base.sha` and pushes use `before`. A generation
+mismatch, invalid contract, rejected schema conversion or error-level breaking
+change fails the contract task. The Verify certifier still binds task execution
+to the selected source, plan, run attempt and immutable artifact.
+
 ## CI admission, execution and resource policy
 
 This section is the **normative scheduling and resource contract**. The canonical task

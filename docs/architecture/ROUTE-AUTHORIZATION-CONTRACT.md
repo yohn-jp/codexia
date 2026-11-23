@@ -40,18 +40,23 @@
 
 Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadataをTunnel経由でFastifyへ通す。**URLごとのAccess policyとWAF除外は明示的に設計・検証する**。author画面のAccess制御を、公開share、setup、必要なOAuth protocolに機械的に継承しない。逆に公開例外は作者API全体へ広げない。静的画面が表示できても、APIから認可済みデータが返ることを意味しない。
 
-## HTTP API: メソッド・資格別の権限マトリクス
+## HTTP APIの認可マトリクス
+
+[TypeSpecから生成するワイヤ契約](../../packages/http-contract/openapi/codexia.openapi.yaml) はmethod/pathと資格のHTTP上の表現を定める。
+同じbearer形式でも、許可するprincipalや作品はこの表と個別の規則で決まる。
+静的APIリファレンスは契約を表示し、アクセスの許可はAPIの入場制御と業務処理が判断する。
 
 | HTTP path/method群 | 必須資格・境界 | 拒否すべき操作 |
 | --- | --- | --- |
 | `GET /health/*`、`GET /api/version`、`GET /api/browser/version` | ANONから最小readiness/identityのみ。EDGE-CIもexact probe限定 | DB URL、owner/秘密、原稿一覧の露出 |
 | `GET /.well-known/oauth-*`、OIDC/JWKS metadata | ANONへ公開プロトコルmetadataのみ | Dynamic Client Registration許可との混同 |
 | `/api/auth/oauth2/{authorize,token,revoke}` | Better Auth protocol、登録済みclient、PKCE、exact redirect、audience、grant/token状態 | 未登録client、他IdP token、静的API bearer |
+| `POST /api/auth/codexia/owner-session` | 通常APIのOWNER-SESSION、正確なsame-origin、空のJSON object | bearer、setup専用モード、owner以外、セッション情報の開示 |
 | `POST /api/auth/oauth2/consent-context`、同意決定 | OWNER-SESSION、same-origin、signed request、CSRF | cross-origin、scope逸脱、黙ったauto-consent |
 | `/api/auth/*` Passkey/session/consent管理 | OWNER-SESSION。追加削除・ポリシー変更はfresh再認証 | MCP/OWNER-API bearer/SETUPキーを管理セッション化 |
 | `GET /api/auth/codexia/setup/status` | ANONへ機密のない登録可否状態のみ | ownerの存在詳細、grant値の漏えい・cache |
 | `POST /api/auth/codexia/setup/authorize` | owner不在＋NEW_APPROVED、期限内grant、CSRF/Origin、rate limit。短命setup transactionのみ生成 | 普通のAPI bearerやowner session発行、キーreplay、復旧DBでの新規owner |
-| `/api/auth/passkey/{generate-register-options,verify-registration}`（setup時） | 短命setup transactionに拘束されたWebAuthn ceremony、RP/origin/UV/challenge、原子的なowner登録＋grant消費 | 部分owner作成、同時登録二重成功、既存ownerの上書き |
+| `GET /api/auth/passkey/generate-register-options`、`POST /api/auth/passkey/verify-registration`（setup時） | 短命setup transactionに拘束されたWebAuthn ceremony、RP/origin/UV/challenge、原子的なowner登録＋grant消費 | 部分owner作成、同時登録二重成功、既存ownerの上書き |
 | `GET /api/session`、`GET /api/v1/persistence/status` | OWNER-API。workspace認証とDBの独立観測 | 画面stateをowner資格とみなす |
 | `GET /api/v1/persistence/projects*` | OWNER-API、毎回project/object scopeを検証 | MCP直アクセス、project列挙 |
 | `POST/PATCH/PUT/DELETE /api/v1/persistence/*` | OWNER-API、対象・version/revision・冪等キー・transaction前提 | stale write、他作品、提案による承認迂回 |

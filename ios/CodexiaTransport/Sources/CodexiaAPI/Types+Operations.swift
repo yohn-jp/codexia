@@ -9,6 +9,485 @@
 public import Foundation
 /// API operations, with input and output types, generated from `#/paths` in the OpenAPI document.
 public enum Operations {
+    /// - Remark: HTTP `GET /api/auth/codexia/auth-methods`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/auth-methods/get(auth_methods_get)`.
+    public enum auth_methods_get {
+        public static let id: Swift.String = "auth_methods_get"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/auth-methods/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.auth_methods_get.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.auth_methods_get.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.auth_methods_get.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.auth_methods_get.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/auth-methods/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/auth-methods/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.AuthMethodsBody)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.AuthMethodsBody {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.auth_methods_get.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.auth_methods_get.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/auth-methods/get(auth_methods_get)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.auth_methods_get.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.auth_methods_get.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/owner-session`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)`.
+    public enum owner_session_confirm_post {
+        public static let id: Swift.String = "owner_session_confirm_post"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/header/Origin`.
+                public var Origin: Swift.String
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_session_confirm_post.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - Origin:
+                ///   - accept:
+                public init(
+                    Origin: Swift.String,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_session_confirm_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Origin = Origin
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.owner_session_confirm_post.Input.Headers
+            /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.OwnerSessionRequest)
+            }
+            public var body: Operations.owner_session_confirm_post.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.owner_session_confirm_post.Input.Headers,
+                body: Operations.owner_session_confirm_post.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_session_confirm_post.Output.Ok.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.OwnerSessionBody)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSessionBody {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_session_confirm_post.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_session_confirm_post.Output.Ok.Headers,
+                    body: Operations.owner_session_confirm_post.Output.Ok.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.owner_session_confirm_post.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.owner_session_confirm_post.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/400/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/400/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/400/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_session_confirm_post.Output.BadRequest.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_session_confirm_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_session_confirm_post.Output.BadRequest.Headers,
+                    body: Operations.owner_session_confirm_post.Output.BadRequest.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.owner_session_confirm_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.owner_session_confirm_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Unauthorized: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/401/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/401/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/401/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Unauthorized.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Unauthorized.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_session_confirm_post.Output.Unauthorized.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/401/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/401/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_session_confirm_post.Output.Unauthorized.Body
+                /// Creates a new `Unauthorized`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_session_confirm_post.Output.Unauthorized.Headers,
+                    body: Operations.owner_session_confirm_post.Output.Unauthorized.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is unauthorized.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Operations.owner_session_confirm_post.Output.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Operations.owner_session_confirm_post.Output.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/403/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/403/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/403/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_session_confirm_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_session_confirm_post.Output.Forbidden.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/owner-session/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_session_confirm_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_session_confirm_post.Output.Forbidden.Headers,
+                    body: Operations.owner_session_confirm_post.Output.Forbidden.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.owner_session_confirm_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.owner_session_confirm_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
     /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
     /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
     public enum owner_setup_authorize_post {
@@ -9601,12 +10080,29 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_get.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Last-Event-ID`.
+                public var Last_hyphen_Event_hyphen_ID: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_get.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Last_hyphen_Event_hyphen_ID:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_get.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Last_hyphen_Event_hyphen_ID: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_get.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Last_hyphen_Event_hyphen_ID = Last_hyphen_Event_hyphen_ID
                     self.accept = accept
                 }
             }
@@ -9876,12 +10372,24 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_post.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_post.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                     self.accept = accept
                 }
             }
@@ -9890,20 +10398,87 @@ public enum Operations {
             @frozen public enum Body: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json`.
                 public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json/value1`.
+                    public struct Value1Payload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `Value1Payload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json/value1`.
+                    public var value1: Operations.project_mcp_stream_post.Input.Body.jsonPayload.Value1Payload?
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json/Value2Payload`.
+                    public struct Value2PayloadPayload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `Value2PayloadPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json/value2`.
+                    public typealias Value2Payload = [Operations.project_mcp_stream_post.Input.Body.jsonPayload.Value2PayloadPayload]
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/json/value2`.
+                    public var value2: Operations.project_mcp_stream_post.Input.Body.jsonPayload.Value2Payload?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
+                    ///   - value1:
+                    ///   - value2:
+                    public init(
+                        value1: Operations.project_mcp_stream_post.Input.Body.jsonPayload.Value1Payload? = nil,
+                        value2: Operations.project_mcp_stream_post.Input.Body.jsonPayload.Value2Payload? = nil
+                    ) {
+                        self.value1 = value1
+                        self.value2 = value2
                     }
                     public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        var errors: [any Swift.Error] = []
+                        do {
+                            self.value1 = try .init(from: decoder)
+                        } catch {
+                            errors.append(error)
+                        }
+                        do {
+                            self.value2 = try decoder.decodeFromSingleValueContainer()
+                        } catch {
+                            errors.append(error)
+                        }
+                        try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                            [
+                                self.value1,
+                                self.value2
+                            ],
+                            type: Self.self,
+                            codingPath: decoder.codingPath,
+                            errors: errors
+                        )
                     }
                     public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
+                        try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                            self.value2
+                        ])
+                        try self.value1?.encode(to: encoder)
                     }
                 }
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/requestBody/content/application\/json`.
@@ -10178,12 +10753,24 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_delete.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_delete.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_delete.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_delete.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                     self.accept = accept
                 }
             }
@@ -13073,33 +13660,62 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.public_share_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/X-Robots-Tag`.
+                    @frozen public enum X_hyphen_Robots_hyphen_TagPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case noindex_comma__space_nofollow = "noindex, nofollow"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/X-Robots-Tag`.
+                    public var X_hyphen_Robots_hyphen_Tag: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/Referrer-Policy`.
+                    @frozen public enum Referrer_hyphen_PolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_referrer = "no-referrer"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/Referrer-Policy`.
+                    public var Referrer_hyphen_Policy: Operations.public_share_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/X-Content-Type-Options`.
+                    @frozen public enum X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case nosniff = "nosniff"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/headers/X-Content-Type-Options`.
+                    public var X_hyphen_Content_hyphen_Type_hyphen_Options: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    ///   - X_hyphen_Robots_hyphen_Tag:
+                    ///   - Referrer_hyphen_Policy:
+                    ///   - X_hyphen_Content_hyphen_Type_hyphen_Options:
+                    public init(
+                        Cache_hyphen_Control: Operations.public_share_get.Output.Ok.Headers.Cache_hyphen_ControlPayload,
+                        X_hyphen_Robots_hyphen_Tag: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload,
+                        Referrer_hyphen_Policy: Operations.public_share_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload,
+                        X_hyphen_Content_hyphen_Type_hyphen_Options: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload
+                    ) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                        self.X_hyphen_Robots_hyphen_Tag = X_hyphen_Robots_hyphen_Tag
+                        self.Referrer_hyphen_Policy = Referrer_hyphen_Policy
+                        self.X_hyphen_Content_hyphen_Type_hyphen_Options = X_hyphen_Content_hyphen_Type_hyphen_Options
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.public_share_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/GET/responses/200/content/application\/json`.
-                    case json(Operations.public_share_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PublicShareIndexBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.public_share_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PublicShareIndexBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13113,8 +13729,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.public_share_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.public_share_get.Output.Ok.Headers,
+                    body: Operations.public_share_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -13280,33 +13901,62 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.public_share_scene_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/X-Robots-Tag`.
+                    @frozen public enum X_hyphen_Robots_hyphen_TagPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case noindex_comma__space_nofollow = "noindex, nofollow"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/X-Robots-Tag`.
+                    public var X_hyphen_Robots_hyphen_Tag: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/Referrer-Policy`.
+                    @frozen public enum Referrer_hyphen_PolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_referrer = "no-referrer"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/Referrer-Policy`.
+                    public var Referrer_hyphen_Policy: Operations.public_share_scene_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/X-Content-Type-Options`.
+                    @frozen public enum X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case nosniff = "nosniff"
+                    }
+                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/headers/X-Content-Type-Options`.
+                    public var X_hyphen_Content_hyphen_Type_hyphen_Options: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    ///   - X_hyphen_Robots_hyphen_Tag:
+                    ///   - Referrer_hyphen_Policy:
+                    ///   - X_hyphen_Content_hyphen_Type_hyphen_Options:
+                    public init(
+                        Cache_hyphen_Control: Operations.public_share_scene_get.Output.Ok.Headers.Cache_hyphen_ControlPayload,
+                        X_hyphen_Robots_hyphen_Tag: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload,
+                        Referrer_hyphen_Policy: Operations.public_share_scene_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload,
+                        X_hyphen_Content_hyphen_Type_hyphen_Options: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload
+                    ) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                        self.X_hyphen_Robots_hyphen_Tag = X_hyphen_Robots_hyphen_Tag
+                        self.Referrer_hyphen_Policy = Referrer_hyphen_Policy
+                        self.X_hyphen_Content_hyphen_Type_hyphen_Options = X_hyphen_Content_hyphen_Type_hyphen_Options
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.public_share_scene_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.public_share_scene_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PublicShareSceneBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.public_share_scene_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PublicShareSceneBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13320,8 +13970,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.public_share_scene_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.public_share_scene_get.Output.Ok.Headers,
+                    body: Operations.public_share_scene_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -13982,26 +14637,8 @@ public enum Operations {
             public var headers: Operations.persistence_import_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_import_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.WorkArchive)
             }
             public var body: Operations.persistence_import_post.Input.Body
             /// Creates a new `Input`.
@@ -14021,31 +14658,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_import_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.WorkImportResult)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_import_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.WorkImportResult {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -14184,6 +14803,57 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.persistence_import_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.persistence_import_post.Output.ContentTooLarge.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/v1/persistence/import/post(persistence_import_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.persistence_import_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.persistence_import_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
                             response: self
                         )
                     }
@@ -15593,26 +16263,8 @@ public enum Operations {
             public var headers: Operations.persistence_assertion_put.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/requestBody/content/application\/json`.
-                case json(Operations.persistence_assertion_put.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceAssertionUpdateRequest)
             }
             public var body: Operations.persistence_assertion_put.Input.Body
             /// Creates a new `Input`.
@@ -15635,31 +16287,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/PUT/responses/200/content/application\/json`.
-                    case json(Operations.persistence_assertion_put.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceAssertionEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_assertion_put.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceAssertionEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -16142,26 +16776,8 @@ public enum Operations {
             public var headers: Operations.persistence_assertion_evidence_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_assertion_evidence_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceAssertionEvidenceCreateRequest)
             }
             public var body: Operations.persistence_assertion_evidence_post.Input.Body
             /// Creates a new `Input`.
@@ -16184,31 +16800,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_assertion_evidence_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceEvidenceEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_assertion_evidence_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceEvidenceEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -18292,26 +18890,8 @@ public enum Operations {
             public var headers: Operations.persistence_documents_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_documents_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceDocumentCreateRequest)
             }
             public var body: Operations.persistence_documents_post.Input.Body
             /// Creates a new `Input`.
@@ -19068,26 +19648,8 @@ public enum Operations {
             public var headers: Operations.persistence_document_delete.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/DELETE/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/DELETE/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/DELETE/requestBody/content/application\/json`.
-                case json(Operations.persistence_document_delete.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceDocumentDeleteRequest)
             }
             public var body: Operations.persistence_document_delete.Input.Body
             /// Creates a new `Input`.
@@ -19662,26 +20224,8 @@ public enum Operations {
             public var headers: Operations.persistence_document_anchors_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_document_anchors_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceAnchorCreateRequest)
             }
             public var body: Operations.persistence_document_anchors_post.Input.Body
             /// Creates a new `Input`.
@@ -19980,26 +20524,8 @@ public enum Operations {
             public var headers: Operations.persistence_document_anchor_patch.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/PATCH/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/PATCH/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/PATCH/requestBody/content/application\/json`.
-                case json(Operations.persistence_document_anchor_patch.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceAnchorUpdateRequest)
             }
             public var body: Operations.persistence_document_anchor_patch.Input.Body
             /// Creates a new `Input`.
@@ -20298,26 +20824,8 @@ public enum Operations {
             public var headers: Operations.persistence_anchor_assertions_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_anchor_assertions_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceAnchorAssertionRequest)
             }
             public var body: Operations.persistence_anchor_assertions_post.Input.Body
             /// Creates a new `Input`.
@@ -20340,31 +20848,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_anchor_assertions_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceAssertionEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_anchor_assertions_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceAssertionEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -20508,6 +20998,57 @@ public enum Operations {
                     }
                 }
             }
+            public struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/responses/409/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/POST/responses/409/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.persistence_anchor_assertions_post.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.persistence_anchor_assertions_post.Output.Conflict.Body) {
+                    self.body = body
+                }
+            }
+            /// The request conflicts with the current state of the server.
+            ///
+            /// - Remark: Generated from `#/paths//api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions/post(persistence_anchor_assertions_post)/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.persistence_anchor_assertions_post.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            public var conflict: Operations.persistence_anchor_assertions_post.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
@@ -20583,26 +21124,8 @@ public enum Operations {
             public var headers: Operations.persistence_anchor_mentions_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_anchor_mentions_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceMentionCreateRequest)
             }
             public var body: Operations.persistence_anchor_mentions_post.Input.Body
             /// Creates a new `Input`.
@@ -20622,34 +21145,67 @@ public enum Operations {
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Created: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/201/content`.
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_anchor_mentions_post.Output.Created.Body.jsonPayload)
+                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.PersistenceMentionLink)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_anchor_mentions_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceMentionLink {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.persistence_anchor_mentions_post.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.persistence_anchor_mentions_post.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/post(persistence_anchor_mentions_post)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.persistence_anchor_mentions_post.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.persistence_anchor_mentions_post.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Created: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/201/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/201/content/application\/json`.
+                    case json(Components.Schemas.PersistenceMentionLink)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.PersistenceMentionLink {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -20793,6 +21349,57 @@ public enum Operations {
                     }
                 }
             }
+            public struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/409/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/POST/responses/409/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.persistence_anchor_mentions_post.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.persistence_anchor_mentions_post.Output.Conflict.Body) {
+                    self.body = body
+                }
+            }
+            /// The request conflicts with the current state of the server.
+            ///
+            /// - Remark: Generated from `#/paths//api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions/post(persistence_anchor_mentions_post)/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.persistence_anchor_mentions_post.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            public var conflict: Operations.persistence_anchor_mentions_post.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
@@ -20863,26 +21470,8 @@ public enum Operations {
             public var headers: Operations.persistence_document_metadata_patch.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata/PATCH/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata/PATCH/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata/PATCH/requestBody/content/application\/json`.
-                case json(Operations.persistence_document_metadata_patch.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceDocumentMetadataRequest)
             }
             public var body: Operations.persistence_document_metadata_patch.Input.Body
             /// Creates a new `Input`.
@@ -21183,26 +21772,8 @@ public enum Operations {
             public var headers: Operations.persistence_document_restore_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/restore/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/restore/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/restore/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_document_restore_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceDocumentRestoreRequest)
             }
             public var body: Operations.persistence_document_restore_post.Input.Body
             /// Creates a new `Input`.
@@ -22210,26 +22781,8 @@ public enum Operations {
             public var headers: Operations.persistence_node_put.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/requestBody/content/application\/json`.
-                case json(Operations.persistence_node_put.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceKnowledgeNodeUpdateRequest)
             }
             public var body: Operations.persistence_node_put.Input.Body
             /// Creates a new `Input`.
@@ -22252,31 +22805,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/PUT/responses/200/content/application\/json`.
-                    case json(Operations.persistence_node_put.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceKnowledgeNodeEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_put.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceKnowledgeNodeEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -22541,26 +23076,8 @@ public enum Operations {
             public var headers: Operations.persistence_node_aliases_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_node_aliases_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceKnowledgeAliasCreateRequest)
             }
             public var body: Operations.persistence_node_aliases_post.Input.Body
             /// Creates a new `Input`.
@@ -22583,31 +23100,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_node_aliases_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceKnowledgeAliasEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_aliases_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceKnowledgeAliasEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -23672,26 +24171,8 @@ public enum Operations {
             public var headers: Operations.persistence_node_relations_post.Input.Headers
             /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/requestBody/json`.
-                public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                    /// Creates a new `jsonPayload`.
-                    ///
-                    /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
-                    }
-                    public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                    }
-                    public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
-                    }
-                }
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/requestBody/content/application\/json`.
-                case json(Operations.persistence_node_relations_post.Input.Body.jsonPayload)
+                case json(Components.Schemas.PersistenceKnowledgeRelationCreateRequest)
             }
             public var body: Operations.persistence_node_relations_post.Input.Body
             /// Creates a new `Input`.
@@ -23714,31 +24195,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_node_relations_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceKnowledgeRelationEnvelope)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_relations_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceKnowledgeRelationEnvelope {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -25163,12 +25626,29 @@ public enum Operations {
         public struct Input: Sendable, Hashable {
             /// - Remark: Generated from `#/paths/mcp/GET/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/GET/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/GET/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/GET/header/Last-Event-ID`.
+                public var Last_hyphen_Event_hyphen_ID: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_get.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Last_hyphen_Event_hyphen_ID:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_get.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Last_hyphen_Event_hyphen_ID: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_get.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Last_hyphen_Event_hyphen_ID = Last_hyphen_Event_hyphen_ID
                     self.accept = accept
                 }
             }
@@ -25420,12 +25900,24 @@ public enum Operations {
         public struct Input: Sendable, Hashable {
             /// - Remark: Generated from `#/paths/mcp/POST/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/POST/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_post.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                     self.accept = accept
                 }
             }
@@ -25434,20 +25926,87 @@ public enum Operations {
             @frozen public enum Body: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json`.
                 public struct jsonPayload: Codable, Hashable, Sendable {
-                    /// A container of undocumented properties.
-                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json/value1`.
+                    public struct Value1Payload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `Value1Payload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json/value1`.
+                    public var value1: Operations.mcp_root_post.Input.Body.jsonPayload.Value1Payload?
+                    /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json/Value2Payload`.
+                    public struct Value2PayloadPayload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `Value2PayloadPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json/value2`.
+                    public typealias Value2Payload = [Operations.mcp_root_post.Input.Body.jsonPayload.Value2PayloadPayload]
+                    /// - Remark: Generated from `#/paths/mcp/POST/requestBody/json/value2`.
+                    public var value2: Operations.mcp_root_post.Input.Body.jsonPayload.Value2Payload?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
-                    ///   - additionalProperties: A container of undocumented properties.
-                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                        self.additionalProperties = additionalProperties
+                    ///   - value1:
+                    ///   - value2:
+                    public init(
+                        value1: Operations.mcp_root_post.Input.Body.jsonPayload.Value1Payload? = nil,
+                        value2: Operations.mcp_root_post.Input.Body.jsonPayload.Value2Payload? = nil
+                    ) {
+                        self.value1 = value1
+                        self.value2 = value2
                     }
                     public init(from decoder: any Swift.Decoder) throws {
-                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        var errors: [any Swift.Error] = []
+                        do {
+                            self.value1 = try .init(from: decoder)
+                        } catch {
+                            errors.append(error)
+                        }
+                        do {
+                            self.value2 = try decoder.decodeFromSingleValueContainer()
+                        } catch {
+                            errors.append(error)
+                        }
+                        try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                            [
+                                self.value1,
+                                self.value2
+                            ],
+                            type: Self.self,
+                            codingPath: decoder.codingPath,
+                            errors: errors
+                        )
                     }
                     public func encode(to encoder: any Swift.Encoder) throws {
-                        try encoder.encodeAdditionalProperties(additionalProperties)
+                        try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                            self.value2
+                        ])
+                        try self.value1?.encode(to: encoder)
                     }
                 }
                 /// - Remark: Generated from `#/paths/mcp/POST/requestBody/content/application\/json`.
@@ -25706,12 +26265,24 @@ public enum Operations {
         public struct Input: Sendable, Hashable {
             /// - Remark: Generated from `#/paths/mcp/DELETE/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/DELETE/header/Mcp-Session-Id`.
+                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/DELETE/header/MCP-Protocol-Version`.
+                public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_delete.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Mcp_hyphen_Session_hyphen_Id:
+                ///   - MCP_hyphen_Protocol_hyphen_Version:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_delete.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
+                    MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_delete.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
+                    self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                     self.accept = accept
                 }
             }

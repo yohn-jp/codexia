@@ -6,7 +6,19 @@
  */
 import * as zod from 'zod';
 
-export const PersistenceDocumentAnchorsPostBody = zod.record(zod.string(), zod.unknown())
+export const persistenceDocumentAnchorsPostBodyFromUtf16Min = 0;
+
+export const persistenceDocumentAnchorsPostBodyToUtf16Min = 0;
+
+
+export const PersistenceDocumentAnchorsPostBody = zod.looseObject({
+  "id": zod.string().optional(),
+  "revisionId": zod.string().optional(),
+  "fromUtf16": zod.int().min(persistenceDocumentAnchorsPostBodyFromUtf16Min).optional(),
+  "toUtf16": zod.int().min(persistenceDocumentAnchorsPostBodyToUtf16Min).optional(),
+  "status": zod.enum(['proposed', 'confirmed']).optional(),
+  "nodeId": zod.string().optional()
+})
 
 export type PersistenceDocumentAnchorsPostBody = zod.input<typeof PersistenceDocumentAnchorsPostBody>;
 export type PersistenceDocumentAnchorsPostBodyOutput = zod.output<typeof PersistenceDocumentAnchorsPostBody>;
