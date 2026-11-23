@@ -93,7 +93,7 @@ test('same-tree certification returns the exact plan and reports it verified alo
   assert.equal(receipt.tree, tree);
 });
 
-test('compact main proof accepts a full PR plan in the current reuse format and rejects its retired encoding', async () => {
+test('compact main proof accepts a full PR plan with optional coverage reuse and rejects unknown metadata', async () => {
   const { args, plan, state } = fixture();
   const artifact = state.artifacts.find(item => item.name === 'ci-plan');
   const coverage = { task: 'coverage', sourceSha: base, proofSourceSha: base, planDigest: '1'.repeat(64),
@@ -105,10 +105,10 @@ test('compact main proof accepts a full PR plan in the current reuse format and 
       cwd: '/home/runner/work/codexia/codexia', imageOS: null, imageVersion: null },
     certification: { sourceSha: base, workflowRunId: 10, workflowAttempt: 1, workflowId: workflow_id, repositoryId: repo.id,
       jobId: 41, step: 'Certify every required exact-source matrix element' } };
-  state.contents.set(artifact.id, { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v2', coverage, omitted: {} } });
+  state.contents.set(artifact.id, { ...plan, coverageReuse: coverage });
   assert.equal((await verifyReusableMainProof(args)).planDigest, planDigest(plan));
-  state.contents.set(artifact.id, { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage } });
-  await assert.rejects(verifyReusableMainProof(args), /Unknown task input reuse format/);
+  state.contents.set(artifact.id, { ...plan, taskInputReuse: { coverage } });
+  await assert.rejects(verifyReusableMainProof(args), /canonical impact rules/);
 });
 
 test('compact main evidence resolves from an exact PR checkout without relaxing main identity', async () => {

@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { assertPlanEvidence } from './ci-evidence.mjs';
-import { selectLatestEvidenceArtifacts, selectLatestPlanArtifact, resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
+import { selectLatestEvidenceArtifacts, selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-ci-artifacts.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 import { assertTaskProducerInventory, assertTrustedTaskInputProof, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
-import { VERIFICATION_TASKS, requiredBuildProfile } from './ci-contract.mjs';
+import { VERIFICATION_TASKS } from './ci-contract.mjs';
 import { captureCoverageInputClosure, coverageInvocation } from './ci-coverage-inputs.mjs';
 import { readReusableMainEvidence } from './reuse-pr-verification.mjs';
 import { assertTrustedCertifiedSourceTaskInputProof } from './ci-task-input-proof.mjs';
-import { captureTaskInputSource, taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { coverageRuntime } from './ci-coverage-inputs.mjs';
-import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 
 const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const PROOF_API = 'https://api.github.com/repos/yohn-jp/codexia/';
@@ -66,7 +64,7 @@ function exactJob(jobs, name, run) {
   return job;
 }
 
-async function resolveCompactMainTaskProofs({ plan, run, jobs, current, repository, token, request, read, tasks = [] }) {
+async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repository, token, request, read }) {
   const certJob = exactJob(jobs, 'certification', run);
   const certSteps = certJob.steps?.filter(step => step.name === COMPACT_CERTIFICATION_STEP) ?? [];
   assert.equal(certSteps.length, 1, 'Missing or duplicate compact exact-main certification step');
@@ -124,38 +122,7 @@ async function resolveCompactMainTaskProofs({ plan, run, jobs, current, reposito
     workflowId: sourceRun.workflow_id, repositoryId: sourceRun.repository.id, jobId: sourceJob.id,
     workflowJob: proof.workflowJob, artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
     inputClosure: proof.inputClosure, runtime: proof.runtime, certification: mainCertification };
-  const output = { coverage };
-  for (const task of tasks) {
-    const group = taskGroup(task);
-    const report = sourceReports.find(item => item.group === group);
-    assert.ok(report, `Merged PR proof task report is missing: ${task}`);
-    assertTaskProducerInventory({ plan: sourcePlan, report, inventory: report.producerInventory });
-    const result = report.results.find(item => item.task === task);
-    assert.equal(result?.status, 'passed', `Merged PR proof task did not pass: ${task}`);
-    const taskProof = result.inputProof;
-    assert.equal(taskProof?.mode, 'task-execution', `Merged PR task input proof is missing: ${task}`);
-    const taskArtifact = sourceEvidence.find(item => item.name === `ci-evidence-${group}`);
-    assert.ok(taskArtifact, `Merged PR task proof artifact is missing: ${task}`);
-    const taskJobs = sourceJobs.filter(job => job.name === group);
-    assert.equal(taskJobs.length, 1, `Merged PR proof has no unique task producer job: ${group}`);
-    const taskJob = taskJobs[0];
-    assertTrustedCertifiedSourceTaskInputProof({ inputProof: taskProof,
-      identity: { sourceSha: mainProof.headSha, planDigest: mainProof.planDigest,
-        workflowRunId: sourceRun.id, workflowAttempt: sourceRun.run_attempt },
-      sourceRun, job: taskJob, artifact: taskArtifact, mainRun: run, certificationJob: certJob,
-      certificationStep: certSteps[0], certification: mainCertification,
-      expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobId: taskJob.id,
-        task, jobName: group, workflowJob: taskWorkflowJob(task), artifactId: taskArtifact.id,
-        artifactName: taskArtifact.name, artifactDigest: taskArtifact.digest },
-    });
-    output[task] = { task, sourceSha: plan.base, proofSourceSha: mainProof.headSha,
-      planDigest: taskProof.planDigest, workflowRunId: sourceRun.id, workflowAttempt: sourceRun.run_attempt,
-      workflowId: sourceRun.workflow_id, repositoryId: sourceRun.repository.id, jobId: taskJob.id,
-      workflowJob: taskProof.workflowJob, artifactId: taskArtifact.id, artifactName: taskArtifact.name,
-      artifactDigest: taskArtifact.digest, inputClosure: taskProof.inputClosure, runtime: taskProof.runtime,
-      certification: mainCertification };
-  }
-  return output;
+  return coverage;
 }
 
 async function getJson(request, endpoint) {
@@ -164,19 +131,11 @@ async function getJson(request, endpoint) {
   return response.json();
 }
 
-/** Resolve coverage alone without requesting omitted task receipts. */
-export async function resolveExactMainCoverageProof(options) {
-  return (await resolveExactMainTaskProofs({ ...options, tasks: [] })).coverage;
-}
-
-/** Read the latest successful exact-base certification once for this set of task proofs. */
-export async function resolveExactMainTaskProofs({ plan: planValue, current, repository, token, tasks, request = fetch, readArtifact }) {
+/** Resolve optional static coverage reuse from an exact-base main certification. */
+export async function resolveExactMainCoverageProof({ plan: planValue, current, repository, token, request = fetch, readArtifact }) {
   const plan = validateVerificationPlan(planValue);
   assert.equal(plan.event, 'pull_request', 'Task proof reuse is only available to pull requests');
   assert.match(plan.base ?? '', /^[a-f0-9]{40}$/u, 'Task proof reuse requires an exact PR base');
-  assert.ok(Array.isArray(tasks) && new Set(tasks).size === tasks.length, 'Invalid omitted task proof inventory');
-  assert.ok(tasks.every(task => VERIFICATION_TASKS.includes(task) && !plan.tasks.includes(task) && task !== 'coverage'),
-    'Task proof request is not an omitted canonical task');
   assert.ok(plan.tasks.includes('coverage'), 'Coverage task is not selected');
   assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
@@ -211,7 +170,7 @@ export async function resolveExactMainTaskProofs({ plan: planValue, current, rep
     await downloadArtifact(artifact, repository, token, request), filename)));
   const certificationJob = exactJob(jobs, 'certification', run);
   if (certificationJob.steps?.some(step => step.name === COMPACT_CERTIFICATION_STEP && step.conclusion === 'success')) {
-    return resolveCompactMainTaskProofs({ plan, run, jobs, current, repository, token, request, read, tasks });
+    return resolveCompactMainCoverageProof({ plan, run, jobs, current, repository, token, request, read });
   }
   const fullCertificationSteps = certificationJob.steps?.filter(step => step.name === CERTIFICATION_STEP) ?? [];
   assert.equal(fullCertificationSteps.length, 1, 'Task proof source lacks full exact-main certification');
@@ -230,46 +189,32 @@ export async function resolveExactMainTaskProofs({ plan: planValue, current, rep
   const selectedEvidence = selectedArtifacts({ identity, artifacts }, evidenceArtifacts.map(item => item.id), identity, 'evidence');
   const reports = await Promise.all(selectedEvidence.map(item => read(item, 'report.json')));
   assertPlanEvidence(mainPlan, jobs, reports);
-  if (tasks.some(task => requiredBuildProfile(taskGroup(task)))) {
-    const producerJobs = await resolveProducerJobAttempts(jobs, run, get, ['build-core', 'build-full']);
-    assertProfileArtifactEvidence(mainPlan, producerJobs, reports, artifacts, run.id);
-  }
-  function receiptFor(task) {
-    const group = task === 'coverage' ? COVERAGE_JOB : taskGroup(task);
-    const report = reports.find(item => item.group === group);
-    assert.ok(report, `Exact-main task report is missing: ${task}`);
-    assertTaskProducerInventory({ plan: mainPlan, report, inventory: report.producerInventory });
-    const result = report.results.find(item => item.task === task);
-    assert.equal(result?.status, 'passed', `Exact-main task did not pass: ${task}`);
-    const proof = result.inputProof;
-    assert.ok(proof, `Exact-main task input proof is missing: ${task}`);
-    const artifact = evidenceArtifacts.find(item => item.name === `ci-evidence-${group}`);
-    assert.ok(artifact, `Exact-main task proof artifact is missing: ${task}`);
-    const job = exactJob(jobs, group, run);
-    assertTrustedTaskInputProof({ inputProof: proof,
-      identity: { sourceSha: plan.base, planDigest: planDigest(mainPlan), workflowRunId: run.id, workflowAttempt: run.run_attempt },
-      run, job, artifact,
-      expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, task,
-        jobName: group, workflowJob: task === 'coverage' ? COVERAGE_WORKFLOW_JOB : taskWorkflowJob(task), artifactName: `ci-evidence-${group}`,
-        artifactId: artifact.id, artifactDigest: artifact.digest },
-    });
-    return { task, sourceSha: plan.base, proofSourceSha: plan.base, planDigest: proof.planDigest,
-      workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowId: run.workflow_id,
-      repositoryId: run.repository.id, jobId: job.id, workflowJob: proof.workflowJob,
-      artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
-      inputClosure: proof.inputClosure, runtime: proof.runtime,
-      certification: { workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowId: run.workflow_id,
-        repositoryId: run.repository.id, sourceSha: plan.base, jobId: certificationJob.id,
-        step: fullCertificationSteps[0].name } };
-  }
-  const output = Object.fromEntries(tasks.map(task => [task, receiptFor(task)]));
-  try {
-    output.coverage = receiptFor('coverage');
-  } catch (error) {
-    // A missing coverage receipt reruns the selected static check. Every omitted task still needs its own receipt.
-    if (!tasks.length) throw error;
-  }
-  return output;
+  const report = reports.find(item => item.group === COVERAGE_JOB);
+  assert.ok(report, 'Exact-main coverage report is missing');
+  assertTaskProducerInventory({ plan: mainPlan, report, inventory: report.producerInventory });
+  const result = report.results.find(item => item.task === 'coverage');
+  assert.equal(result?.status, 'passed', 'Exact-main coverage task did not pass');
+  const proof = result.inputProof;
+  assert.ok(proof, 'Exact-main coverage input proof is missing');
+  const artifact = evidenceArtifacts.find(item => item.name === COVERAGE_ARTIFACT);
+  assert.ok(artifact, 'Exact-main coverage artifact is missing');
+  const job = exactJob(jobs, COVERAGE_JOB, run);
+  assertTrustedTaskInputProof({ inputProof: proof,
+    identity: { sourceSha: plan.base, planDigest: planDigest(mainPlan), workflowRunId: run.id, workflowAttempt: run.run_attempt },
+    run, job, artifact,
+    expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, task: 'coverage',
+      jobName: COVERAGE_JOB, workflowJob: COVERAGE_WORKFLOW_JOB, artifactName: COVERAGE_ARTIFACT,
+      artifactId: artifact.id, artifactDigest: artifact.digest },
+  });
+  return { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: proof.planDigest,
+    workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowId: run.workflow_id,
+    repositoryId: run.repository.id, jobId: job.id, workflowJob: proof.workflowJob,
+    artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
+    inputClosure: proof.inputClosure, runtime: proof.runtime,
+    certification: { workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowId: run.workflow_id,
+      repositoryId: run.repository.id, sourceSha: plan.base, jobId: certificationJob.id,
+      step: fullCertificationSteps[0].name } };
+
 }
 
 /** Re-resolve the exact-base proof and recompute the candidate closure in certification. */
@@ -283,7 +228,7 @@ export async function assertReusedCoverageProof({ plan: planValue, report, curre
   const candidateProof = result.inputProof;
   assert.ok(candidateProof?.reusedFrom, 'Coverage result does not record task proof consumption');
   const trusted = await resolveExactMainCoverageProof({ plan, current, repository, token, request });
-  assert.deepEqual(plan.taskInputReuse?.coverage, trusted, 'Plan task proof reference changed after selection');
+  assert.deepEqual(plan.coverageReuse, trusted, 'Plan task proof reference changed after selection');
   assert.deepEqual(candidateProof.reusedFrom, trusted, 'Consumed task proof identity changed');
 
   const runtime = candidateProof.runtime;
@@ -308,38 +253,3 @@ export async function assertReusedCoverageProof({ plan: planValue, report, curre
   return true;
 }
 
-/** Re-resolve and recompute every omitted-task closure before certifying an affected PR plan. */
-export async function assertReusedOmittedTaskProofs({ plan: planValue, current, repository, token, request = fetch }) {
-  const plan = validateVerificationPlan(planValue);
-  assert.equal(plan.event, 'pull_request', 'Omitted task proof reuse is only available to pull requests');
-  assert.equal(plan.mode, 'affected', 'Omitted task proof reuse requires an affected plan');
-  assert.equal(plan.taskInputReuse?.format, 'codexia-ci-task-input-reuse/v2', 'Affected plan lacks complete task proof reuse');
-  const tasks = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
-  assert.deepEqual(Object.keys(plan.taskInputReuse.omitted).sort(), [...tasks].sort(), 'Affected plan omitted proof inventory changed');
-  const trusted = await resolveExactMainTaskProofs({ plan, current, repository, token, tasks, request });
-  assert.deepEqual(plan.taskInputReuse.coverage, trusted.coverage, 'Plan static coverage proof reference changed');
-  assert.deepEqual(plan.taskInputReuse.omitted, Object.fromEntries(tasks.map(task => [task, trusted[task]])),
-    'Plan task proof reference changed after selection');
-
-  const runtime = coverageRuntime();
-  const closureFor = captureTaskInputSource({ root: process.cwd(), sha: plan.sha, runtime });
-  const baseline = [];
-  const candidate = [];
-  for (const task of tasks) {
-    const receipt = trusted[task];
-    const closure = closureFor(task);
-    baseline.push({ ...receipt, format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', status: 'passed',
-      sourceSha: receipt.proofSourceSha });
-    candidate.push({ task, format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', status: 'passed',
-      sourceSha: plan.sha, planDigest: planDigest(plan), workflowRunId: current.id,
-      workflowAttempt: current.run_attempt, workflowJob: taskWorkflowJob(task), inputClosure: closure });
-  }
-  const equivalent = selectEquivalentTaskProofs({ tasks, baseline, candidate,
-    baselineIdentity: { sourceSha: trusted[tasks[0]].proofSourceSha, planDigest: trusted[tasks[0]].planDigest,
-      workflowRunId: trusted[tasks[0]].workflowRunId, workflowAttempt: trusted[tasks[0]].workflowAttempt },
-    candidateIdentity: { sourceSha: plan.sha, planDigest: planDigest(plan), workflowRunId: current.id,
-      workflowAttempt: current.run_attempt },
-  });
-  assert.deepEqual(equivalent, tasks, 'Candidate and exact-base omitted task inputs are not equivalent');
-  return true;
-}

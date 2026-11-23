@@ -176,22 +176,34 @@ test('test-only changes select their owner while non-executable documentation se
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
 });
 
-test('proof ineligibility can expand an affected PR plan to the complete task inventory without losing its actual diff', async () => {
+test('impact selection is independent of proof availability; unknown diffs still fail closed', async () => {
   const { createVerificationPlan, verificationPlanOutputs } = await import('./ci-impact.mjs');
-  const affected = createVerificationPlan({ files: ['modules/search/src/browser.ts'], event: 'pull_request',
-    sha: 'a'.repeat(40), base: 'b'.repeat(40) });
-  const fallback = createVerificationPlan({ ...affected, forceFull: true });
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  const affected = createVerificationPlan({ ...input, files: ['docs/authoring.md'] });
   assert.equal(affected.mode, 'affected');
-  assert.equal(fallback.mode, 'full');
-  assert.equal(fallback.forceFull, true);
-  assert.deepEqual(fallback.files, affected.files, 'Fallback retains the exact source diff for later first-parent validation');
-  assert.deepEqual(fallback.tasks, VERIFICATION_TASKS);
-  assert.equal(fallback.full_model_oci, affected.full_model_oci);
-  const outputs = verificationPlanOutputs(fallback);
-  assert.deepEqual(JSON.parse(outputs.unit), ['core', 'modules']);
-  assert.deepEqual(JSON.parse(outputs.types), ['sources', 'tests']);
-  assert.equal(JSON.parse(outputs.plan).forceFull, true);
+  assert.deepEqual(affected.tasks, ['coverage']);
+  assert.equal(affected.excluded.length, VERIFICATION_TASKS.length - 1);
+  assert.deepEqual(JSON.parse(verificationPlanOutputs(affected).types), ['tests']);
+
+  const unknown = createVerificationPlan({ ...input, files: null });
+  assert.equal(unknown.mode, 'full');
+  assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
+  assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, VERIFICATION_TASKS);
+  assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
+});
+
+test('certification rejects tampered PR base or changed-file inventory without historical proofs', async () => {
+  const { createVerificationPlan, assertExactPrImpact } = await import('./ci-impact.mjs');
+  const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  const affected = createVerificationPlan({ ...input, files: ['docs/architecture/SYSTEM-DESIGN.md'] });
+  assert.doesNotThrow(() => assertExactPrImpact(affected, input.base, affected.files));
+  assert.throws(() => assertExactPrImpact(affected, 'c'.repeat(40), affected.files), /PR base/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, ['packages/api/src/server.ts']), /exact PR diff/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, null), /exact PR diff/);
+  const full = createVerificationPlan({ ...input, files: null });
+  assert.doesNotThrow(() => assertExactPrImpact(full, input.base, null), 'Unknown diff already selects full verification');
+  assert.throws(() => assertExactPrImpact(full, 'c'.repeat(40), null), /PR base/);
 });
 
 test('OAuth browser acceptance is selected in both profile browser lanes', async () => {

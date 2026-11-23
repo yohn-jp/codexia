@@ -27,7 +27,7 @@
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
-| `typescript` | `~5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
+| `typescript` | 現行 `~5.9.3` → **採用目標 TypeScript 7 最新安定版** | root・型検査 | **移行必須・未実装**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。型設定・依存型を修正し、全workspaceでnative型検査を受入。5系への恒久フォールバックは禁止 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 
@@ -41,9 +41,9 @@
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | `^5.12.8` | API・単一認可境界 | **既存採用**: Fastify 5。最新版・major互換性の証拠は別途評価 |
-| `jose` | `6.2.17` | API・JWT検証 | **更新対象**: 6.2.18へのDependabot PRあり。ローカルのJWTプロファイル・失効判定の契約を維持 |
-| `pg` | API `8.16.3` / persistence `^8.23.1` | API/Auth・PostgreSQL | **更新対象**: API側が遅れている。8.23.1への更新と、二つのDB接続主体の動作を確認 |
-| `@types/pg` | API `8.15.6` / persistence `^8.23.1` | PostgreSQL型 | **更新対象**: 型定義もAPI側を8.23.1系列へ合わせる。ランタイムとの型整合を検証 |
+| `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
+| `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
+| `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
 | `zod` | `4.6.7` | API/MCP/Assistant/Speaker・境界入力 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
@@ -55,8 +55,8 @@
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
 | `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
-| `react-router-dom` | `7.18.5` | app・画面遷移 | **更新対象**: 7.18.6へのPRあり。画面遷移・リロード・保護ルートを検証 |
-| `react-resizable-panels` | `4.24.0` | app・パネル | **更新対象**: 4.24.1へのPRあり。Desktop配置・ドラッグ・復元を検証 |
+| `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
+| `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
 | `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
 | `@codemirror/state` | `^6.7.6` | app・編集状態 | **要検証** |
@@ -70,7 +70,17 @@
 | `@xstate/react` | `6.1.0` | app・WRT-01/REC-01 machineとReact 19のactor接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。machine統合と保存／復旧受入で併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧の状態機械とasync actor | **連動**: 実装時点のv5 latest stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
-| `vite` | `^8.3.8` | app・フロントビルド | **要検証**: ビルド・Workers配信成果物の一致を検証 |
+| `vite` | 現行 `^8.3.8` → **Vite 8継続採用** | app・フロントビルド | **採用確定**: 最新8系への追従、Reactプラグイン・CSS生成・Workers配信・OAuth分離を検証。バンドラー変更は本契約の対象外 |
+
+### Desktop CSS基盤（採用目標・未導入）
+
+| パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
+| --- | --- | --- | --- |
+| `@vanilla-extract/css` | 未導入 → 最新安定版 | Desktop Web・型付きテーマ／静的CSS | **採用確定・未実装**: Light/Dark/Paperのtheme contractとsemantic tokensを正本化 |
+| `@vanilla-extract/vite-plugin` | 未導入 → 最新安定版 | Vite 8・CSSビルド統合 | **採用確定・未実装**: Vite 8との互換性、CSS出力とOAuthビルド分離を実証 |
+| `@vanilla-extract/recipes` | 未導入 → 最新安定版 | Desktop UI・型付きvariants | **採用確定・未実装**: 再利用可能なvariantsのみ採用し、重複スタイルを撤去 |
+
+既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
 ### Optional modules・ファイル形式
 
@@ -103,7 +113,7 @@
 | AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
 | Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
-| GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v6.1.0` | **更新対象**: v7.1.0 PRあり。配布元・ランナー互換性と該当ジョブの実行を検証 |
+| GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 
 ## アップデートの審査・記録
