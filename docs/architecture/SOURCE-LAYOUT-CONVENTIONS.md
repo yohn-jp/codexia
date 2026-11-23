@@ -6,7 +6,7 @@
 
 ## 1. Scope and design rules
 
-- Apply to **new or relocated first-party source** in `scripts/`, `packages/`, `modules/`, `app/` and first-party tools. The approved first migration is **`scripts/` only**, governed by [Scripts migration plan](SCRIPTS-MIGRATION-PLAN.md).
+- Apply to **new or relocated first-party source** in `scripts/`, `packages/`, `modules/`, `app/` and first-party tools. The approved first migration is **`scripts/` only**, governed by [Issue #690](https://github.com/yohn-jp/codexia/issues/690).
 - A directory denotes a **responsibility owner**, not file type, language, length, activity verb or presumed execution frequency. Place each implementation at one owner. Keep imports pointing to that owner; do not duplicate logic to satisfy old paths.
 - Name a file by its **local role** within its owner. Do not repeat the directory's domain prefix (e.g., `ci/impact/plan.mjs`, not `ci/impact/ci-impact.mjs`). Names must be intelligible in an editor/search result without relying on `index`.
 - Prefer `scripts/<domain>/<responsibility>/<file>` (three levels below the repository root); a domain-level entry such as `scripts/build/root.mjs` is permitted. Add a deeper level only for separately owned resources such as `ci/dashboard/site/`.
@@ -89,6 +89,6 @@ The normative [CI/CD contract](../verification/CI-CD.md) is unchanged: `NOT_SELE
 
 ## 4. Migration acceptance
 
-The [complete path map](SCRIPTS-MIGRATION-MAP.md) is the approved source-to-target mapping for the scripts migration, and the [implementation plan](SCRIPTS-MIGRATION-PLAN.md) owns waves, prerequisites and verification. Every migrated PR must update imports, child-process commands, workspaces, package scripts, Docker/OCI contexts, workflows, test fixtures, documentation links and literal source-input closures affected by the move **atomically**. Keep executable path/permissions of `.sh` tools, relative `import.meta.url` resources and ESM resolution valid. A clean build is not a substitute for tested CI/release/host behavior.
+[Issue #690](https://github.com/yohn-jp/codexia/issues/690) owns the complete source-to-target mapping, migration waves, prerequisites and verification. Every migrated PR must update imports, child-process commands, workspaces, package scripts, Docker/OCI contexts, workflows, test fixtures, documentation links and literal source-input closures affected by the move **atomically**. Keep executable path/permissions of `.sh` tools, relative `import.meta.url` resources and ESM resolution valid. A clean build is not a substitute for tested CI/release/host behavior.
 
 If a target collision or ownership contradiction is discovered, first amend this normative file and the path map; never introduce a temporary duplicate authority. Documentation acceptance does not assert any file was already moved.
