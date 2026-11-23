@@ -40,12 +40,12 @@ cleanup() {
 trap cleanup EXIT
 docker run -d --name codexia-sshfs-smoke \
   --mount "type=bind,source=$work/authorized_keys,target=/home/codexia-backup/.ssh/authorized_keys,readonly" \
-  -p 127.0.0.1:2223:22 "$image"
+  -p 127.0.0.1:2223:2222 "$image"
 for attempt in $(seq 1 30); do
-  if docker exec codexia-sshfs-smoke test -s /etc/ssh/ssh_host_ed25519_key.pub; then break; fi
+  if docker exec codexia-sshfs-smoke test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub; then break; fi
   sleep 1
 done
-server_key="$(docker exec codexia-sshfs-smoke cat /etc/ssh/ssh_host_ed25519_key.pub)"
+server_key="$(docker exec codexia-sshfs-smoke cat /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub)"
 printf '[127.0.0.1]:2223 %s\n' "$server_key" >"$work/known_hosts"
 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
   -o UserKnownHostsFile="$work/known_hosts" -o ConnectTimeout=10 \

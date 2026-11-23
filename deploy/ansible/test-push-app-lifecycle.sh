@@ -505,7 +505,7 @@ if [[ ! "$imported_fixture_image_id" =~ ^(sha256:)?[a-f0-9]{64}$ ]] ||
   exit 1
 fi
 rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup \
-  -p 127.0.0.1:2222:22 \
+  -p 127.0.0.1:2222:2222 \
   --volume "$build_context/authorized_keys:/home/codexia-backup/.ssh/authorized_keys:ro" \
   "$fixture_image" >/dev/null
 fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
@@ -530,7 +530,7 @@ sudo install -o codexia -g codexia -m 0600 "$tmp/ssh-config" "$fixture_home/.ssh
 # before ssh-keygen -A, so wait for the real key instead of racing sshd startup.
 ssh_host_key_ready=false
 for attempt in $(seq 1 30); do
-  if rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/ssh_host_ed25519_key.pub >/dev/null 2>&1; then
+  if rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub >/dev/null 2>&1; then
     ssh_host_key_ready=true
     break
   fi
@@ -541,7 +541,7 @@ if [[ "$ssh_host_key_ready" != true ]]; then
   rootless_podman logs --tail 50 codexia-backup-sshfs >&2 || true
   exit 1
 fi
-server_key=$(rootless_podman exec codexia-backup-sshfs cat /etc/ssh/ssh_host_ed25519_key.pub)
+server_key=$(rootless_podman exec codexia-backup-sshfs cat /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub)
 printf 'codexia-backup-fixture %s\n' "$server_key" > "$tmp/known_hosts"
 sudo install -o codexia -g codexia -m 0600 "$tmp/known_hosts" "$fixture_home/.ssh/known_hosts"
 if ! rootless ssh -F "$fixture_home/.ssh/config" -o BatchMode=yes codexia-backup-fixture true; then
