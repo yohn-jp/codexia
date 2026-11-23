@@ -5,14 +5,36 @@
  * OpenAPI spec version: 2.0.0
  */
 import {
+  PersistenceAnchorCreatedResponse,
   PersistenceDocumentListResponse,
   PersistenceStatusResponse
 } from './schemas';
 import type {
+  PersistenceDocumentAnchorsPostBody,
   PersistenceDocumentsGetParams
 } from './schemas';
 
 import { generatedHttpFetch } from '../../generated-http-fetch';
+const getHeaders = (...sources: (RequestInit['headers'] | Record<string, string | undefined>)[]) => {
+  const seen = new Set<string>();
+  const layers: [string, string | readonly string[]][][] = [];
+  for (const source of sources.reverse()) {
+    if (!source) continue;
+    const entries = source instanceof Headers
+      ? source.entries()
+      : Symbol.iterator in source
+        ? Array.from(source as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+        : Object.entries<string | readonly string[] | undefined>(source);
+    const layer: [string, string | readonly string[]][] = [];
+    for (const [name, value] of entries) {
+      if (value !== undefined && !seen.has(name.toLowerCase())) layer.push([name, value]);
+    }
+    for (const [name] of layer) seen.add(name.toLowerCase());
+    layers.push(layer);
+  }
+  return Object.fromEntries(layers.reverse().flat()) as Extract<RequestInit['headers'], Record<string, unknown>>;
+};
+
 export const getPersistenceDocumentsGetUrl = (projectId: string,
     params?: PersistenceDocumentsGetParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -39,6 +61,31 @@ export const persistenceDocumentsGet = async (projectId: string,
 
     ,
     schema: PersistenceDocumentListResponse
+  }
+);}
+
+
+
+export const getPersistenceDocumentAnchorsPostUrl = (projectId: string,
+    documentId: string,) => {
+
+
+
+
+  return `/api/v1/persistence/projects/${encodeURIComponent(String(projectId))}/documents/${encodeURIComponent(String(documentId))}/anchors`
+}
+
+export const persistenceDocumentAnchorsPost = async (projectId: string,
+    documentId: string,
+    persistenceDocumentAnchorsPostBody: PersistenceDocumentAnchorsPostBody, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<PersistenceAnchorCreatedResponse> => {
+
+  return generatedHttpFetch<PersistenceAnchorCreatedResponse>(getPersistenceDocumentAnchorsPostUrl(projectId,documentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(persistenceDocumentAnchorsPostBody),
+    schema: PersistenceAnchorCreatedResponse
   }
 );}
 
