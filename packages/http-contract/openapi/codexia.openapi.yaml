@@ -2469,8 +2469,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceDocumentListResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2499,8 +2498,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/SaveDocumentResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2556,8 +2554,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceDocumentGetResponse'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2643,8 +2640,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceDocumentEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2952,8 +2948,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceDocumentEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3007,8 +3002,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/SaveDocumentResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3070,8 +3064,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/DocumentRevisionPageResponse'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -4038,6 +4031,21 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    DocumentRevisionPageResponse:
+      type: object
+      required:
+        - revisions
+        - nextBefore
+      properties:
+        revisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceDocumentRevision'
+        nextBefore:
+          anyOf:
+            - type: string
+            - type: 'null'
+      additionalProperties: {}
     HealthResponse:
       type: object
       required:
@@ -4096,6 +4104,112 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    PersistenceDocument:
+      type: object
+      required:
+        - id
+        - projectId
+        - parentId
+        - kind
+        - title
+        - orderKey
+        - headRevisionId
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        parentId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        kind:
+          type: string
+        title:
+          type: string
+        orderKey:
+          type: string
+        headRevisionId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    PersistenceDocumentEnvelope:
+      type: object
+      required:
+        - document
+      properties:
+        document:
+          $ref: '#/components/schemas/PersistenceDocument'
+      additionalProperties: {}
+    PersistenceDocumentGetResponse:
+      type: object
+      required:
+        - document
+        - revision
+      properties:
+        document:
+          $ref: '#/components/schemas/PersistenceDocument'
+        revision:
+          anyOf:
+            - $ref: '#/components/schemas/PersistenceDocumentRevision'
+            - type: 'null'
+      additionalProperties: {}
+    PersistenceDocumentListResponse:
+      type: object
+      required:
+        - documents
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceDocument'
+      additionalProperties: {}
+    PersistenceDocumentRevision:
+      type: object
+      required:
+        - id
+        - projectId
+        - documentId
+        - parentRevisionId
+        - markdown
+        - sha256
+        - authorId
+        - createdAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        documentId:
+          type: string
+        parentRevisionId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        markdown:
+          type: string
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        authorId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
     PersistenceProjectCreateRequest:
       type: object
       required:
@@ -4257,6 +4371,16 @@ components:
         current:
           anyOf:
             - type: object
+              properties:
+                document:
+                  $ref: '#/components/schemas/PersistenceDocument'
+                revision:
+                  anyOf:
+                    - $ref: '#/components/schemas/PersistenceDocumentRevision'
+                    - type: 'null'
+              required:
+                - document
+                - revision
               additionalProperties: {}
             - type: 'null'
       unevaluatedProperties:
@@ -4288,11 +4412,9 @@ components:
         - replayed
       properties:
         document:
-          type: object
-          additionalProperties: {}
+          $ref: '#/components/schemas/PersistenceDocument'
         revision:
-          type: object
-          additionalProperties: {}
+          $ref: '#/components/schemas/PersistenceDocumentRevision'
         replayed:
           type: boolean
       unevaluatedProperties:
