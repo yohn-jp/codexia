@@ -5,7 +5,7 @@ import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { collectGitHubPages } from './release-policy.mjs';
 import { CERTIFICATION_DEPENDENCIES } from './ci-contract.mjs';
-import { validateVerificationPlan } from './ci-impact.mjs';
+import { validateVerificationPlan, assertExactPrImpact } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
@@ -36,14 +36,12 @@ assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact s
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
 if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all validations');
 if (run.event === 'pull_request') {
-  const expectedBase = process.env.CODEXIA_EXPECTED_BASE;
-  assert.match(expectedBase ?? '', /^[a-f0-9]{40}$/u, 'Missing exact PR base identity');
-  assert.equal(plan.base, expectedBase, 'Impact plan PR base does not match the event');
-  if (plan.mode === 'affected') {
-    const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', `${expectedBase}...${plan.sha}`, '--'],
-      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
-    assert.deepEqual(plan.files, changed, 'Impact plan does not match the exact PR diff');
-  }
+  const changed = plan.mode === 'affected'
+    ? execFileSync('git', ['diff', '--name-only', '--no-renames', '-z',
+      `${process.env.CODEXIA_EXPECTED_BASE}...${plan.sha}`, '--'],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean)
+    : null;
+  assertExactPrImpact(plan, process.env.CODEXIA_EXPECTED_BASE, changed);
 }
 const jobs = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`), 'jobs');
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
