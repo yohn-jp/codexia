@@ -52,6 +52,8 @@
     ".dockerignore",
     "Dockerfile.backend.dockerignore",
     "deploy/backend/**",
+    "deploy/fixtures/sshfs-server/**",
+    "scripts/verify-sshfs-fixture-artifact*.mjs",
     "packages/**",
     "modules/**",
     "!modules/story/src/browser.tsx",
