@@ -157,7 +157,11 @@ flowchart TD
     KEY --> VALID{"APIでキーと状態を検証"}
     VALID -->|無効・期限切れ| KEYERROR["理由を安全に案内<br/>再入力/運用者の再発行へ"]
     KEYERROR --> KEY
-    VALID -->|正当| PASS["Passkey作成を明示開始<br/>ブラウザーWebAuthn"]
+    VALID -->|正当| PROFILE["所有者プロフィール<br/>表示名と連絡先メールを入力"]
+    PROFILE --> VALIDPROFILE{"入力検証"}
+    VALIDPROFILE -->|不正| PROFILEERROR["項目ごとに修正を案内"]
+    PROFILEERROR --> PROFILE
+    VALIDPROFILE -->|妥当| PASS["Passkey作成を明示開始<br/>ブラウザーWebAuthn"]
     PASS -->|キャンセル・端末非対応| PASSERR["入力を保持して再試行/別端末<br/>ownerは未作成"]
     PASSERR --> PASS
     PASS -->|応答| COMMIT{"APIが証明/単一owner/一回限り消費を原子的に確定"}
@@ -176,6 +180,7 @@ flowchart TD
 | --- | --- | --- |
 | 初期化状況 | 必要な作業とセットアップ状態の表示、再読込 | DBが不明・復旧中ならowner新規作成を提示しない |
 | キー入力 | 安全な入力欄、貼り付け、検証、戻る | キー全体をURL、分析ログ、Web Storage、エラー表示に残さない。無効・期限切れ・失効は再発行を案内 |
+| プロフィール | 表示名と連絡先メールを入力・確認 | メールアドレスだけでowner権限やアカウントリンクを確定しない。Better Authの内部user IDが正本 |
 | Passkey作成 | ユーザーの明示クリックでWebAuthn、利用可能端末で本人確認 | キャンセル/非対応/不正origin・challengeを区別。検証前にowner登録完了と表示しない |
 | 完了確認 | owner確定・OAuth client準備状態をAPIから再取得 | 応答喪失を未実施と推定しない。二重owner/二重キー消費を拒否 |
 | 本番公開待ち | 構築担当に必要な承認を案内、状態を更新 | UIからSSH/Ansible/デプロイ権限を行使しない。公開が失敗しても認証DBを初期化しない |
