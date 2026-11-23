@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codexia — Graphify File Explorer</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b1020; --panel:#151c2e; --panel2:#1b263c; --line:#344258; --fg:#e9eef8; --muted:#a5b4ca; --accent:#8dbbff; --in:#79cdb8; --out:#f0bb78; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--fg); margin:0; font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  button,input,select { font:inherit; } button,select,input { color:inherit; }
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,svg [role="button"]:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+  .top { padding:23px clamp(16px,3vw,40px) 18px; border-bottom:1px solid var(--line); }
+  .top-row { display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap; }
+  h1 { font-size:22px;letter-spacing:-.035em;margin:0; } h2 { font-size:17px;margin:0 0 8px; } h3 { font-size:14px;margin:0 0 8px; }
+  .top p { margin:6px 0 0;color:var(--muted); }
+  nav { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+  nav a { display:inline-block;padding:7px 12px;border:1px solid var(--line);border-radius:9px; }nav a.active { color:#fff;background:#2b4264; }
+  .stats { display:flex;flex-wrap:wrap;gap:18px;margin-top:17px; }
+  .stat { min-width:112px; } .stat strong { display:block;font-size:20px;font-variant-numeric:tabular-nums; } .stat span { font-size:12px;color:var(--muted); }
+  .warning { font-size:12px;color:var(--muted);padding:9px 16px;border-bottom:1px solid var(--line);background:#121a2d; }
+  .layout { display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);min-height:calc(100vh - 220px); }
+  aside { border-right:1px solid var(--line);padding:16px;min-width:0; }
+  label { display:block;color:var(--muted);font-size:12px;margin-bottom:6px; }
+  input[type="search"],select { width:100%;background:var(--panel);border:1px solid var(--line);padding:9px 11px;border-radius:8px; }
+  .filters { display:grid;gap:10px; }
+  .check { display:flex;gap:8px;align-items:center;color:var(--fg);font-size:12px; }
+  .check input { accent-color:var(--accent); }
+  .file-count { color:var(--muted);font-size:12px;margin:14px 0 8px; }
+  .file-list { display:grid;gap:4px;max-height:calc(100vh - 360px);min-height:280px;overflow:auto; }
+  .file-button { text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;padding:8px 10px;cursor:pointer;min-width:0; }
+  .file-button:hover { background:var(--panel); } .file-button[aria-current="true"] { background:#233a56;border-color:#4a76a8; }
+  .file-button strong { display:block;font-size:12px;overflow-wrap:anywhere;font-weight:600; }
+  .file-button small { display:block;color:var(--muted);margin-top:2px; }
+  main { padding:24px clamp(16px,3vw,36px);min-width:0; }
+  .head { display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap; }
+  .head h2 { overflow-wrap:anywhere;font-size:20px;max-width:70ch; }
+  .source-links a[hidden] { display:none; }
+  .pills { display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px; }
+  .pill { border:1px solid var(--line);border-radius:8px;padding:4px 10px;color:var(--muted);font-variant-numeric:tabular-nums; }
+  .canvas-wrap { background:radial-gradient(ellipse at 50% 40%,#22314d,#101829);border:1px solid var(--line);border-radius:12px;overflow-x:auto; }
+  .canvas-head { display:flex;gap:16px;flex-wrap:wrap;padding:10px 15px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line); }
+  .legend-in { color:var(--in); } .legend-out { color:var(--out); }
+  svg { display:block;width:100%;min-width:700px;min-height:245px; }
+  .edge { stroke-width:2;fill:none;opacity:.75; } .edge.in { stroke:var(--in); } .edge.out { stroke:var(--out); }
+  .node rect { fill:#233753;stroke:#57728d;stroke-width:1.5;rx:8; }
+  .node text { fill:var(--fg);font:12px system-ui,sans-serif;pointer-events:none; }
+  .node.center rect { fill:#35577d;stroke:#9cc6f7; } .node.in rect { stroke:var(--in); }.node.out rect { stroke:var(--out); }
+  .node.linked { cursor:pointer; }.node.linked:hover rect,.node.linked:focus rect { stroke-width:3; }
+  .columns { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0; }
+  section.card { background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0; }
+  .relations { display:grid;gap:6px;max-height:380px;overflow:auto; }
+  .relation { display:flex;width:100%;text-align:left;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);background:var(--panel2);border-radius:7px;cursor:pointer; }
+  .relation:hover { border-color:var(--accent); } .relation span { overflow-wrap:anywhere;font-size:12px; } .relation small { white-space:nowrap;color:var(--muted); }
+  .empty { color:var(--muted);font-size:12px;margin:8px 0; }
+  details { margin-top:16px; } details summary { cursor:pointer;color:var(--accent); } .symbol-list { columns:2;column-gap:22px;padding:10px 0 0;list-style:none; }
+  .symbol-list li { break-inside:avoid;overflow-wrap:anywhere;padding:3px 0;font-size:12px;color:var(--muted); }
+  .source-meta { color:var(--muted);font-size:11px;margin-top:16px;overflow-wrap:anywhere; }
+  @media (max-width:850px) { .layout { grid-template-columns:1fr; }aside { border-right:0;border-bottom:1px solid var(--line); }.file-list { max-height:270px;min-height:0; } .columns { grid-template-columns:1fr; } }
+  @media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div><h1>Codexia / Code Map</h1><p>Graphify静的解析から生成したファイル・参照関係の探索画面</p></div>
+    <nav aria-label="Graphify views"><a href="./" class="active" aria-current="page">ファイル探索</a><a href="communities.html">コミュニティ概観</a><a href="../ci/">CI</a></nav>
+  </div>
+  <div class="stats" aria-label="解析サマリー">
+    <div class="stat"><strong id="stat-files">—</strong><span>解析されたファイル</span></div>
+    <div class="stat"><strong id="stat-nodes">—</strong><span>Graphifyノード</span></div>
+    <div class="stat"><strong id="stat-links">—</strong><span>全エッジ</span></div>
+    <div class="stat"><strong id="stat-cross">—</strong><span>ファイル間エッジ</span></div>
+  </div>
+</header>
+<div class="warning">静的解析による観測結果です。「参照元なし」は未使用の証明ではありません。動的ロード、MCP登録、実行時設定、SQL、テストなどの経路は別途確認が必要です。</div>
+<div class="layout">
+  <aside aria-label="ファイルを探す">
+    <div class="filters">
+      <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" autocomplete="off" placeholder="例: auth / CoreStore / routes"></div>
+      <div><label for="area">トップレベルディレクトリ</label><select id="area"><option value="">すべて</option></select></div>
+      <label class="check"><input type="checkbox" id="no-inbound">参照元の観測がないファイルのみ</label>
+    </div>
+    <div class="file-count" id="file-count" aria-live="polite"></div>
+    <div id="file-list" class="file-list" aria-label="ファイル一覧"></div>
+  </aside>
+  <main>
+    <div class="head"><div><h2 id="selected-path">ファイルを選択</h2><div id="file-metrics" class="pills"></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
+    <div class="canvas-wrap">
+      <div class="canvas-head"><span class="legend-in">● 参照元 → 選択ファイル</span><span class="legend-out">● 選択ファイル → 参照先</span><span>最大各8件を表示（一覧は全件）</span></div>
+      <svg id="neighbor-graph" role="img" aria-label="選択ファイルと隣接ファイルのグラフ"></svg>
+    </div>
+    <div class="columns">
+      <section class="card"><h3 id="incoming-title">参照元</h3><div id="incoming-list" class="relations"></div></section>
+      <section class="card"><h3 id="outgoing-title">参照先</h3><div id="outgoing-list" class="relations"></div></section>
+    </div>
+    <section class="card"><h3 id="symbols-title">このファイルのシンボル</h3><div id="symbols" class="symbol-list"></div></section>
+    <div class="source-meta" id="source-meta"></div>
+  </main>
+</div>
+<script id="graph-data" type="application/json">__GRAPHIFY_INDEX_JSON__</script>
+<script>
+(() => {
+  'use strict';
+  const data = JSON.parse(document.getElementById('graph-data').textContent);
+  const files = data.files;
+  const byPath = new Map(files.map(f => [f.path, f]));
+  const $ = id => document.getElementById(id);
+  const nf = new Intl.NumberFormat('ja-JP');
+  const usage = f => f.incoming.length + f.outgoing.length;
+  const firstChoice = files.filter(f => /^(packages|modules|app)\//.test(f.path)).sort((a,b) => usage(b) - usage(a))[0] || files[0];
+  let selected = byPath.get(new URLSearchParams(location.search).get('file')) || firstChoice;
+  for (const [name, value] of Object.entries({ 'stat-files': data.stats.files, 'stat-nodes': data.stats.nodes, 'stat-links': data.stats.links, 'stat-cross': data.stats.crossFileLinks })) $(name).textContent = nf.format(value);
+  const areas = [...new Set(files.map(f => f.path.split('/')[0]))].sort();
+  for (const area of areas) { const opt=document.createElement('option');opt.value=area;opt.textContent=area;$('area').append(opt); }
+  const short = path => path.length > 33 ? '…' + path.slice(-32) : path;
+  const basename = path => path.split('/').pop();
+  const sourceLinks = [...$('source-links').querySelectorAll('a')];
+  const sourceLinkByPath = new Map(files.map((f, i) => [f.path, sourceLinks[i]]));
+  let shownSourceLink = null;
+  function select(path) {
+    const next = byPath.get(path);
+    if (!next) return;
+    selected = next;
+    history.replaceState(null, '', location.pathname + '?file=' + encodeURIComponent(path) + location.hash);
+    renderFiles(); renderSelected();
+  }
+  function renderFiles() {
+    const q = $('search').value.toLocaleLowerCase().trim();
+    const area = $('area').value;
+    const noInbound = $('no-inbound').checked;
+    const filtered = files.filter(f => (!area || f.path.split('/')[0] === area) && (!noInbound || f.incoming.length === 0) && (!q || f.path.toLocaleLowerCase().includes(q) || f.symbols.some(s => s.toLocaleLowerCase().includes(q)))).sort((a,b) => usage(b) - usage(a) || a.path.localeCompare(b.path));
+    $('file-count').textContent = nf.format(filtered.length) + '件 / ' + nf.format(files.length) + '件（最大200件を表示）';
+    const root = $('file-list'); root.replaceChildren();
+    for (const f of filtered.slice(0, 200)) {
+      const button = document.createElement('button');button.type='button';button.className='file-button';button.setAttribute('aria-current', String(f.path === selected.path));
+      const title = document.createElement('strong');title.textContent = f.path;
+      const count = document.createElement('small');count.textContent='参照元 ' + f.incoming.length + ' · 参照先 ' + f.outgoing.length + ' · シンボル ' + f.symbols.length;
+      button.append(title, count);button.addEventListener('click', () => select(f.path));root.append(button);
+    }
+    if (filtered.length === 0) { const empty=document.createElement('p');empty.className='empty';empty.textContent='該当ファイルなし';root.append(empty); }
+  }
+  const NS='http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs = {}) { const el=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));return el; }
+  function renderGraph(f) {
+    const incoming=f.incoming.slice(0,8), outgoing=f.outgoing.slice(0,8);
+    const rows=Math.max(incoming.length,outgoing.length,1);
+    const height=Math.max(255,rows*49+74), cy=height/2;
+    const svg=$('neighbor-graph');svg.replaceChildren();svg.setAttribute('viewBox',`0 0 1000 ${height}`);
+    const defs=svgEl('defs');
+    for(const [id,color] of [['in','#79cdb8'],['out','#f0bb78']]) { const marker=svgEl('marker',{id:'arrow-'+id,viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'5',markerHeight:'5',orient:'auto-start-reverse'});marker.append(svgEl('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:color}));defs.append(marker); }
+    svg.append(defs);
+    function node(path,x,y,kind,linked=true) {
+      const g=svgEl('g',{class:'node '+kind+(linked?' linked':''),transform:`translate(${x},${y})`});
+      g.append(svgEl('rect',{x:-115,y:-18,width:230,height:36}));
+      const text=svgEl('text',{'text-anchor':'middle',y:4});text.textContent=short(path);g.append(text);
+      const tip=svgEl('title');tip.textContent=path;g.append(tip);
+      if(linked){ g.setAttribute('role','button');g.setAttribute('tabindex','0');g.setAttribute('aria-label','ファイルを開く: '+path);g.addEventListener('click',()=>select(path));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(path);}}); }
+      svg.append(g);
+    }
+    const rowY = (i,count) => (height-49*(count-1))/2+49*i;
+    for(const [i,rel] of incoming.entries()) { const y=rowY(i,incoming.length);svg.append(svgEl('path',{class:'edge in',d:`M 315 ${y} L 390 ${cy}`,'marker-end':'url(#arrow-in)'})); }
+    for(const [i,rel] of outgoing.entries()) { const y=rowY(i,outgoing.length);svg.append(svgEl('path',{class:'edge out',d:`M 610 ${cy} L 685 ${y}`,'marker-end':'url(#arrow-out)'})); }
+    for(const [i,rel] of incoming.entries()) node(rel.path,200,rowY(i,incoming.length),'in');
+    for(const [i,rel] of outgoing.entries()) node(rel.path,800,rowY(i,outgoing.length),'out');
+    node(f.path,500,cy,'center',false);
+    if(incoming.length===0 && outgoing.length===0){const t=svgEl('text',{x:500,y:cy+55,'text-anchor':'middle',fill:'#a5b4ca'});t.textContent='観測されたファイル間参照なし';svg.append(t);}
+  }
+  function renderRelations(id,rels) {
+    const root=$(id);root.replaceChildren();
+    if (!rels.length){const p=document.createElement('p');p.className='empty';p.textContent='静的解析では観測されませんでした';root.append(p);return;}
+    for(const r of rels){const b=document.createElement('button');b.type='button';b.className='relation';b.title=r.relations.join(', ');
+      const s=document.createElement('span');s.textContent=r.path;const n=document.createElement('small');n.textContent=nf.format(r.count)+' エッジ';b.append(s,n);b.addEventListener('click',()=>select(r.path));root.append(b);}
+  }
+  function renderSelected() {
+    const f=selected;
+    $('selected-path').textContent=f.path;
+    if (shownSourceLink) shownSourceLink.hidden=true;
+    shownSourceLink=sourceLinkByPath.get(f.path);
+    if (shownSourceLink) shownSourceLink.hidden=false;
+    const pills=$('file-metrics');pills.replaceChildren();
+    for(const item of [`参照元 ${f.incoming.length} ファイル`,`参照先 ${f.outgoing.length} ファイル`,`シンボル ${f.symbols.length} 件`]){const p=document.createElement('span');p.className='pill';p.textContent=item;pills.append(p);}
+    renderGraph(f);
+    $('incoming-title').textContent=`参照元 (${f.incoming.length})`;
+    $('outgoing-title').textContent=`参照先 (${f.outgoing.length})`;
+    renderRelations('incoming-list',f.incoming);renderRelations('outgoing-list',f.outgoing);
+    $('symbols-title').textContent=`このファイルのシンボル (${f.symbols.length})`;
+    const root=$('symbols');root.replaceChildren();
+    if(!f.symbols.length){const p=document.createElement('p');p.className='empty';p.textContent='Graphifyが抽出したシンボルなし';root.append(p);}
+    else {const ul=document.createElement('ul');ul.style.paddingLeft='18px';for(const s of f.symbols){const li=document.createElement('li');li.textContent=s;ul.append(li);}root.append(ul);}
+    $('source-meta').textContent='Source SHA: '+data.sourceSha+' · Graphify静的解析のファイル間エッジを集計（同一ファイル内・外部シンボルは表示対象外）';
+  }
+  $('search').addEventListener('input',renderFiles);
+  $('area').addEventListener('change',renderFiles);
+  $('no-inbound').addEventListener('change',renderFiles);
+  renderFiles();renderSelected();
+})();
+</script>
+</body>
+</html>

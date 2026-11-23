@@ -289,7 +289,7 @@ for (const mode of ["desktop", "mobile"] as const) {
   });
 }
 
-test("project switch fences a late unified-feed response and read-only sessions expose no author controls", async ({ page, browser, authorizeAuthor }) => {
+test("project switch fences a late unified-feed response and withdrawn author scope hides controls", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
   const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Native review response fence", originalMarkdown);
@@ -318,20 +318,21 @@ test("project switch fences a late unified-feed response and read-only sessions 
   await expect(page.getByText("この作品にネイティブ提案はありません。", { exact: true })).toBeVisible();
   await expect(page.locator(".native-changeset-card")).toHaveCount(0);
 
-  const readOnlyPage = await browser.newPage();
-  await readOnlyPage.route("**/api/session", async (route) => {
+  // The standalone session DTO authorizes editing through authorScope.
+  // A permissions array was a retired Hosted contract and never affected this UI.
+  // Recheck the already-authorized author after simulating scope withdrawal,
+  // without starting a second OAuth flow or relaxing the approval boundary.
+  await page.route("**/api/session", async (route) => {
     const response = await route.fetch();
     if (!response.ok()) { await route.fulfill({ response }); return; }
     const body = await response.json() as Record<string, unknown>;
     await route.fulfill({ response, body: JSON.stringify({ ...body, authorScope: "" }) });
   });
-  try {
-    const missingAuthorControls = readOnlyPage.getByRole("alert").filter({ hasText: "原稿編集権限がありません" });
-    await authorizeAuthor("desktop", readOnlyPage, { expectedView: missingAuthorControls });
-    await expect(missingAuthorControls).toBeVisible();
-    await expect(readOnlyPage.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
-    await expect(readOnlyPage.getByRole("button", { name: "承認する" })).toHaveCount(0);
-  } finally { await readOnlyPage.close(); }
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  const missingAuthorControls = page.getByRole("alert").filter({ hasText: "原稿編集権限がありません" });
+  await expect(missingAuthorControls).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "承認する" })).toHaveCount(0);
 });
 
 

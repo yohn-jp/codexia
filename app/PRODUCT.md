@@ -41,7 +41,7 @@ The product name is Codexia. No additional voice, logo treatment, or identity as
 - [Design and UX contract](../docs/design/UX-CONTRACT.md) defines the author experience and acceptance targets; it is not a report that every target is implemented or accepted in production.
 - [Codexia design system](DESIGN.md) records owner-confirmed visual direction and separates unresolved details from adopted decisions.
 - [Visual system history](../docs/design/VISUAL-SYSTEM.md) preserves existing proposals and comparisons; its earlier choices are not automatically current specifications.
-- [UI redesign acceptance record](../evidence/ui-redesign-v2/acceptance.md) documents synthetic manuscript fixtures and the initial redesign capture. It notes that screenshots predate later review fixes, so they are not current rendered-state proof. No real user manuscript was used for those captures.
+- [UI redesign acceptance record](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md) documents synthetic manuscript fixtures and the initial redesign capture. It notes that screenshots predate later review fixes, so they are not current rendered-state proof. No real user manuscript was used for those captures.
 
 ## Product Principles
 
