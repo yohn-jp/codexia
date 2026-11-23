@@ -9,6 +9,18 @@
 public import Foundation
 /// A type that performs HTTP operations defined by the OpenAPI document.
 public protocol APIProtocol: Sendable {
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
+    func owner_setup_authorize_post(_ input: Operations.owner_setup_authorize_post.Input) async throws -> Operations.owner_setup_authorize_post.Output
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/complete`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)`.
+    func owner_setup_complete_post(_ input: Operations.owner_setup_complete_post.Input) async throws -> Operations.owner_setup_complete_post.Output
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/profile`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)`.
+    func owner_setup_profile_post(_ input: Operations.owner_setup_profile_post.Input) async throws -> Operations.owner_setup_profile_post.Output
+    /// - Remark: HTTP `GET /api/auth/codexia/setup/status`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)`.
+    func owner_setup_status_get(_ input: Operations.owner_setup_status_get.Input) async throws -> Operations.owner_setup_status_get.Output
     /// - Remark: HTTP `POST /api/auth/oauth2/consent-context`.
     /// - Remark: Generated from `#/paths//api/auth/oauth2/consent-context/post(auth_consent_context_post)`.
     func auth_consent_context_post(_ input: Operations.auth_consent_context_post.Input) async throws -> Operations.auth_consent_context_post.Output
@@ -340,6 +352,44 @@ public protocol APIProtocol: Sendable {
 
 /// Convenience overloads for operation inputs.
 extension APIProtocol {
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
+    public func owner_setup_authorize_post(
+        headers: Operations.owner_setup_authorize_post.Input.Headers = .init(),
+        body: Operations.owner_setup_authorize_post.Input.Body
+    ) async throws -> Operations.owner_setup_authorize_post.Output {
+        try await owner_setup_authorize_post(Operations.owner_setup_authorize_post.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/complete`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)`.
+    public func owner_setup_complete_post(
+        headers: Operations.owner_setup_complete_post.Input.Headers,
+        body: Operations.owner_setup_complete_post.Input.Body
+    ) async throws -> Operations.owner_setup_complete_post.Output {
+        try await owner_setup_complete_post(Operations.owner_setup_complete_post.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/profile`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)`.
+    public func owner_setup_profile_post(
+        headers: Operations.owner_setup_profile_post.Input.Headers,
+        body: Operations.owner_setup_profile_post.Input.Body
+    ) async throws -> Operations.owner_setup_profile_post.Output {
+        try await owner_setup_profile_post(Operations.owner_setup_profile_post.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// - Remark: HTTP `GET /api/auth/codexia/setup/status`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)`.
+    public func owner_setup_status_get(headers: Operations.owner_setup_status_get.Input.Headers = .init()) async throws -> Operations.owner_setup_status_get.Output {
+        try await owner_setup_status_get(Operations.owner_setup_status_get.Input(headers: headers))
+    }
     /// - Remark: HTTP `POST /api/auth/oauth2/consent-context`.
     /// - Remark: Generated from `#/paths//api/auth/oauth2/consent-context/post(auth_consent_context_post)`.
     public func auth_consent_context_post(

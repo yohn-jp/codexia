@@ -648,6 +648,169 @@ extension Components {
                 case oauth_query
             }
         }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupCompleted`.
+        public struct OwnerSetupCompleted: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupCompleted/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case owner_hyphen_enrolled = "owner-enrolled"
+            }
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupCompleted/state`.
+            public var state: Components.Schemas.OwnerSetupCompleted.statePayload
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupCompleted/clientsReady`.
+            public var clientsReady: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupCompleted/sessionConfirmed`.
+            public var sessionConfirmed: Swift.Bool
+            /// Creates a new `OwnerSetupCompleted`.
+            ///
+            /// - Parameters:
+            ///   - state:
+            ///   - clientsReady:
+            ///   - sessionConfirmed:
+            public init(
+                state: Components.Schemas.OwnerSetupCompleted.statePayload,
+                clientsReady: Swift.Bool,
+                sessionConfirmed: Swift.Bool
+            ) {
+                self.state = state
+                self.clientsReady = clientsReady
+                self.sessionConfirmed = sessionConfirmed
+            }
+            public enum CodingKeys: String, CodingKey {
+                case state
+                case clientsReady
+                case sessionConfirmed
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupEnrolled`.
+        public struct OwnerSetupEnrolled: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupEnrolled/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case owner_hyphen_enrolled = "owner-enrolled"
+            }
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupEnrolled/state`.
+            public var state: Components.Schemas.OwnerSetupEnrolled.statePayload
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupEnrolled/clientsReady`.
+            public var clientsReady: Swift.Bool
+            /// Creates a new `OwnerSetupEnrolled`.
+            ///
+            /// - Parameters:
+            ///   - state:
+            ///   - clientsReady:
+            public init(
+                state: Components.Schemas.OwnerSetupEnrolled.statePayload,
+                clientsReady: Swift.Bool
+            ) {
+                self.state = state
+                self.clientsReady = clientsReady
+            }
+            public enum CodingKeys: String, CodingKey {
+                case state
+                case clientsReady
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupError`.
+        public struct OwnerSetupError: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupError/code`.
+            @frozen public enum codePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case SETUP_SAME_ORIGIN_REQUIRED = "SETUP_SAME_ORIGIN_REQUIRED"
+                case SETUP_KEY_INVALID = "SETUP_KEY_INVALID"
+                case SETUP_TRANSACTION_INVALID = "SETUP_TRANSACTION_INVALID"
+                case SETUP_PROFILE_INVALID = "SETUP_PROFILE_INVALID"
+                case SETUP_CLOSED = "SETUP_CLOSED"
+                case SETUP_REQUEST_INVALID = "SETUP_REQUEST_INVALID"
+                case SETUP_RATE_LIMIT = "SETUP_RATE_LIMIT"
+                case SETUP_UNAVAILABLE = "SETUP_UNAVAILABLE"
+                case SETUP_ONLY = "SETUP_ONLY"
+            }
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupError/code`.
+            public var code: Components.Schemas.OwnerSetupError.codePayload
+            /// Creates a new `OwnerSetupError`.
+            ///
+            /// - Parameters:
+            ///   - code:
+            public init(code: Components.Schemas.OwnerSetupError.codePayload) {
+                self.code = code
+            }
+            public enum CodingKeys: String, CodingKey {
+                case code
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupKeyInput`.
+        public struct OwnerSetupKeyInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupKeyInput/key`.
+            public var key: Swift.String
+            /// Creates a new `OwnerSetupKeyInput`.
+            ///
+            /// - Parameters:
+            ///   - key:
+            public init(key: Swift.String) {
+                self.key = key
+            }
+            public enum CodingKeys: String, CodingKey {
+                case key
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupProfileInput`.
+        public struct OwnerSetupProfileInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupProfileInput/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupProfileInput/email`.
+            public var email: Swift.String
+            /// Creates a new `OwnerSetupProfileInput`.
+            ///
+            /// - Parameters:
+            ///   - name:
+            ///   - email:
+            public init(
+                name: Swift.String,
+                email: Swift.String
+            ) {
+                self.name = name
+                self.email = email
+            }
+            public enum CodingKeys: String, CodingKey {
+                case name
+                case email
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupState`.
+        public struct OwnerSetupState: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupState/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case waiting = "waiting"
+                case setup_hyphen_pending = "setup-pending"
+                case expired = "expired"
+                case blocked = "blocked"
+                case active = "active"
+            }
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupState/state`.
+            public var state: Components.Schemas.OwnerSetupState.statePayload
+            /// Creates a new `OwnerSetupState`.
+            ///
+            /// - Parameters:
+            ///   - state:
+            public init(state: Components.Schemas.OwnerSetupState.statePayload) {
+                self.state = state
+            }
+            public enum CodingKeys: String, CodingKey {
+                case state
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupTransaction`.
+        public struct OwnerSetupTransaction: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupTransaction/transaction`.
+            public var transaction: Swift.String
+            /// Creates a new `OwnerSetupTransaction`.
+            ///
+            /// - Parameters:
+            ///   - transaction:
+            public init(transaction: Swift.String) {
+                self.transaction = transaction
+            }
+            public enum CodingKeys: String, CodingKey {
+                case transaction
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/PersistenceDocument`.
         public struct PersistenceDocument: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PersistenceDocument/id`.

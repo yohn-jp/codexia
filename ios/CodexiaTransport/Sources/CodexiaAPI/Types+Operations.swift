@@ -9,6 +9,1894 @@
 public import Foundation
 /// API operations, with input and output types, generated from `#/paths` in the OpenAPI document.
 public enum Operations {
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
+    public enum owner_setup_authorize_post {
+        public static let id: Swift.String = "owner_setup_authorize_post"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_authorize_post.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_authorize_post.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.owner_setup_authorize_post.Input.Headers
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.OwnerSetupKeyInput)
+            }
+            public var body: Operations.owner_setup_authorize_post.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.owner_setup_authorize_post.Input.Headers = .init(),
+                body: Operations.owner_setup_authorize_post.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.Ok.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupTransaction)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupTransaction {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.Ok.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.Ok.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.owner_setup_authorize_post.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.owner_setup_authorize_post.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/400/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/400/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/400/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.BadRequest.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.BadRequest.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.BadRequest.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.owner_setup_authorize_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.owner_setup_authorize_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/403/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/403/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/403/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.Forbidden.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.Forbidden.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.Forbidden.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.owner_setup_authorize_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.owner_setup_authorize_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/413/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/413/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/413/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.owner_setup_authorize_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.owner_setup_authorize_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct TooManyRequests: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/headers/Retry-After`.
+                    public var Retry_hyphen_After: Swift.String
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    ///   - Retry_hyphen_After:
+                    public init(
+                        Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload,
+                        Retry_hyphen_After: Swift.String
+                    ) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                        self.Retry_hyphen_After = Retry_hyphen_After
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/429/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.TooManyRequests.Body
+                /// Creates a new `TooManyRequests`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.TooManyRequests.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/429`.
+            ///
+            /// HTTP response code: `429 tooManyRequests`.
+            case tooManyRequests(Operations.owner_setup_authorize_post.Output.TooManyRequests)
+            /// The associated value of the enum case if `self` is `.tooManyRequests`.
+            ///
+            /// - Throws: An error if `self` is not `.tooManyRequests`.
+            /// - SeeAlso: `.tooManyRequests`.
+            public var tooManyRequests: Operations.owner_setup_authorize_post.Output.TooManyRequests {
+                get throws {
+                    switch self {
+                    case let .tooManyRequests(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "tooManyRequests",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/authorize/POST/responses/503/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers,
+                    body: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.owner_setup_authorize_post.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.owner_setup_authorize_post.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/complete`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)`.
+    public enum owner_setup_complete_post {
+        public static let id: Swift.String = "owner_setup_complete_post"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/header/x-codexia-setup-transaction`.
+                public var x_hyphen_codexia_hyphen_setup_hyphen_transaction: Swift.String
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_complete_post.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - x_hyphen_codexia_hyphen_setup_hyphen_transaction:
+                ///   - accept:
+                public init(
+                    x_hyphen_codexia_hyphen_setup_hyphen_transaction: Swift.String,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_complete_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.x_hyphen_codexia_hyphen_setup_hyphen_transaction = x_hyphen_codexia_hyphen_setup_hyphen_transaction
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.owner_setup_complete_post.Input.Headers
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/requestBody/content/application\/json`.
+                case json(OpenAPIRuntime.OpenAPIObjectContainer)
+            }
+            public var body: Operations.owner_setup_complete_post.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.owner_setup_complete_post.Input.Headers,
+                body: Operations.owner_setup_complete_post.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_complete_post.Output.Ok.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupCompleted)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupCompleted {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_complete_post.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_complete_post.Output.Ok.Headers,
+                    body: Operations.owner_setup_complete_post.Output.Ok.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.owner_setup_complete_post.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.owner_setup_complete_post.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/400/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/400/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/400/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_complete_post.Output.BadRequest.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_complete_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_complete_post.Output.BadRequest.Headers,
+                    body: Operations.owner_setup_complete_post.Output.BadRequest.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.owner_setup_complete_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.owner_setup_complete_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/403/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/403/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/403/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_complete_post.Output.Forbidden.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_complete_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_complete_post.Output.Forbidden.Headers,
+                    body: Operations.owner_setup_complete_post.Output.Forbidden.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.owner_setup_complete_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.owner_setup_complete_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/413/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/413/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/413/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_complete_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers,
+                    body: Operations.owner_setup_complete_post.Output.ContentTooLarge.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.owner_setup_complete_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.owner_setup_complete_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/complete/POST/responses/503/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers,
+                    body: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.owner_setup_complete_post.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.owner_setup_complete_post.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/profile`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)`.
+    public enum owner_setup_profile_post {
+        public static let id: Swift.String = "owner_setup_profile_post"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/header/x-codexia-setup-transaction`.
+                public var x_hyphen_codexia_hyphen_setup_hyphen_transaction: Swift.String
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_profile_post.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - x_hyphen_codexia_hyphen_setup_hyphen_transaction:
+                ///   - accept:
+                public init(
+                    x_hyphen_codexia_hyphen_setup_hyphen_transaction: Swift.String,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_profile_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.x_hyphen_codexia_hyphen_setup_hyphen_transaction = x_hyphen_codexia_hyphen_setup_hyphen_transaction
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.owner_setup_profile_post.Input.Headers
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.OwnerSetupProfileInput)
+            }
+            public var body: Operations.owner_setup_profile_post.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.owner_setup_profile_post.Input.Headers,
+                body: Operations.owner_setup_profile_post.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.Ok.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupTransaction)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupTransaction {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.Ok.Headers,
+                    body: Operations.owner_setup_profile_post.Output.Ok.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.owner_setup_profile_post.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.owner_setup_profile_post.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/400/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/400/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/400/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.BadRequest.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.BadRequest.Headers,
+                    body: Operations.owner_setup_profile_post.Output.BadRequest.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.owner_setup_profile_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.owner_setup_profile_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/403/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/403/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/403/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.Forbidden.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.Forbidden.Headers,
+                    body: Operations.owner_setup_profile_post.Output.Forbidden.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.owner_setup_profile_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.owner_setup_profile_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/409/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/409/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/409/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Conflict.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.Conflict.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.Conflict.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/409/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/409/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.Conflict.Headers,
+                    body: Operations.owner_setup_profile_post.Output.Conflict.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request conflicts with the current state of the server.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.owner_setup_profile_post.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            public var conflict: Operations.owner_setup_profile_post.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/413/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/413/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/413/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers,
+                    body: Operations.owner_setup_profile_post.Output.ContentTooLarge.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.owner_setup_profile_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.owner_setup_profile_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/profile/POST/responses/503/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers,
+                    body: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.owner_setup_profile_post.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.owner_setup_profile_post.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// - Remark: HTTP `GET /api/auth/codexia/setup/status`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)`.
+    public enum owner_setup_status_get {
+        public static let id: Swift.String = "owner_setup_status_get"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_status_get.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.owner_setup_status_get.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.owner_setup_status_get.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.owner_setup_status_get.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_status_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_status_get.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_status_get.Output.Ok.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json`.
+                    public struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json/value1`.
+                        public var value1: Components.Schemas.OwnerSetupState?
+                        /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json/value2`.
+                        public var value2: Components.Schemas.OwnerSetupEnrolled?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - value1:
+                        ///   - value2:
+                        public init(
+                            value1: Components.Schemas.OwnerSetupState? = nil,
+                            value2: Components.Schemas.OwnerSetupEnrolled? = nil
+                        ) {
+                            self.value1 = value1
+                            self.value2 = value2
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            var errors: [any Swift.Error] = []
+                            do {
+                                self.value1 = try .init(from: decoder)
+                            } catch {
+                                errors.append(error)
+                            }
+                            do {
+                                self.value2 = try .init(from: decoder)
+                            } catch {
+                                errors.append(error)
+                            }
+                            try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                [
+                                    self.value1,
+                                    self.value2
+                                ],
+                                type: Self.self,
+                                codingPath: decoder.codingPath,
+                                errors: errors
+                            )
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try self.value1?.encode(to: encoder)
+                            try self.value2?.encode(to: encoder)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/application\/json`.
+                    case json(Operations.owner_setup_status_get.Output.Ok.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Operations.owner_setup_status_get.Output.Ok.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_status_get.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_status_get.Output.Ok.Headers,
+                    body: Operations.owner_setup_status_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has succeeded.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.owner_setup_status_get.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.owner_setup_status_get.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/403/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/403/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/403/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_status_get.Output.Forbidden.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_status_get.Output.Forbidden.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_status_get.Output.Forbidden.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/403/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_status_get.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_status_get.Output.Forbidden.Headers,
+                    body: Operations.owner_setup_status_get.Output.Forbidden.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.owner_setup_status_get.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.owner_setup_status_get.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct TooManyRequests: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_status_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/headers/Retry-After`.
+                    public var Retry_hyphen_After: Swift.String
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    ///   - Retry_hyphen_After:
+                    public init(
+                        Cache_hyphen_Control: Operations.owner_setup_status_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload,
+                        Retry_hyphen_After: Swift.String
+                    ) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                        self.Retry_hyphen_After = Retry_hyphen_After
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_status_get.Output.TooManyRequests.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/429/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_status_get.Output.TooManyRequests.Body
+                /// Creates a new `TooManyRequests`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_status_get.Output.TooManyRequests.Headers,
+                    body: Operations.owner_setup_status_get.Output.TooManyRequests.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)/responses/429`.
+            ///
+            /// HTTP response code: `429 tooManyRequests`.
+            case tooManyRequests(Operations.owner_setup_status_get.Output.TooManyRequests)
+            /// The associated value of the enum case if `self` is `.tooManyRequests`.
+            ///
+            /// - Throws: An error if `self` is not `.tooManyRequests`.
+            /// - SeeAlso: `.tooManyRequests`.
+            public var tooManyRequests: Operations.owner_setup_status_get.Output.TooManyRequests {
+                get throws {
+                    switch self {
+                    case let .tooManyRequests(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "tooManyRequests",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/503/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.owner_setup_status_get.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers,
+                    body: Operations.owner_setup_status_get.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.owner_setup_status_get.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.owner_setup_status_get.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
     /// - Remark: HTTP `POST /api/auth/oauth2/consent-context`.
     /// - Remark: Generated from `#/paths//api/auth/oauth2/consent-context/post(auth_consent_context_post)`.
     public enum auth_consent_context_post {
@@ -16184,17 +18072,22 @@ public enum Operations {
                 public var parentId: Swift.String?
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/GET/query/projectVersion`.
                 public var projectVersion: Swift.Int32?
+                /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/GET/query/limit`.
+                public var limit: Swift.Int32?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - parentId:
                 ///   - projectVersion:
+                ///   - limit:
                 public init(
                     parentId: Swift.String? = nil,
-                    projectVersion: Swift.Int32? = nil
+                    projectVersion: Swift.Int32? = nil,
+                    limit: Swift.Int32? = nil
                 ) {
                     self.parentId = parentId
                     self.projectVersion = projectVersion
+                    self.limit = limit
                 }
             }
             public var query: Operations.persistence_documents_get.Input.Query
@@ -22844,6 +24737,87 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct TooManyRequests: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_ready_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/headers/Retry-After`.
+                    public var Retry_hyphen_After: Swift.String
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    ///   - Retry_hyphen_After:
+                    public init(
+                        Cache_hyphen_Control: Operations.health_ready_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload,
+                        Retry_hyphen_After: Swift.String
+                    ) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                        self.Retry_hyphen_After = Retry_hyphen_After
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_ready_get.Output.TooManyRequests.Headers
+                /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/429/content/application\/json`.
+                    case json(Components.Schemas.OwnerSetupError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.OwnerSetupError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.health_ready_get.Output.TooManyRequests.Body
+                /// Creates a new `TooManyRequests`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.health_ready_get.Output.TooManyRequests.Headers,
+                    body: Operations.health_ready_get.Output.TooManyRequests.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//health/ready/get(health_ready_get)/responses/429`.
+            ///
+            /// HTTP response code: `429 tooManyRequests`.
+            case tooManyRequests(Operations.health_ready_get.Output.TooManyRequests)
+            /// The associated value of the enum case if `self` is `.tooManyRequests`.
+            ///
+            /// - Throws: An error if `self` is not `.tooManyRequests`.
+            /// - SeeAlso: `.tooManyRequests`.
+            public var tooManyRequests: Operations.health_ready_get.Output.TooManyRequests {
+                get throws {
+                    switch self {
+                    case let .tooManyRequests(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "tooManyRequests",
                             response: self
                         )
                     }

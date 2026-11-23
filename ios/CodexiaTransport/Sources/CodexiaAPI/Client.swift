@@ -35,6 +35,831 @@ public struct Client: APIProtocol {
     private var converter: Converter {
         client.converter
     }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
+    public func owner_setup_authorize_post(_ input: Operations.owner_setup_authorize_post.Input) async throws -> Operations.owner_setup_authorize_post.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.owner_setup_authorize_post.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/setup/authorize",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .json(value):
+                    body = try converter.setRequiredRequestBodyAsJSON(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/json; charset=utf-8"
+                    )
+                }
+                return (request, body)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let headers: Operations.owner_setup_authorize_post.Output.Ok.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_authorize_post.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupTransaction.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let headers: Operations.owner_setup_authorize_post.Output.BadRequest.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_authorize_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 403:
+                    let headers: Operations.owner_setup_authorize_post.Output.Forbidden.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_authorize_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 413:
+                    let headers: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 429:
+                    let headers: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers = .init(
+                        Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Cache-Control",
+                            as: Operations.owner_setup_authorize_post.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload.self
+                        ),
+                        Retry_hyphen_After: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Retry-After",
+                            as: Swift.String.self
+                        )
+                    )
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.TooManyRequests.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .tooManyRequests(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 503:
+                    let headers: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_authorize_post.Output.ServiceUnavailable.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .serviceUnavailable(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/complete`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/complete/post(owner_setup_complete_post)`.
+    public func owner_setup_complete_post(_ input: Operations.owner_setup_complete_post.Input) async throws -> Operations.owner_setup_complete_post.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.owner_setup_complete_post.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/setup/complete",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "x-codexia-setup-transaction",
+                    value: input.headers.x_hyphen_codexia_hyphen_setup_hyphen_transaction
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .json(value):
+                    body = try converter.setRequiredRequestBodyAsJSON(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/json; charset=utf-8"
+                    )
+                }
+                return (request, body)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let headers: Operations.owner_setup_complete_post.Output.Ok.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_complete_post.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_complete_post.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupCompleted.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let headers: Operations.owner_setup_complete_post.Output.BadRequest.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_complete_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_complete_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 403:
+                    let headers: Operations.owner_setup_complete_post.Output.Forbidden.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_complete_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_complete_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 413:
+                    let headers: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_complete_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_complete_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 503:
+                    let headers: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_complete_post.Output.ServiceUnavailable.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .serviceUnavailable(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/setup/profile`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/profile/post(owner_setup_profile_post)`.
+    public func owner_setup_profile_post(_ input: Operations.owner_setup_profile_post.Input) async throws -> Operations.owner_setup_profile_post.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.owner_setup_profile_post.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/setup/profile",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "x-codexia-setup-transaction",
+                    value: input.headers.x_hyphen_codexia_hyphen_setup_hyphen_transaction
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .json(value):
+                    body = try converter.setRequiredRequestBodyAsJSON(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/json; charset=utf-8"
+                    )
+                }
+                return (request, body)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let headers: Operations.owner_setup_profile_post.Output.Ok.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupTransaction.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let headers: Operations.owner_setup_profile_post.Output.BadRequest.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 403:
+                    let headers: Operations.owner_setup_profile_post.Output.Forbidden.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 409:
+                    let headers: Operations.owner_setup_profile_post.Output.Conflict.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.Conflict.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.Conflict.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .conflict(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 413:
+                    let headers: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.ContentTooLarge.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 503:
+                    let headers: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_profile_post.Output.ServiceUnavailable.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .serviceUnavailable(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `GET /api/auth/codexia/setup/status`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/setup/status/get(owner_setup_status_get)`.
+    public func owner_setup_status_get(_ input: Operations.owner_setup_status_get.Input) async throws -> Operations.owner_setup_status_get.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.owner_setup_status_get.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/setup/status",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let headers: Operations.owner_setup_status_get.Output.Ok.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_status_get.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_status_get.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Operations.owner_setup_status_get.Output.Ok.Body.jsonPayload.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 403:
+                    let headers: Operations.owner_setup_status_get.Output.Forbidden.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_status_get.Output.Forbidden.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_status_get.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 429:
+                    let headers: Operations.owner_setup_status_get.Output.TooManyRequests.Headers = .init(
+                        Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Cache-Control",
+                            as: Operations.owner_setup_status_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload.self
+                        ),
+                        Retry_hyphen_After: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Retry-After",
+                            as: Swift.String.self
+                        )
+                    )
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_status_get.Output.TooManyRequests.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .tooManyRequests(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 503:
+                    let headers: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_setup_status_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_setup_status_get.Output.ServiceUnavailable.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .serviceUnavailable(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// - Remark: HTTP `POST /api/auth/oauth2/consent-context`.
     /// - Remark: Generated from `#/paths//api/auth/oauth2/consent-context/post(auth_consent_context_post)`.
     public func auth_consent_context_post(_ input: Operations.auth_consent_context_post.Input) async throws -> Operations.auth_consent_context_post.Output {
@@ -7189,6 +8014,13 @@ public struct Client: APIProtocol {
                     name: "projectVersion",
                     value: input.query.projectVersion
                 )
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: false,
+                    name: "limit",
+                    value: input.query.limit
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -10131,6 +10963,43 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .ok(.init(body: body))
+                case 429:
+                    let headers: Operations.health_ready_get.Output.TooManyRequests.Headers = .init(
+                        Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Cache-Control",
+                            as: Operations.health_ready_get.Output.TooManyRequests.Headers.Cache_hyphen_ControlPayload.self
+                        ),
+                        Retry_hyphen_After: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Retry-After",
+                            as: Swift.String.self
+                        )
+                    )
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.health_ready_get.Output.TooManyRequests.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSetupError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .tooManyRequests(.init(
+                        headers: headers,
+                        body: body
+                    ))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
