@@ -397,7 +397,7 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   const workflow = parse(readFileSync(new URL('../' + workflowPath, import.meta.url), 'utf8'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes(workflowPath));
   assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'workflow_dispatch']);
-  for (const input of ['app/native/**', 'scripts/html-document.mjs', 'scripts/ios/**', 'scripts/read-regular-file.mjs']) {
+  for (const input of ['app/native/**', 'scripts/shared/html-document.mjs', 'scripts/ios/**', 'scripts/shared/read-regular-file.mjs']) {
     assert.ok(workflow.on.pull_request.paths.includes(input), input);
   }
   assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');

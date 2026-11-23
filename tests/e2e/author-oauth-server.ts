@@ -44,7 +44,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
   databaseUrl: string;
   profile: string;
   apiPort?: number;
-  apiHostname?: "127.0.0.1" | "localhost";
+  apiHostname?: "localhost" | "127.0.0.1";
   frontendSource?: string;
 }): Promise<BetterAuthFixture> {
   const stateDirectory = await mkdtemp(join(tmpdir(), "codexia-author-browser-"));

@@ -386,7 +386,7 @@ test('the disposable entry point exercises the same auth transaction', () => {
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
   const fixtureAdmission = fixture[0]['ansible.builtin.assert'].that;
-  assert.ok(fixtureAdmission.some(condition => condition.includes("['head', 'prior', 'failed', 'auth-primary', 'auth-update', 'auth-failed']")));
+  assert.ok(fixtureAdmission.some(condition => condition.includes("['head', 'prior', 'failed', 'app-update', 'auth-primary', 'auth-update', 'auth-failed']")));
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const noOp = shell.slice(shell.indexOf('cmp -s -- "$candidate_unit" "$active_unit"'), shell.indexOf('echo "UNCHANGED'));
