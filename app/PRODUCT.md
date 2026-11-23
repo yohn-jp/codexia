@@ -34,7 +34,7 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Brand Commitments
 
-The product name is Codexia. No additional voice, logo treatment, or identity asset has been confirmed as binding.
+The product name is Codexia. The accepted brand icon is an **open leather-bound manuscript with a rising quill**. Its design must remain recognizable at browser-favicon sizes, use deliberately simplified optical masters at small sizes, and remain available in light/dark and single-color variants. The [visual design system](DESIGN.md) owns the icon's intended appearance and accessibility constraints; the [icon generator](../scripts/branding/README.md) is an implementation, not a competing design authority. Unapproved brand voice, native icons and other identity assets are not implied by this decision.
 
 ## Evidence on Hand
 

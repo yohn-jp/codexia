@@ -73,6 +73,12 @@ WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）�
 
 選択・状態は色以外でも示す。保存・復旧はUX contract準拠。Focusは**3px solid outline、2px offset**、3:1以上、隠さない。
 
+## Brand icon
+
+The approved Codexia mark represents an **open leather-bound manuscript and a rising writing quill**. It must read as literature and writing even at a 16px favicon size; tiny versions shall retain only strong, aligned book and quill silhouettes instead of shrinking ornamental detail indiscriminately. Use separately optically adjusted masters for 16px, 24px, 32–40px, 41–96px, and 97px-and-above presentations. Small sizes require intentional pixel-grid placement, while larger variants can restore paper, binding and feather details. Maintain light, dark and single-color palettes and usable contrast. The icon does not replace accessible text or convey state by color alone.
+
+The [SVG implementation and regeneration procedure](../scripts/branding/README.md) must conform to this visual contract. Native iOS raster asset creation, PWA installation metadata, ICO support and Apple icon packaging require their own build/acceptance work; the accepted visual design is not evidence those formats are shipped.
+
 ## Do's and Don'ts
 
 - Do: Quiet Page、作業密度、両shellの意味tokenを保つ。
