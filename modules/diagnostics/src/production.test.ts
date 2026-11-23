@@ -209,6 +209,18 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const proposals: ChangeProposal[] = [];
   const { runtime, host: runtimeHost } = await createRuntime(files, proposals);
   const host = { ...runtimeHost, reader: { ...runtimeHost.reader, nativeStoryDocuments: [nativeScene] } };
+  const lintReads: string[] = [];
+  const lintHost = {
+    ...host,
+    reader: {
+      ...host.reader,
+      async read(path: string) {
+        lintReads.push(path);
+        return host.reader.read(path);
+      },
+      async list() { assert.fail("linting a pinned scene must not enumerate the project"); },
+    },
+  };
   try {
     const nativePlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId }, host);
     assert.ok(nativePlot.ok, JSON.stringify(nativePlot));
@@ -218,7 +230,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
 
     const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: nativePath, baseRevision: "native-body-r1", operationId: "native-lint-fix",
-    }, host);
+    }, lintHost);
     assert.equal(lintResult.ok, true, JSON.stringify(lintResult));
     assert.deepEqual(lintResult.snapshot, snapshot);
     if (!lintResult.ok) return;
@@ -228,6 +240,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     assert.deepEqual(lintProposal.operations[0]?.writes.map(({ path }) => path), [nativePath]);
     assert.equal(lintProposal.operations[0]?.writes[0]?.content, "---\n正体と真相……\n---\n星野は夜明けを待った……。\n\t「もう大丈夫だ。」");
     assert.equal(files.get(nativePath)?.content, original, "lint proposals do not change the selected snapshot");
+    assert.deepEqual(lintReads, [nativePath, "meta/scriptorium/modules/diagnostics/lint-rules.yaml"]);
 
     const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId: nativeSceneId }, host);
     assert.equal(formatResult.ok, true, JSON.stringify(formatResult));
@@ -384,9 +397,28 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
       assert.equal(featureData.features.find((feature) => feature.id === "embedding")?.enabled, true, "local features do not require external-send consent");
     }
 
+    const mappedBody = "manuscript/v1/scene-1.md";
+    const mappedMetadata = "plot/volumes/volume-1/scenes/scene-1.yaml";
+    const metadataFile = files.get(mappedMetadata)!;
+    const rejectedUntypedLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: mappedBody, baseRevision: "manuscript-r1",
+    }, host);
+    assert.equal(rejectedUntypedLint.ok, false);
+    assert.equal(rejectedUntypedLint.error.code, "invalid_path");
+    files.set(mappedBody, { ...files.get(mappedBody)!, documentKind: "scene" });
     const lint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: "manuscript/v1/scene-1.md", baseRevision: "manuscript-r1", operationId: "mcp-p06-lint-1",
-    }, host);
+    }, {
+      ...host,
+      reader: {
+        ...host.reader,
+        nativeStoryDocuments: [{
+          id: "sc-scene-1", kind: "scene", title: "遺跡", orderKey: "1", documentOrder: 0,
+          metadataPath: mappedMetadata, metadataRevision: metadataFile.revision, metadataContent: metadataFile.content,
+          metadata: { type: "scene", manuscript: mappedBody },
+        }],
+      },
+    });
     assert.equal(lint.ok, true, JSON.stringify(lint));
     assert.equal(proposals.length, 3, "lint output is proposed for review, never written directly");
     const operation = proposals[2].operations[0];
