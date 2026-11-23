@@ -79,6 +79,12 @@ jobs:
           test -x "$CHROME"
           echo "CODEXIA_E2E_CHROMIUM=$CHROME" >> "$GITHUB_ENV"
           echo "PUPPETEER_EXECUTABLE_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Install Japanese fonts for faithful Pages browser QA
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+          fc-list :lang=ja family | grep -q 'Noto Sans CJK'
       - name: Test Pages generators, analysis and component interactions
         run: |
           node --test scripts/audit/*.test.mjs scripts/ci-dashboard/*.test.mjs \

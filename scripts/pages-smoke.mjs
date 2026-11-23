@@ -91,7 +91,7 @@ try {
     const capture = async name => {
       if (!screenshots) return;
       await page.evaluate(() => document.fonts.ready);
-      await page.screenshot({ path: resolve(screenshots, `${name}-${viewport.width}x${viewport.height}.png`) });
+      await page.screenshot({ path: resolve(screenshots, `${name}-${viewport.width}x${viewport.height}.png`), fullPage: name === 'security-export' });
     };
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
