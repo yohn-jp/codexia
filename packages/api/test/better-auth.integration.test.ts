@@ -270,7 +270,7 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
       method: "POST", headers: { cookie: cookieHeader(), "content-type": "application/json" }, body: "{}",
     });
     assert.equal(missingWriteOrigin.status, 403);
-    assert.equal((await missingWriteOrigin.json()).code, "OWNER_SECURITY_ORIGIN_DENIED");
+    assert.equal((await missingWriteOrigin.json()).code, "MISSING_OR_NULL_ORIGIN");
     const revokeCurrent = await apiRequest(`${baseAuth}/revoke-session`, {
       method: "POST",
       headers: { ...ownerHeaders, "content-type": "application/json" },
