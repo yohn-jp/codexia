@@ -28,6 +28,14 @@ final class AuthoringFlowUITests: XCTestCase {
         let copy = menuAction("Copy", in: app)
         XCTAssertTrue(copy.waitForExistence(timeout: 5))
         copy.tap()
+        // Copy leaves a full-document selection. Reopen the same sample so the
+        // Paste gesture starts in a fresh editor while retaining the app clipboard.
+        app.buttons["戻る"].tap()
+        let sample = app.buttons["fixture.10000"]
+        XCTAssertTrue(sample.waitForExistence(timeout: 10))
+        sample.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertEqual(editor.value as? String, before)
         editor.tap()
         editor.press(forDuration: 1.2)
         let paste = menuAction("Paste", in: app)
