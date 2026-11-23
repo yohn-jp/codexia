@@ -13,6 +13,26 @@ const require = createRequire(new URL('../../../packages/core/package.json', imp
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
+test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
+  const sha = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  const check = (file, event = 'pull_request') => createVerificationPlan({files:[file], event, sha, base});
+  for (const file of ['app/src/main.tsx', 'packages/api/src/server.ts', 'modules/story/src/index.ts', 'edge/frontend/test/static-smoke.mjs', 'biome.json']) {
+    const plan = check(file);
+    assert.ok(plan.tasks.includes('biome-ci'), file);
+    assert.ok(plan.groups.includes('biome'), file);
+  }
+  for (const file of ['scripts/ci/execution/group.mjs', 'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift']) {
+    assert.ok(!check(file).tasks.includes('biome-ci'), file);
+  }
+  assert.ok(check('scripts/ci/execution/group.mjs', 'push').tasks.includes('biome-ci'));
+  const biomeJob = workflow.jobs.biome;
+  assert.equal(biomeJob.permissions['security-events'], 'write');
+  assert.equal(biomeJob.steps.find(step => step.name === 'Publish Biome Lint results to Code Scanning').with.category, 'biome-lint');
+  assert.equal(biomeJob.steps.find(step => step.name === 'Publish Biome Lint results to Code Scanning').if, 'always()');
+  assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
+});
+
 test('the certified graph covers every declared obligation within the twenty-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);

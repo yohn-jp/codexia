@@ -424,7 +424,9 @@ test('known operational inputs retain root proof without unrelated browser or OC
       ? ['unit-root', 'db-contract', 'coverage']
       : file.startsWith('docs/deployment/')
         ? ['unit-root', 'coverage', 'architecture-g5']
-        : ['unit-root','coverage'];
+        : file.startsWith('edge/frontend/') && /\.[cm]?[jt]sx?$/u.test(file)
+          ? ['unit-root', 'coverage', 'biome-ci']
+          : ['unit-root','coverage'];
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
@@ -581,7 +583,7 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
 });
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
-  const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage'];
+  const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage', 'biome-ci'];
   for (const [file, expectedModelOci] of [
     ['packages/api/test/passkey-bootstrap.acceptance.test.ts', false],
     ['packages/api/scripts/run-passkey-acceptance.mjs', true],
