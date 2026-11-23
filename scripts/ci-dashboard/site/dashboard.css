@@ -31,7 +31,10 @@ h1{font-size:clamp(36px,5.4vw,71px);line-height:1.01;font-weight:660;letter-spac
 .copy-diagnostics:disabled{opacity:.6;cursor:not-allowed}
 #copy-hint{font-size:10px;line-height:1.4;color:var(--muted)}
 #copy-status{font-size:11px;color:#b0dbca;min-height:1em;line-height:1.4}
-.status{color:#aab8bf;font-size:12px;min-height:29px;overflow-wrap:anywhere}
+.status{color:#aab8bf;font-size:12px;min-height:29px;overflow-wrap:anywhere;display:flex;align-items:start;gap:14px;justify-content:space-between}
+.retry{flex:none;background:#192329;border:1px solid #53646b;border-radius:4px;color:#dce8e4;padding:5px 11px;font-size:11px;cursor:pointer}
+.retry:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.retry:disabled{opacity:.6;cursor:wait}
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;border:1px solid var(--line);background:var(--line);margin:10px 0 24px}
 .metric{background:#11191d;min-width:0;padding:22px 23px;display:flex;flex-direction:column;gap:8px}
 .metric-label{font-size:10px;letter-spacing:.12em;color:#96a9b1;font-weight:760}
@@ -56,6 +59,15 @@ h2{font-weight:650;letter-spacing:-.035em;font-size:22px;line-height:1.2;margin:
 .timeline-label a{text-decoration:none}
 .timeline-label a:hover{text-decoration:underline}
 .timeline-label .flag{color:#f2a56d;padding-right:5px}
+.timeline-label .state{margin-left:7px;vertical-align:1px}
+.state{display:inline-block;border:1px solid #53636a;border-radius:3px;padding:1px 5px;color:#c4d0d0;font-size:9px;font-weight:650;white-space:normal;line-height:1.45}
+.state.success{border-color:#406b57;color:#a8d7bd}
+.state.failed{border-color:#8d4d4b;color:#f1a09a}
+.state.skipped{border-color:#5a6872;color:#b7c4cb}
+.state.blocked{border-color:#916f4e;color:#f0c38e}
+.state.cancelled{border-color:#675c5b;color:#c5b3b0}
+.state.running{border-color:#48717d;color:#a7d8e7}
+.state.unknown{border-style:dashed;color:#bac3c5}
 .workflow-header{padding:15px 0 6px;color:#91afa7;font-size:10px;font-weight:700;letter-spacing:.12em;overflow-wrap:anywhere}
 .timeline-track{height:17px;position:relative;background:repeating-linear-gradient(90deg,#ffffff08 0,#ffffff08 1px,transparent 1px,transparent 20%);border-left:1px solid #5360674d}
 .bar{height:11px;position:absolute;top:3px;border-radius:2px;min-width:2px}
@@ -63,6 +75,9 @@ h2{font-weight:650;letter-spacing:-.035em;font-size:22px;line-height:1.2;margin:
 .bar.exec{background:#6b9b98}
 .bar.critical{background:#efa46b}
 .bar.failed{background:#dc7770}
+.bar.skipped,.bar.cancelled{background:#74818a}
+.bar.blocked{background:#c18f58}
+.bar.unknown{background:repeating-linear-gradient(135deg,#9aa9b055 0,#9aa9b055 3px,transparent 3px,transparent 6px)}
 .timeline-time{text-align:right;font-size:10px;color:#a6b8bc;font-variant-numeric:tabular-nums}
 .panel-foot{font-size:11px;color:#84949c;margin-top:16px;line-height:1.5}
 .chain{padding:0;margin:16px 0;list-style:none;counter-reset:seq}
@@ -74,6 +89,17 @@ h2{font-weight:650;letter-spacing:-.035em;font-size:22px;line-height:1.2;margin:
 .context{display:grid;gap:9px;margin-top:17px;font-size:11px}
 .context-row{display:flex;justify-content:space-between;gap:16px;color:#9ba9b0}
 .context-row strong{font-size:11px;font-weight:600;color:#d6e5df;overflow-wrap:anywhere;text-align:right}
+.workflow-runs{display:grid;gap:7px;border-top:1px solid var(--line);padding-top:12px;margin-top:8px}
+.workflow-runs>strong{font-size:10px;color:#aab8bf;text-transform:uppercase;letter-spacing:.08em}
+.workflow-run{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:7px;font-size:10px;overflow-wrap:anywhere}
+.workflow-run a{color:#c9d9d4;text-decoration:none}
+.workflow-run a:hover{text-decoration:underline;color:var(--accent)}
+.job-steps{padding:4px 0 8px 12px;border-bottom:1px solid #27313769}
+.job-steps summary{cursor:pointer;color:#82959d;font-size:9px;list-style-position:inside}
+.job-steps summary:hover{color:var(--accent)}
+.job-step-list{list-style:none;margin:6px 0 4px;padding:0 0 0 13px;display:grid;gap:3px}
+.job-step{display:flex;justify-content:space-between;gap:12px;color:#b9c7ca;font-size:10px;overflow-wrap:anywhere}
+.step-meta{flex:none;color:#82959d;font-variant-numeric:tabular-nums}
 .table-scroll{max-height:500px;overflow:auto}
 table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}
 th{font-size:10px;color:#8ca0a7;text-transform:uppercase;letter-spacing:.1em;font-weight:700;position:sticky;top:0;background:#11181d;z-index:1;padding:12px 8px}

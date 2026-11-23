@@ -91,6 +91,9 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     const cache = join(root, 'cache');
     const run = (site, heads, executable = process.env.CODEXIA_AUDIT_REPOMIX_BIN) => buildPortal({ root: repo, site: join(root, site), cache, executable, heads });
     const a = run('site1', [{branch:'main',sha:second},{branch:'old',sha:first},{branch:'same',sha:second}]);
+    assert.equal(existsSync(join(root,'site1','index.html')), false);
+    assert.ok(existsSync(join(root,'site1','audit','index.html')));
+    assert.ok(existsSync(join(root,'site1','manifest.json')));
     assert.equal(a.snapshots[first].status, 'ready');
     assert.equal(a.snapshots[second].status, 'ready');
     const read = (site, id, file) => JSON.parse(readFileSync(join(root, site, 'snapshots', id, file), 'utf8'));

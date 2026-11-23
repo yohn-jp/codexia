@@ -4,72 +4,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { summarizeGraph } from './analysis.mjs';
 
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_GRAPH_BYTES = 80 * 1024 * 1024;
 const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const DATA_SLOT = '__GRAPHIFY_INDEX_JSON__';
 const LINKS_SLOT = '__GRAPHIFY_SOURCE_LINKS__';
-// Only directional source references; containment and similarity do not mean a file uses another.
-const REFERENCE_RELATIONS = new Set(['imports', 'imports_from', 're_exports', 'calls', 'references', 'depends_on', 'instantiates', 'inherits', 'implements', 'extends', 'uses']);
-
-function repoPath(value) {
-  if (typeof value !== 'string') return null;
-  const path = value.replaceAll('\\', '/').replace(/^\.\//, '');
-  if (!path || path.startsWith('/') || path.includes('//') || path.split('/').some(p => !p || p === '.' || p === '..') || /[\x00-\x1f\x7f]/.test(path)) return null;
-  return path;
-}
-
-function safeLabel(value) {
-  return typeof value === 'string' ? value.slice(0, 240) : '';
-}
-
-export function summarizeGraph(graph, sha, trackedFiles) {
-  if (!(trackedFiles instanceof Set) || trackedFiles.size === 0) throw new Error('Git-tracked file inventory is required');
-  if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.links)) {
-    throw new Error('Graphify graph.json requires nodes and links arrays');
-  }
-  const files = new Map();
-  const nodePaths = new Map();
-  for (const node of graph.nodes) {
-    if (!node || typeof node !== 'object') continue;
-    const path = repoPath(node.source_file);
-    if (!path || !trackedFiles.has(path)) continue;
-    if (!files.has(path)) files.set(path, { path, symbols: new Set(), outgoing: new Map(), incoming: new Map() });
-    const file = files.get(path);
-    const label = safeLabel(node.label);
-    if (label && label !== basename(path) && label !== path) file.symbols.add(label);
-    if (typeof node.id === 'string' || typeof node.id === 'number') nodePaths.set(String(node.id), path);
-  }
-  if (files.size === 0) throw new Error('Graphify graph contains no repository-relative source files');
-
-  let crossFileLinks = 0;
-  for (const link of graph.links) {
-    if (!link || typeof link !== 'object') continue;
-    const from = nodePaths.get(String(link.source));
-    const to = nodePaths.get(String(link.target));
-    if (!from || !to || from === to) continue;
-    const relation = safeLabel(link.relation).toLowerCase();
-    if (!REFERENCE_RELATIONS.has(relation)) continue;
-    crossFileLinks++;
-    for (const [owner, direction, neighbor] of [[from, 'outgoing', to], [to, 'incoming', from]]) {
-      const map = files.get(owner)[direction];
-      if (!map.has(neighbor)) map.set(neighbor, { path: neighbor, count: 0, relations: new Set() });
-      const entry = map.get(neighbor);
-      entry.count++;
-      entry.relations.add(relation);
-    }
-  }
-  const toRelations = map => [...map.values()].map(x => ({ path: x.path, count: x.count, relations: [...x.relations].sort() }))
-    .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path));
-  return {
-    sourceSha: sha,
-    stats: { files: files.size, nodes: graph.nodes.length, links: graph.links.length, crossFileLinks },
-    files: [...files.values()].sort((a, b) => a.path.localeCompare(b.path)).map(f => ({
-      path: f.path, symbols: [...f.symbols].sort(), incoming: toRelations(f.incoming), outgoing: toRelations(f.outgoing),
-    })),
-  };
-}
+export { summarizeGraph } from './analysis.mjs';
 
 export function trackedPathsFromGit(repoRoot = process.cwd()) {
   const inventory = execFileSync('git', ['ls-files', '--cached', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
@@ -89,7 +31,11 @@ export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = tracked
 
   const graphBytes = await readFile(join(source, 'graph.json'));
   if (graphBytes.byteLength < 2 || graphBytes.byteLength > MAX_GRAPH_BYTES) throw new Error('Graph JSON empty or over 80 MiB limit');
-  const index = summarizeGraph(JSON.parse(graphBytes.toString('utf8')), sha, trackedFiles);
+  const graph = JSON.parse(graphBytes.toString('utf8'));
+  if (graph && typeof graph.built_at_commit === 'string' && graph.built_at_commit !== sha) {
+    throw new Error(`Graphify graph was built for ${graph.built_at_commit}, expected ${sha}`);
+  }
+  const index = summarizeGraph(graph, sha, trackedFiles);
   // The JSON is part of the HTML, but source snippets, graph.json and raw graph edges aren't published separately.
   const payload = JSON.stringify(index).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const template = await readFile(new URL('./explorer.html', import.meta.url), 'utf8');
@@ -104,7 +50,17 @@ export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = tracked
   await mkdir(target, { recursive: true });
   await writeFile(join(target, 'index.html'), explorerBytes);
   await writeFile(join(target, 'communities.html'), htmlBytes);
-  await writeFile(join(target, 'source.json'), JSON.stringify({ sourceSha: sha, generator: 'graphifyy', mode: 'code-only', stats: index.stats }) + '\n');
+  await writeFile(join(target, 'source.json'), JSON.stringify({
+    schemaVersion: 1,
+    sourceSha: sha,
+    generator: 'graphifyy',
+    mode: index.coverage.mode,
+    stats: index.stats,
+    coverage: index.coverage,
+    relations: index.relations,
+    // Atlas may resolve only paths actually present in this same-SHA graph index.
+    files: index.files.map(file => ({ path: file.path })),
+  }) + '\n');
   return { bytes: explorerBytes.byteLength, path: join(target, 'index.html'), stats: index.stats };
 }
 

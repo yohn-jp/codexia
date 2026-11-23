@@ -249,15 +249,36 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     if (!Object.hasOwn(contentTypes, name)) return route.fulfill({ status: 404 });
     return route.fulfill({ body: await readFile(join(output, path.slice(1))), contentType: contentTypes[name] });
   });
+  let mode = 'measured';
+  const browserJobs = [...jobs,
+    { id: 6, name: 'optional-skipped', status: 'completed', conclusion: 'skipped', run_attempt: 1,
+      created_at: at(0), started_at: null, completed_at: null, html_url: 'https://github.com/yohn-jp/codexia/actions/runs/1/job/6',
+      steps: [{ number: 1, name: 'Skipped command', conclusion: 'skipped', started_at: null, completed_at: null }] },
+    { id: 7, name: 'manual-gate', status: 'completed', conclusion: 'action_required', run_attempt: 1,
+      created_at: at(0), started_at: null, completed_at: null, html_url: 'https://github.com/yohn-jp/codexia/actions/runs/1/job/7', steps: [] },
+    { id: 8, name: 'pending-job', status: 'queued', conclusion: null, run_attempt: 1,
+      created_at: at(0), started_at: null, completed_at: null, html_url: 'https://github.com/yohn-jp/codexia/actions/runs/1/job/8', steps: [] },
+    { id: 9, name: 'unknown-outcome', status: 'completed', conclusion: null, run_attempt: 1,
+      created_at: at(0), started_at: at(1), completed_at: at(2), html_url: 'https://github.com/yohn-jp/codexia/actions/runs/1/job/9', steps: [] },
+  ];
   let releaseInventory;
   const inventoryReady = new Promise(resolve => { releaseInventory = resolve; });
   await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/actions/runs')) {
       await inventoryReady;
+      if (mode === 'empty') return route.fulfill({ json: { workflow_runs: [] } });
+      if (mode === '403' || mode === '429') return route.fulfill({ status: Number(mode) });
       return route.fulfill({ json: { workflow_runs: [{ ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] }] } });
     }
-    if (path.endsWith('/actions/runs/1/attempts/1/jobs')) return route.fulfill({ json: { jobs } });
+    if (mode === 'incomplete' && path.endsWith('/actions/runs/1/attempts/1/jobs') &&
+      new URL(route.request().url()).searchParams.get('page') === '1') {
+      return route.fulfill({ json: { jobs: Array.from({ length: 100 }, (_, index) => ({ ...jobs[0], id: index + 1 })) } });
+    }
+    if (mode === 'incomplete' && path.endsWith('/actions/runs/1/attempts/1/jobs')) {
+      return route.fulfill({ json: { jobs: Array(100).fill(jobs[0]) } });
+    }
+    if (path.endsWith('/actions/runs/1/attempts/1/jobs')) return route.fulfill({ json: { jobs: browserJobs } });
     return route.fulfill({ status: 404 });
   });
   const copies = [];
@@ -266,7 +287,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: window.captureClipboard } });
   });
 
-  await page.goto('http://localhost/ci/index.html');
+  await page.goto('http://localhost/ci/index.html?pr=42&sha=' + 'a'.repeat(40));
   const copyButton = page.getByRole('button', { name: '診断JSONをコピー' });
   assert.equal(await copyButton.isDisabled(), true);
   releaseInventory();
@@ -274,6 +295,21 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await timeline.getByText('browser-core-webkit', { exact: false }).first().waitFor();
   const history = page.getByRole('region', { name: 'PR revision history' });
   await history.getByRole('button', { name: /#42/u }).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('pr'), '42');
+  assert.equal(new URL(page.url()).searchParams.get('sha'), 'a'.repeat(40));
+  assert.equal(await page.getByText('Executed source SHA').locator('..').locator('strong').textContent(), 'a'.repeat(40));
+  assert.ok(await timeline.getByText('skipped', { exact: true }).count() >= 1);
+  await timeline.getByText('blocked · action required', { exact: true }).waitFor();
+  await timeline.getByText('queued · cause unknown', { exact: true }).waitFor();
+  await timeline.getByText('unknown', { exact: true }).waitFor();
+  const skippedDetails = timeline.locator('details').filter({ hasText: 'Skipped command' });
+  await skippedDetails.locator('summary').press('Enter');
+  await skippedDetails.getByText('Skipped command').waitFor();
+  await skippedDetails.getByText('skipped · —').waitFor();
+  const workflowLink = page.getByRole('link', { name: 'GitHubでVerifyを開く' });
+  assert.match(await workflowLink.getAttribute('href'), /^https:\/\/github\.com\/yohn-jp\/codexia\/actions\/runs\/1$/u);
+  const workflowListLink = page.getByRole('link', { name: 'Verify Codexia · attempt #1' });
+  assert.equal(await workflowListLink.getAttribute('href'), await workflowLink.getAttribute('href'));
   await copyButton.click();
   await page.getByRole('status').filter({ hasText: 'PR #42 の診断JSONをコピーしました。' }).waitFor();
   assert.equal(copies.length, 1);
@@ -283,9 +319,30 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
 
-  await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', route => route.fulfill({ status: 503 }));
+  for (const status of ['403', '429']) {
+    mode = status;
+    await page.reload();
+    await page.getByRole('status').filter({ hasText: new RegExp('CIデータを読み込めませんでした.*' + status, 'u') }).waitFor();
+    assert.equal(await copyButton.isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '再試行' }).isVisible(), true);
+    if (status === '403') {
+      mode = 'measured';
+      await page.getByRole('button', { name: '再試行' }).focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('status').filter({ hasText: 'Collected' }).waitFor();
+    } else {
+      mode = 'measured';
+      await page.getByRole('button', { name: '再試行' }).click();
+      await page.getByRole('status').filter({ hasText: 'Collected' }).waitFor();
+    }
+  }
+  mode = 'empty';
   await page.reload();
-  await page.getByRole('status').filter({ hasText: /CIデータを読み込めませんでした.*503/u }).waitFor();
+  await page.getByRole('status').filter({ hasText: 'Bounded recent pull_request workflow sample' }).waitFor();
+  assert.equal(await copyButton.isDisabled(), true);
+  mode = 'incomplete';
+  await page.reload();
+  await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
   assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
 });

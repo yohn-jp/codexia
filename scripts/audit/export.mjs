@@ -190,10 +190,10 @@ function sizeLabel(bytes) {
 function downloadLink(base, name, filename, label, className = '') {
   return '<a class="' + escapeHtml(className) + '" href="' + escapeHtml(base + name) + '" download="' + escapeHtml(filename) + '">' + escapeHtml(label) + '</a>';
 }
-export function renderIndex(manifest) {
+export function renderIndex(manifest, { base = '' } = {}) {
   const rows = manifest.branches.map(branch => {
     const snap = manifest.snapshots[branch.sha];
-    const base = 'snapshots/' + branch.sha + '/';
+    const snapshotBase = base + 'snapshots/' + branch.sha + '/';
     const prefix = 'codexia-' + branch.sha + '-';
     let links = 'Not published';
     if (snap.status !== 'blocked') {
@@ -201,25 +201,25 @@ export function renderIndex(manifest) {
       assert.ok(full, 'Missing full export');
       const parts = snap.outputs.filter(x => x.name.startsWith('part-'));
       links = '<div class="actions">' +
-        downloadLink(base, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
-        downloadLink(base, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
-        '<a href="' + base + 'repomix.json">View JSON</a></div>' +
+        downloadLink(snapshotBase, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
+        downloadLink(snapshotBase, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
+        '<a href="' + snapshotBase + 'repomix.json">View JSON</a></div>' +
         '<div class="actions review-parts">' +
-        parts.map((item, i) => downloadLink(base, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
+        parts.map((item, i) => downloadLink(snapshotBase, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
         '</div>';
     }
     const review = manifest.reviews?.[branch.sha];
     if (review && (review.status === 'ready' || review.status === 'partial')) {
       links += '<div class="actions review-parts">' +
-        downloadLink('reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
+      downloadLink(base + 'reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
           'Gemini review · 1 Markdown (' + review.published + ' source files)' + (review.status === 'partial' ? ' · partial' : ''), 'primary') +
-        '<a href="reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
+        '<a href="' + base + 'reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
     } else if (review?.status === 'blocked') {
       links += '<div>OCR review inputs unavailable</div>';
     }
     return '<tr><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
   }).join('\n');
-  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink('', 'manifest.json', 'codexia-branches.json', 'Download branch index') + ' · <a href="ci/">CI Observatory</a> · <a href="architecture/">Architecture Atlas</a> · <a href="https://github.com/yohn-jp/codexia">Repository</a></p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></html>';
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style></head><body><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink(base, 'manifest.json', 'codexia-branches.json', 'Download branch index') + '</p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></body></html>';
 }
 
 export function buildPortal({ root, site, cache, executable, heads, observedAt = new Date().toISOString() }) {
@@ -254,7 +254,8 @@ export function buildPortal({ root, site, cache, executable, heads, observedAt =
   // Cache is an optimization only; deleted HEADs are never copied into the site.
   for (const name of readdirSync(cache)) if (shaPattern.test(name) && !manifest.snapshots[name]) rmSync(join(cache, name), { recursive: true, force: true });
   writeFileSync(join(site, 'manifest.json'), json(manifest));
-  writeFileSync(join(site, 'index.html'), renderIndex(manifest));
+  mkdirSync(join(site, 'audit'), { recursive: true });
+  writeFileSync(join(site, 'audit', 'index.html'), renderIndex(manifest, { base: '../' }));
   writeFileSync(join(site, '.nojekyll'), '');
   return manifest;
 }
