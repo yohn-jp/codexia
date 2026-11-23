@@ -56,7 +56,7 @@
 | REQ-OPS-004 | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Admin flow](../design/ADMIN-SCREEN-FLOW.md) | /console/backups、config/secret store、Fastify BKC-001〜007は全て目標・未実装 | BKC-T01〜04/09/10、CON-30〜32とCTRL | UNMAPPED |
 | REQ-OPS-005 | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md) | rootless executor、BKC-008〜010、protected host lock/durable runは追加未実装 | BKC-T05〜10、CON-33/34、隔離host receipt | UNMAPPED |
 | REQ-QUAL-001 | [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) | tests/e2e/、tests/integration/、packages/配下test | 義務別の証明力は未監査 | PARTIAL |
-| REQ-QUAL-002 | [CI/CD](CI-CD.md) | .github/workflows/verify.yml、scripts/ci-impact.mjs | exact-sourceのrun/artifact未結合 | MAPPED_UNVERIFIED |
+| REQ-QUAL-002 | [CI/CD](CI-CD.md) | .github/workflows/verify.yml、scripts/ci/impact/plan.mjs | exact-sourceのrun/artifact未結合 | MAPPED_UNVERIFIED |
 | REQ-QUAL-003 | [UX](../design/UX-CONTRACT.md) | scripts/performance/ | 条件固定の計測証拠未取得 | UNMAPPED |
 | REQ-TRACE-001 | [Requirements](../requirements/README.md) | この台帳とAPI・DB・外部IFの初期契約 | 全件逆走査・自動gate未実施 | PARTIAL |
 

@@ -47,7 +47,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/reuse-pr-verification.mjs dedicated
+        run: node scripts/ci/certification/reuse-merged-pr.mjs dedicated
       - uses: actions/setup-python@v6.1.0
         if: steps.reuse.outputs.eligible != 'true'
         with:

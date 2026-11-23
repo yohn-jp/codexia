@@ -76,6 +76,6 @@ This opt-in source-build acceptance is not a replay of the byte-identical deploy
 
 ## Repository CI and release
 
-[CI/CD architecture](CI-CD.md) is the execution, evidence and certification contract. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) defines the proof placement and model-based/representative E2E strategy. The executable inventory is maintained in [ci-contract.mjs](../../scripts/ci-contract.mjs).
+[CI/CD architecture](CI-CD.md) is the execution, evidence and certification contract. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) defines the proof placement and model-based/representative E2E strategy. The executable inventory is maintained in [ci-contract.mjs](../../scripts/ci/impact/contract.mjs).
 
 Local verification and CI are separate results. Record exact commands, source identity, exits and skipped or blocked cases in PR checks and machine artifacts. Verification does not publish or deploy. See [OCI releases](OCI-RELEASE.md) and [Deployment](../deployment/README.md) for delivery and operational checks.

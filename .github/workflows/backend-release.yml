@@ -25,9 +25,9 @@ on:
       - deploy/update-compatibility.json
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
-      - scripts/ci-contract.mjs
-      - scripts/ci-artifact-selection.mjs
-      - scripts/download-ci-artifacts*.mjs
+      - scripts/ci/impact/contract.mjs
+      - scripts/ci/evidence/artifact-selection.mjs
+      - scripts/ci/evidence/download-artifacts*.mjs
       - scripts/verify-backend-artifacts*.mjs
       - scripts/resolve-backend-promotion*.mjs
       - scripts/verify-backend-promotion-handoff.mjs
@@ -46,7 +46,7 @@ on:
       - .github/workflows/backend-deployment-handoff.yml
       - scripts/component-release-record.test.mjs
       - scripts/verify-frontend-artifact.mjs
-      - scripts/reuse-pr-verification.mjs
+      - scripts/ci/certification/reuse-merged-pr.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml

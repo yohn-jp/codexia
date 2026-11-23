@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
-import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
-import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
+import { selectLatestJobArtifact } from './ci/evidence/artifact-selection.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './ci/evidence/download-artifacts.mjs';
 import { assertFrontendOAuthConfigIdentity } from './build/frontend/oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
 import { assertFrontendIdentity } from './verify-frontend-compatibility.mjs';
-import { verifyReusableMainProof } from './reuse-pr-verification.mjs';
+import { verifyReusableMainProof } from './ci/certification/reuse-merged-pr.mjs';
 
 const repository = 'yohn-jp/codexia';
 const shaPattern = /^[a-f0-9]{40}$/u;

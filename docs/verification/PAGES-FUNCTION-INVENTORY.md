@@ -47,8 +47,8 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 | `/snapshots/<SHA>/part-####.json` | アーキテクチャ、フロント、API、永続化等の責務別ソースを参照 | [exporter](../../scripts/audit/export.mjs) | 実装コード確認 |
 | `/reviews/<SHA>/index.html` | Gemini等の**レビュー用入力資料**の対象ファイル/除外を確認 | [OCR delegate](../../scripts/audit/delegate.mjs) | 実装コード確認 |
 | `/reviews/<SHA>/{gemini-review.md,gemini-diff.md,manifest.json,preview.json,rules.json}` | 同一SHAの完全/差分レビュー入力、選定ルールとカバレッジを取得 | [OCR delegate](../../scripts/audit/delegate.mjs) | 実装コード確認。AIによるレビュー結果ではない |
-| `/ci/` | PR/SHA選択、ジョブ時系列、実行/待ち時間、blocking chain、最長step、履歴比較、診断JSONコピー | [CI entry](../../scripts/ci-dashboard/site/index.html)、[browser client](../../scripts/ci-dashboard/site/dashboard.js) | 実装コード確認 |
-| `/ci/{collection.mjs,analysis.mjs,diagnostics.mjs,verify.yml}` 等 | ブラウザーCI解析の同梱ソース。利用者のUIページではない | [CI packer](../../scripts/ci-dashboard/collect.mjs) | 実装コード確認 |
+| `/ci/` | PR/SHA選択、ジョブ時系列、実行/待ち時間、blocking chain、最長step、履歴比較、診断JSONコピー | [CI entry](../../scripts/ci/dashboard/site/index.html)、[browser client](../../scripts/ci/dashboard/site/dashboard.js) | 実装コード確認 |
+| `/ci/dashboard/{collection.mjs,analysis.mjs,diagnostics.mjs,timing.mjs}`、`/ci/impact/contract.mjs`、`/ci/verify.yml` 等 | ブラウザーCI解析の同梱ソース。利用者のUIページではない | [CI packer](../../scripts/ci/dashboard/collect.mjs) | 実装コード確認 |
 | `/graph/` | ファイル・シンボル検索、トップレベルディレクトリフィルタ、参照元なし候補抽出、ファイル選択、参照元/先一覧、隣接グラフ、SHA固定ソースリンク | [Graph packer](../../scripts/graphify-pages/pack.mjs)、[explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/?file=<path>` | 選択ファイルのディープリンクを開く。入力は生成済みindex内のパスに限定 | [explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/communities.html` | Graphify本来の集約コミュニティHTMLを変更せず閲覧 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
@@ -70,8 +70,8 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 
 #### B. CI Observatory
 
-- [collector](../../scripts/ci-dashboard/collection.mjs)は公開GitHub APIから最大2ページ、直近200件程度のPR実行を取得し、実行されたSHAへの関連付けが一意な履歴に絞る。PRとSHAに基づく`Verify Codexia`を中心に20件程度の選定結果を出す。
-- [analysis](../../scripts/ci-dashboard/analysis.mjs)はVerifyの公開`needs` DAG、step時刻、実行待ち、最長完了ジョブ、certification tailを分析。`diagnostics.mjs`はソースに結びついた比較・観測上の欠落を機械可読JSONへまとめる。
+- [collector](../../scripts/ci/dashboard/collection.mjs)は公開GitHub APIから最大2ページ、直近200件程度のPR実行を取得し、実行されたSHAへの関連付けが一意な履歴に絞る。PRとSHAに基づく`Verify Codexia`を中心に20件程度の選定結果を出す。
+- [analysis](../../scripts/ci/dashboard/analysis.mjs)はVerifyの公開`needs` DAG、step時刻、実行待ち、最長完了ジョブ、certification tailを分析。`diagnostics.mjs`はソースに結びついた比較・観測上の欠落を機械可読JSONへまとめる。
 - 失敗/中断/skip、step時刻欠落、APIアクセス制限、切詰められた履歴を成功またはゼロとして扱わない。
 - 限界: **task単位の時間・CPU/メモリ/IO・playwright specの真のコスト、全required check/branch protectionは可観測ではない。** 既存UIの「診断JSONコピー」はこの欠落を補完しない。
 
@@ -132,7 +132,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 
 ### 6. 調査の証拠と未確認事項
 
-確認した生成元: [publisher](../../.github/workflows/repository-audit.yml)、[audit exporter](../../scripts/audit/export.mjs)、[delegate](../../scripts/audit/delegate.mjs)、[CI packer](../../scripts/ci-dashboard/collect.mjs)、[CI client](../../scripts/ci-dashboard/site/dashboard.js)、[Graph packer](../../scripts/graphify-pages/pack.mjs)、[Graph UI](../../scripts/graphify-pages/explorer.html)、[Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[Atlas UI](../../scripts/architecture-diagrams/atlas.js)、および各[既存のCI説明](CI-DASHBOARD.md)・[Graph説明](GRAPHIFY-PAGES.md)・[Atlas説明](ARCHITECTURE-ATLAS.md)。
+確認した生成元: [publisher](../../.github/workflows/repository-audit.yml)、[audit exporter](../../scripts/audit/export.mjs)、[delegate](../../scripts/audit/delegate.mjs)、[CI packer](../../scripts/ci/dashboard/collect.mjs)、[CI client](../../scripts/ci/dashboard/site/dashboard.js)、[Graph packer](../../scripts/graphify-pages/pack.mjs)、[Graph UI](../../scripts/graphify-pages/explorer.html)、[Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[Atlas UI](../../scripts/architecture-diagrams/atlas.js)、および各[既存のCI説明](CI-DASHBOARD.md)・[Graph説明](GRAPHIFY-PAGES.md)・[Atlas説明](ARCHITECTURE-ATLAS.md)。
 
 未確認: 公開Pagesの実到達・現物スクリーンショット、最新main公開のartifact内容、対象全ブランチの公開可否、Graphify実データ内のソース位置属性、GitHub REST APIの現時点のレート制限、現行本番のページセキュリティヘッダー。**これらを未検証のまま「正常」「安全」と記載しない。**
 

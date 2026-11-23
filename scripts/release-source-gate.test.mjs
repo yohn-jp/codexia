@@ -33,7 +33,7 @@ test('full main verification persists the real push boundary as release evidence
   const planPath=path.join(directory,'plan.json');
   const before='b'.repeat(40);
   writeFileSync(eventPath,JSON.stringify({before,after:sha,ref:'refs/heads/main'}));
-  execFileSync(process.execPath,[fileURLToPath(new URL('./ci-impact.mjs',import.meta.url))],{env:{
+  execFileSync(process.execPath,[fileURLToPath(new URL('./ci/impact/plan.mjs',import.meta.url))],{env:{
     ...process.env, CODEXIA_EXPECTED_SHA:sha, CODEXIA_CI_PLAN_PATH:planPath, GITHUB_EVENT_PATH:eventPath,
     GITHUB_EVENT_NAME:'push', GITHUB_OUTPUT:'', GITHUB_STEP_SUMMARY:'',
   }});

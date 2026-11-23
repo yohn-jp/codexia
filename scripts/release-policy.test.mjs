@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS } from './ci/impact/contract.mjs';
 import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './release-policy.mjs';
 
 const sha = 'a'.repeat(40);

@@ -1,4 +1,4 @@
-import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from './ci/impact/contract.mjs';
 
 /** @typedef {{id: number, head_sha: string, head_branch: string, event: string, status: string, conclusion: string | null}} VerificationRun */
 /** @param {unknown} value @returns {value is Record<string, unknown>} */

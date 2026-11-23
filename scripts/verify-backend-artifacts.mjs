@@ -6,8 +6,8 @@ import { createReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { selectLatestJobArtifact } from './ci/evidence/artifact-selection.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
 
