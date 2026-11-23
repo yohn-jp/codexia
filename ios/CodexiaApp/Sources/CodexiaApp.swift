@@ -12,7 +12,7 @@ private struct LibraryView: View {
         NavigationStack {
             List {
                 Section("原稿エディターの検証") {
-                    NavigationLink("サンプル原稿") { FixtureListView() }
+                    NavigationLink("サンプル作品") { FixtureProjectView() }
                 }
                 Section {
                     Text("作品の読み込みと保存はまだ利用できません。サンプルの編集内容は終了時に失われます。")
@@ -20,6 +20,20 @@ private struct LibraryView: View {
             }
             .navigationTitle("ライブラリ")
         }
+    }
+}
+
+private struct FixtureProjectView: View {
+    var body: some View {
+        List {
+            Section("執筆") {
+                NavigationLink("構成と原稿") { FixtureListView() }
+            }
+            Section("未接続") {
+                Text("履歴、レビュー、知識と設定はまだ利用できません。")
+            }
+        }
+        .navigationTitle("サンプル作品")
     }
 }
 
@@ -34,7 +48,7 @@ private struct FixtureListView: View {
                 }
             }
         }
-        .navigationTitle("サンプル原稿")
+        .navigationTitle("構成と原稿")
         .navigationDestination(isPresented: Binding(
             get: { editor != nil },
             set: { if !$0, editor?.canLeave == true { editor = nil } }

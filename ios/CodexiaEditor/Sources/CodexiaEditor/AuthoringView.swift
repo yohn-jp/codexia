@@ -6,6 +6,7 @@ public struct AuthoringView: View {
     @Binding private var state: EditorState
     private let onLeave: () -> Void
     @State private var showingProtectionNotice = false
+    @State private var showingReading = false
 
     public init(state: Binding<EditorState>, onLeave: @escaping () -> Void) {
         self._state = state
@@ -23,10 +24,23 @@ public struct AuthoringView: View {
         .navigationTitle("原稿")
         .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("読む") { showingReading = true }
+                    .disabled(state.isComposing)
+            }
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("戻る") {
                     if state.canLeave { onLeave() } else { showingProtectionNotice = true }
                 }
+            }
+        }
+        .sheet(isPresented: $showingReading) {
+            NavigationStack {
+                ScrollView {
+                    Text(state.text).frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+                .navigationTitle("読む")
+                .toolbar { Button("閉じる") { showingReading = false } }
             }
         }
         .alert("原稿はまだ保護されていません", isPresented: $showingProtectionNotice) {
