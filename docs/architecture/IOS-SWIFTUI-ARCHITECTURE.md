@@ -52,7 +52,11 @@ flowchart TD
 
 ## 5. API client and OAuth
 
-- **One wire source:** Issue [#652](https://github.com/yohn-jp/codexia/issues/652) owns the TypeSpec → OpenAPI 3.1 server/API contract. Use a **Swift generator consuming that same generated OpenAPI** (candidate: [Apple Swift OpenAPI Generator](https://github.com/apple/swift-openapi-generator) with [URLSession transport](https://github.com/apple/swift-openapi-urlsession)). Orval remains a TypeScript/Web client generator, **not** the iOS generator. Select and lock generator versions after confirming OpenAPI 3.1, status/error, multipart and streaming compatibility. No hand-maintained iOS wire DTO schema.
+- **One wire source.** Apple Swift OpenAPI Generator reads the [TypeSpec-generated OpenAPI](../../packages/http-contract/openapi/codexia.openapi.yaml).
+  The [Swift package lock](../../ios/CodexiaTransport/Package.resolved) fixes the generator, runtime and URLSession transport versions.
+  Run `ios/CodexiaTransport/generate.sh --check` to compare the operation IDs and generated files.
+  The native acceptance suite tests transport and status/receipt behavior.
+  The [HTTP platform contract](HTTP-PLATFORM-MIGRATION.md) defines schema compatibility and the existing nullable normalization.
 - Implement the existing Better Auth **iOS public OAuth client**, Authorization Code + PKCE S256, exact registered redirect, state/nonce/resource/audience/scope checks and system authentication presentation ([ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/); existing AppAuth-iOS logic can be assessed for native-only reuse). Cloudflare Access protecting Web assets is **not** API caller authorization.
 - Keep access tokens in memory and rotated refresh tokens only in device-protected Keychain; do not include secrets in binary, build logs, drafts or published artifacts. Preserve explicit logout and token revocation distinctions. Never send upstream OIDC ID tokens to ordinary APIs.
 - Use native URLSession with an exact HTTPS API-origin/path policy, no ambient cookie authority, no redirect to another origin, and bounded cancellation/retry behavior. Keep public reader origin separate from API origin. SSE/event streams need a proper streaming URLSession implementation or an explicitly documented unsupported feature decision, **not** a WebView CORS fallback. The current Capacitor bridge's buffered SSE limitation is a legacy behavior, not native design.
@@ -70,7 +74,7 @@ flowchart TD
 
 | Gate | Deliverable | Evidence required |
 | --- | --- | --- |
-| N0: API contract dependency | OpenAPI 3.1 version/epoch and scope/error/receipt requirements available from #652 | Generated Swift client compiles; no duplicate manually authored wire DTO |
+| N0: API contract dependency | TypeSpec source, OpenAPI version and epoch, scope, errors and receipts | Regeneration matches the committed client and every generated operation ID |
 | N1: Native shell | SwiftUI app, deep links, native navigation, account entry | Xcode 27 build + iOS Simulator functional checks; no Capacitor authoring runtime in target |
 | N2: Editor feasibility | TextKit 2 adapter, Japanese input and markdown source, navigation guards | Physical-device IME, selection, undo, large fixture latency/memory results |
 | N3: Data safety | Native journal, receipt reconciliation, conflict/unknown recovery, OAuth/Keychain | Crash/force-quit/401/403/409/412/offline/timeout/reinstall-re-sign tests against disposable API |

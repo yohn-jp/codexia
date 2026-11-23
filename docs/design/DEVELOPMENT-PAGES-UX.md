@@ -26,6 +26,7 @@
 | `/graph/` | Code Map / GRAPH-01 | Graphify が抽出したファイルとシンボルの静的参照を探索 |
 | `/graph/communities.html` | Community Overview / GRAPH-02 | Graphify の集約概観を閲覧 |
 | `/ci/` | CI Observatory / CI-01 | PR と実行 SHA を起点とする公開 CI テレメトリ、履歴、診断 JSON |
+| `/api/` | API Reference / API-01 | TypeSpec由来のOpenAPI契約からmethod、schema、security、error responseを参照 |
 | `/audit/` | Source Audit / AUDIT-01 | 観測したブランチ、snapshot、レビュー入力の索引と収録状況 |
 | `/reviews/<SHA>/` | Review Materials / AUDIT-02 | OCR が選定したレビュー入力、差分、収録の根拠 |
 | `/snapshots/<SHA>/` | Source Snapshot Artifacts / AUDIT-03 | Repomix の全体 JSON、分割 JSON、manifest |
@@ -55,13 +56,13 @@ flowchart TB
 
 **Desktop:**
 
-1. **グローバルヘッダー:** `Codexia / Development`、`概要`・`Architecture`・`Code Map`・`CI`・`Source Audit`。正本GitHub Docsは外部リンクとして明示する。各機能の現在位置は`aria-current`で示す。
+1. **グローバルヘッダー:** `Codexia / Development`、`概要`・`Architecture`・`Code Map`・`CI`・`API`・`Source Audit`。正本GitHub Docsは外部リンクとして明示する。各機能の現在位置は`aria-current`で示す。
 2. **トップの主領域:** ユーザーのタスクから探せる4カテゴリカード。「設計を確認」「コード構造を追う」「CIの待ちを分析」「レビュー資料を得る」。各カードは**何が分かるか・何が分からないか・データの基準**を短く記載し、一つの明確な操作リンクを置く。
 3. **サイトマップ:** 全主要URLと説明、詳細画面・ダウンロードの関係を表示。生成されなかった機能を機能一覧から消さず「利用不可／証拠不明」と示し、代替のGitHubリンクを提供する。
 4. **版とデータの帯:** 「Published Pages source SHA」（サイト生成に使用したmain SHA）と、各機能の観測モデルを別々に表示。CIを`live`、Graph/Atlasを`build snapshot`、Auditを`branch snapshots`として区別する。
 5. **補助領域:** サイトの生成方針、検証対象、Docs・Actionsへのリンク。実際のrunner/CIのグリーン判定は表示しない。
 
-**Mobile（幅320pxから）:** ヘッダー・ナビを折畳可能にし、カードは1列、サイトマップは読みやすい入れ子リストへ。モーダルでナビを占有しない。長いファイル名/SHAは改行できる一方、全文をコピーできる。キーボード、focus-visible、スクリーンリーダーの見出し階層、reduce-motionに対応する。
+**Mobile（幅320pxから）:** ヘッダー・ナビを折畳可能にし、カードは1列、サイトマップは読みやすい入れ子リストへ。モーダルでナビを占有しない。ScalarのAPI Referenceはendpoint listを折返し、schemaやresponseの横幅を画面内に収める。長いファイル名/SHAは改行できる一方、全文をコピーできる。キーボード、focus-visible、スクリーンリーダーの見出し階層、reduce-motionに対応する。
 
 **共通ルール:** カードは単なる大きなリンクにせず、説明・対象SHA・閲覧入口を分離。サイトのリンクはサイトルート相対/相対URLを使い`/codexia/`というGitHub Pagesのproject pathを壊さない。状態表示は`loading`・`ready`・`empty`・`unavailable`・`truncated`・`stale`を区別し、HTTPエラーやAPI制限を空データと混同しない。
 
@@ -103,6 +104,7 @@ flowchart LR
 | AUDIT-01 | remote branch HEADとパッケージ状態 | branch選択、SHA manifest、レビュー入力 | blocked/partial/除外を明示、完了と扱わない | 同じbranch/SHAに戻れる |
 | AUDIT-02 | OCRによる**レビュー入力**でAIレビュー結果ではない | 差分・完全版ダウンロード、coverage確認 | 生成不可なら除外理由/元SHAへ | AUDIT-01のSHAへ戻す |
 | AUDIT-03 | SOURCE SHA、分割範囲、manifest整合 | JSON閲覧・取得 | 不足/partialは理由を明示 | SHA/branchの元索引 |
+| API-01 | 対象contractとcurrent route/target routeの区別、method/schema/security/error response | endpointを検索しrequest/response schemaを参照 | 未実装targetや動作検証済みでない状態をoperationごとに表示。Try Itと認証値入力は提供しない | source SHA固定のTypeSpec・OpenAPI出典 |
 
 狭い画面の Atlas は図の操作領域を優先し、図の検索と設計根拠を必要なときに展開できるようにする。
 Code Map は検索から選択したファイルのグラフへ進み、参照関係の詳細と解析範囲を画面内で確認する。

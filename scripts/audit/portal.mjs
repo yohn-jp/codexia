@@ -70,11 +70,12 @@ function likec4Provenance(site, sourceSha) {
 function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
-  const rootLinks = ['requirements/html/','architecture/','graph/','ci/','security/','audit/','manifest.json',
+  const rootLinks = ['requirements/html/',...(existsSync(page(site,'/api/')) ? ['api/'] : []),'architecture/','graph/','ci/','security/','audit/','manifest.json',
     ...snapshotBranches.flatMap(sha => [`snapshots/${sha}/`,`snapshots/${sha}/repomix.json`]), ...reviewBranches.map(sha => `reviews/${sha}/index.html`)];
   const routes = [
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
     { route:'/requirements/html/', label:'Requirements and traceability', description:'StrictDoc requirements and trace matrix; source references are not test results.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/html/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs/requirements', internalLinks:existsSync(page(site,'/requirements/html/')) ? ['../../','requirements/REQUIREMENT-REGISTER.md-TRACE.html'] : ['../../'] },
+    ...(existsSync(page(site,'/api/')) ? [{ route:'/api/', label:'API Reference', description:'Static Scalar view of the TypeSpec-generated target OpenAPI contract. Runtime implementation and verification state are reported separately.', category:'Contracts', sourceSha, generationStatus:'ready', coverageStatus:'generated-target-contract', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/packages/http-contract/openapi', internalLinks:['../','codexia.openapi.yaml','manifest.json'] }] : []),
     { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
     { route:'/graph/', label:'Code Map', description:'Static code relationships extracted by Graphify.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['../','communities.html'] },
     { route:'/ci/', label:'CI Observatory', description:'Public GitHub Actions run and job observations, fetched by the browser.', category:'Verification', generationStatus: existsSync(page(site,'/ci/')) ? 'ready':'unavailable', coverageStatus:'live-public-actions-api', dataKind:'browser-live', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/actions', internalLinks:['../'] },
@@ -91,7 +92,9 @@ function makeRoutes(site, sourceSha, origin, audit) {
     routes.push({ route:`/reviews/${sha}/`,label:`Review Materials ${sha.slice(0,12)}`,description:'OCR-selected review input materials. These are not AI review findings.',category:'Audit',sourceSha:sha,generationStatus:'ready',coverageStatus:review.status,dataKind:'branch-head-snapshot',observedAt:audit.observedAt,externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sha}`,internalLinks:[`../../audit/#sha-${sha}`,'manifest.json',...outputs.map(item=>item.name)] });
   }
   const likec4=likec4Provenance(site,sourceSha);
-  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), ...(likec4 ? {likec4} : {}), routes };
+  const scalar=existsSync(join(site,'api','manifest.json')) ? JSON.parse(readPageFile(join(site,'api','manifest.json'),'utf8')) : undefined;
+  assert.ok(!scalar || scalar.sourceSha===sourceSha,'Scalar API reference source mismatch');
+  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), ...(likec4 ? {likec4} : {}), ...(scalar ? {scalar} : {}), routes };
 }
 
 function renderPortal(manifest,audit) {
@@ -110,7 +113,7 @@ function renderPortal(manifest,audit) {
     'branch-head-snapshots':'Observed branch heads',
   };
   const label=value=>esc(labels[value]??value);
-  const cards = manifest.routes.filter(x => ['/requirements/html/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
+  const cards = manifest.routes.filter(x => ['/requirements/html/','/api/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
     const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
@@ -123,7 +126,7 @@ function renderPortal(manifest,audit) {
     const community=item.route==='/graph/'?`<p><a href="graph/communities.html">Community overview</a></p>`:'';
     return `<article class="cx-pages-card"><div class="cx-pages-card-heading"><h2>${esc(item.label)}</h2>${statusBadge(available?'ready':'unavailable')}</div><p class="cx-pages-card-description">${esc(item.description)}</p><p class="cx-pages-card-meta">${label(item.dataKind)} · ${label(item.coverageStatus)}</p><div class="cx-pages-card-actions"><a class="cx-pages-action cx-pages-action--primary" href="${esc(target)}">Open ${esc(item.label)}</a></div>${community}${detail}</article>`;
   }).join('\n');
-  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, code relationships, CI activity, security exports, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
+  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, API contract, code relationships, CI activity, security exports, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
   return overview;
 }
 
@@ -324,7 +327,7 @@ function verifyAuditArtifacts(site,audit) {
 }
 
 function validateRegistry(site,manifest,audit,origin) {
-  const base=['/','/requirements/html/','/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
+  const base=['/','/requirements/html/',...(existsSync(page(site,'/api/'))?['/api/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
   const expected=[...base,...snapshotRoutes,...reviewRoutes];
@@ -366,6 +369,13 @@ function validateRegistry(site,manifest,audit,origin) {
   }
   const requirements=manifest.routes.find(item=>item.route==='/requirements/html/');
   if (requirements.generationStatus === 'ready') verifySpecifications(site, sourceSha);
+  const apiRoute=manifest.routes.find(item=>item.route==='/api/');
+  if (apiRoute) {
+    assert.equal(apiRoute.generationStatus,'ready','API reference generation must be complete before publication');
+    assert.equal(apiRoute.sourceSha,sourceSha,'API reference route source SHA differs from Pages build');
+    const apiManifest=verifyScalar(site,sourceSha);
+    assert.deepEqual(manifest.scalar,apiManifest,'Top-level Scalar provenance differs from API artifact manifest');
+  } else assert.equal(manifest.scalar,undefined,'Scalar provenance exists without a registered route');
   const architecture=manifest.routes.find(item=>item.route==='/architecture/');
   if (architecture.generationStatus==='ready') {
     const atlas=JSON.parse(readFileSync(join(site,'architecture','manifest.json'),'utf8'));
@@ -418,6 +428,67 @@ function validateRegistry(site,manifest,audit,origin) {
     const item=manifest.routes.find(route=>route.route===`/reviews/${sha}/`);
     assert.ok(item.sourceSha===sha && item.coverageStatus===audit.reviews[sha].status && item.dataKind==='branch-head-snapshot','Review route metadata disagrees with its SHA manifest');
   }
+}
+
+function verifyScalar(site,sourceSha) {
+  const directory=join(site,'api'), manifestPath=join(directory,'manifest.json');
+  const manifest=JSON.parse(readPageFile(manifestPath,'utf8','Scalar artifact manifest is missing'));
+  assert.equal(manifest.schemaVersion,1,'Unexpected Scalar artifact manifest version');
+  assert.equal(manifest.sourceSha,sourceSha,'Scalar artifact source SHA mismatch');
+  assert.equal(manifest.publication,'public-static-contract','Scalar artifact publication classification mismatch');
+  assert.deepEqual(manifest.targetState,{contract:'generated-target',runtime:'partial-compatibility-dispatcher',verification:'not-asserted-by-this-page'},'Scalar target/runtime/verification state must remain explicit');
+  assert.equal(manifest.input?.path,'packages/http-contract/openapi/codexia.openapi.yaml','Scalar input path mismatch');
+  const source=execFileSync('git',['show',`${sourceSha}:packages/http-contract/openapi/codexia.openapi.yaml`]);
+  const routes=execFileSync('git',['show',`${sourceSha}:packages/http-contract/test/fixtures/admitted-routes.json`]);
+  const contractPackageBytes=execFileSync('git',['show',`${sourceSha}:packages/http-contract/package.json`]);
+  const pnpmLock=execFileSync('git',['show',`${sourceSha}:pnpm-lock.yaml`]);
+  const lock=execFileSync('git',['show',`${sourceSha}:scripts/pages-api/package-lock.json`]);
+  const admitted=JSON.parse(routes.toString('utf8'));
+  const routeStates=Object.fromEntries([
+    ...admitted.current.map(value=>[value.slice(0,value.indexOf(' ')).toLowerCase()+' '+value.slice(value.indexOf(' ')+1), 'current']),
+    ...admitted.target.map(value=>[value.slice(0,value.indexOf(' ')).toLowerCase()+' '+value.slice(value.indexOf(' ')+1), 'target']),
+  ]);
+  assert.equal(manifest.routeInventory?.path,'packages/http-contract/test/fixtures/admitted-routes.json','Scalar admitted-route source path mismatch');
+  assert.equal(manifest.routeInventory?.sha256,sha256(routes),'Scalar admitted-route source digest mismatch');
+  assert.equal(manifest.routeInventory?.currentCount,admitted.current.length,'Scalar current route count mismatch');
+  assert.equal(manifest.routeInventory?.targetCount,admitted.target.length,'Scalar target route count mismatch');
+  assert.deepEqual(manifest.routeInventory?.operationStates,Object.fromEntries(Object.entries(routeStates).sort(([a],[b])=>a.localeCompare(b))), 'Scalar per-operation route states differ from the admitted inventory');
+  assert.equal(manifest.typeSpec?.packagePath,'packages/http-contract/package.json','TypeSpec package path mismatch');
+  assert.equal(manifest.typeSpec?.packageSha256,sha256(contractPackageBytes),'TypeSpec package digest mismatch');
+  assert.equal(manifest.typeSpec?.lockPath,'pnpm-lock.yaml','TypeSpec lock path mismatch');
+  assert.equal(manifest.typeSpec?.lockSha256,sha256(pnpmLock),'TypeSpec lock digest mismatch');
+  const contractPackage=JSON.parse(contractPackageBytes.toString('utf8'));
+  const expectedTypeSpecVersions=Object.fromEntries(['@typespec/compiler','@typespec/http','@typespec/openapi','@typespec/openapi3'].map(name=>[name,contractPackage.devDependencies?.[name]]));
+  assert.deepEqual(manifest.typeSpec?.versions,expectedTypeSpecVersions,'Scalar TypeSpec versions differ from the source package');
+  for (const [name,version] of Object.entries(expectedTypeSpecVersions)) assert.ok(pnpmLock.toString('utf8').includes(`'${name}@${version}'`),`TypeSpec lock is missing ${name}@${version}`);
+  const lockData=JSON.parse(lock.toString('utf8'));
+  const scalarPackage=lockData.packages?.['node_modules/@scalar/api-reference'];
+  assert.equal(scalarPackage?.version,'1.83.0','Scalar lock version mismatch');
+  assert.equal(manifest.generator?.name,'@scalar/api-reference','Scalar generator identity mismatch');
+  assert.equal(manifest.generator?.version,'1.83.0','Scalar generator version mismatch');
+  assert.equal(manifest.generator?.npmIntegrity,scalarPackage.integrity,'Scalar package integrity mismatch');
+  assert.equal(manifest.generator?.lockPath,'scripts/pages-api/package-lock.json','Scalar lock path mismatch');
+  assert.equal(manifest.generator?.lockSha256,sha256(lock),'Scalar lock digest mismatch');
+  assert.equal(manifest.input?.sha256,sha256(source),'Scalar source contract digest mismatch');
+  assert.ok(manifest.buildTool?.name==='esbuild' && manifest.buildTool?.version===lockData.packages?.['node_modules/esbuild']?.version,'Scalar bundler does not match lockfile');
+  assert.ok(!Number.isNaN(Date.parse(manifest.generatedAt)),'Scalar generation timestamp is invalid');
+  assert.deepEqual(readdirSync(directory).sort(),['THIRD_PARTY_NOTICES.txt','codexia.openapi.yaml','index.html','manifest.json','scalar-reference.css','scalar-reference.js'],'Unexpected Scalar artifact output');
+  const names=verifyOutputs(directory,manifest.outputs,name=>['THIRD_PARTY_NOTICES.txt','codexia.openapi.yaml','index.html','scalar-reference.css','scalar-reference.js'].includes(name));
+  assert.deepEqual([...names].sort(),['THIRD_PARTY_NOTICES.txt','codexia.openapi.yaml','index.html','scalar-reference.css','scalar-reference.js'],'Scalar output registry mismatch');
+  assert.match(readPageFile(join(directory,'THIRD_PARTY_NOTICES.txt'),'utf8'),/Copyright Scalar[\s\S]*MIT License/u,'Scalar license notice is missing');
+  assert.match(readPageFile(join(directory,'scalar-reference.js'),'utf8'),/@license\s+MIT/u,'Upstream bundled legal comments are missing');
+  const yaml=readPageFile(join(directory,'codexia.openapi.yaml'),'utf8');
+  assert.ok(yaml.includes('openapi: 3.1.0'),'Scalar output is not OpenAPI 3.1');
+  assert.equal(manifest.input?.outputSha256,sha256(Buffer.from(yaml)),'Scalar sanitized OpenAPI output digest mismatch');
+  assert.doesNotMatch(yaml,/^\s*servers:\s*$/mu,'Scalar output contains a root/path/operation server declaration');
+  assert.doesNotMatch(yaml,/^\s*\$ref:\s*https?:/mu,'Scalar output contains an external schema reference');
+  assert.ok((yaml.match(/^\s*x-codexia-pages-status:/gmu)??[]).length===admitted.current.length+admitted.target.length,'Per-operation status annotations are incomplete');
+  const html=readPageFile(join(directory,'index.html'),'utf8');
+  assert.ok(html.includes("connect-src 'self'"),'Scalar CSP must prohibit external fetches');
+  assert.ok(html.includes('Static target contract from TypeSpec') && html.includes('partial. The current Fastify API'),'Scalar page must distinguish contract from implementation');
+  assert.ok(html.includes('Auth request/response examples are removed') && html.includes('No API server, credentials, or Try It request'),'Scalar publication boundary notice missing');
+  assert.ok(html.includes('Authentication scheme definitions') && html.includes('ApiKeyAuth'),'Read-only authentication scheme details missing');
+  return manifest;
 }
 
 export function finalize(siteDir,originValue) {
