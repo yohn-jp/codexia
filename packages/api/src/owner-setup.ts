@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import { jwtVerify, SignJWT } from "jose";
 import { z } from "zod";
 import { readCodexiaEnvironment } from "./environment.js";
@@ -86,8 +87,6 @@ export function createOwnerSetupApp(
   // Status polling and setup grant attempts have independent budgets.
   const withinStatusWindow = createSetupRateLimiter();
   const withinAdmissionWindow = createSetupRateLimiter();
-  const withinLoopbackReadinessWindow = createSetupRateLimiter();
-  const withinNetworkReadinessWindow = createSetupRateLimiter();
   const registration = new AsyncLocalStorage<SetupRegistration>();
   const clientId = new AsyncLocalStorage<string>();
   const provisioningOwner = new AsyncLocalStorage<string>();
@@ -176,21 +175,38 @@ export function createOwnerSetupApp(
   app.setErrorHandler((error, _request, reply) => {
     const failure = z.object({ statusCode: z.number().min(400).max(499) }).safeParse(error);
     const status = failure.success ? failure.data.statusCode : 503;
+    if (status === 429) {
+      void reply.code(429).send({ code: "SETUP_RATE_LIMIT" });
+      return;
+    }
     void reply.code(status).send({ code: status === 503 ? "SETUP_UNAVAILABLE" : "SETUP_REQUEST_INVALID" });
   });
   app.setNotFoundHandler((_request, reply) => reply.code(403).send({ code: "SETUP_ONLY" }));
   app.addHook("onClose", async () => auth.pool.end());
 
-  app.get("/health/ready", { exposeHeadRoute: false }, async (request, reply) => {
-    // Reserve an independent budget for the Quadlet's actual loopback probe.
-    const peer = request.raw.socket.remoteAddress?.replace(/^::ffff:/u, "");
-    const withinWindow = peer === "127.0.0.1" || peer === "::1"
-      ? withinLoopbackReadinessWindow : withinNetworkReadinessWindow;
-    if (!withinWindow()) {
-      return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
-    }
-    await auth.pool.query("SELECT 1 FROM owner_setup LIMIT 1");
-    return { status: "ready" };
+  app.register(async (health) => {
+    await health.register(rateLimit, {
+      global: false,
+      addHeaders: { "retry-after": true, "x-ratelimit-limit": false, "x-ratelimit-remaining": false, "x-ratelimit-reset": false },
+      addHeadersOnExceeding: { "x-ratelimit-limit": false, "x-ratelimit-remaining": false, "x-ratelimit-reset": false },
+    });
+    health.get("/health/ready", {
+      exposeHeadRoute: false,
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: RATE_LIMIT_SECONDS * 1000,
+          keyGenerator(request) {
+            // Reserve an independent budget for the Quadlet's actual loopback probe.
+            const peer = request.raw.socket.remoteAddress?.replace(/^::ffff:/u, "");
+            return peer === "127.0.0.1" || peer === "::1" ? "loopback" : "network";
+          },
+        },
+      },
+    }, async () => {
+      await auth.pool.query("SELECT 1 FROM owner_setup LIMIT 1");
+      return { status: "ready" };
+    });
   });
 
   app.get(OWNER_SETUP_PATH + "/status", { exposeHeadRoute: false }, async (request, reply) => {

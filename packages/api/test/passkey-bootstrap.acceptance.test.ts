@@ -869,7 +869,8 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
         for (const input of [networkReadiness, status]) {
           const blocked = await rateLimitApp.inject(input);
           assert.equal(blocked.statusCode, 429, input.url);
-          assert.equal(blocked.headers["retry-after"], "60");
+          const retryAfter = Number(blocked.headers["retry-after"]);
+          assert.ok(Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= 60, input.url);
           assert.equal(blocked.headers["cache-control"], "no-store");
           assert.deepEqual(blocked.json(), { code: "SETUP_RATE_LIMIT" });
         }
