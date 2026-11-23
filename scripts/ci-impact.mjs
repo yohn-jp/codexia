@@ -264,6 +264,20 @@ function assertCoverageReuse(plan, receipt) {
   assertReceipt(receipt, 'coverage');
 }
 
+
+/** Independently bind an affected PR plan to the actual event base and Git diff. */
+export function assertExactPrImpact(plan, expectedBase, changedFiles) {
+  validateVerificationPlan(plan);
+  if (plan.event !== 'pull_request') throw new Error('Exact PR impact verification requires a PR plan');
+  if (!/^[a-f0-9]{40}$/u.test(expectedBase ?? '') || plan.base !== expectedBase) {
+    throw new Error('Impact plan PR base does not match the event');
+  }
+  if (plan.mode === 'affected' &&
+      (!Array.isArray(changedFiles) || JSON.stringify(plan.files) !== JSON.stringify(changedFiles))) {
+    throw new Error('Impact plan does not match the exact PR diff');
+  }
+}
+
 export function planDigest(plan) {
   const { coverageReuse: _coverageReuse, ...canonical } = validateVerificationPlan(plan);
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
