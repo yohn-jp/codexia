@@ -1594,6 +1594,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         try {
           const existing = await api.persistenceDocument(project.id, intent.documentId);
           if (existing.document.title !== intent.title) {
+            // A confirmed ID collision cannot be retried with the same intent.
+            // Keep the intent for unknown outcomes such as timeouts and 404s.
+            if (documentCreationIntentRef.current === intent) documentCreationIntentRef.current = null;
             throw new Error("同じ文書IDに別の文書が存在するため、作成を完了できませんでした。文書名を確認してください。");
           }
           if (!existing.revision) throw new Error("作成済み文書のRevisionを確認できませんでした。");

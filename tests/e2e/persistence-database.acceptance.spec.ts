@@ -1511,6 +1511,52 @@ test("replays ambiguous project and document creates with retained client intent
   expect(documentBodies).toHaveLength(3);
   expect(documentBodies[2]?.documentId).not.toBe(documentBodies[0]?.documentId);
   expect(documentBodies[2]?.idempotencyKey).not.toBe(documentBodies[0]?.idempotencyKey);
+
+  // A response proving that the requested ID belongs to another document
+  // must release the old creation intent; ambiguous 504 + 404 above must not.
+  const collisionTitle = `Collision scene ${crypto.randomUUID()}`;
+  const existingReadResponse = await author.fetch(`/api/v1/persistence/projects/${projectId}/documents/${allDocuments[0]!.id}`);
+  expect(existingReadResponse.ok()).toBe(true);
+  const existingRead = await existingReadResponse.json() as {
+    document: { id: string; title: string; [key: string]: unknown };
+    revision: ({ documentId?: string; [key: string]: unknown }) | null;
+  };
+  let collidingAttempt: { documentId: string; idempotencyKey: string; title: string } | undefined;
+  let collisionReadCount = 0;
+  await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
+    if (route.request().method() === "POST" && !collidingAttempt) {
+      collidingAttempt = route.request().postDataJSON() as typeof collidingAttempt;
+      await route.fulfill({ status: 409, json: { error: "synthetic document ID collision" } });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
+    if (route.request().method() === "GET" && collidingAttempt && collisionReadCount === 0 &&
+        new URL(route.request().url()).pathname.endsWith(`/documents/${collidingAttempt.documentId}`)) {
+      collisionReadCount += 1;
+      await route.fulfill({
+        status: 200,
+        json: {
+          ...existingRead,
+          document: { ...existingRead.document, id: collidingAttempt.documentId },
+          revision: existingRead.revision ? { ...existingRead.revision, documentId: collidingAttempt.documentId } : null,
+        },
+      });
+      return;
+    }
+    await route.fallback();
+  });
+  await createDocument.getByLabel("文書名").fill(collisionTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(editorAlert).toContainText("同じ文書IDに別の文書が存在");
+  expect(collisionReadCount).toBe(1);
+  expect(collidingAttempt?.documentId).toBeTruthy();
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(() => documentBodies.length).toBe(4);
+  expect(documentBodies[3]?.documentId).not.toBe(collidingAttempt?.documentId);
+  expect(documentBodies[3]?.idempotencyKey).not.toBe(collidingAttempt?.idempotencyKey);
+  await expect(page.getByRole("heading", { name: collisionTitle, exact: true })).toBeVisible();
 });
 
 
