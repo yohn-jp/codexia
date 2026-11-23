@@ -14,7 +14,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
@@ -873,7 +873,7 @@ export function createServer(options: ApiServerOptions): Server {
         } },
         async invoke(input, context) {
           const { path } = input as { path: string };
-          if (!canReviewPrivateChangeSets && isPrivatePublishingPath(path)) {
+          if (isModulePreservationArchivePath(path) || (!canReviewPrivateChangeSets && isPrivatePublishingPath(path))) {
             return { ok: true, snapshot: context.reader.snapshot, data: { sceneId: null, document: null } };
           }
           if (!coreStore.resolveDocumentScene) return { ok: false, snapshot: context.reader.snapshot,

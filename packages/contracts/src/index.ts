@@ -56,6 +56,10 @@ export const PRIVATE_PUBLISHING_PATHS = Object.freeze([
 export function isPrivatePublishingPath(path: string): boolean {
   return PRIVATE_PUBLISHING_PATHS.includes(path);
 }
+/** Identifies module data retained for preservation outside live authoring. */
+export function isModulePreservationArchivePath(path: string): boolean {
+  return /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u.test(path);
+}
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
 /** Return a decimal order key after every existing text-ordered key without rewriting them. */

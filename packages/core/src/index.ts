@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { makeKnowledgeProjection, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, SNAPSHOT_READ_MANY_LIMIT, snapshotScopeRevision, type SnapshotFile, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PUBLISHING_EPISODES_KEY, PUBLISHING_RECORD_KEYS, SNAPSHOT_READ_MANY_LIMIT, snapshotScopeRevision, type SnapshotFile, type OwnModuleRecord, type OwnModuleRecordProposal, type NativeChangeSetReference, type SnapshotId, type SnapshotReader, type SnapshotKnowledgeProjection, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
 import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, NLP_FEATURE_SETTINGS_CHANGESET_SOURCE, PUBLISHING_CHANGESET_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, DocumentHeadRevisionLookup, DocumentRevisionKey, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
@@ -195,7 +195,6 @@ function projectionProofKey(version: number): string {
 const ARTIFACTS = "core.artifacts";
 const RETIRED_PROJECT_SETTINGS_PATH = "meta/project.yaml";
 const RETIRED_KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.json";
-const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
 const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -1237,7 +1236,7 @@ export class CoreStore implements MutationCoordinator {
       if (replay) return recordApplication(replay);
 
       assertCurrentOperationPaths(operation);
-      if (operation.writes.some(({ path }) => PRESERVATION_ARCHIVE_PATH.test(path))) {
+      if (operation.writes.some(({ path }) => isModulePreservationArchivePath(path))) {
         fail(409, "preservation_archive_read_only", "Module preservation archives are read-only");
       }
 

@@ -2997,6 +2997,48 @@ it("native actions use real PostgreSQL through direct and composed OAuth admissi
   assert.equal(nestedChange.status, "proposed");
 });
 
+it("excludes preserved module files from live resolution while retaining portable bytes", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Preserved module files");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-preserved-module-files-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const archivePath = "meta/scriptorium/modules/story/legacy/files/notes.md";
+  const currentPath = "meta/scriptorium/modules/story/legacy-notes.md";
+  const archived = { content: "Preserved author notes.\n", encoding: "utf8" };
+  const current = { content: "Current module notes.\n", encoding: "utf8" };
+  await persistence.transaction(async tx => {
+    for (const [key, value] of [[archivePath, archived], [currentPath, current]] as const) {
+      await tx.saveModuleRecord({ projectId: project.id, moduleId: "core.artifacts", key, value, expectedVersion: null });
+    }
+  });
+  const pinned = (await store.reader(project.id)).snapshot;
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, staticDir, { persistence, ...testClientSettings(project.id, client.publicJwks, client.isActive) });
+  t.after(api.close);
+  for (const headers of [client.ownerHeaders(), client.mcpHeaders()]) {
+    const resolvePath = async (path: string) => {
+      const response = await fetch(`${api.base}/api/projects/${project.id}/actions/core.document.resolve`, {
+        method: "POST", headers, body: JSON.stringify({ input: { path }, snapshot: pinned }),
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json() as ActionResult<{ sceneId: null; document: { path: string; content: string } | null }>;
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.deepEqual(result.snapshot, pinned);
+      return result.data;
+    };
+    assert.deepEqual(await resolvePath(archivePath), { sceneId: null, document: null });
+    assert.deepEqual(await resolvePath("meta/scriptorium/modules/story/missing.md"), { sceneId: null, document: null });
+    assert.equal((await resolvePath(currentPath)).document?.content, current.content);
+  }
+  const response = await fetch(`${api.base}/api/v1/persistence/projects/${project.id}/archive`, {
+    headers: { Authorization: client.ownerHeaders().Authorization },
+  });
+  assert.equal(response.status, 200);
+  const exported = await response.json() as { moduleRecords: Array<{ moduleId: string; key: string; value: unknown }> };
+  assert.deepEqual(exported.moduleRecords.find(({ key }) => key === archivePath), {
+    moduleId: "core.artifacts", key: archivePath, value: archived,
+  });
+});
+
 it("restricts Publishing review payloads and legacy files to authenticated authors", async (t) => {
   const { project, store, persistence } = await nativeProject(t, "Private Publishing review");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-publishing-review-"));
