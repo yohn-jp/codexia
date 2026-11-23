@@ -2,32 +2,25 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { api, clearNativeApiSession, configureNativeApiSession, setOAuthAccessToken } from "./api.js";
 
-test("browser version stays under the author application and only retries a legacy origin response", async (t) => {
+test("browser version stays on the author application endpoint after denial, absence, or network failure", async (t) => {
   const requests: string[] = [];
-  let legacyOrigin = false;
-  let accessRedirect = false;
+  const version = { name: "codexia", version: "0.1.0", profile: "full" };
+  let respond = () => Response.json(version);
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    requests.push(path);
+    requests.push(String(input));
     assert.equal(init?.credentials, "same-origin");
-    if (accessRedirect) throw new TypeError("Failed to fetch");
-    if (path === "/api/browser/version" && legacyOrigin) {
-      return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
-    }
-    return Response.json({ name: "codexia", version: "0.1.0", profile: "full" });
+    return respond();
   });
 
-  await api.version();
-  assert.deepEqual(requests, ["/api/browser/version"]);
-  legacyOrigin = true;
-  requests.length = 0;
-  await api.version();
-  assert.deepEqual(requests, ["/api/browser/version", "/api/version"]);
-
-  accessRedirect = true;
-  requests.length = 0;
-  await assert.rejects(api.version(), /Failed to fetch/u);
-  assert.deepEqual(requests, ["/api/browser/version"]);
+  assert.deepEqual(await api.version(), version);
+  for (const [status, code] of [[401, "UNAUTHORIZED"], [404, "NOT_FOUND"]] as const) {
+    respond = () => Response.json({ error: "Version endpoint unavailable", code }, { status });
+    await assert.rejects(api.version(), { status, code });
+  }
+  const networkFailure = new TypeError("Failed to fetch");
+  respond = () => { throw networkFailure; };
+  await assert.rejects(api.version(), error => error === networkFailure);
+  assert.deepEqual(requests, Array.from({ length: 4 }, () => "/api/browser/version"));
 });
 
 test("OAuth API requests send a bearer token without ambient cookies", async () => {
