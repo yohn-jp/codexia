@@ -1,5 +1,7 @@
 # API authentication and authorization
 
+**Path-by-path normative authorization:** [Route authorization contract](ROUTE-AUTHORIZATION-CONTRACT.md) owns the principal/HTTP method/edge/API resource matrix. User flows and button-level requirements are in [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md). These contracts specialize, rather than replace, Better Auth and PostgreSQL authorization invariants below.
+
 **Normative authentication contract.** The owner UI's entrypoints and current-vs-target states are defined by [Admin screen flows](../design/ADMIN-SCREEN-FLOW.md); external authentication interfaces conform to [System design](SYSTEM-DESIGN.md). Target requirements in this document are not claims of deployed acceptance.
 
 > This document describes standalone OAuth admission and the accepted Passkey-first requirements. Production rollout evidence is tracked separately.

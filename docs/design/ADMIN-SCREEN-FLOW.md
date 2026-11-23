@@ -1,5 +1,7 @@
 # 管理画面の遷移設計
 
+**詳細画面設計:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[画面状態遷移図](SCREEN-STATE-ATLAS.md)、[URL/API認可設計](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) が初回SETUP、owner-session管理、OIDC/OAuth、運用プレーンの権限を区別する。
+
 **種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile 内の認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）

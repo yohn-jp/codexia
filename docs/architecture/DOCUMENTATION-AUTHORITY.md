@@ -20,6 +20,8 @@
 | --- | --- |
 | システム構成と責務 | [システム基本設計](SYSTEM-DESIGN.md)・[Internal boundaries](INTERNAL-BOUNDARIES.md) |
 | PostgreSQL とドメイン ID | [データモデル](DATA-MODEL.md)・[Core](CORE.md) |
+| URL/HTTP method・principal別のアクセス境界 | [Route authorization contract](ROUTE-AUTHORIZATION-CONTRACT.md)・[API authentication](API-AUTHN-AUTHZ.md) |
+| 画面ID・操作ボタン・状態遷移の全体台帳 | [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md)・[Screen State Atlas](../design/SCREEN-STATE-ATLAS.md) |
 | API admission / Better Auth / OAuth / project 認可 | [API authentication](API-AUTHN-AUTHZ.md)・[MCP OAuth](MCP-OAUTH.md) |
 | Module と外部 AI | [Modules](MODULES.md)・[MCP-first](MCP-FIRST.md)・[Modular workspace](MODULAR-WORKSPACE.md) |
 | UI/UX と利用者操作 | [UX contract](../design/UX-CONTRACT.md)・[利用画面遷移](../design/USER-SCREEN-FLOW.md) |

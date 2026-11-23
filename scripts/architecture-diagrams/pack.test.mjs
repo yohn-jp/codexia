@@ -16,13 +16,19 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   const manifest = createManifest(sha, sources);
   assert.equal(manifest.format, 'codexia-architecture-atlas/v1');
   assert.equal(manifest.sourceSha, sha);
-  assert.equal(manifest.diagrams.length, 17);
-  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, 17);
+  const sourceCount = sources.reduce((total, item) =>
+    total + item.markdown.split('\n').filter(line => line.trim() === '```mermaid').length, 0);
+  assert.ok(sourceCount >= 40, 'The full screen catalog must be rendered');
+  assert.equal(manifest.diagrams.length, sourceCount);
+  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount);
   assert.deepEqual([...new Set(manifest.diagrams.map(d => d.group))],
-    ['system', 'data', 'user', 'admin', 'first', 'update']);
+    ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']);
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-4' && d.title.includes('管理コンソール')));
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-5' && d.title.includes('初回所有者登録')));
   assert.ok(manifest.diagrams.some(d => d.id === 'first-3' && d.title.includes('VMの再構築')));
+  assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
+  assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
+  assert.ok(manifest.diagrams.some(d => d.id === 'screen-23' && d.title.includes('Cross-shell')));
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
     /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));

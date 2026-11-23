@@ -1,5 +1,7 @@
 # 利用画面の遷移設計
 
+**画面ごとの詳細正本:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[状態遷移図](SCREEN-STATE-ATLAS.md) と [URL/API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) に各画面の入口・主操作・異常系・principalを紐付ける。本書は作者体験の横断契約であり、個別画面の権限を曖昧にしない。
+
 **種別: 正本・規範的設計。** 本書は作者が Desktop / Mobile / iOS から作品を利用する際の画面、遷移条件、失敗時の扱いを定義する。画面配置・内部 UI の実装をそのまま設計の正本にしない。[システム基本設計](../architecture/SYSTEM-DESIGN.md)、[UX 契約](UX-CONTRACT.md)、[情報設計](INFORMATION-ARCHITECTURE.md)に従う。
 
 ## 起動から作品への遷移

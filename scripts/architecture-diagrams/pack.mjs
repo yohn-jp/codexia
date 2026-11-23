@@ -10,6 +10,7 @@ export const DIAGRAM_DOCUMENTS = Object.freeze([
   { id: 'data', label: 'データモデル', path: 'docs/architecture/DATA-MODEL.md' },
   { id: 'user', label: '利用画面', path: 'docs/design/USER-SCREEN-FLOW.md' },
   { id: 'admin', label: '管理・認証画面', path: 'docs/design/ADMIN-SCREEN-FLOW.md' },
+  { id: 'screen', label: '全画面の状態遷移', path: 'docs/design/SCREEN-STATE-ATLAS.md' },
   { id: 'first', label: '初期デプロイ', path: 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md' },
   { id: 'update', label: 'アップデートと復旧', path: 'docs/deployment/UPDATE-FLOW.md' },
 ]);
@@ -56,8 +57,10 @@ export function parseMermaidDiagrams(markdown, section) {
 export function createManifest(sha, sources) {
   assert.match(sha, /^[a-f0-9]{40}$/u, 'Expected a source commit SHA');
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
-  assert.ok(diagrams.length >= 14 && diagrams.length <= 32, 'Incomplete or excessive architecture diagram catalog');
-  for (const group of ['system', 'data', 'user', 'admin', 'first', 'update']) {
+  assert.ok(diagrams.length >= 40 && diagrams.length <= 64, 'Incomplete or excessive architecture diagram catalog');
+  assert.ok(diagrams.filter(d => d.group === 'screen').length >= 23,
+    'Accepted logical screens require their individual state diagrams');
+  for (const group of ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']) {
     assert.ok(diagrams.some(d => d.group === group), 'Missing required diagram group: ' + group);
   }
   return {

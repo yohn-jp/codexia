@@ -1,12 +1,12 @@
 # Architecture Atlas — グラフィカルな設計図
 
-**種別: ビューアーの検証・運用手順。** 設計上の正本は [システム設計](../architecture/SYSTEM-DESIGN.md)、[利用画面](../design/USER-SCREEN-FLOW.md)、[管理画面](../design/ADMIN-SCREEN-FLOW.md)、[初期デプロイ](../deployment/INITIAL-DEPLOYMENT-FLOW.md)、[更新](../deployment/UPDATE-FLOW.md) の Mermaid コードブロックと、それらが参照する領域設計書にある。Atlas に別の図の正本は設けない。
+**種別: ビューアーの検証・運用手順。** 設計上の正本は [画面状態遷移図](../design/SCREEN-STATE-ATLAS.md)、[全画面操作台帳](../design/SCREEN-CONTROL-CATALOG.md)、[URL/API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[システム設計](../architecture/SYSTEM-DESIGN.md)、[利用画面](../design/USER-SCREEN-FLOW.md)、[管理画面](../design/ADMIN-SCREEN-FLOW.md)、[初期デプロイ](../deployment/INITIAL-DEPLOYMENT-FLOW.md)、[更新](../deployment/UPDATE-FLOW.md) の Mermaid コードブロックと、それらが参照する領域設計書にある。Atlas に別の図の正本は設けない。
 
-[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する読み取り専用の SVG ビューアーで、17 のシステム・状態・画面遷移図を表示する。左側のカテゴリから図を切替え、拡大・縮小・元の設計書への移動・SVG 単体表示ができる。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
+[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する読み取り専用の SVG ビューアーで、原本に登録されたシステム・状態・画面遷移図すべてを表示する（既存の全体設計17図と各画面の詳細23図を含む）。左側のカテゴリから図を切替え、拡大・縮小・元の設計書への移動・SVG 単体表示ができる。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
 
 ## 生成・権限
 
-- `scripts/architecture-diagrams/pack.mjs` が承認済みの6設計書から `mermaid` フェンスを抽出する。順序とタイトルは元の見出しに従う。対象文書を増やすときは所有設計書を明示してインベントリを更新する。
+- `scripts/architecture-diagrams/pack.mjs` が承認済みの7設計書から `mermaid` フェンスを抽出する。順序とタイトルは元の見出しに従う。対象文書を増やすときは所有設計書を明示してインベントリを更新する。
 - `Repository Audit Pages` の PR プレビュー／main 公開の既存一経路だけを使用する。別の Pages publisher、アカウント、Secret、アプリのデプロイ経路を増やさない。
 - `@mermaid-js/mermaid-cli` の固定バージョンが、CI の Chrome 上で全図を描画し、SVG でない・空・過大な結果を拒否する。ブラウザーの描画/ナビゲーション/ズームを Playwright で実測する。ブラウザーは Mermaid ライブラリを CDN から読み込まず、公開済み SVG を画像として表示する。
 - `manifest.json` は exact source SHA、元 Markdown の path/line、出力 SVG の path を束縛し、GitHub ソースへのリンクをその SHA に固定する。ビルド済み SVG と、原文 Markdown が衝突した場合は**原文 Markdown と設計の決定が優先**する。図だけを手編集しない。

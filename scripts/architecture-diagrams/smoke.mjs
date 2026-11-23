@@ -40,7 +40,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await page.locator('#svg-image:not([hidden])').waitFor({ timeout: 20000 });
     const first = await page.locator('#svg-image').evaluate(img => ({ naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight }));
     assert.ok(first.naturalWidth > 50 && first.naturalHeight > 50, 'First SVG failed to render');
-    assert.equal(await page.locator('#diagram-total').textContent(), '14 visual diagrams');
+    const manifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
+    assert.equal(await page.locator('#diagram-total').textContent(), manifest.diagrams.length + ' visual diagrams');
+    assert.ok(manifest.diagrams.some(item => item.id === 'screen-23'));
+    assert.ok(manifest.diagrams.some(item => item.id === 'admin-5'));
+    assert.ok(manifest.diagrams.some(item => item.id === 'first-3'));
     await page.getByRole('button', { name: '拡大' }).click();
     assert.equal(await page.locator('#zoom-reset').textContent(), '125%');
     const adminButton = page.locator('#diagram-list .group').nth(3).locator('button').first();
@@ -49,6 +53,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assert.match(new URL(page.url()).hash, /^#admin-1$/u);
     assert.match(await page.locator('#svg-image').getAttribute('src'), /^svg\/admin-1\.svg$/u);
     assert.ok((await page.locator('#svg-image').evaluate(img => img.naturalWidth)) > 50);
+    await page.goto(base + '/#screen-23', { waitUntil: 'networkidle' });
+    await page.locator('#svg-image:not([hidden])').waitFor();
+    assert.equal(await page.locator('#svg-image').getAttribute('src'), 'svg/screen-23.svg');
+    assert.ok(await page.locator('#svg-image').evaluate(img => img.naturalWidth > 50));
     await page.screenshot({ path: resolve(root, 'preview.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.locator('#diagram').isVisible());
