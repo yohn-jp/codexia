@@ -122,7 +122,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
     const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
     assert.deepEqual(selected.tasks, requirementRegister
       ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
-    assert.deepEqual(selected.groups, requirementRegister ? ['unit-core', 'types-tests'] : ['types-tests'], file);
+    assert.deepEqual(selected.groups, requirementRegister ? ['unit-core', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 
