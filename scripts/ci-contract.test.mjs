@@ -71,7 +71,7 @@ test('HTTP contract sources select the dedicated unit and typecheck tasks', () =
     base: 'b'.repeat(40),
   });
   assert.equal(plan.mode, 'affected');
-  assert.equal(plan.full_model_oci, false);
+  assert.equal(plan.full_model_oci, true);
   assert.ok(plan.tasks.includes('unit-http-contract'));
   assert.ok(plan.tasks.includes('typecheck-http-contract'));
   assert.ok(plan.tasks.includes('test-types-packages'));
@@ -79,7 +79,7 @@ test('HTTP contract sources select the dedicated unit and typecheck tasks', () =
   assert.ok(plan.groups.includes('types-sources'));
   assert.ok(!plan.tasks.includes('oci-full'));
   assert.ok(matchesFullModelOciPath('packages/api/src/server.ts'));
-  assert.ok(!matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
+  assert.ok(matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {

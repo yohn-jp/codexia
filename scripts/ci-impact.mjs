@@ -24,7 +24,6 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'modules/**',
   'package.json',
   'packages/**',
-  '!packages/http-contract/**',
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
