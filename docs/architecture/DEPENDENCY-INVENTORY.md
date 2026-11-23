@@ -29,7 +29,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
-| `typescript` | 現行 `~5.9.3` → **採用目標 TypeScript 7 最新安定版** | root・型検査 | **移行必須・未実装**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。型設定・依存型を修正し、全workspaceでnative型検査を受入。5系への恒久フォールバックは禁止 |
+| `typescript` | `7.0.2` | root・native型検査、宣言emit、HTTPルートのAST検査 | ambient型の自動取り込みに依存せず、共通tsconfigで`types: ["node"]`を明示する。HTTPルート検査が使うnative AST APIはunstableのため、compilerを厳密指定し、更新時はルート契約テストも検証する |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 | `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |

@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-import ts from 'typescript';
-import { readdir, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TEST_TYPECHECK_SCOPES, WORKSPACES } from '../impact/contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const compiler = createRequire(import.meta.url).resolve('typescript/package.json');
+const tsc = path.join(path.dirname(compiler), 'bin', 'tsc');
 const generatedDirectoryNames = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out', 'target']);
 const scopeWorkspaces = new Map([
   ['app-e2e', ['app']],
@@ -45,58 +48,59 @@ function isTestFile(filename) {
   return /\.(?:test|spec)\.(?:ts|tsx)$/u.test(filename);
 }
 
-function sourceIncludes(scope, directory, parsed) {
-  const names = new Set(parsed.fileNames.map((filename) => path.resolve(filename)));
-  const missing = scope.testFiles.filter((filename) => !names.has(path.resolve(filename)));
-  if (missing.length) throw new Error(`TypeScript input omitted test sources for ${directory}: ${missing.map((filename) => path.relative(root, filename)).join(', ')}`);
-  if (parsed.fileNames.length === 0) throw new Error(`Typecheck scope ${scope.id} selected no TypeScript files in ${directory}`);
+function sourceIncludes(directory, configDirectory, files, testFiles) {
+  const names = new Set(files.map(filename => path.resolve(configDirectory, filename)));
+  const missing = testFiles.filter(filename => !names.has(filename));
+  if (missing.length) throw new Error(`TypeScript input omitted test sources for ${directory}: ${missing.map(filename => path.relative(root, filename)).join(', ')}`);
+  if (files.length === 0) throw new Error(`Test typecheck selected no TypeScript files in ${directory}`);
 }
 
-async function checkDirectory(scope, directory, { configDirectory = directory, include, testFiles }) {
-  const configPath = path.join(root, configDirectory, 'tsconfig.json');
-  let config;
+async function checkDirectory(directory, { configDirectory = directory, include, testFiles }) {
+  const workspaceDirectory = path.join(root, configDirectory);
+  const configPath = path.join(workspaceDirectory, 'tsconfig.json');
   try {
-    config = JSON.parse(await readFile(configPath, 'utf8'));
+    await access(configPath);
   } catch (error) {
     if (error.code === 'ENOENT') throw new Error(`Required TypeScript config is missing: ${path.relative(root, configPath)}`);
     throw error;
   }
-  config.exclude = [];
-  config.include = include;
-  const basePath = path.join(root, configDirectory);
-  const parsed = ts.parseJsonConfigFileContent(config, ts.sys, basePath);
-  if (parsed.errors.length) {
-    console.error(ts.formatDiagnosticsWithColorAndContext(parsed.errors, {
-      getCanonicalFileName: (filename) => filename,
-      getCurrentDirectory: () => root,
-      getNewLine: () => '\n',
+
+  // Keep the derived config inside the workspace so native package/type resolution sees its dependencies.
+  const temporary = await mkdtemp(path.join(workspaceDirectory, '.ci-test-types-'));
+  try {
+    const project = path.join(temporary, 'tsconfig.json');
+    await writeFile(project, JSON.stringify({
+      extends: '../tsconfig.json',
+      compilerOptions: {
+        noEmit: true,
+        composite: false,
+        incremental: false,
+        declaration: false,
+        declarationMap: false,
+        rootDir: null,
+        outDir: null,
+        tsBuildInfoFile: null,
+      },
+      include: include.map(pattern => `../${pattern}`),
+      exclude: [],
     }));
-    throw new Error(`Could not parse TypeScript config for ${path.relative(root, configPath)}`);
+
+    const args = [tsc, '--project', project, '--pretty', 'false'];
+    const shown = spawnSync(process.execPath, [...args, '--showConfig'], { cwd: root, encoding: 'utf8' });
+    if (shown.error) throw shown.error;
+    if (shown.status !== 0) {
+      throw new Error(`Could not parse TypeScript config for ${path.relative(root, configPath)}\n${shown.stdout}${shown.stderr}`);
+    }
+    const { compilerOptions, files = [] } = JSON.parse(shown.stdout);
+    sourceIncludes(directory, temporary, files, testFiles);
+
+    if (!compilerOptions.jsx) args.push('--jsx', 'react-jsx');
+    const checked = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
+    if (checked.error) throw checked.error;
+    return { failed: checked.status !== 0, fileCount: files.length, testCount: testFiles.length };
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
-  sourceIncludes(scope, directory, { ...parsed, testFiles });
-  const options = {
-    ...parsed.options,
-    jsx: parsed.options.jsx ?? ts.JsxEmit.ReactJSX,
-    noEmit: true,
-    composite: false,
-    incremental: false,
-    declaration: false,
-    declarationMap: false,
-  };
-  delete options.rootDir;
-  delete options.outDir;
-  delete options.tsBuildInfoFile;
-  const program = ts.createProgram(parsed.fileNames, options);
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  if (diagnostics.length) {
-    console.error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-      getCanonicalFileName: (filename) => filename,
-      getCurrentDirectory: () => root,
-      getNewLine: () => '\n',
-    }));
-    return { failed: true, fileCount: parsed.fileNames.length, testCount: testFiles.length };
-  }
-  return { failed: false, fileCount: parsed.fileNames.length, testCount: testFiles.length };
 }
 
 async function checkScope(scopeId) {
@@ -110,7 +114,6 @@ async function checkScope(scopeId) {
     const appDirectory = path.join(root, 'app');
     const appTests = (await listTypeScriptFiles(appDirectory)).filter(isTestFile);
     results.push(await checkDirectory(
-      { id: scopeId, testFiles: appTests },
       'app',
       { include: ['src/**/*.ts', 'src/**/*.tsx'], testFiles: appTests },
     ));
@@ -119,7 +122,6 @@ async function checkScope(scopeId) {
     const e2eFiles = await listTypeScriptFiles(e2eDirectory);
     const e2eTests = e2eFiles.filter(isTestFile);
     results.push(await checkDirectory(
-      { id: scopeId, testFiles: e2eTests },
       'tests/e2e',
       {
         configDirectory: 'app',
@@ -131,7 +133,6 @@ async function checkScope(scopeId) {
     for (const workspace of selected) {
       const testFiles = (await listTypeScriptFiles(path.join(root, workspace.path))).filter(isTestFile);
       results.push(await checkDirectory(
-        { id: scopeId, testFiles },
         workspace.path,
         { include: ['src/**/*.ts', 'src/**/*.tsx', 'test/**/*.ts', 'test/**/*.tsx'], testFiles },
       ));
