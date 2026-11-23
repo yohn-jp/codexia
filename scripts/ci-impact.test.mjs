@@ -191,6 +191,14 @@ test('PostgreSQL contract fixture changes select the real database contract lane
   }
 });
 
+test('canonical backup producer changes retain the isolated DB restore contract', async () => {
+  const selected = await plan(['deploy/backup/backup.sh']);
+  assert.equal(selected.mode, 'affected');
+  assert.ok(selected.tasks.includes('unit-root'), 'retain the existing operational proof');
+  assert.ok(selected.tasks.includes('db-contract'), 'rerun the real PostgreSQL restore proof');
+  assert.ok(!selected.tasks.includes('unit-api'), 'do not expand to unrelated application unit checks');
+});
+
 test('existing PostgreSQL migration changes retain full verification', async () => {
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   const selected = await plan(['packages/persistence-postgres/migrations/0002-orphaned-evidence-ranges.sql']);
