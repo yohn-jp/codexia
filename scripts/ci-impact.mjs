@@ -149,6 +149,18 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
+const DB_CONTRACT_SOURCE_PATHS = new Set([
+  'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
+  'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
+  'docs/architecture/DATA-MODEL.md',
+  'docs/requirements/REQUIREMENT-REGISTER.md',
+  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+  'deploy/ansible/verify-postgres-roles.sql',
+  'packages/api/src/auth-schema.ts',
+  'packages/api/src/migrate-auth.ts',
+  'packages/persistence-postgres/src/migrate.ts',
+  'packages/persistence-postgres/src/migration-set.ts',
+]);
 
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
@@ -163,9 +175,32 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
     }
+    if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
     if (file === 'deploy/backup/backup.sh') add('db-contract');
+    if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||
+        file === 'scripts/strictdoc/strictdoc_config.py' ||
+        file.startsWith('scripts/strictdoc/')) {
+      add('requirements-trace');
+      continue;
+    }
+    if (file.startsWith('docs/architecture/') || file.startsWith('docs/deployment/') || file.startsWith('docs/security/') ||
+        file === 'docs/verification/ARCHITECTURE-ATLAS.md' ||
+        file.startsWith('scripts/architecture/') || file === 'scripts/architecture-diagrams/pack.mjs' ||
+        file === 'scripts/architecture-diagrams/pack.test.mjs') add('architecture-g5');
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
+      continue;
+    }
+    if (
+      file.startsWith('packages/http-contract/src/') ||
+      file.startsWith('packages/http-contract/test/') ||
+      file.startsWith('packages/http-contract/scripts/') ||
+      file.startsWith('packages/http-contract/openapi/') ||
+      file.startsWith('packages/http-contract/baselines/') ||
+      file === 'packages/http-contract/tspconfig.yaml' ||
+      file === 'packages/http-contract/redocly.yaml'
+    ) {
+      add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
       continue;
     }
     // API client source is read by the canonical deployment route assertion.
@@ -292,7 +327,7 @@ export function verificationPlanOutputs(plan) {
   validateVerificationPlan(plan);
   return {
     plan: JSON.stringify(plan),
-    unit: JSON.stringify(['core', 'modules'].filter(id => plan.groups.includes(`unit-${id}`))),
+    unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
     types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),

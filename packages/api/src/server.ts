@@ -1284,6 +1284,28 @@ export function createServer(options: ApiServerOptions): Server {
       }
       return;
     }
+    if (options.betterAuth && routePath === "/api/auth/codexia/owner-session" && method === "POST") {
+      if (!sameOrigin(request, trustProxy)) {
+        fail(response, 403, "CROSS_ORIGIN_REQUEST", "Owner session confirmation requires the exact same origin");
+        return;
+      }
+      if (request.headers.authorization !== undefined) {
+        fail(response, 403, "OWNER_SESSION_COOKIE_REQUIRED", "Owner session confirmation does not accept bearer credentials");
+        return;
+      }
+      let body: unknown;
+      try { body = await readJson(request, parsedBody); }
+      catch { fail(response, 400, "OWNER_SESSION_REQUEST_INVALID", "Owner session confirmation request is invalid"); return; }
+      if (!isRecord(body) || Object.keys(body).length !== 0) {
+        fail(response, 400, "OWNER_SESSION_REQUEST_INVALID", "Owner session confirmation request is invalid");
+        return;
+      }
+      const result = await options.betterAuth.checkOwnerSession(options.betterAuth.toHeaders(request.headers));
+      if (result.status === 200) sendJson(response, 200, { authenticated: true });
+      else if (result.status === 403) fail(response, 403, "OWNER_SESSION_REQUIRED", "Owner session confirmation was denied");
+      else fail(response, 401, "AUTHENTICATION_REQUIRED", "A valid owner session is required");
+      return;
+    }
     if (options.betterAuth && routePath === "/api/auth/token") {
       fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
       return;

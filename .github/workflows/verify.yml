@@ -187,9 +187,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ matrix.group == 'tests' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
+      - uses: actions/setup-python@v6.1.0
+        if: matrix.group == 'tests'
+        with:
+          python-version: '3.12'
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
@@ -204,6 +209,13 @@ jobs:
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install pinned StrictDoc and Chromium
+        if: matrix.group == 'tests'
+        run: |
+          python -m venv "$RUNNER_TEMP/strictdoc"
+          "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+          echo "STRICTDOC_BIN=$RUNNER_TEMP/strictdoc/bin/strictdoc" >> "$GITHUB_ENV"
+          pnpm exec playwright install --with-deps chromium
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}

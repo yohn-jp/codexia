@@ -5,10 +5,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { browserRuntimeRequirements } from './ci-browser-image-digests.mjs';
+import { THREAGILE_IMAGE } from './architecture/constants.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
-const dependencyPath = file => /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
+const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
 export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
   'docs/deployment/BACKUP.md',
   'docs/deployment/IAC.md',
@@ -17,7 +18,14 @@ export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
   'docs/deployment/PUSH-HOST-CI.md',
   'docs/deployment/README.md',
 ]);
+export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
+  'docs/requirements/README.md',
+  'docs/requirements/REQUIREMENT-REGISTER.md',
+  'docs/requirements/STRICTDOC-TRACEABILITY.md',
+  'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
+]);
 const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
+const requirementsTraceDocuments = new Set(REQUIREMENTS_TRACE_DOCUMENTS);
 
 export function isNonExecutableDocumentation(file) {
   if (rootVerificationDocuments.has(file)) return false;
@@ -55,6 +63,7 @@ function taskOverrides(task) {
       CODEXIA_E2E_STATE_DIR: '<isolated-state-dir>', CODEXIA_E2E_OUTPUT_DIR: path.resolve('tests/e2e/test-results', task),
       CODEXIA_E2E_PROJECT_TITLE: '<disposable-fixture-title>', CODEXIA_CI_REPORT_DIR: '<task-report-dir>' };
   }
+  if (task === 'architecture-g5') return { CODEXIA_ARCHITECTURE_EVIDENCE_DIR: '<CODEXIA_CI_REPORT_DIR>/architecture' };
   return {};
 }
 
@@ -63,6 +72,11 @@ export function taskInvocation(task, executable = process.execPath) {
   const overrides = taskOverrides(task);
   const environmentKeys = Object.keys(overrides).sort();
   if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
+  if (task === 'requirements-trace') return {
+    executable,
+    arguments: ['scripts/strictdoc/verify.mjs'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_CI_SOURCE_SHA', 'CODEXIA_CI_TASK', 'STRICTDOC_BIN'],
+  };
   if (task.startsWith('unit-')) return { executable, arguments: ['scripts/ci-workspace.mjs', 'unit', task.slice(5)], environmentKeys };
   if (task.startsWith('typecheck-')) return { executable, arguments: ['scripts/ci-workspace.mjs', 'typecheck', task.slice(10)], environmentKeys };
   if (task.startsWith('test-types-')) return { executable, arguments: ['scripts/ci-workspace.mjs', 'test-types', task.slice(11)], environmentKeys };
@@ -75,13 +89,24 @@ export function taskInvocation(task, executable = process.execPath) {
     const [, profile, ...suite] = task.split('-');
     return { executable, arguments: ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'], environmentKeys };
   }
+  if (task === 'architecture-g5') return [
+    { executable: 'npm', arguments: ['ci', '--prefix', 'scripts/architecture', '--ignore-scripts', '--no-audit', '--no-fund'], environmentKeys: [] },
+    { executable: 'docker', arguments: ['pull', THREAGILE_IMAGE], environmentKeys: [] },
+    { executable, arguments: ['scripts/architecture/verify.mjs'], environmentKeys },
+  ];
   throw new Error(`No canonical invocation for ${task}`);
 }
 
 function taskEnvironment(task, group, runtime) {
   const env = { CI: 'true', NODE_ENV: 'workflow-default', TZ: 'workflow-default',
     LANG: 'runner-default', LC_ALL: 'runner-default' };
-  if (task.startsWith('unit-')) Object.assign(env, {
+  if (task === 'requirements-trace') Object.assign(env, {
+    CODEXIA_CI_TASK: task,
+    STRICTDOC_VERSION: '0.32.1',
+    PYTHON_VERSION: '3.12',
+    PLAYWRIGHT_BROWSER: 'chromium',
+  });
+  if (group.startsWith('unit-')) Object.assign(env, {
     CODEXIA_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_test',
     CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
@@ -120,6 +145,7 @@ function taskProducerRecipe(task) {
       ...Object.values(toolchain.restoreDrill.age.archives).map(archive));
   }
   if (task.startsWith('oci-')) external.push('docker:ubuntu-24.04-host');
+  if (task === 'architecture-g5') external.push(THREAGILE_IMAGE);
   return { group, task, prerequisites: [...new Set(prerequisites)].sort(), external,
     runnerClass: group.startsWith('browser-') ? 'pinned-playwright-container' : 'ubuntu-24.04' };
 }
@@ -146,19 +172,21 @@ function treeEntries(root, sha) {
 export function captureTaskInputSource({ root, sha, runtime }) {
   assert.match(sha ?? '', /^[a-f0-9]{40}$/u, 'Invalid task proof source SHA');
   assert.ok(runtime && typeof runtime === 'object', 'Task proof runtime is required');
-  const executable = treeEntries(root, sha).filter(({ file }) => !isNonExecutableDocumentation(file));
-  const manifest = executable.find(({ file }) => file === 'package.json');
+  const tree = treeEntries(root, sha);
+  const manifest = tree.find(({ file }) => file === 'package.json');
   assert.ok(manifest?.mode === '100644' || manifest?.mode === '100755', 'Task proof requires a regular root package.json');
   const { packageManager } = JSON.parse(readGit(root, 'cat-file', 'blob', manifest.oid));
   const entries = rows => rows.map(({ mode, file, oid }) => [mode, file, oid]);
-  const source = sha256(entries(executable));
-  const tests = sha256(entries(executable.filter(({ file }) => testFilePattern.test(file))));
-  const dependencies = sha256(entries(executable.filter(({ file }) => dependencyPath(file))));
   const toolchain = sha256({ nodeVersion: runtime.nodeVersion, platform: runtime.platform, arch: runtime.arch,
     imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null, packageManager: packageManager ?? null });
 
   return (task, invocations = taskInvocation(task, runtime.execPath)) => {
     const group = taskGroup(task);
+    const executable = tree.filter(({ file }) => !isNonExecutableDocumentation(file) ||
+      (task === 'requirements-trace' && requirementsTraceDocuments.has(file)));
+    const source = sha256(entries(executable));
+    const tests = sha256(entries(executable.filter(({ file }) => testFilePattern.test(file))));
+    const dependencies = sha256(entries(executable.filter(({ file }) => dependencyPath(file))));
     const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
     const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
       executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));

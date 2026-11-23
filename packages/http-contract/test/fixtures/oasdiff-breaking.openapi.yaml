@@ -1,0 +1,25 @@
+openapi: 3.1.0
+info:
+  title: oasdiff test fixture
+  version: 1.0.0
+paths:
+  /resources/{resourceId}:
+    get:
+      operationId: get_resource
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: resource
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name]
+                properties:
+                  name:
+                    type: integer

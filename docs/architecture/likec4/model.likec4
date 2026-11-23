@@ -1,0 +1,158 @@
+specification {
+  element person
+  element system
+  element container
+  element component
+  element database
+  element externalSystem
+  tag client
+  tag edge
+  tag application
+  tag data
+  tag operations
+  tag storage
+}
+
+model {
+  author = person 'Owner / author' {
+    #client
+    metadata { trustBoundary 'client' }
+  }
+
+  web = system 'Desktop Web target (React + CodeMirror)' {
+    #client
+    metadata { trustBoundary 'client' }
+  }
+  indexedDb = database 'Desktop IndexedDB (recoverable drafts only)' {
+    #data
+    metadata { trustBoundary 'client' }
+  }
+  ios = system 'iOS native target (SwiftUI + TextKit 2)' {
+    #client
+    metadata { trustBoundary 'client' }
+  }
+  iosJournal = database 'iOS protected local draft journal' {
+    #data
+    metadata { trustBoundary 'client' }
+  }
+  externalAi = system 'External AI / MCP client' {
+    #client
+    metadata { trustBoundary 'client' }
+  }
+
+  edge = system 'Cloudflare public edge' {
+    #edge
+    metadata { trustBoundary 'edge' }
+    workers = container 'Workers Static Assets + Access' {
+      #edge
+      metadata { trustBoundary 'edge' }
+    }
+    tunnel = container 'Tunnel / API ingress' {
+      #edge
+      metadata { trustBoundary 'edge' }
+    }
+  }
+
+  codexia = system 'Codexia VM' {
+    #application
+    metadata { trustBoundary 'application-host' }
+    fastify = container 'Fastify API admission' {
+      #application
+      metadata { trustBoundary 'application' }
+      betterAuth = component 'Better Auth / OAuth' {
+        #application
+        metadata { trustBoundary 'application' }
+      }
+      mcp = component 'MCP adapter (stdio / Streamable HTTP)' {
+        #application
+        metadata { trustBoundary 'application' }
+      }
+      core = component 'Shared domain actions and Core' {
+        #application
+        metadata { trustBoundary 'application' }
+      }
+      modules = component 'Trusted optional module runtime (read / compute / propose)' {
+        #application
+        metadata { trustBoundary 'application' }
+      }
+      persistence = component 'PostgreSQL persistence adapter' {
+        #application
+        metadata { trustBoundary 'application' }
+      }
+    }
+    postgres = database 'PostgreSQL (sole canonical data authority)' {
+      #data
+      metadata { trustBoundary 'data' }
+    }
+    history = database 'Job history volume (derived operations records)' {
+      #data
+      metadata { trustBoundary 'data' }
+    }
+    ssh = component 'Pinned SSH host entry' {
+      #operations
+      metadata { trustBoundary 'host-operations' }
+    }
+    backupExecutor = component 'Protected backup.sh executor + host lock' {
+      #operations
+      metadata { trustBoundary 'host-operations' }
+    }
+  }
+
+  operations = system 'Protected GitHub Actions deployment path' {
+    #operations
+    metadata { trustBoundary 'operations' }
+    workflow = container 'GitHub Actions protected admission' {
+      #operations
+      metadata { trustBoundary 'operations' }
+    }
+    ansible = component 'Pinned SSH and Ansible desired state' {
+      #operations
+      metadata { trustBoundary 'operations' }
+    }
+  }
+  tailscale = externalSystem 'Tailscale OIDC and network coordination' {
+    #operations
+    metadata { trustBoundary 'operations' }
+  }
+  offsite = system 'S3-compatible off-VM storage' {
+    #storage
+    metadata { trustBoundary 'offsite-storage' }
+    s3 = externalSystem 'Age-encrypted backup objects' {
+      #storage
+      metadata { trustBoundary 'offsite-storage' }
+    }
+  }
+
+  author -> web 'Writes through the authoring UI'
+  web -> indexedDb 'Stores recoverable local drafts only'
+  ios -> iosJournal 'Stores recoverable protected local drafts only'
+  web -> edge.workers 'Loads static UI behind Access'
+  web -> edge.tunnel 'Calls the authenticated API'
+  ios -> edge.tunnel 'Calls the authenticated API'
+  externalAi -> codexia.fastify.mcp 'Uses assigned MCP read / compute / propose scopes'
+  edge.tunnel -> codexia.fastify 'Forwards API ingress only'
+  codexia.fastify.mcp -> codexia.fastify.core 'Uses shared authorized domain actions'
+  codexia.fastify.core <-> codexia.fastify.modules 'Reads, computes and proposes through trusted capabilities'
+  codexia.fastify.core -> codexia.fastify.persistence 'Uses the PostgreSQL persistence boundary'
+  codexia.fastify.persistence -> codexia.postgres 'Reads and commits canonical project data'
+  codexia.fastify.betterAuth -> codexia.postgres 'Stores authentication state'
+
+  operations.workflow -> tailscale 'Obtains the protected Tailscale OIDC identity'
+  operations.workflow -> operations.ansible 'Runs the admitted deployment workflow'
+  operations.ansible -> codexia.ssh 'Uses pinned SSH over the tailnet'
+  codexia.ssh -> codexia.backupExecutor 'Invokes the protected host-locked backup path'
+  codexia.backupExecutor -> codexia.postgres 'Reads a quiesced PostgreSQL backup source'
+  codexia.backupExecutor -> codexia.history 'Includes the host history volume in backup'
+  codexia.backupExecutor -> offsite.s3 'Uploads and re-reads age-encrypted ciphertext'
+}
+
+views {
+  view architecture {
+    title 'Codexia system context, containers, and trust boundaries'
+    include *
+    include edge.**
+    include codexia.**
+    include operations.**
+    include offsite.**
+  }
+}
