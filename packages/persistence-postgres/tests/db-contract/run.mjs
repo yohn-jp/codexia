@@ -357,8 +357,17 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const historyPath = path.join(historyJobs, 'synthetic-owner-history.json');
   await writeFile(historyPath, historyJson, { mode: 0o600 });
   const historyHash = digest(Buffer.from(`${digest(Buffer.from(historyJson))}  ./jobs/synthetic-owner-history.json\n`));
-  await encryptStream('tar', ['-C', historyDirectory, '-cf', '-', '.'], agePath, recipient,
+  // The API writes history as UID/GID 1000 with mode 0600. The CI host runner
+  // usually has a different UID, so encode the API identity explicitly in the
+  // synthetic archive rather than accidentally testing the host runner's owner.
+  const historyArchive = path.join(tempDirectory, 'history.tar');
+  invoke('tar', ['--owner=1000', '--group=1000', '-C', historyDirectory, '-cf', historyArchive, '.']);
+  const archiveListing = output('tar', ['--numeric-owner', '-tvf', historyArchive]);
+  assert.match(archiveListing, /-rw-------\s+1000\/1000\s+.*jobs\/synthetic-owner-history\.json$/mu,
+    'synthetic history must retain private mode 0600 and API UID/GID 1000');
+  await encryptStream('cat', [historyArchive], agePath, recipient,
     path.join(backup, 'history.tar.age'), 'history archive');
+  await rm(historyArchive);
 
   const dbOutput = invoke('docker', ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
     input: `SET TIME ZONE 'UTC';\nSET DateStyle TO ISO, YMD;\nSELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)\nFROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace\nWHERE n.nspname IN ('public','codexia_auth') AND c.relkind IN ('r','p')\nORDER BY n.nspname, c.relname\n\\gexec\n`,
@@ -374,6 +383,30 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const checksumBody = `${checksums.join('\n')}\n`;
   await writeFile(path.join(backup, 'SHA256SUMS'), checksumBody, { mode: 0o600 });
   const artifactDigest = digest(Buffer.from(checksumBody));
+
+  // Keep a negative artifact with valid ciphertext checksums but a history
+  // payload that disagrees with its still-authenticated v2 manifest. This
+  // proves the real restore drill rejects altered history after decryption.
+  const negativeBackup = path.join(evidenceDirectory, 'tampered-history-backup-v2');
+  await mkdir(negativeBackup);
+  await writeFile(path.join(negativeBackup, 'database.dump.age'), await readFile(path.join(backup, 'database.dump.age')),
+    { mode: 0o600 });
+  await writeFile(path.join(negativeBackup, 'manifest.age'), await readFile(path.join(backup, 'manifest.age')),
+    { mode: 0o600 });
+  const negativeHistoryDirectory = path.join(tempDirectory, 'tampered-history');
+  const negativeJobs = path.join(negativeHistoryDirectory, 'jobs');
+  await mkdir(negativeJobs, { recursive: true });
+  await writeFile(path.join(negativeJobs, 'synthetic-owner-history.json'), `${historyJson.trimEnd()} tampered\n`, { mode: 0o600 });
+  const negativeHistoryArchive = path.join(tempDirectory, 'tampered-history.tar');
+  invoke('tar', ['--owner=1000', '--group=1000', '-C', negativeHistoryDirectory, '-cf', negativeHistoryArchive, '.']);
+  await encryptStream('cat', [negativeHistoryArchive], agePath, recipient,
+    path.join(negativeBackup, 'history.tar.age'), 'tampered history archive');
+  await rm(negativeHistoryArchive);
+  const negativeChecksums = [];
+  for (const name of ['database.dump.age', 'history.tar.age', 'manifest.age']) {
+    negativeChecksums.push(`${digest(await readFile(path.join(negativeBackup, name)))}  ${name}`);
+  }
+  await writeFile(path.join(negativeBackup, 'SHA256SUMS'), `${negativeChecksums.join('\n')}\n`, { mode: 0o600 });
 
   const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : undefined;
   if (!arch) throw new Error(`Unsupported isolated restore architecture ${process.arch}`);
@@ -408,6 +441,8 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     'test "${loaded_id#sha256:}" = "' + postgresId.replace(/^sha256:/u, '') + '"',
     'bash /contract/backup.sh drill /contract/backup "$CODEXIA_RESTORE_IDENTITY" --approved',
     'bash /contract/restore-proof.sh',
+    'if bash /contract/backup.sh drill /contract/tampered-backup "$CODEXIA_RESTORE_IDENTITY" --approved > /contract/restore-proof/tampered-history-rejection.txt 2>&1; then echo "Tampered history restore unexpectedly succeeded" >&2; exit 1; fi',
+    'grep -F "Restored history fingerprint mismatch" /contract/restore-proof/tampered-history-rejection.txt >/dev/null',
     'chown -R "$CODEXIA_HOST_UID:$CODEXIA_HOST_GID" /contract/restore-proof',
   ].join('\n');
   invoke('docker', [
@@ -417,6 +452,7 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     '--env', `CODEXIA_PG_IMAGE_REF=${pgImage}`, '--env', `CODEXIA_PG_IMAGE_ID=${postgresId}`,
     '--env', `CODEXIA_RESTORE_PROJECT_ID=${identity.projectId}`,
     '--volume', `${backup}:/contract/backup:rw`, '--volume', `${proof}:/contract/restore-proof:rw`,
+    '--volume', `${negativeBackup}:/contract/tampered-backup:rw`,
     '--volume', `${keyFile}:/contract/identity:ro`, '--volume', `${toolsDirectory}:/contract/tools:ro`,
     '--volume', `${path.join(root, 'deploy/backup/backup.sh')}:/contract/backup.sh:ro`,
     '--volume', `${restoreScript}:/contract/restore-proof.sh:ro`,
@@ -436,7 +472,10 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     head_revision_id: identity.revisionId, revision_id: identity.revisionId, revision_markdown: identity.manuscript,
     author_id: identity.ownerId, owner_id: identity.ownerId, owner_email: identity.ownerEmail,
   });
-  return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint };
+  const tamperedHistoryRejection = await readFile(path.join(proof, 'tampered-history-rejection.txt'), 'utf8');
+  assert.match(tamperedHistoryRejection, /Restored history fingerprint mismatch/u,
+    'the canonical restore drill must reject altered history with a valid ciphertext checksum list');
+  return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint, tamperedHistoryRejected: true };
 }
 
 async function main() {
@@ -610,7 +649,8 @@ async function main() {
         ownerIdentity: { ownerId: identity.ownerId, ownerEmail: identity.ownerEmail, projectId: identity.projectId,
           documentId: identity.documentId, revisionId: identity.revisionId }, canonicalScript: 'deploy/backup/backup.sh' },
       artifacts: { tbls: 'tbls/', tblsFileCount: generatedTblsFiles.length,
-        tblsFingerprint: tblsArtifactFingerprint, encryptedBackup: 'encrypted-backup-v2/', restoreProof: 'restore-proof/' },
+        tblsFingerprint: tblsArtifactFingerprint, encryptedBackup: 'encrypted-backup-v2/',
+        tamperedHistoryBackup: 'tampered-history-backup-v2/', restoreProof: 'restore-proof/' },
     };
     const serialized = JSON.stringify(manifest, null, 2);
     if (/postgres:\/\/|password|secret/iu.test(serialized)) throw new Error('Evidence manifest contains a forbidden connection or credential field');
