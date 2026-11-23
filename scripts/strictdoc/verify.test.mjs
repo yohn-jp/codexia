@@ -1,0 +1,147 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import {
+  deterministicMid,
+  normalizeHtml,
+  normalizeSearchIndexJavascript,
+  resolveRunIdentity,
+  validateScenarioNodes,
+  validateInventory,
+  validateRequirementNodes,
+  validateRelations,
+} from './verify.mjs';
+
+const stableMid = (uid) => createHash('sha256').update(uid).digest('hex').slice(0, 32);
+
+test('rejects duplicate requirement UIDs and unstable MIDs', () => {
+  assert.equal(deterministicMid('REQ-DATA-001'), stableMid('REQ-DATA-001'));
+  const violations = validateRequirementNodes([
+    { UID: 'REQ-DATA-001', MID: stableMid('REQ-DATA-001'), TITLE: 'First' },
+    { UID: 'REQ-DATA-001', MID: stableMid('REQ-DATA-001'), TITLE: 'Duplicate' },
+    { UID: 'REQ-DATA-002', MID: 'not-a-stable-mid', TITLE: 'Malformed MID' },
+  ]);
+
+  assert.match(violations.join('\n'), /duplicate UID REQ-DATA-001/i);
+  assert.match(violations.join('\n'), /MID.*REQ-DATA-002/i);
+});
+
+test('rejects missing files and ranges beyond the referenced source', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-trace-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'tiny.ts'), 'line one\nline two\n');
+  const violations = await validateRelations([
+    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'missing.ts', LINE_RANGE: '1, 2' }] },
+    { UID: 'REQ-DATA-002', RELATIONS: [{ TYPE: 'File', VALUE: 'tiny.ts', LINE_RANGE: '1, 8' }] },
+  ], root);
+
+  assert.match(violations.join('\n'), /missing\.ts/i);
+  assert.match(violations.join('\n'), /tiny\.ts.*line range/i);
+});
+
+test('reports discovered runtime surfaces that lack an explicit classification', () => {
+  const violations = validateInventory({
+    routes: ['GET /api/v1/projects', 'DELETE /api/v1/projects/:id'],
+    tools: ['project_read'],
+    databaseObjects: ['public.project', 'public.document_revision'],
+  }, [
+    { kind: 'route', id: 'GET /api/v1/projects', classification: 'REQ-DATA-001' },
+    { kind: 'tool', id: 'project_read', classification: 'REQ-CORE-001' },
+    { kind: 'databaseObject', id: 'public.project', classification: 'REQ-DATA-001' },
+  ]);
+
+  assert.match(violations.join('\n'), /DELETE \/api\/v1\/projects/);
+  assert.match(violations.join('\n'), /public\.document_revision/);
+});
+
+test('requires each TEST-ID to resolve to a declared requirement and a real test case', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-scenarios-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'case.test.mjs'), "test('rejects a damaged identifier', () => {});\n");
+  const parent = {
+    UID: 'REQ-TRACE-001',
+    'Test IDs': 'TEST-TRC-06-001, NOT_ASSIGNED (no standalone TEST-ID exists)',
+  };
+  const scenarios = [{
+    UID: 'TEST-TRC-06-001',
+    MID: stableMid('TEST-TRC-06-001'),
+    'Case name': 'rejects a damaged identifier',
+    'Exact-run reference': 'NOT_RUN',
+    RELATIONS: [
+      { TYPE: 'Parent', VALUE: 'REQ-TRACE-001' },
+      { TYPE: 'File', VALUE: 'case.test.mjs' },
+    ],
+  }];
+
+  assert.deepEqual(await validateScenarioNodes(scenarios, [parent], root), []);
+  const broken = [{
+    ...scenarios[0],
+    'Case name': 'does not exist in the source file',
+    RELATIONS: [{ TYPE: 'File', VALUE: 'case.test.mjs' }],
+  }];
+  const violations = await validateScenarioNodes(broken, [parent], root);
+  assert.match(violations.join('\n'), /missing a parent requirement/i);
+  assert.match(violations.join('\n'), /case name.*not found/i);
+});
+
+test('requires complete exact GitHub run identity when running in Actions', () => {
+  const result = resolveRunIdentity({
+    GITHUB_ACTIONS: 'true',
+    GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_REPOSITORY: 'yohn-jp/codexia',
+    GITHUB_RUN_ID: '12345',
+    GITHUB_RUN_ATTEMPT: '2',
+    GITHUB_JOB: 'verify-strictdoc',
+    GITHUB_SHA: 'd'.repeat(40),
+    CODEXIA_CI_SOURCE_SHA: 'c'.repeat(40),
+    CODEXIA_CI_TASK: 'requirements-trace',
+  });
+
+  assert.deepEqual(result, {
+    status: 'IN_PROGRESS',
+    repository: 'yohn-jp/codexia',
+    sourceSha: 'c'.repeat(40),
+    eventSha: 'd'.repeat(40),
+    runId: '12345',
+    runAttempt: 2,
+    job: 'verify-strictdoc',
+    task: 'requirements-trace',
+    runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/12345',
+  });
+
+  assert.throws(
+    () => resolveRunIdentity({ GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '12345' }),
+    /incomplete.*GitHub Actions/i,
+  );
+});
+
+test('keeps local execution as NOT_RUN instead of inventing a CI link', () => {
+  assert.deepEqual(resolveRunIdentity({}), { status: 'NOT_RUN' });
+});
+
+test('normalizes only the observed StrictDoc HTML volatility', () => {
+  const html = [
+    '<meta name="strictdoc-search-index-timestamp" content="1795413779.221949">',
+    '<turbo-frame id="article-b9e6dedfa4674cb9af824ccffd19b566">',
+    '<turbo-frame id="article-9d4f2545b24a45dd9c81ae42f0d167d1">',
+    '<sdoc-node data-uid="REQ-DATA-001" data-nodeid="11111111111111111111111111111111">',
+    'https://example.test/1795413779.221949',
+  ].join('\n');
+
+  const normalized = normalizeHtml(html, { stableMids: [stableMid('REQ-DATA-001')] });
+  assert.match(normalized, /strictdoc-search-index-timestamp" content="<TIMESTAMP>"/);
+  assert.equal((normalized.match(/article-<SHELL-MID>/gu) ?? []).length, 2);
+  assert.match(normalized, /data-nodeid="11111111111111111111111111111111"/);
+  assert.match(normalized, /https:\/\/example\.test\/1795413779\.221949/);
+});
+
+test('canonicalizes only StrictDoc search index object keys and set membership order', () => {
+  const first = 'window.StrictDoc.search.index = {"z":[2,1],"a":[2,1]};\nwindow.other = {"b":2,"a":1};';
+  const second = 'window.StrictDoc.search.index = {"a":[1,2],"z":[1,2]};\nwindow.other = {"b":2,"a":1};';
+  const expected = 'window.StrictDoc.search.index = {"a":[1,2],"z":[1,2]};\nwindow.other = {"b":2,"a":1};';
+  assert.equal(normalizeSearchIndexJavascript(first), expected);
+  assert.equal(normalizeSearchIndexJavascript(second), expected);
+});

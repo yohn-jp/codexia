@@ -25,7 +25,7 @@
 
 要求登録簿は既存正本の**索引と検証可能な受入条件の要約**である。具体的な振る舞いが矛盾した場合は所有する設計正本に戻して承認する。API・DB・外部IFの物理詳細を要求登録簿に複写しない。
 
-**要求管理の採用済みツール目標:** [StrictDoc migration](STRICTDOC-TRACEABILITY.md)。現行要求登録簿はMarkdown表であり、StrictDocに対応する構造化要求への変換・テスト/実装relation検証は未実施。変換時もREQ-IDと唯一の編集正本を維持し、手書き表とStrictDoc仕様を並行保守しない。
+**要求の唯一の編集正本:** [StrictDoc requirement register](REQUIREMENT-REGISTER.md)。StrictDoc Markdownを正本として33件の採用済みREQ-IDを保持し、HTML/JSONは検証・レビュー用の派生物とする。実装候補・テスト候補のrelationだけで適合や完全coverageを認定しない。導入範囲と残件は[StrictDoc traceability](STRICTDOC-TRACEABILITY.md)に記録する。
 
 ## ID、粒度、参照の規則
 
@@ -59,4 +59,4 @@
 
 ## 現段階での完了範囲
 
-この導入では要求登録簿と追跡規則、主要契約の**初期索引**を整備する。全ソースを逐一走査した完全網羅率、実API/DB/外部サービスの適合認定、CIの自動traceability gateは**まだ成立していない**。未証明を成功と表示せず、次のツール導入・実装検査の受入条件として残す。
+StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、代表的なroute/tool/DB surface inventory、Node fault-injectionとPlaywright static-page checkをCI taskへ追加した。シンボル単位の完全trace、全runtime surfaceの完全reverse inventory、最終CI実行証拠、Repository Audit Pagesへの公開は別々の残件であり、該当statusをPARTIALまたはPENDINGのまま保つ。
