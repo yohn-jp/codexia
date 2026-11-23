@@ -502,13 +502,19 @@ async function runLifecycle() {
   try {
     await persistence.transaction(tx => tx.createProject({ id: PROJECT_ID, title: projectTitle }));
     await seedModelFixture(store, PROJECT_ID, files);
-    failureStage = "oauth-startup";
+    // Expose only the failed step, never exception messages or OAuth/DB secrets.
+    failureStage = "oauth-runtime-import";
     const { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } = await import(new URL("./better-auth.js", apiUrl).href);
     const { readBetterAuthMigrationConfig } = await import(new URL("./migrate-auth.js", apiUrl).href);
+    failureStage = "oauth-config";
     const authConfig = readBetterAuthMigrationConfig();
+    failureStage = "oauth-runtime-create";
     betterAuth = createBetterAuthRuntime(authConfig);
+    failureStage = "oauth-registered-clients";
     await betterAuth.assertRegisteredClients();
+    failureStage = "oauth-introspection";
     await betterAuth.verifyIntrospectionCredentials();
+    failureStage = "api-server-start";
     server = await start({ store, persistence, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist",
       betterAuth, closeBetterAuthOnShutdown: true, trustProxy: true,
       oauthOwner: {
