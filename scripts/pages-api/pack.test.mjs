@@ -100,6 +100,9 @@ test('removes Scalar CDN font faces from the self-hosted bundle and rejects chan
   const result = removeRemoteScalarFontFaces(bundle);
   assert.equal(result.removedFaces, 2);
   assert.equal(result.output, '');
+  const unrelatedUrl = 'https://assets.example.test/fonts.scalar.com/readme';
+  assert.equal(removeRemoteScalarFontFaces(bundle + unrelatedUrl).output, unrelatedUrl);
+  assert.throws(() => removeRemoteScalarFontFaces(bundle + '//fonts.scalar.com/other.woff2'), /still references an external font host/u);
   assert.throws(() => removeRemoteScalarFontFaces('no external fonts here'), /asset structure changed/u);
 });
 

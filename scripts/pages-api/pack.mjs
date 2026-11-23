@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,20 +159,39 @@ export function prepareOpenApi(sourceText, admitted) {
   return { document, admittedStates, sanitizedContract };
 }
 
+function scalarFontUrls(text) {
+  const urls = text.match(/(?:https?:)?\/\/[^\s"'()`<>\\]+/gu) ?? [];
+  return urls.filter(url => {
+    try {
+      return new URL(url, 'https://example.invalid').hostname === 'fonts.scalar.com';
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function removeRemoteScalarFontFaces(bundle) {
   assert.equal(typeof bundle, 'string', 'Expected Scalar JavaScript bundle text');
-  const references = bundle.match(/https:\/\/fonts\.scalar\.com\//gu) ?? [];
+  const references = scalarFontUrls(bundle);
   assert.ok(references.length > 0, 'Scalar font asset structure changed; review external font handling');
   const output = bundle.replace(/@font-face\s*\{[^{}]*url\(https:\/\/fonts\.scalar\.com\/[^)]+\)[^{}]*\}/giu, '');
-  assert.ok(!output.includes('fonts.scalar.com'), 'Scalar bundle still references an external font host');
+  assert.equal(scalarFontUrls(output).length, 0, 'Scalar bundle still references an external font host');
   return { output, removedFaces: references.length };
+}
+
+function readOutputFile(path) {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    assert.ok(fstatSync(fd).isFile(), 'API reference output must be a regular file');
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function outputFiles(directory) {
   return readdirSync(directory).sort().map(name => {
-    const path = join(directory, name);
-    assert.ok(statSync(path).isFile(), 'API reference output must be flat regular files');
-    const bytes = readFileSync(path);
+    const bytes = readOutputFile(join(directory, name));
     return { name, bytes: bytes.length, sha256: sha256(bytes) };
   });
 }
@@ -206,13 +225,12 @@ export async function pack(sitePath, sourceSha) {
     legalComments: 'eof',
   });
   const bundledJsPath = join(directory, 'scalar-reference.js');
-  const builtJavaScript = readFileSync(bundledJsPath, 'utf8');
+  const builtJavaScript = readOutputFile(bundledJsPath).toString('utf8');
   assert.match(builtJavaScript, /@license\s+MIT/u, 'Scalar bundle must retain upstream legal comments');
   const fontSanitization = removeRemoteScalarFontFaces(builtJavaScript);
   writeFileSync(bundledJsPath, fontSanitization.output);
   const stylesheet = join(directory, 'scalar-reference.css');
-  assert.ok(statSync(stylesheet).isFile(), 'Scalar stylesheet bundle is missing');
-  assert.ok(!readFileSync(stylesheet, 'utf8').includes('fonts.scalar.com'), 'Scalar stylesheet references an external font host');
+  assert.equal(scalarFontUrls(readOutputFile(stylesheet).toString('utf8')).length, 0, 'Scalar stylesheet references an external font host');
   const index = `<!doctype html>
 <html lang="en">
 <head>
