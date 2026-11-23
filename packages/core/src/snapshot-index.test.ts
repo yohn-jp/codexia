@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Document, DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndexFile } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, manuscriptCharacterCount, type SnapshotIndexFile } from "./snapshot-index.js";
 
 const projectId = "project-index" as ProjectId;
 
@@ -30,7 +30,7 @@ function file(content: string, documentId?: string, metadata = false): SnapshotI
   return { content, encoding: "utf8", revision: "revision", ...(documentId ? { documentId } : {}), ...(metadata ? { metadata: true } : {}) };
 }
 
-test("snapshot indexes keep parent order, first logical ID resolution, paths, and Unicode writing counts", () => {
+test("snapshot indexes keep parent order, first logical ID resolution and paths without reading manuscript content", () => {
   const volume = document("volume-db", "volume", "Volume", null, "01");
   const chapter = document("chapter-db", "chapter", "Chapter", volume.id, "01");
   const first = document("scene-first", "scene", "First", chapter.id, "01");
@@ -46,6 +46,9 @@ test("snapshot indexes keep parent order, first logical ID resolution, paths, an
     "metadata/second.yaml": file("id: duplicate-logical\n", second.id, true),
     "manuscript/second.md": file("二番目😀", second.id),
   };
+  Object.defineProperty(files["manuscript/first.md"]!, "content", {
+    get() { assert.fail("A metadata-only index must not read the manuscript body"); },
+  });
 
   const index = createSnapshotIndex(documents, files);
   assert.deepEqual(index.volumes.map(({ id }) => id), [volume.id]);
@@ -56,26 +59,18 @@ test("snapshot indexes keep parent order, first logical ID resolution, paths, an
   assert.equal(index.pathsByDocumentId.get(first.id)?.metadataPath, "metadata/first.yaml");
   assert.equal(index.firstDocumentByLookupId.get("duplicate-logical"), first);
   assert.equal(index.firstDocumentByLookupId.get(second.id), second);
-  assert.equal(index.sceneCharacterCountsByDocumentId.get(first.id), 5);
-  assert.equal(index.sceneCharacterCountsByDocumentId.get(second.id), 4);
 });
 
 test("scene writing counts preserve a leading Markdown horizontal rule unless it is YAML frontmatter", () => {
-  const volume = document("volume-rule", "volume", "Volume", null, "01");
-  const chapter = document("chapter-rule", "chapter", "Chapter", volume.id, "01");
-  const ordinaryScene = document("scene-rule", "scene", "Horizontal rule", chapter.id, "01");
-  const frontmatterScene = document("scene-frontmatter", "scene", "Explicit frontmatter", chapter.id, "02");
   const ordinaryMarkdown = "---\n普通の回想\n---\n「すぐに戻ります。」";
   const frontmatterMarkdown = "---\ntitle: Explicit title\n---\n本文です。";
-  const index = createSnapshotIndex([volume, chapter, ordinaryScene, frontmatterScene], {
-    "body/rule.md": file(ordinaryMarkdown, ordinaryScene.id),
-    "body/frontmatter.md": file(frontmatterMarkdown, frontmatterScene.id),
-  });
 
-  assert.equal(index.sceneCharacterCountsByDocumentId.get(ordinaryScene.id), 21);
-  assert.equal(index.sceneCharacterCountsByDocumentId.get(frontmatterScene.id), 5);
+  assert.equal(manuscriptCharacterCount(ordinaryMarkdown), 21);
+  assert.equal(manuscriptCharacterCount(frontmatterMarkdown), 5);
   assert.equal(manuscriptBody(ordinaryMarkdown), ordinaryMarkdown);
   assert.equal(manuscriptBody(frontmatterMarkdown), "本文です。");
+  assert.equal(manuscriptCharacterCount("---\nid: ignored\n---\n本文 😀 e\u0301 \u00a0\r\n"), 5);
+  assert.equal(manuscriptCharacterCount("二番目😀"), 4);
 });
 
 test("snapshot indexes preserve actual ID lookup precedence when logical IDs collide with document IDs", () => {
@@ -93,7 +88,7 @@ test("snapshot indexes preserve actual ID lookup precedence when logical IDs col
   assert.equal(index.logicalDocumentIds.has("second-logical"), true);
 });
 
-test("index counts a non-scene first match and accounts for retained variable-length document data", () => {
+test("index resolves a non-scene first match and accounts for retained variable-length document data", () => {
   const note = document("note-db", "note", "補足", null, "01");
   const scene = document("scene-db", "scene", "Scene", null, "02");
   const files = {
@@ -104,7 +99,6 @@ test("index counts a non-scene first match and accounts for retained variable-le
   };
   const index = createSnapshotIndex([note, scene], files);
   assert.equal(index.firstDocumentByLookupId.get("shared-logical"), note);
-  assert.equal(index.sceneCharacterCountsByDocumentId.get(note.id), 3);
   const oversizedTitle = "界".repeat(3 * 1024 * 1024);
   const oversized = createSnapshotIndex([{...note, title: oversizedTitle}, scene], files);
   assert.ok(estimateSnapshotIndexBytes(oversized) > 4 * 1024 * 1024);

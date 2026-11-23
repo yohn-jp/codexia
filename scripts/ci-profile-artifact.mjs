@@ -22,7 +22,7 @@ const profileName = value => { assert.ok(PROFILES.includes(value), 'Unknown prof
 export function profileRoots(profile) {
   profileName(profile);
   const common = WORKSPACES.filter(({id}) => ['contracts','persistence-contracts','persistence-postgres','module-runtime','core','api','app'].includes(id));
-  const extra = profile === 'full' ? WORKSPACES.filter(({id,path}) => id === 'migration' || path.startsWith('modules/')) : [];
+  const extra = profile === 'full' ? WORKSPACES.filter(({path}) => path.startsWith('modules/')) : [];
   return [...common,...extra].map(({path}) => path + '/dist').concat('profiles/' + profile + '/generated');
 }
 

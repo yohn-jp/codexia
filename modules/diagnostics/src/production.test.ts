@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
-import { ModuleRuntime } from "@codexia/module-runtime";
+import YAML from "yaml";
+import type { ChangeOperation, ChangeProposal, NativeStoryDocument, SnapshotId } from "@codexia/contracts";
+import { ModuleRuntime, type ActionHostContext } from "@codexia/module-runtime";
 import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
 import { evaluateLintRules } from "./linter/rulesEvaluator.js";
@@ -20,7 +21,6 @@ const initialFiles = new Map<string, { content: string; revision: string; docume
   ["manuscript/v1/scene-1.md", { content: "---\ntitle: 遺跡\n---\n「……」\n星野は古い遺跡へ走った。黒い霧が道を塞ぐ。\n", revision: "manuscript-r1" }],
   ["meta/scriptorium/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
   ["meta/scriptorium/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
-  ["meta/scriptorium/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
 ]);
 
 async function createRuntime(files: Map<string, { content: string; revision: string; documentKind?: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
@@ -178,9 +178,12 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const nativePath = `documents/${nativeDocumentId}.md`;
   const nativeSceneId = "scene-native";
   const original = "---\n正体と真相…\n---\n星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
-  files.set("plot/volumes/v1/scenes/scene-native.yaml", {
-    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\ngoal: 秘密を隠す\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
-  });
+  const metadata = { id: nativeSceneId, type: "scene", title: "夜明け", name: "夜明け", order: "0001", goal: "秘密を隠す", manuscript: nativePath };
+  const nativeScene: NativeStoryDocument = {
+    id: nativeSceneId, kind: "scene", title: metadata.title, orderKey: metadata.order, documentOrder: 0,
+    metadataPath: "plot/volumes/v1/scenes/scene-native.yaml", metadataRevision: "native-scene-r1",
+    metadataContent: YAML.stringify(metadata), metadata,
+  };
   files.set(nativePath, { content: original, revision: "native-body-r1", documentKind: "scene" });
   files.set("documents/123e4567-e89b-42d3-a456-426614174001.md", {
     content: "note …", revision: "native-note-r1", documentKind: "note",
@@ -204,7 +207,20 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     revision: "lint-rules-r1",
   });
   const proposals: ChangeProposal[] = [];
-  const { runtime, host } = await createRuntime(files, proposals);
+  const { runtime, host: runtimeHost } = await createRuntime(files, proposals);
+  const host = { ...runtimeHost, reader: { ...runtimeHost.reader, nativeStoryDocuments: [nativeScene] } };
+  const lintReads: string[] = [];
+  const lintHost = {
+    ...host,
+    reader: {
+      ...host.reader,
+      async read(path: string) {
+        lintReads.push(path);
+        return host.reader.read(path);
+      },
+      async list() { assert.fail("linting a pinned scene must not enumerate the project"); },
+    },
+  };
   try {
     const nativePlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId }, host);
     assert.ok(nativePlot.ok, JSON.stringify(nativePlot));
@@ -214,7 +230,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
 
     const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: nativePath, baseRevision: "native-body-r1", operationId: "native-lint-fix",
-    }, host);
+    }, lintHost);
     assert.equal(lintResult.ok, true, JSON.stringify(lintResult));
     assert.deepEqual(lintResult.snapshot, snapshot);
     if (!lintResult.ok) return;
@@ -224,6 +240,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     assert.deepEqual(lintProposal.operations[0]?.writes.map(({ path }) => path), [nativePath]);
     assert.equal(lintProposal.operations[0]?.writes[0]?.content, "---\n正体と真相……\n---\n星野は夜明けを待った……。\n\t「もう大丈夫だ。」");
     assert.equal(files.get(nativePath)?.content, original, "lint proposals do not change the selected snapshot");
+    assert.deepEqual(lintReads, [nativePath, "meta/scriptorium/modules/diagnostics/lint-rules.yaml"]);
 
     const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId: nativeSceneId }, host);
     assert.equal(formatResult.ok, true, JSON.stringify(formatResult));
@@ -330,6 +347,25 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
   files.set("manuscript/v1/scene-2.md", { content: "---\ntitle: 帰路\n---\n前日、旅人は遺物を手にした。", revision: "manuscript-2-r1" });
   const proposals: ChangeProposal[] = [];
   const { runtime, host } = await createRuntime(files, proposals);
+  const consentHost: ActionHostContext = {
+    ...host,
+    access: "owner",
+    caller: "author",
+    async readOwnModuleRecord(scope, key) {
+      assert.equal(scope.moduleId, "nlp");
+      assert.equal(key, "feature-settings");
+      assert.deepEqual(scope.snapshot, snapshot);
+      return { version: 4, value: { externalEnabled: { "setting-qa": false } } };
+    },
+    async proposeOwnModuleRecord(scope, request) {
+      assert.equal(scope.caller, "author");
+      assert.equal(scope.effect, "propose");
+      assert.equal(request.key, "feature-settings");
+      assert.equal(request.expectedVersion, 4);
+      assert.deepEqual(request.value, { externalEnabled: { "setting-qa": true } });
+      return { id: "proposed-consent", projectId: snapshot.projectId };
+    },
+  };
   try {
     const dictionary = await runtime.invokeAction("nlp", "nlp.dictionary", { term: "強い" }, host);
     assert.equal(dictionary.ok, true, JSON.stringify(dictionary));
@@ -350,7 +386,7 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /既存語/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /新候補/u);
 
-    const features = await runtime.invokeAction("nlp", "nlp.features", {}, host);
+    const features = await runtime.invokeAction("nlp", "nlp.features", {}, consentHost);
     assert.equal(features.ok, true, JSON.stringify(features));
     if (features.ok) {
       const featureData = features.data as { features: Array<{ id: string; locality: "local" | "external"; enabled: boolean }>; settings: { externalEnabled: Record<string, boolean> } };
@@ -361,9 +397,28 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
       assert.equal(featureData.features.find((feature) => feature.id === "embedding")?.enabled, true, "local features do not require external-send consent");
     }
 
+    const mappedBody = "manuscript/v1/scene-1.md";
+    const mappedMetadata = "plot/volumes/volume-1/scenes/scene-1.yaml";
+    const metadataFile = files.get(mappedMetadata)!;
+    const rejectedUntypedLint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
+      path: mappedBody, baseRevision: "manuscript-r1",
+    }, host);
+    assert.equal(rejectedUntypedLint.ok, false);
+    assert.equal(rejectedUntypedLint.error.code, "invalid_path");
+    files.set(mappedBody, { ...files.get(mappedBody)!, documentKind: "scene" });
     const lint = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: "manuscript/v1/scene-1.md", baseRevision: "manuscript-r1", operationId: "mcp-p06-lint-1",
-    }, host);
+    }, {
+      ...host,
+      reader: {
+        ...host.reader,
+        nativeStoryDocuments: [{
+          id: "sc-scene-1", kind: "scene", title: "遺跡", orderKey: "1", documentOrder: 0,
+          metadataPath: mappedMetadata, metadataRevision: metadataFile.revision, metadataContent: metadataFile.content,
+          metadata: { type: "scene", manuscript: mappedBody },
+        }],
+      },
+    });
     assert.equal(lint.ok, true, JSON.stringify(lint));
     assert.equal(proposals.length, 3, "lint output is proposed for review, never written directly");
     const operation = proposals[2].operations[0];
@@ -372,11 +427,11 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     assert.ok(operation.writes[0].content?.startsWith("---\ntitle: 遺跡\n---\n"));
     assert.equal(files.get("manuscript/v1/scene-1.md")?.content, initialFiles.get("manuscript/v1/scene-1.md")?.content);
 
-    const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, host);
+    const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, consentHost);
     assert.equal(consent.ok, true, JSON.stringify(consent));
-    assert.equal(proposals.length, 4);
-    assert.equal(proposals[3].operations[0].writes[0].path, "meta/scriptorium/modules/nlp/feature-settings.json");
-    const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, host);
+    assert.deepEqual((consent.data as { changeSet: unknown }).changeSet, { id: "proposed-consent", projectId: snapshot.projectId });
+    assert.equal(proposals.length, 3, "consent does not add a file proposal");
+    const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, consentHost);
     assert.equal(consentBeforeApproval.ok, true, JSON.stringify(consentBeforeApproval));
     if (consentBeforeApproval.ok) {
       const feature = (consentBeforeApproval.data as { features: Array<{ id: string; enabled: boolean }> }).features.find((item) => item.id === "setting-qa");

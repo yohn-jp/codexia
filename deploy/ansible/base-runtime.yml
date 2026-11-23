@@ -41,7 +41,7 @@
       - -eu
       - -c
       - >-
-        for secret in codexia-auth-token codexia-tunnel-token
+        for secret in codexia-tunnel-token
         codexia-postgres-admin-password codexia-postgres-app-password; do
           podman secret exists "$secret";
         done

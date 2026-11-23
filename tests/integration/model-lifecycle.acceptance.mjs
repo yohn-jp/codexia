@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { postgresFixture } from "../helpers/postgres-fixture.mjs";
 import { seedModelFixture } from "./model-postgres-fixture.mjs";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
+import { NLP_FEATURE_SETTINGS_KEY } from "../../packages/contracts/dist/index.js";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
@@ -20,7 +21,8 @@ const capabilityValueIds = new WeakMap();
 let nextCapabilityValueId = 1;
 const semanticSettingsPath = "meta/scriptorium/modules/semantic/settings.json";
 const semanticDismissalsPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
-const nlpSettingsPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+const consentAuthor = "owner";
+const disabledExternalFeatures = { "setting-qa": false, rewrite: false };
 const workerFiles = {
   story: join(root, "modules/story/dist/worker.js"),
   nlp: join(root, "modules/nlp/dist/worker.js"),
@@ -32,7 +34,6 @@ function writeText(files, path, content) { files[path] = content; }
 function writeYaml(files, path, value) { writeText(files, path, JSON.stringify(value) + "\n"); }
 async function createSyntheticFixture() {
   const seed = {};
-  await writeYaml(seed, "meta/project.yaml", { id: "p13-model-lifecycle", title: "Synthetic model lifecycle work" });
   await writeYaml(seed, "plot/volumes/v1/volume.yaml", { id: "vol-one", name: "第一巻", order: 1 });
   await writeYaml(seed, "plot/volumes/v1/chapters/c1/chapter.yaml", { id: "ch-one", title: "第一章", volume: "vol-one", order: 1 });
 
@@ -50,10 +51,6 @@ async function createSyntheticFixture() {
     await writeText(seed, manuscriptPath, `---\ntitle: ${sceneId}\n---\n${body}\n`);
   }
 
-  await writeText(seed, nlpSettingsPath, `${JSON.stringify({
-    externalEnabled: { "setting-qa": false, rewrite: false },
-    ownerNote: "preserve-local-consent",
-  }, null, 2)}\n`);
   await writeText(seed, semanticSettingsPath, `${JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }, null, 2)}\n`);
   const dismissal = `${JSON.stringify({ candidateId: "author-dismissed-p13-fixture", timestamp: "2026-10-17T00:00:00.000Z" })}\n`;
   await writeText(seed, semanticDismissalsPath, dismissal);
@@ -233,13 +230,27 @@ function makeResourceSampler(runtime) {
   };
 }
 
-function actionHost(projectId, reader, signal) {
+function actionHost(store, projectId, reader, signal) {
+  const assertConsentScope = (scope, key) => {
+    assert.equal(scope.moduleId, "nlp");
+    assert.equal(scope.access, "owner");
+    assert.deepEqual(scope.snapshot, reader.snapshot);
+    assert.equal(key, NLP_FEATURE_SETTINGS_KEY);
+  };
   return {
     projectId,
     reader,
     signal,
     access: "owner",
-    async propose() { throw new Error("This read-only model lifecycle fixture must not propose changes"); },
+    async readOwnModuleRecord(scope, key) {
+      assertConsentScope(scope, key);
+      return store.readNlpFeatureSettingsSnapshotRecord(projectId, scope.snapshot);
+    },
+    async proposeOwnModuleRecord(scope, input) {
+      assertConsentScope(scope, input.key);
+      return store.proposeNlpFeatureSettingsSnapshotRecord(projectId, scope.snapshot, input, consentAuthor);
+    },
+    async propose() { throw new Error("The model lifecycle fixture accepts only native consent proposals"); },
   };
 }
 
@@ -270,7 +281,7 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
   await symlink(modelCache, modelLink, "dir");
 
   const fixture = await postgresFixture({}, "Synthetic model lifecycle work");
-  const {store, project} = fixture;
+  const { store, persistence, project } = fixture;
   let reader;
   try { reader = await seedModelFixture(store, project.id, files); }
   catch (error) { await fixture.close(); await rm(rootDirectory, {recursive:true,force:true}); throw error; }
@@ -296,7 +307,7 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
   });
   const resources = makeResourceSampler(runtime);
   const metrics = [];
-  const host = (signal = new AbortController().signal) => actionHost(project.id, reader, signal);
+  const host = (signal = new AbortController().signal) => actionHost(store, project.id, reader, signal);
   let storyStatus;
   try {
     assert.equal(runtime.status("semantic").availability, "disabled");
@@ -307,13 +318,38 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
     const storyTree = actionData(await runtime.invokeAction("story", "story.volumes.tree", {}, host()), "story.volumes.tree");
     assert.ok(storyTree);
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "compiled Story read remains worker-free");
-    const consent = actionData(await runtime.invokeAction("nlp", "nlp.features", {}, host()), "nlp.features");
-    assert.equal(consent.features.find((feature) => feature.id === "setting-qa")?.enabled, false);
+    const features = actionData(await runtime.invokeAction("nlp", "nlp.features", {}, host()), "nlp.features");
+    for (const id of Object.keys(disabledExternalFeatures)) {
+      assert.equal(features.features.find(feature => feature.id === id)?.enabled, false, `${id} defaults to denied`);
+    }
+    const readConsent = () => store.readNlpFeatureSettingsSnapshotRecord(project.id, reader.snapshot);
+    assert.equal(await readConsent(), undefined);
+    const consent = actionData(await runtime.invokeAction("nlp", "nlp.updateExternalConsent", {
+      externalEnabled: disabledExternalFeatures,
+    }, host()), "nlp.updateExternalConsent");
+    assert.equal(consent.changeSet.projectId, project.id);
+    const changeSetId = consent.changeSet.id;
+    const changeSet = await persistence.read(current => current.getChangeSet(project.id, changeSetId));
+    assert.equal(changeSet?.status, "proposed");
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId, expectedVersion: changeSet.version, approvedBy: consentAuthor,
+    }));
+    assert.equal(await persistence.read(current => current.getModuleRecord(project.id, "nlp", NLP_FEATURE_SETTINGS_KEY)), undefined,
+      "approval alone does not persist consent");
+    const applied = await persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId, expectedVersion: approved.version,
+    }));
+    assert.equal(applied.changeSet.status, "applied");
+    reader = await store.reader(project.id);
+    const savedConsent = await readConsent();
+    assert.deepEqual(savedConsent?.value, { externalEnabled: disabledExternalFeatures });
+    const appliedFeatures = actionData(await runtime.invokeAction("nlp", "nlp.features", {}, host()), "nlp.features");
+    for (const [id, enabled] of Object.entries(disabledExternalFeatures)) {
+      assert.equal(appliedFeatures.features.find(feature => feature.id === id)?.enabled, enabled);
+    }
     const savedDismissals = await reader.read(semanticDismissalsPath);
-    assert.ok(savedDismissals);
-    const savedConsent = await reader.read(nlpSettingsPath);
     const savedSettings = await reader.read(semanticSettingsPath);
-    assert.ok(savedConsent && savedSettings);
+    assert.ok(savedSettings && savedDismissals);
     assert.equal(runtime.status("semantic").availability, "disabled");
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "actual metadata and settings reads do not load the semantic model");
 
@@ -408,10 +444,10 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
     const currentReader = await store.reader(project.id);
     const settingsAfter = await currentReader.read(semanticSettingsPath);
     const dismissalsAfter = await currentReader.read(semanticDismissalsPath);
-    const consentAfter = await currentReader.read(nlpSettingsPath);
+    const consentAfter = await store.readNlpFeatureSettingsSnapshotRecord(project.id, currentReader.snapshot);
     assert.equal(settingsAfter?.content, savedSettings.content, "module enable/disable and cache rebuild must preserve author settings");
     assert.equal(dismissalsAfter?.content, savedDismissals.content, "module enable/disable and cache rebuild must preserve author dismissals");
-    assert.equal(consentAfter?.content, savedConsent.content, "module enable/disable and cache rebuild must preserve external consent settings");
+    assert.deepEqual(consentAfter, savedConsent, "module enable/disable and cache rebuild must preserve external consent settings");
 
     await runtime.disable("semantic");
     await waitFor(() => runtime.workerSupervisor.activeWorkerPids.length === 0, "last semantic lease did not release its worker PID");

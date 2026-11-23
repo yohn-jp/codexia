@@ -236,11 +236,6 @@ async function authenticatePasskey(page: Page, persistedCredentialId: string): P
     if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status };
     const options = await optionsResponse.json();
     const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(options);
-    const binaryId = atob(persistedCredentialId.replaceAll("-", "+").replaceAll("_", "/"));
-    publicKey.allowCredentials = [{
-      type: "public-key",
-      id: Uint8Array.from(binaryId, (character) => character.charCodeAt(0)).buffer,
-    }];
     const allowedCredentialIds = publicKey.allowCredentials?.map(({ id }) => {
       let binary = "";
       const bytes = id instanceof ArrayBuffer
@@ -249,6 +244,14 @@ async function authenticatePasskey(page: Page, persistedCredentialId: string): P
       for (const byte of bytes) binary += String.fromCharCode(byte);
       return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
     }) ?? [];
+    // Select the persisted credential only when the server allows discovery.
+    if (allowedCredentialIds.length === 0) {
+      const binaryId = atob(persistedCredentialId.replaceAll("-", "+").replaceAll("_", "/"));
+      publicKey.allowCredentials = [{
+        type: "public-key",
+        id: Uint8Array.from(binaryId, (character) => character.charCodeAt(0)).buffer,
+      }];
+    }
     const credential = await navigator.credentials.get({ publicKey });
     if (!(credential instanceof PublicKeyCredential)) throw new Error("Virtual authenticator did not return a credential");
     const response = await fetch("/api/auth/passkey/verify-authentication", {
@@ -268,7 +271,6 @@ function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, o
   const environment = { ...process.env };
   for (const suffix of ["ISSUER", "CLIENT_ID", "CLIENT_SECRET"]) {
     delete environment[`CODEXIA_OIDC_${suffix}`];
-    delete environment[`SCRIPTORIUM_OIDC_${suffix}`];
   }
   Object.assign(environment, {
     CODEXIA_AUTH_DATABASE_URL: databaseUrl,
@@ -419,6 +421,7 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal(invalidGrantUpdate.length, 0);
   browser = await chromium.launch({
     headless: true,
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
   const browserContext = await browser.newContext();
   contexts.push(browserContext);
@@ -683,7 +686,6 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
     profile: "core",
     store: testStore,
     persistence: testPersistence,
-    authToken: randomBytes(32).toString("base64url"),
     staticDir: process.cwd(),
     usageDirectory: authorApiUsageDirectory,
     betterAuth: oauthRuntime,
@@ -735,8 +737,11 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
     method: "POST", credentials: "same-origin",
   })).status);
   assert.equal(signout, 200);
-  const signedOut = await winnerPage.evaluate(async () => (await fetch("/api/auth/get-session", { credentials: "same-origin" })).status);
-  assert.equal(signedOut, 200);
+  const signedOut = await winnerPage.evaluate(async () => {
+    const response = await fetch("/api/auth/get-session", { credentials: "same-origin" });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.deepEqual(signedOut, { status: 200, body: null });
   assert.ok(persistedCredentialId);
   const signin = await authenticatePasskey(winnerPage, persistedCredentialId);
   assert.equal(signin.optionsStatus, 200);

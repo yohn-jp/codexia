@@ -3,8 +3,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
-import { expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import type { Page } from "@playwright/test";
+import { expect, test, type AuthorizeAuthor, type AuthorSession } from "./author-oauth-fixture";
+import { expectServerSaved, manuscriptEditor, openRevisionHistory } from "./postgres-fixture";
 
 const prose = [
   "　港町の朝は、潮の匂いと、まだ眠っている街の静けさから始まる。凪は古い灯台の階段を上りながら、昨夜から胸に残っている小さな違和感を、ひとつずつ確かめていた。",
@@ -36,15 +37,16 @@ const manuscript = [
 
 interface CreatedDocument { id: string; headRevisionId: string; version: number }
 
-async function createDocument(page: Page, projectId: string, input: {
+async function createDocument(author: AuthorSession, projectId: string, input: {
   kind: "volume" | "chapter" | "scene";
   title: string;
   orderKey: string;
   markdown?: string;
   parentId?: string;
 }): Promise<CreatedDocument> {
-  const response = await page.request.post(`/api/v1/persistence/projects/${projectId}/documents`, {
-    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID() },
+  const response = await author.fetch(`/api/v1/persistence/projects/${projectId}/documents`, {
+    method: "POST",
+    headers: { Origin: author.origin, "Idempotency-Key": randomUUID() },
     data: { markdown: "", ...input },
   });
   expect(response.status(), await response.text()).toBe(201);
@@ -52,29 +54,31 @@ async function createDocument(page: Page, projectId: string, input: {
   return result.document;
 }
 
-async function buildManuscript(page: Page, mode: "desktop" | "mobile") {
-  await ownerLogin(page, `/${mode}/`);
-  const origin = new URL(page.url()).origin;
-  const projectResponse = await page.request.post("/api/v1/persistence/projects", {
+async function buildManuscript(page: Page, mode: "desktop" | "mobile", authorizeAuthor: AuthorizeAuthor) {
+  const author = await authorizeAuthor(mode);
+  const { origin } = author;
+  const projectResponse = await author.fetch("/api/v1/persistence/projects", {
+    method: "POST",
     headers: { Origin: origin },
     data: { title: `潮目の図書館・視覚確認 ${randomUUID().slice(0, 8)}`, settings: { language: "ja" } },
   });
   expect(projectResponse.status(), await projectResponse.text()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string } };
-  const volume = await createDocument(page, project.id, { kind: "volume", title: "第一巻　潮が満ちる", orderKey: "01" });
-  const firstChapter = await createDocument(page, project.id, { kind: "chapter", parentId: volume.id, title: "第一章　灯台守の娘", orderKey: "01" });
-  const secondChapter = await createDocument(page, project.id, { kind: "chapter", parentId: volume.id, title: "第二章　濡れた目録", orderKey: "02" });
-  const firstScene = await createDocument(page, project.id, {
+  const volume = await createDocument(author, project.id, { kind: "volume", title: "第一巻　潮が満ちる", orderKey: "01" });
+  const firstChapter = await createDocument(author, project.id, { kind: "chapter", parentId: volume.id, title: "第一章　灯台守の娘", orderKey: "01" });
+  const secondChapter = await createDocument(author, project.id, { kind: "chapter", parentId: volume.id, title: "第二章　濡れた目録", orderKey: "02" });
+  const firstScene = await createDocument(author, project.id, {
     kind: "scene", parentId: firstChapter.id, title: "一　薄明の羅針盤", orderKey: "01", markdown: manuscript,
   });
-  await createDocument(page, project.id, { kind: "scene", parentId: firstChapter.id, title: "二　波間の記録", orderKey: "02", markdown: prose });
-  await createDocument(page, project.id, { kind: "scene", parentId: firstChapter.id, title: "三　地下書庫の入口", orderKey: "03", markdown: prose });
-  await createDocument(page, project.id, { kind: "scene", parentId: secondChapter.id, title: "一　青い目録", orderKey: "01", markdown: prose });
-  await createDocument(page, project.id, { kind: "scene", parentId: secondChapter.id, title: "二　選ばれなかった明日", orderKey: "02", markdown: prose });
-  await createDocument(page, project.id, { kind: "scene", parentId: secondChapter.id, title: "三　帰港", orderKey: "03", markdown: prose });
+  await createDocument(author, project.id, { kind: "scene", parentId: firstChapter.id, title: "二　波間の記録", orderKey: "02", markdown: prose });
+  await createDocument(author, project.id, { kind: "scene", parentId: firstChapter.id, title: "三　地下書庫の入口", orderKey: "03", markdown: prose });
+  await createDocument(author, project.id, { kind: "scene", parentId: secondChapter.id, title: "一　青い目録", orderKey: "01", markdown: prose });
+  await createDocument(author, project.id, { kind: "scene", parentId: secondChapter.id, title: "二　選ばれなかった明日", orderKey: "02", markdown: prose });
+  await createDocument(author, project.id, { kind: "scene", parentId: secondChapter.id, title: "三　帰港", orderKey: "03", markdown: prose });
 
   const nodeId = randomUUID();
-  const nodeResponse = await page.request.put(`/api/v1/persistence/projects/${project.id}/nodes/${nodeId}`, {
+  const nodeResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${nodeId}`, {
+    method: "PUT",
     headers: { Origin: origin },
     data: { type: "object", name: "真鍮の羅針盤", attributes: { owner: "灯台守の家", origin: "海図室" }, status: "confirmed", expectedVersion: null },
   });
@@ -82,7 +86,8 @@ async function buildManuscript(page: Page, mode: "desktop" | "mobile") {
   const initial = manuscript;
   const addition = "\n\n　羅針盤の縁には、まだ誰にも読まれていない海図の方角が刻まれていた。";
   const revised = initial + addition;
-  const revisionResponse = await page.request.patch(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`, {
+  const revisionResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`, {
+    method: "PATCH",
     headers: { Origin: origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "visual-redesign-fixture" },
     data: {
       baseRevisionId: firstScene.headRevisionId,
@@ -94,16 +99,18 @@ async function buildManuscript(page: Page, mode: "desktop" | "mobile") {
   expect(revisionResponse.ok(), await revisionResponse.text()).toBe(true);
   const { revision } = await revisionResponse.json() as { revision: { id: string } };
   const anchorStart = revised.indexOf("羅針盤");
-  const evidenceResponse = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}/anchors`, {
+  const evidenceResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}/anchors`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { id: randomUUID(), revisionId: revision.id, fromUtf16: anchorStart, toUtf16: anchorStart + "羅針盤".length, status: "confirmed", nodeId },
   });
   expect(evidenceResponse.status(), await evidenceResponse.text()).toBe(201);
 
-  const currentProjectResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}`);
+  const currentProjectResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}`);
   expect(currentProjectResponse.ok(), await currentProjectResponse.text()).toBe(true);
   const currentProject = await currentProjectResponse.json() as { project: { version: number } };
-  const proposalResponse = await page.request.post(`/api/v1/persistence/projects/${project.id}/changesets`, {
+  const proposalResponse = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets`, {
+    method: "POST",
     headers: { Origin: origin, "Idempotency-Key": randomUUID() },
     data: {
       projectVersion: currentProject.project.version,
@@ -120,12 +127,12 @@ async function buildManuscript(page: Page, mode: "desktop" | "mobile") {
   });
   expect(proposalResponse.status(), await proposalResponse.text()).toBe(201);
 
-  await page.goto(new URL(`/${mode}/projects/${project.id}/scenes/${firstScene.id}${mode === "mobile" ? "?view=writing" : ""}`, page.url()).toString());
+  const currentAuthor = await authorizeAuthor(mode, page, { path: `/${mode}/projects/${project.id}/scenes/${firstScene.id}${mode === "mobile" ? "?view=writing" : ""}` });
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expectServerSaved(page);
   await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
-  return { project, firstScene };
+  return { project, firstScene, author: currentAuthor };
 }
 
 async function selectTheme(page: Page, mode: "light" | "dark" | "paper"): Promise<void> {
@@ -159,7 +166,8 @@ async function openMobileReferenceSheet(page: Page, buttonName: "構成" | "知�
   await expect(page.locator(`#mobile-reference-tab-${panel}`)).toHaveAttribute("aria-selected", "true");
 }
 
-test("renders and exercises the full Quiet Page authoring surfaces", async ({ page }, testInfo) => {
+test("renders and exercises the full Quiet Page authoring surfaces", async ({ page, authorizeAuthor }, testInfo) => {
+  test.setTimeout(180_000);
   const captureDirectory = process.env.CODEXIA_UI_REVIEW_CAPTURE_DIR ?? testInfo.outputPath("ui-review");
   await mkdir(captureDirectory, { recursive: true });
   await page.addInitScript(() => {
@@ -281,11 +289,11 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
     performanceRecords.push(record);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project, firstScene } = await buildManuscript(page, "desktop");
+  const { project, firstScene } = await buildManuscript(page, "desktop", authorizeAuthor);
   const network = await page.context().newCDPSession(page);
   await network.send("Network.enable");
   await network.send("Network.setCacheDisabled", { cacheDisabled: true });
-  await page.goto(new URL(`/desktop/projects/${project.id}/scenes/${firstScene.id}`, page.url()).toString());
+  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}/scenes/${firstScene.id}` });
   await expect(manuscriptEditor(page)).toBeVisible();
   await capturePerformance("desktop");
 
@@ -334,7 +342,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await page.screenshot({ path: join(captureDirectory, "after-desktop-dark.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing`, page.url()).toString());
+  await authorizeAuthor("mobile", page, { path: `/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing` });
   await expect(manuscriptEditor(page)).toBeVisible();
   await capturePerformance("mobile");
   await selectMobileTheme(page, "light");
@@ -383,12 +391,12 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   }, null, 2) + "\n");
 });
 
-test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", async ({ page }) => {
+test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project, firstScene } = await buildManuscript(page, "desktop");
+  const { project, firstScene, author } = await buildManuscript(page, "desktop", authorizeAuthor);
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing`, page.url()).toString());
+    await authorizeAuthor("mobile", page, { path: `/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing` });
     await expect(manuscriptEditor(page)).toBeVisible();
     await expectServerSaved(page);
     const command = page.locator(".pg-editor-command-menu");
@@ -414,7 +422,7 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
     await display.locator("summary").click();
     // The normal autosave may finish before a manual save can be clicked.
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`);
+      const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`);
       if (!response.ok()) return "";
       const { revision } = await response.json() as { revision: { markdown: string } };
       return revision.markdown;
@@ -424,25 +432,26 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
   }
 });
 
-test("outline preserves database sibling order and reveals a navigated document", async ({ page }) => {
+test("outline preserves database sibling order and reveals a navigated document", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { project, firstScene } = await buildManuscript(page, "desktop");
+  const { project, firstScene, author } = await buildManuscript(page, "desktop", authorizeAuthor);
   const url = `/api/v1/persistence/projects/${project.id}/documents`;
   const list = async () => {
-    const response = await page.request.get(url);
+    const response = await author.fetch(url);
     expect(response.ok()).toBe(true);
     return (await response.json() as { documents: Array<CreatedDocument & { title: string; parentId: string | null; orderKey: string }> }).documents;
   };
   const parentId = (await list()).find(document => document.id === firstScene.id)!.parentId!;
-  const a = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順A", orderKey: "04", markdown: "同順の原稿A" });
-  const b = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順B", orderKey: "04", markdown: "同順の原稿B" });
+  const a = await createDocument(author, project.id, { kind: "scene", parentId, title: "同順A", orderKey: "04", markdown: "同順の原稿A" });
+  const b = await createDocument(author, project.id, { kind: "scene", parentId, title: "同順B", orderKey: "04", markdown: "同順の原稿B" });
   const siblingsBefore = (await list()).filter(document => document.parentId === parentId);
   const ties = siblingsBefore.filter(document => document.id === a.id || document.id === b.id);
   expect(ties).toHaveLength(2);
   const renamed = new Map([[ties[0]!.id, "ZZZ同順"], [ties[1]!.id, "AAA同順"]]);
   for (const document of ties) {
-    const response = await page.request.patch(`${url}/${document.id}/metadata`, {
-      headers: { Origin: new URL(page.url()).origin },
+    const response = await author.fetch(`${url}/${document.id}/metadata`, {
+      method: "PATCH",
+      headers: { Origin: author.origin },
       data: { expectedVersion: document.version, title: renamed.get(document.id) },
     });
     expect(response.ok(), await response.text()).toBe(true);
@@ -453,6 +462,7 @@ test("outline preserves database sibling order and reveals a navigated document"
   const expected = siblingsBefore.map(document => renamed.get(document.id) ?? document.title);
   const other = persisted.find(document => document.title === "一　青い目録")!;
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(manuscriptEditor(page)).toBeVisible();
   // Bind UI rows to the actual persisted IDs, not whitespace-normalized names.
   const outline = page.locator('[data-workspace-panel="outline"]');

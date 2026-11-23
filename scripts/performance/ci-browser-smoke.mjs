@@ -63,7 +63,8 @@ try {
   const { stdout } = await promisify(execFile)(process.execPath, [
     '--test', '--test-reporter=tap', '--test-name-pattern=PostgreSQL browser benchmark exercises the current UI and save/receipt path',
     'scripts/performance/performance.test.mjs',
-  ], { env: { ...gitEnv, CODEXIA_TEST_DATABASE_URL: target.toString(), CODEXIA_PERF_BROWSER_SMOKE: '1' },
+  ], { env: { ...gitEnv, CODEXIA_TEST_DATABASE_URL: target.toString(), CODEXIA_PERF_BROWSER_SMOKE: '1',
+    CODEXIA_AUTH_TEST_DISPOSABLE: '1' },
     timeout: 200_000, maxBuffer: 4 * 1024 * 1024 });
   if (!stdout.includes('# pass 1') || !stdout.includes('# skipped 0')) {
     throw new Error('Benchmark smoke did not execute exactly one passing test');

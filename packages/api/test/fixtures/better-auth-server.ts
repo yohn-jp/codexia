@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,11 @@ export interface BetterAuthFixtureOptions {
   readonly staticDirectory?: string;
   readonly apiPort?: number;
   readonly usePostgresPersistence?: boolean;
+  /** A caller-owned store and pool that the fixture does not replace or close. */
+  readonly domain?: Pick<ApiServerOptions, "store" | "persistence">;
+  readonly createApiServer?: typeof createServer;
+  readonly observeApiServer?: (server: Server) => void;
+  readonly appProfile?: Pick<ApiServerOptions, "profile" | "runtimeOptions">;
   readonly registerInBrowser?: (bootstrapOrigin: string) => Promise<BootstrapRegistration>;
 }
 
@@ -38,6 +43,8 @@ export interface BetterAuthFixture {
   readonly ownerSubject: string;
   readonly introspectionClientId: string;
   readonly introspectionClientSecret: string;
+  issueOwnerAccessToken(): Promise<string>;
+  issueForeignClientAccessToken(): Promise<string>;
   readRevocationRecord(jti: string): Promise<{
     issuer: string;
     jti: string;
@@ -62,7 +69,8 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
   const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
     new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) &&
-    new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName);
+    (new Set(["codexia_auth_test", "codexia_web_oauth_test", "codexia_passkey_virtual"]).has(databaseName) ||
+      /^codexia_perf_[a-z0-9_-]+$/u.test(databaseName) || /^codexia_e2e_compat_[a-z0-9_]+$/u.test(databaseName));
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
       (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
     throw new Error("Better Auth fixture requires an explicitly opted-in disposable loopback auth database or uniquely named disposable CI database");
@@ -139,6 +147,9 @@ function persistenceForAuthFixture(): ApiServerOptions["persistence"] {
 
 export async function startBetterAuthFixture(options: BetterAuthFixtureOptions): Promise<BetterAuthFixture> {
   assertDisposableAuthFixtureDatabaseUrl(options.databaseUrl);
+  if (options.domain && options.usePostgresPersistence) {
+    throw new Error("Select either caller-owned domain persistence or fixture-owned PostgreSQL persistence");
+  }
   const previousNodeEnv = process.env.NODE_ENV;
   const restoreNodeEnv = () => {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -261,26 +272,29 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       domainStore = new CoreStore({ persistence: domainPersistence });
     }
 
-    const makeApi = (withOwner: boolean, withPostgresPersistence = false): Server => createServer({
-      // OAuth fixture does not provision Full runtime manifests; browser coverage
-      // exercises the same authentication contract in both build profiles.
-      profile: "core",
-      store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
-      persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
-      staticDir: options.staticDirectory ?? process.cwd(),
-      usageDirectory: usageDirectory!,
-      betterAuth: runtime!,
-      ...(withOwner ? { oauthOwner: {
-        issuer,
-        audience,
-        jwksUrl: `${issuer}/jwks`,
-        ownerSubject,
-        requiredScopes: [CODEXIA_OWNER_SCOPE],
-        allowedClientIds: ownerClientIds,
-        verifyActiveToken: runtime!.verifyActiveAccessToken,
-        allowInsecureLoopbackForTests: true,
-      } } : {}),
-    });
+    const makeApi = (): Server => {
+      const server = (options.createApiServer ?? createServer)({
+        profile: "core",
+        ...options.appProfile,
+        store: options.domain?.store ?? domainStore ?? coreStoreForAuthFixture(),
+        persistence: options.domain?.persistence ?? domainPersistence ?? persistenceForAuthFixture(),
+        staticDir: options.staticDirectory ?? process.cwd(),
+        usageDirectory: usageDirectory!,
+        betterAuth: runtime!,
+        oauthOwner: {
+          issuer,
+          audience,
+          jwksUrl: `${issuer}/jwks`,
+          ownerSubject,
+          requiredScopes: [CODEXIA_OWNER_SCOPE],
+          allowedClientIds: ownerClientIds,
+          verifyActiveToken: runtime!.verifyActiveAccessToken,
+          allowInsecureLoopbackForTests: true,
+        },
+      });
+      options.observeApiServer?.(server);
+      return server;
+    };
 
     const bootstrapOrigin = "http://127.0.0.1:" + await (async () => {
       const probe = createHttpServer();
@@ -375,8 +389,48 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     bootstrapServer = undefined;
     await bootstrap.close();
     bootstrap = undefined;
-    apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
+    apiServer = makeApi();
     await listen(apiServer, apiPort);
+
+    async function issueAccessToken(clientId: string, path: string): Promise<string> {
+      const verifier = randomBytes(32).toString("base64url");
+      const state = randomUUID();
+      const redirectUri = new URL(path, apiOrigin).href;
+      const authorization = await fetch(`${issuer}/oauth2/authorize?${new URLSearchParams({
+        response_type: "code", client_id: clientId, redirect_uri: redirectUri,
+        scope: `openid ${CODEXIA_OWNER_SCOPE}`, state, prompt: "consent", resource: audience,
+        code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
+      })}`, { redirect: "manual", headers: { accept: "application/json", cookie: productionCookie.header() } });
+      if (!authorization.ok) throw new Error(`OAuth authorization failed (${authorization.status})`);
+      const pending = await authorization.json() as { url?: string };
+      const consentPage = new URL(pending.url ?? "", apiOrigin);
+      if (consentPage.origin !== apiOrigin || consentPage.pathname !== "/oauth/consent") {
+        throw new Error("OAuth authorization did not reach the consent page");
+      }
+
+      const consent = await fetch(`${issuer}/oauth2/consent`, {
+        method: "POST", redirect: "manual",
+        headers: { "content-type": "application/json", cookie: productionCookie.header(), origin: apiOrigin },
+        body: JSON.stringify({ accept: true, oauth_query: consentPage.searchParams.toString() }),
+      });
+      if (!consent.ok) throw new Error(`OAuth consent failed (${consent.status})`);
+      const granted = await consent.json() as { url?: string };
+      const callback = new URL(granted.url ?? "", apiOrigin);
+      const code = callback.searchParams.get("code");
+      if (`${callback.origin}${callback.pathname}` !== redirectUri || !code || callback.searchParams.get("state") !== state) {
+        throw new Error("OAuth consent did not return the bound authorization code");
+      }
+
+      const tokenResponse = await fetch(`${issuer}/oauth2/token`, {
+        method: "POST", redirect: "manual",
+        body: new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code,
+          redirect_uri: redirectUri, code_verifier: verifier, resource: audience }),
+      });
+      if (!tokenResponse.ok) throw new Error(`OAuth token exchange failed (${tokenResponse.status})`);
+      const token = await tokenResponse.json() as { access_token?: string; token_type?: string };
+      if (!token.access_token || token.token_type !== "Bearer") throw new Error("OAuth token exchange did not issue an API bearer token");
+      return token.access_token;
+    }
 
     return {
       apiOrigin,
@@ -388,6 +442,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       ownerSubject,
       introspectionClientId: registered.introspectionClientId,
       introspectionClientSecret: runtimeConfig.oauthIntrospectionClientSecret,
+      issueOwnerAccessToken: () => issueAccessToken(registered.webClientId, "/desktop"),
+      issueForeignClientAccessToken: () => issueAccessToken(foreignClient.client_id, "/foreign-client"),
       async readSigningKeyIds() {
         const context = await runtime!.auth.$context;
         const rows = await context.adapter.findMany({ model: "jwks" });
@@ -396,10 +452,17 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       async restartApi() {
         if (apiServer) await close(apiServer);
         apiServer = undefined;
+        const moduleCache = options.appProfile?.runtimeOptions?.cacheDirectory;
+        if (moduleCache) await rm(moduleCache, { recursive: true, force: true });
+        if (options.usePostgresPersistence) {
+          await domainPersistence?.close();
+          domainPersistence = createPostgresPersistence(options.databaseUrl);
+          domainStore = new CoreStore({ persistence: domainPersistence });
+        }
         await runtime!.pool.end();
         runtime = createBetterAuthRuntime(runtimeConfig);
         await runtime.assertRegisteredClients();
-        apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
+        apiServer = makeApi();
         await listen(apiServer, apiPort);
       },
       async readRevocationRecord(jti) {

@@ -13,6 +13,7 @@ export function availableModulePanels({
   journal,
   refresh,
   onProposalStored,
+  onNativeChangeSetProposed,
   readCurrentEditor,
   navigateDocument,
 }: {
@@ -25,6 +26,7 @@ export function availableModulePanels({
   journal: BrowserJournal | null;
   refresh: () => Promise<void>;
   onProposalStored: () => void;
+  onNativeChangeSetProposed: (projectId: string, changeSetId: string) => void;
   readCurrentEditor: () => BrowserEditorDocument | null;
   navigateDocument: (path: string) => Promise<void>;
 }): WorkspacePanel[] {
@@ -35,6 +37,7 @@ export function availableModulePanels({
       ? <WorkspaceContribution item={item} contributions={contributions} modules={modules}
           projectId={projectId} authorScope={authorScope} snapshot={snapshot}
           refresh={refresh} journal={journal} onProposalStored={onProposalStored}
+          onNativeChangeSetProposed={onNativeChangeSetProposed}
           readCurrentEditor={readCurrentEditor} navigateDocument={navigateDocument} />
       : <p>作品を選択してください。</p>,
   }));

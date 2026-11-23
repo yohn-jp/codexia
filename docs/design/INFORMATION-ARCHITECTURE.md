@@ -60,7 +60,7 @@ PostgreSQL、ID、read/write set、version、receipt等は技術詳細を必要�
 
 | 画面ID | 開く対象・主な操作 | 主導線・戻り先 | 既存責務 |
 | --- | --- | --- | --- |
-| LIB-01 | 作品一覧、最近の作業、作品作成・取込 | 起動、作品名から開く。選択作品の構成へ | PersistenceWorkspace / persistenceProjects |
+| LIB-01 | 作品一覧、最近の作業、作品作成・取込 | 起動、作品名から開く。選択作品の構成へ | PersistenceWorkspace / persistenceProjectPage |
 | WRT-01 | 選択文書、構成、執筆・閲覧 | 作品選択、直接リンク、最近の作業。現在の原稿に留まる | outline / editor / coordinator |
 | WRT-02 | 原稿の履歴、確定Revision、比較・復元 | 原稿の操作メニュー。元の編集へ | persistenceRevisions / restoreRevision |
 | KNO-01 | 作品の知識一覧、絞込、候補登録 | 知識ナビゲーション。執筆に戻る | inspector / persistenceNodes |

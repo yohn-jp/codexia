@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { NLP_FEATURE_SETTINGS_KEY, SNAPSHOT_READ_MANY_LIMIT } from "@codexia/contracts";
 import type { SnapshotReader } from "@codexia/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -16,7 +17,8 @@ import type {
   ProjectId,
 } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import { CoreStore } from "./index.js";
+import { CoreStore, SNAPSHOT_PROJECTION_EPOCH } from "./index.js";
+import { makeKnowledgeProjection } from "./knowledge-context.js";
 import YAML from "yaml";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -36,9 +38,9 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
     transactions: 0,
     listDocuments: 0,
     getDocumentHeadRevisions: 0,
+    getDocumentHeadRevisionHashes: 0,
     listModuleRecords: 0,
     snapshotMisses: 0,
-    manifestReads: 0,
   };
   const instrumented = new Proxy(base, {
     get(target, property, receiver) {
@@ -50,9 +52,6 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
               if (typeof method !== "function") return method;
               if (readerProperty === "getModuleRecord") {
                 return async (...args: Parameters<PersistenceReader["getModuleRecord"]>) => {
-                  if (args[1] === "core.authority.snapshots" && args[2].startsWith("snapshot:")) {
-                    counts.manifestReads = (counts.manifestReads ?? 0) + 1;
-                  }
                   const record = await readerTarget.getModuleRecord(...args);
                   if (args[1] === "core.authority.snapshots" && !record) {
                     counts.snapshotMisses = (counts.snapshotMisses ?? 0) + 1;
@@ -61,7 +60,8 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
                   return record;
                 };
               }
-              if (readerProperty === "listDocuments" || readerProperty === "getDocumentHeadRevisions" || readerProperty === "listModuleRecords") {
+              if (readerProperty === "listDocuments" || readerProperty === "getDocumentHeadRevisions" ||
+                  readerProperty === "getDocumentHeadRevisionHashes" || readerProperty === "listModuleRecords") {
                 return (...args: unknown[]) => {
                   const key = String(readerProperty);
                   counts[key] = (counts[key] ?? 0) + 1;
@@ -111,7 +111,7 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
   const beforeWarm = { ...instrumented.counts };
   assert.deepEqual(await store.readTreeSnapshot(project.id), concurrent[0]);
   assert.equal((await store.writingStatsSnapshot(project.id)).stats.totalCharCount, 0);
-  for (const key of ["transactions", "listDocuments", "getDocumentHeadRevisions", "listModuleRecords"] as const) {
+  for (const key of ["transactions", "listDocuments", "getDocumentHeadRevisions", "getDocumentHeadRevisionHashes", "listModuleRecords"] as const) {
     assert.equal(instrumented.counts[key], beforeWarm[key], "warm current reads must not repeat " + key);
   }
 
@@ -134,40 +134,196 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
   }
 });
 
-test("hierarchy and restore builders read each resolved manifest only once", async () => {
+test("body references avoid cold hydration and keep old and new pins readable after soft deletion and restart", async () => {
   const project = await createProject();
-  const { document } = await persistence.transaction(tx => tx.createDocument({
-    projectId: project.id, kind: "scene", parentId: null, title: "Scene", orderKey: "1",
-    markdown: "本文", authorId: "author", idempotencyKey: randomUUID(),
+  const archivedMarkdown = "旧固定版 😀 \r\n";
+  const currentMarkdown = "新固定版 e\u0301 😀\n";
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const { document, revision } = await persistence.transaction(tx => tx.createDocument({
+    projectId: project.id, kind: "scene", title: "Pinned", orderKey: "1", markdown: archivedMarkdown,
+    authorId: "author", idempotencyKey: randomUUID(),
   }));
-  const volume = await persistence.transaction(tx => tx.createDocument({
-    projectId: project.id, kind: "volume", parentId: null, title: "Volume", orderKey: "1",
-    markdown: "", authorId: "author", idempotencyKey: randomUUID(),
+  const path = `documents/${document.id}.md`;
+  const oldProject = await persistence.read(reader => reader.getProject(project.id));
+  assert.ok(oldProject);
+  const old = { projectId: project.id, projectVersion: oldProject.version };
+  const authority = "core.authority.snapshots";
+  const oldFiles = { [path]: { content: archivedMarkdown, encoding: "utf8", revision: digest(archivedMarkdown), documentId: document.id } };
+  const archivedRecord = await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: authority, key: `snapshot:${old.projectVersion}`, expectedVersion: null,
+    value: { snapshot: old, project: oldProject, documents: [document], files: oldFiles } as unknown as JsonObject,
   }));
-  const pinned = (await core.reader(project.id)).snapshot;
-  await persistence.transaction(tx => tx.updateProject({
-    projectId: project.id, expectedVersion: pinned.projectVersion, title: "Later version",
+  const changed = await persistence.transaction(tx => tx.saveDocument({
+    projectId: project.id, documentId: document.id, baseRevisionId: revision.id,
+    changes: [{ fromUtf16: 0, toUtf16: archivedMarkdown.length, insert: currentMarkdown }],
+    resultingSha256: digest(currentMarkdown), clientId: "test", idempotencyKey: randomUUID(), authorId: "author",
   }));
-  const current = (await core.reader(project.id)).snapshot;
   const tracked = countSnapshotReads(persistence, async () => {});
   const store = new CoreStore({ persistence: tracked.persistence });
+  const { snapshot } = await store.readTreeSnapshot(project.id);
+  const reader = await store.reader(project.id, snapshot);
+  assert.deepEqual(await reader.listRevisions?.(path), [{ path, revision: digest(currentMarkdown) }]);
+  assert.equal(tracked.counts.getDocumentHeadRevisionHashes, 1);
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 0);
+  const durable = await persistence.read(source => source.getModuleRecord(project.id, authority, `snapshot:${snapshot.projectVersion}`));
+  assert.ok(durable);
+  const files = durable.value.files as JsonObject;
+  assert.deepEqual(files[path], { documentId: document.id, revisionId: changed.revision.id, revision: digest(currentMarkdown) });
 
-  for (const snapshot of [undefined, pinned]) {
-    const expected = snapshot ?? current;
-    for (const build of [
-      () => store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot),
-      () => store.buildDeleteHierarchyOperation(project.id, { kind: "volume", id: volume.document.id }, snapshot),
-      () => store.buildReorderHierarchyOperation(project.id, { kind: "volume", orderedIds: [volume.document.id] }, snapshot),
-      () => store.buildRestoreOperation(project.id, document.id, document.headRevisionId!, snapshot),
-    ]) {
-      const before = tracked.counts.manifestReads!;
-      const built = await build();
-      assert.deepEqual(built.snapshot, expected);
-      assert.equal(built.operation.projectId, expected.projectId);
-      assert.equal(built.operation.baseProjectVersion, expected.projectVersion);
-      assert.equal(tracked.counts.manifestReads! - before, 1);
-    }
+  const result = await reader.readMany!([path, "documents/unknown.md", path], "base64");
+  const body = { content: Buffer.from(currentMarkdown).toString("base64"), revision: digest(currentMarkdown),
+    documentKind: "scene", documentOrder: 0 };
+  assert.deepEqual(result, [body, null, body]);
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 1);
+  await assert.rejects(reader.readMany!(Array(SNAPSHOT_READ_MANY_LIMIT + 1).fill(path)), { code: "invalid_snapshot_batch" });
+  await assert.rejects(reader.readMany!([path, "../unsafe"]), { code: "invalid_contract" });
+  assert.equal(tracked.counts.getDocumentHeadRevisions, 1);
+
+  await persistence.transaction(tx => tx.deleteDocument({
+    projectId: project.id, documentId: document.id, expectedVersion: changed.document.version,
+  }));
+  const restartedPersistence = createPostgresPersistence(connectionString);
+  try {
+    const restarted = new CoreStore({ persistence: restartedPersistence });
+    assert.equal(await (await restarted.reader(project.id)).read(path), null);
+    assert.deepEqual(await (await restarted.reader(project.id, snapshot)).read(path, "base64"), body);
+    const archived = await restarted.reader(project.id, old);
+    assert.deepEqual(await archived.read(path, "base64"), {
+      ...body, content: Buffer.from(archivedMarkdown).toString("base64"), revision: digest(archivedMarkdown),
+    });
+    assert.deepEqual(await restartedPersistence.read(source => source.getModuleRecord(project.id, authority, `snapshot:${old.projectVersion}`)), archivedRecord);
+  } finally {
+    await restartedPersistence.close();
   }
+});
+
+test("project presentation reads the selected project's public title and subtitle", async () => {
+  const project = await core.createProject({ title: "Author title", settings: {
+    title: "  Published title  ", name: "Fallback title", subtitle: "  Volume One ", internalOnly: "Not projected",
+  } });
+  const selected = await core.reader(project.id);
+  assert.deepEqual(selected.projectPresentation, { title: "Published title", subtitle: "Volume One" });
+  assert.equal(await selected.read("meta/project.yaml"), null);
+
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: project.id, expectedVersion: project.version,
+    settings: { title: null, name: "  New display title ", subtitle: "  " },
+  }));
+  const current = await core.reader(project.id);
+  assert.deepEqual(current.projectPresentation, { title: "New display title" });
+  assert.ok(!(await current.list("")).includes("meta/project.yaml"));
+  assert.deepEqual((await core.reader(project.id, selected.snapshot)).projectPresentation,
+    { title: "Published title", subtitle: "Volume One" });
+  assert.equal((await core.readTreeSnapshot(project.id)).tree.title, "Author title");
+});
+
+test("Publishing reads approved native records at the selected version without exposing files", async () => {
+  const project = await createProject();
+  const key = "share-grants";
+  const oldPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "core.artifacts", key: oldPath,
+    value: { content: "Legacy state retained for maintenance", encoding: "utf8" }, expectedVersion: null,
+  }));
+  const old = await core.reader(project.id);
+  assert.equal(await old.read(oldPath), null);
+  assert.equal(await core.readPublishingSnapshotRecord(project.id, old.snapshot, key), undefined);
+  await assert.rejects(core.readPublishingSnapshotRecord(project.id, old.snapshot, "unexpected"), { code: "invalid_publishing_record" });
+  const input = { key, value: { version: 1, grants: [] }, expectedVersion: null, idempotencyKey: randomUUID() };
+  const submit = (snapshot = old.snapshot) => core.proposePublishingSnapshotRecord(project.id, snapshot, input, "author");
+  const reference = await submit();
+  const persisted = () => persistence.read(reader => reader.getModuleRecord(project.id, "publishing", key));
+  assert.equal(await persisted(), undefined);
+  const changeSet = await persistence.read(reader => reader.getChangeSet(project.id, reference.id as import("@codexia/persistence-contracts").ChangeSetId));
+  assert.ok(changeSet);
+  const apply = (version: number) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: project.id, changeSetId: changeSet.id, expectedVersion: version,
+  }));
+  await assert.rejects(apply(changeSet.version), { code: "invalid_change_set_state" });
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "author",
+  }));
+  const applied = await apply(approved.version);
+  const current = await core.reader(project.id);
+  assert.notEqual(current.snapshot.projectVersion, old.snapshot.projectVersion);
+  assert.equal(await current.read(oldPath), null);
+  assert.ok(!(await current.list("")).includes(oldPath));
+  assert.deepEqual(await core.readPublishingSnapshotRecord(project.id, current.snapshot, key), { value: input.value, version: 1 });
+  assert.equal(await core.readPublishingSnapshotRecord(project.id, old.snapshot, key), undefined);
+  assert.deepEqual(await submit(current.snapshot), reference);
+  assert.deepEqual(await apply(approved.version), { ...applied, replayed: true });
+  await assert.rejects(core.proposePublishingSnapshotRecord(project.id, current.snapshot, {
+    ...input, idempotencyKey: randomUUID(),
+  }, "author"), { code: "conflict" });
+});
+
+test("NLP settings pin the configured record and preserve external proposal origin through author approval", async () => {
+  const project = await createProject();
+  const key = NLP_FEATURE_SETTINGS_KEY;
+  const legacyPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "core.artifacts", key: legacyPath,
+    value: { content: '{"externalEnabled":{"other":true}}', encoding: "utf8" }, expectedVersion: null,
+  }));
+  const old = await core.reader(project.id);
+  assert.equal(await old.read(legacyPath), null);
+  assert.equal(await core.readNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot), undefined);
+  const input = {
+    key, value: { externalEnabled: { entityExtraction: true }, preservedSetting: "author choice" },
+    expectedVersion: null, idempotencyKey: randomUUID(),
+  };
+  const proposer = "verified-mcp-user";
+  await assert.rejects(core.proposeNlpFeatureSettingsSnapshotRecord(
+    project.id, old.snapshot, { ...input, key: "unexpected" }, proposer, "external-agent",
+  ), { code: "invalid_nlp_feature_settings" });
+  const reference = await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot, input, proposer, "external-agent");
+  const competing = await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot, {
+    ...input, value: { externalEnabled: {} }, idempotencyKey: randomUUID(),
+  }, "another-author");
+  const changesetId = reference.id as import("@codexia/persistence-contracts").ChangeSetId;
+  const competingId = competing.id as typeof changesetId;
+  const stored = await persistence.read(reader => reader.getChangeSet(project.id, changesetId));
+  assert.ok(stored);
+  assert.equal(stored.authorId, proposer);
+  assert.equal(stored.provenance.details.origin, "external-agent");
+  assert.equal(await persistence.read(reader => reader.getModuleRecord(project.id, "nlp", key)), undefined);
+  const apply = (id: typeof changesetId, version: number) => persistence.transaction(tx => tx.applyChangeSet({
+    projectId: project.id, changeSetId: id, expectedVersion: version,
+  }));
+  await assert.rejects(apply(changesetId, stored.version), { code: "invalid_change_set_state" });
+  const reviewer = "reviewing-author";
+  const approve = (id: typeof changesetId) => persistence.transaction(tx => tx.approveChangeSet({
+    projectId: project.id, changeSetId: id, expectedVersion: stored.version, approvedBy: reviewer,
+  }));
+  const approved = await approve(changesetId);
+  const competingApproval = await approve(competingId);
+  const applied = await apply(changesetId, approved.version);
+  assert.equal(applied.changeSet.approvedBy, reviewer);
+  await assert.rejects(apply(competingId, competingApproval.version), { code: "conflict" });
+  const current = await core.reader(project.id);
+  assert.ok(!(await current.list("")).includes(legacyPath));
+  assert.deepEqual(await core.readNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot), { value: input.value, version: 1 });
+  assert.equal(await core.readNlpFeatureSettingsSnapshotRecord(project.id, old.snapshot), undefined);
+  assert.deepEqual(await core.proposeNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot, input, proposer, "external-agent"),
+    reference);
+  await assert.rejects(core.proposeNlpFeatureSettingsSnapshotRecord(project.id, current.snapshot, input, proposer, "author"),
+    { code: "idempotency_conflict" });
+  assert.deepEqual(await apply(changesetId, approved.version), { ...applied, replayed: true });
+});
+
+test("native hierarchy creation rejects an older project version without materializing a snapshot", async () => {
+  const project = await createProject();
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: project.id, expectedVersion: project.version, title: "Later version",
+  }));
+  const { snapshot } = await core.observe(project.id);
+  const input = { kind: "volume", id: "v", title: "新巻" } as const;
+  const options = { actorId: "author", idempotencyKey: randomUUID() };
+  await assert.rejects(core.proposeHierarchyCreate(project.id, input, { ...options, projectVersion: project.version }), { code: "conflict" });
+  const proposed = await core.proposeHierarchyCreate(project.id, input, { ...options, projectVersion: snapshot.projectVersion });
+  assert.equal(proposed.changeSet.status, "proposed");
+  assert.equal(await persistence.read(reader =>
+    reader.getModuleRecord(project.id, "core.authority.snapshots", `snapshot:${snapshot.projectVersion}`)), undefined);
 });
 
 test("every persisted snapshot dependency advances the project version, while authority records do not", async () => {
@@ -349,43 +505,57 @@ test("every persisted snapshot dependency advances the project version, while au
   assert.equal((await persistence.read((reader) => reader.getProject(project.id as ProjectId)))?.version, beforeAuthority);
 });
 
-test("startup certifies equivalent legacy snapshots and transitions only incompatible current projections", async () => {
+test("explicit maintenance certifies equivalent legacy snapshots and transitions only incompatible current projections", async () => {
   const legacyModule = "core.authority.snapshots";
   async function seedLegacy(compatible: boolean) {
     const project = await createProject();
     const snapshot = {projectId:project.id, projectVersion:project.version};
     const file = (content: string) => ({content,encoding:"utf8",revision:createHash("sha256").update(content).digest("hex")});
-    const files: Record<string, ReturnType<typeof file>> = {
-      "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
-    };
     const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
-    if (compatible) files[knowledgePath] = file(JSON.stringify({version:1,projectId:project.id,documentMappings:[],entries:[],nodeLimitReached:false}));
-    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files} as unknown as JsonObject,expectedVersion:null}));
-    return {project,snapshot,knowledgePath};
+    const emptyKnowledge = { documentMappings: [], entries: [], nodeLimitReached: false };
+    const legacyKnowledge = JSON.stringify({ version: 1, projectId: project.id, ...emptyKnowledge });
+    const files: Record<string, ReturnType<typeof file>> = compatible ? {} : {
+      "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
+      [knowledgePath]: file(legacyKnowledge),
+    };
+    const currentFacets = compatible ? { publishingRecords: {}, nlpFeatureSettings: null,
+      knowledge: makeKnowledgeProjection(snapshot, emptyKnowledge) } : {};
+    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...currentFacets} as unknown as JsonObject,expectedVersion:null}));
+    return {project,snapshot,knowledgePath,legacyKnowledge};
   }
   const compatible = await seedLegacy(true);
   const incompatible = await seedLegacy(false);
   const store = new CoreStore({persistence});
-  // Use real PostgreSQL reads with transactions forced read-only; no writer
-  // transaction may be attempted by the compatibility preflight.
+  // Exercise the packaged CLI's pending-proof query using a read-only session.
   const readOnly = createPostgresPersistence({connectionString, options:"-c default_transaction_read_only=on"});
   try {
-    const preflight = new CoreStore({persistence:readOnly});
-    await preflight.prepareSnapshotReuse(compatible.project.id, "validate");
-    await preflight.prepareSnapshotReuse(incompatible.project.id, "validate");
     for (const item of [compatible,incompatible]) {
+      assert.deepEqual(await readOnly.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH, { projectId: item.project.id }),
+        [item.project.id]);
       assert.equal((await store.observe(item.project.id)).snapshot.projectVersion,item.project.version);
-      assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id as ProjectId,legacyModule,`proof:projection:1:snapshot:${item.project.version}`)),undefined);
+      assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id,legacyModule,`proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${item.project.version}`)),undefined);
     }
   } finally { await readOnly.close(); }
-  await assert.rejects(store.reader(incompatible.project.id), {code:"snapshot_unavailable"});
-  assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
+  for (const item of [compatible, incompatible]) {
+    await assert.rejects(store.reader(item.project.id), { code: "snapshot_unavailable" });
+    assert.equal((await store.observe(item.project.id)).snapshot.projectVersion, item.project.version);
+    assert.equal(await persistence.read(reader =>
+      reader.getModuleRecord(item.project.id, legacyModule, `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${item.project.version}`)), undefined);
+  }
   const exactFiles = async (reader: SnapshotReader) => Promise.all((await reader.list("")).map(async path => ({path, file:await reader.read(path,"base64")})));
+  const compatibleFiles = await exactFiles(await store.reader(compatible.project.id, compatible.snapshot));
   const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
   const oldFiles = await exactFiles(oldPinned);
-  assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
+  assert.equal((await oldPinned.read("meta/project.yaml"))?.content, YAML.stringify({ title: incompatible.project.title }));
+  await assert.rejects(store.readPublishingSnapshotRecord(incompatible.project.id, incompatible.snapshot, "episodes"),
+    { code: "snapshot_unavailable" });
+  await assert.rejects(store.readNlpFeatureSettingsSnapshotRecord(incompatible.project.id, incompatible.snapshot),
+    { code: "snapshot_unavailable" });
+  assert.equal(oldPinned.knowledge, undefined);
+  assert.equal((await oldPinned.read(incompatible.knowledgePath))?.content, incompatible.legacyKnowledge);
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
+  assert.deepEqual(await exactFiles(await store.reader(compatible.project.id)), compatibleFiles);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
   let release!: () => void;
   const both = new Promise<void>(resolve => { release = resolve; });
@@ -399,17 +569,15 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   assert.ok(misses >= 2);
   const current = await store.reader(incompatible.project.id);
   assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
-  assert.ok(await current.read(incompatible.knowledgePath));
-  assert.equal(await (await store.reader(incompatible.project.id,incompatible.snapshot)).read(incompatible.knowledgePath),null);
+  assert.deepEqual(current.knowledge?.source.snapshot, current.snapshot);
+  assert.equal(await current.read(incompatible.knowledgePath), null);
+  assert.equal(await current.read("meta/project.yaml"), null);
   assert.deepEqual(await exactFiles(await store.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
   await store.prepareSnapshotReuse(incompatible.project.id);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion,incompatible.project.version+1);
   const restarted = new CoreStore({persistence});
   assert.deepEqual((await restarted.reader(incompatible.project.id)).snapshot,current.snapshot);
   assert.deepEqual(await exactFiles(await restarted.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
-  const lazyCompatible = await seedLegacy(true);
-  assert.deepEqual((await restarted.reader(lazyCompatible.project.id)).snapshot,lazyCompatible.snapshot);
-  assert.equal((await restarted.observe(lazyCompatible.project.id)).snapshot.projectVersion,lazyCompatible.project.version);
 });
 
 test("writing statistics include root scenes once without changing chapter and volume subtotals", async () => {
@@ -465,7 +633,7 @@ test("writing statistics preserve a non-scene first-match logical identity colli
   assert.equal(stats.totalCharCount,3);
 });
 
-test("durable current reuse preserves hierarchy deletion write order", async () => {
+test("native hierarchy deletion retains its ordered operations after restart", async () => {
   const project = await createProject();
   const {volume,chapter,scene} = await persistence.transaction(async tx => {
     const create = (kind: string,parentId: DocumentId | null) => tx.createDocument({
@@ -477,13 +645,18 @@ test("durable current reuse preserves hierarchy deletion write order", async () 
     const scene = await create("scene",chapter.document.id);
     return {volume,chapter,scene};
   });
-  const target = {kind:"scene" as const,id:scene.document.id,volumeId:volume.document.id,chapterId:chapter.document.id};
-  const first = await core.buildDeleteHierarchyOperation(project.id,target);
-  const current = await core.readSceneSnapshot(project.id,scene.document.id);
-  const expected = [current.metadata.path,current.document.path];
-  assert.deepEqual(first.operation.writes.map(write=>write.path),expected);
-  const warm = await core.buildDeleteHierarchyOperation(project.id,target);
-  assert.deepEqual(warm.operation.writes,first.operation.writes);
-  const restarted = new CoreStore({persistence});
-  assert.deepEqual((await restarted.buildDeleteHierarchyOperation(project.id,target)).operation.writes,first.operation.writes);
+  const target = { kind: "volume", id: volume.document.id } as const;
+  const { snapshot } = await core.observe(project.id);
+  const options = { projectVersion: snapshot.projectVersion, actorId: "author", idempotencyKey: randomUUID() };
+  const first = await core.proposeHierarchyDelete(project.id, target, options);
+  assert.deepEqual(first.changeSet.operations.map(operation => operation.type === "document.delete" && operation.command.documentId),
+    [scene.document.id, chapter.document.id, volume.document.id]);
+  const restartedPersistence = createPostgresPersistence(connectionString);
+  try {
+    const restarted = new CoreStore({ persistence: restartedPersistence });
+    assert.deepEqual(await restarted.proposeHierarchyDelete(project.id, target, options),
+      { changeSet: first.changeSet, replayed: true });
+  } finally {
+    await restartedPersistence.close();
+  }
 });

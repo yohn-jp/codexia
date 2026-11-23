@@ -21,7 +21,7 @@ command -v curl >/dev/null 2>&1 || {
   exit 2
 }
 command -v od >/dev/null 2>&1 || {
-  echo "od is required to generate a temporary verification token." >&2
+  echo "od is required to generate disposable database and authentication secrets." >&2
   exit 2
 }
 
@@ -40,9 +40,10 @@ port="${CODEXIA_OCI_PORT:-3040}"
 profile="${CODEXIA_PROFILE:-core}"
 container="codexia-verify-$$"
 database_container="codexia-verify-db-$$"
+bootstrap_container="codexia-verify-auth-bootstrap-$$"
+oidc_container="codexia-verify-auth-oidc-$$"
 verification_network="codexia-verify-net-$$"
 database_password="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
-verification_token="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 
 case "$profile" in
   core|full) ;;
@@ -51,22 +52,18 @@ esac
 
 secret_directory=""
 cleanup() {
-  "$engine" rm --volumes --force "$container" "$database_container" >/dev/null 2>&1 || true
+  "$engine" rm --volumes --force "$container" "$bootstrap_container" "$oidc_container" "$database_container" >/dev/null 2>&1 || true
   "$engine" network rm "$verification_network" >/dev/null 2>&1 || true
   if [[ -n "$secret_directory" ]]; then rm -rf "$secret_directory"; fi
 }
 trap cleanup EXIT INT TERM
 # Preserve the failing command location without logging secret-bearing arguments.
-trap 'status=$?; printf "OCI verification failed at line %s (exit %s)\\n" "$LINENO" "$status" >&2; "$engine" ps --all --filter "name=$database_container" --filter "name=$container" >&2 || true' ERR
+trap 'status=$?; printf "OCI verification failed at line %s (exit %s)\\n" "$LINENO" "$status" >&2; "$engine" ps --all --filter "name=$database_container" --filter "name=$container" --filter "name=$oidc_container" --filter "name=$bootstrap_container" >&2 || true' ERR
 
 secret_directory="$(mktemp -d "${TMPDIR:-/tmp}/codexia-oci-secrets.XXXXXX")"
 umask 077
 printf '%s' "$database_password" > "$secret_directory/postgres-password"
-printf '%s' "$database_password" > "$secret_directory/app-password"
-printf '%s' "$verification_token" > "$secret_directory/auth-token"
-# The directory remains private on the host; mounted files must be readable by
-# the non-root runtime UID inside the verification containers.
-chmod 0444 "$secret_directory/postgres-password" "$secret_directory/app-password" "$secret_directory/auth-token"
+chmod 0444 "$secret_directory/postgres-password"
 
 if [[ "${engine##*/}" == podman ]]; then
   "$engine" build --format oci --pull --build-arg "PROFILE=$profile" --tag "$image" .
@@ -85,14 +82,16 @@ for attempt in $(seq 1 40); do
   sleep 0.5
 done
 "$engine" exec "$database_container" pg_isready -h 127.0.0.1 -U codexia -d codexia_verify >/dev/null
+source "$(dirname "$0")/oci-better-auth-fixture.sh"
+setup_oci_better_auth "$engine" "$image" "$verification_network" "$database_container" "$secret_directory" "$bootstrap_container" "$oidc_container"
+
 "$engine" run --detach \
   --name "$container" \
-  --network "$verification_network" \
+  --network "$verification_network" --network-alias codexia-api \
   --stop-timeout 30 \
   --publish "127.0.0.1:${port}:3000" \
-  --volume "$secret_directory/auth-token:/run/secrets/codexia-auth-token:ro" \
-  --volume "$secret_directory/app-password:/run/secrets/app-password:ro" \
-  --env CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token \
+  --volume "$secret_directory/postgres-password:/run/secrets/app-password:ro" \
+  "${oci_auth_runtime_args[@]}" \
   --env CODEXIA_DATA_DIR=/data \
   --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
   --env CODEXIA_DATABASE_USER=codexia \
@@ -116,6 +115,9 @@ if [[ "$ready" != 1 ]]; then
 fi
 
 node scripts/verify-oci-http.mjs "http://127.0.0.1:${port}" "$profile"
+session_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}/api/session")"
+[[ "$session_status" == 401 ]] || { echo "Unauthenticated API session returned HTTP $session_status." >&2; exit 1; }
+"$engine" exec "$oidc_container" node /fixture/fixture.mjs authorize "$OCI_AUTH_WEB_CLIENT" "$oci_owner_subject" >/dev/null
 uid="$("$engine" exec "$container" node -p 'process.getuid()')"
 [[ "$uid" == 1000 ]] || {
   echo "Expected the application to run as UID 1000; got $uid." >&2
@@ -123,7 +125,7 @@ uid="$("$engine" exec "$container" node -p 'process.getuid()')"
 }
 "$engine" exec "$container" node -e "require('node:fs').writeFileSync('/data/.oci-smoke', 'ok'); require('node:fs').unlinkSync('/data/.oci-smoke')"
 
-echo "OCI startup checks passed: production ${profile} profile, HTTP probes, nonroot UID, and writable /data."
+echo "OCI startup checks passed: production ${profile} profile, Better Auth owner session, HTTP probes, nonroot UID, and writable /data."
 if [[ "${engine##*/}" == podman ]]; then
   "$engine" image inspect --format 'Image ID: {{.Id}}; manifest digest: {{.Digest}} ({{.Os}}/{{.Architecture}})' "$image"
 else

@@ -4,53 +4,6 @@ import test from "node:test";
 import type { Persistence, ProjectId } from "@codexia/persistence-contracts";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 
-test("hosted PostgreSQL routes are scoped to the assigned project", async () => {
-  const assignedProjectId = "assigned-project" as ProjectId;
-  const project = { id: assignedProjectId, title: "Assigned", settings: {} };
-  const lookedUp: ProjectId[] = [];
-  const persistence = {
-    async read<T>(work: (reader: unknown) => Promise<T>) {
-      return work({
-        async getProject(projectId: ProjectId) {
-          lookedUp.push(projectId);
-          return projectId === assignedProjectId ? project : undefined;
-        },
-        async listProjects() {
-          assert.fail("hosted project listing must not enumerate the database");
-        },
-      });
-    },
-  } as unknown as Persistence;
-  const base = {
-    persistence,
-    assignedProjectId,
-    requestHeaders: {},
-    body: null,
-    async requireAuthor() { return "hosted-author"; },
-  };
-
-  const projects = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects" });
-  assert.equal(projects?.status, 200);
-  assert.deepEqual(projects?.body, [project]);
-  assert.deepEqual(lookedUp, [assignedProjectId]);
-
-  const page = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=20" });
-  assert.equal(page?.status, 200);
-  assert.deepEqual(page?.body, { projects: [project], nextCursor: null });
-  assert.deepEqual(lookedUp, [assignedProjectId, assignedProjectId]);
-
-  const unassigned = await handlePersistenceRoute({
-    ...base,
-    method: "GET",
-    url: "/api/v1/persistence/projects/another-project",
-  });
-  assert.equal(unassigned?.status, 404);
-  assert.deepEqual(lookedUp, [assignedProjectId, assignedProjectId]);
-
-  const creation = await handlePersistenceRoute({ ...base, method: "POST", url: "/api/v1/persistence/projects" });
-  assert.equal(creation?.status, 403);
-});
-
 test("persistence status reports database health and knowledge lists are bounded", async () => {
   const projectId = "knowledge-project" as ProjectId;
   let requestedLimit = 0;
@@ -147,7 +100,7 @@ test("persistence project page uses the bounded keyset reader and encodes contin
     },
   } as unknown as Persistence;
   const result = await handlePersistenceRoute({
-    persistence, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=1", body: null, requestHeaders: {},
+    persistence, method: "GET", url: "/api/v1/persistence/projects?limit=1", body: null, requestHeaders: {},
     async requireAuthor() { return "author"; },
   });
   assert.equal(result?.status, 200);
@@ -155,7 +108,7 @@ test("persistence project page uses the bounded keyset reader and encodes contin
   assert.deepEqual(firstPage, [projects[0]]);
   assert.ok(cursor, "lookahead must provide an opaque continuation");
   const next = await handlePersistenceRoute({
-    persistence, method: "GET", url: `/api/v1/persistence/projects?page=1&limit=1&cursor=${encodeURIComponent(cursor)}`, body: null, requestHeaders: {},
+    persistence, method: "GET", url: `/api/v1/persistence/projects?limit=1&cursor=${encodeURIComponent(cursor)}`, body: null, requestHeaders: {},
     async requireAuthor() { return "author"; },
   });
   assert.deepEqual(next?.body, { projects: [projects[1]], nextCursor: null });

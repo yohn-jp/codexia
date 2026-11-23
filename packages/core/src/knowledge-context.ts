@@ -1,8 +1,8 @@
 import type { PersistenceReader, ProjectId, Document } from "@codexia/persistence-contracts";
 import { createHash } from "node:crypto";
+import type { KnowledgeProjectionData, KnowledgeProjectionEntry, KnowledgeProjectionEvidence, SnapshotId, SnapshotKnowledgeProjection } from "@codexia/contracts";
+import { canonicalJson } from "./operation-records.js";
 
-/** Read-only snapshot projection. PostgreSQL remains the sole authority. */
-export const KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.json";
 const MAX_PROJECTED_QUOTE_BYTES = 4096;
 const MAX_PROJECTED_QUOTES_TOTAL_BYTES = 256 * 1024;
 const MAX_PROJECTED_ALIASES_PER_NODE = 500;
@@ -20,7 +20,12 @@ function groupBy<T, K>(items: readonly T[], keyOf: (item: T) => K): Map<K, T[]> 
   return groups;
 }
 
-export async function projectKnowledgeContext(reader: PersistenceReader, projectId: ProjectId, documents: readonly Document[], documentMappings: readonly KnowledgeDocumentMapping[] = []) {
+export function makeKnowledgeProjection(snapshot: SnapshotId, data: KnowledgeProjectionData): SnapshotKnowledgeProjection {
+  const revision = createHash("sha256").update(canonicalJson({ projectId: snapshot.projectId, data })).digest("hex");
+  return { ...data, source: { kind: "knowledge-projection", snapshot: { ...snapshot }, revision } };
+}
+
+export async function projectKnowledgeContext(reader: Pick<PersistenceReader, "listKnowledgeNodes" | "readKnowledgeProjectionBatch">, projectId: ProjectId, documents: readonly Document[], documentMappings: readonly KnowledgeDocumentMapping[] = []): Promise<KnowledgeProjectionData> {
   const nodes = await reader.listKnowledgeNodes(projectId, 1000);
   const documentById = new Map(documents.map(document => [document.id, document]));
   const storyIds = new Map<string, number>();
@@ -31,50 +36,35 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
   }
   const mappingByDocument = new Map(documentMappings.map(mapping => [mapping.documentId, mapping]));
   const mappings = documentMappings.map(mapping => ({...mapping,mapping:storyIds.get(mapping.storySceneId) === 1 && documentIds.get(mapping.documentId) === 1 ? "explicit" as const : "ambiguous" as const}));
-  const sourceRevisions = new Map<string, ReturnType<PersistenceReader["getRevision"]>>();
-  const ordered = [...nodes].filter(node => node.deletedAt === null && node.status !== "retired").sort((a,b) => a.id.localeCompare(b.id));
-  const batch = ordered.length > 0 && reader.readKnowledgeProjectionBatch
-    ? await reader.readKnowledgeProjectionBatch(projectId, ordered.map(node => node.id), {
-      aliasesPerNode: MAX_PROJECTED_ALIASES_PER_NODE,
-      relationsPerNode: MAX_PROJECTED_RELATIONS_PER_NODE,
-      mentionsPerNode: 100,
-      assertionsPerAnchor: MAX_PROJECTED_ASSERTIONS_PER_ANCHOR,
-    })
-    : null;
-  const aliasesByNode = batch ? groupBy(batch.aliases, item => item.nodeId) : null;
-  const relationsByNode = batch ? groupBy(batch.relations, item => item.nodeId) : null;
-  const mentionsByNode = batch ? groupBy(batch.mentions, mention => mention.nodeId) : null;
-  const anchorsById = batch ? new Map(batch.anchors.map(anchor => [anchor.id, anchor])) : null;
-  const revisionsByKey = batch ? new Map(batch.revisions.map(revision => [JSON.stringify([revision.documentId, revision.id]), revision])) : null;
-  const assertionEvidenceById = batch ? groupBy(batch.assertionEvidence, item => item.evidenceId) : null;
-  const assertionsById = batch ? new Map(batch.assertions.map(assertion => [assertion.id, assertion])) : null;
-  const entries = [];
+  const ordered = nodes.filter(node => node.deletedAt === null && node.status !== "retired").sort((a,b) => a.id.localeCompare(b.id));
+  if (!ordered.length) return { documentMappings: mappings, entries: [], nodeLimitReached: nodes.length === 1000 };
+  const batch = await reader.readKnowledgeProjectionBatch(projectId, ordered.map(node => node.id), {
+    aliasesPerNode: MAX_PROJECTED_ALIASES_PER_NODE,
+    relationsPerNode: MAX_PROJECTED_RELATIONS_PER_NODE,
+    mentionsPerNode: 100,
+    assertionsPerAnchor: MAX_PROJECTED_ASSERTIONS_PER_ANCHOR,
+  });
+  const aliasesByNode = groupBy(batch.aliases, item => item.nodeId);
+  const relationsByNode = groupBy(batch.relations, item => item.nodeId);
+  const mentionsByNode = groupBy(batch.mentions, mention => mention.nodeId);
+  const anchorsById = new Map(batch.anchors.map(anchor => [anchor.id, anchor]));
+  const revisionsByKey = new Map(batch.revisions.map(revision => [JSON.stringify([revision.documentId, revision.id]), revision]));
+  const assertionEvidenceById = groupBy(batch.assertionEvidence, item => item.evidenceId);
+  const assertionsById = new Map(batch.assertions.map(assertion => [assertion.id, assertion]));
+  const entries: KnowledgeProjectionEntry[] = [];
   let remainingQuoteBytes = MAX_PROJECTED_QUOTES_TOTAL_BYTES;
   for (const node of ordered) {
-    const aliases = (batch
-      ? (aliasesByNode?.get(node.id) ?? []).map(item => item.alias)
-      : [...await reader.listKnowledgeAliases(projectId,node.id,MAX_PROJECTED_ALIASES_PER_NODE)]).sort((a,b)=>a.id.localeCompare(b.id));
-    const relations = (batch
-      ? (relationsByNode?.get(node.id) ?? []).map(item => item.relation)
-      : [...await reader.listKnowledgeRelations(projectId,node.id,MAX_PROJECTED_RELATIONS_PER_NODE)]).sort((a,b)=>a.id.localeCompare(b.id));
-    const mentions = (batch
-      ? mentionsByNode?.get(node.id) ?? []
-      : [...await reader.listNodeMentions(projectId,node.id,100)]).sort((a,b)=>a.evidenceId.localeCompare(b.evidenceId));
-    const evidence = [];
+    const aliases = (aliasesByNode.get(node.id) ?? []).map(item => item.alias).sort((a,b) => a.id.localeCompare(b.id));
+    const relations = (relationsByNode.get(node.id) ?? []).map(item => item.relation).sort((a,b) => a.id.localeCompare(b.id));
+    const mentions = (mentionsByNode.get(node.id) ?? []).sort((a,b) => a.evidenceId.localeCompare(b.evidenceId));
+    const evidence: KnowledgeProjectionEvidence[] = [];
     for (const mention of mentions) {
-      const anchor = batch ? anchorsById?.get(mention.evidenceId) : await reader.getEvidenceAnchor(projectId,mention.evidenceId);
+      const anchor = anchorsById.get(mention.evidenceId);
       if (!anchor) continue;
       const document = documentById.get(anchor.documentId);
       const current = document?.headRevisionId === anchor.revisionId;
       const mapping = mappingByDocument.get(anchor.documentId);
-      const sourceKey=JSON.stringify([anchor.documentId,anchor.revisionId]);
-      let sourceRevisionPromise=sourceRevisions.get(sourceKey);
-      let sourceRevision;
-      if (batch) sourceRevision = revisionsByKey?.get(sourceKey);
-      else {
-        if(!sourceRevisionPromise){sourceRevisionPromise=reader.getRevision(projectId,anchor.documentId,anchor.revisionId);sourceRevisions.set(sourceKey,sourceRevisionPromise);}
-        sourceRevision = await sourceRevisionPromise;
-      }
+      const sourceRevision = revisionsByKey.get(JSON.stringify([anchor.documentId, anchor.revisionId]));
       const rawFrom = anchor.fromUtf16, rawTo = anchor.toUtf16;
       const bounded = Number.isSafeInteger(rawFrom) && Number.isSafeInteger(rawTo) && rawFrom >= 0 && rawTo > rawFrom && rawTo <= (sourceRevision?.markdown.length ?? -1);
       const quote = bounded && sourceRevision ? sourceRevision.markdown.slice(rawFrom,rawTo) : null;
@@ -83,19 +73,17 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
       const quoteAvailable = quoteVerified && quoteBytes <= MAX_PROJECTED_QUOTE_BYTES && quoteBytes <= remainingQuoteBytes;
       if (quoteAvailable) remainingQuoteBytes -= quoteBytes;
       const assertions = [];
-      const assertionLinks = batch
-        ? (assertionEvidenceById?.get(anchor.id) ?? []).map(item => item.link)
-        : await reader.listEvidenceAssertions(projectId,anchor.id,MAX_PROJECTED_ASSERTIONS_PER_ANCHOR);
+      const assertionLinks = (assertionEvidenceById.get(anchor.id) ?? []).map(item => item.link);
       for (const link of assertionLinks) {
-        const assertion = batch ? assertionsById?.get(link.assertionId) : await reader.getAssertion(projectId,link.assertionId);
+        const assertion = assertionsById.get(link.assertionId);
         if (assertion) assertions.push({ assertion, role:link.role });
       }
       assertions.sort((a,b)=>a.assertion.id.localeCompare(b.assertion.id)||a.role.localeCompare(b.role));
-      evidence.push({ mention,anchor,current,stale:!current,sourceDocumentId:anchor.documentId,sourceRevisionId:anchor.revisionId,
+      evidence.push({ mention,anchor,current,
         storySceneId:mapping && storyIds.get(mapping.storySceneId) === 1 && documentIds.get(mapping.documentId) === 1 ? mapping.storySceneId : null,
-        quote:quoteAvailable ? quote : null,quoteAvailable, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions,assertionLimitReached:assertionLinks.length>=MAX_PROJECTED_ASSERTIONS_PER_ANCHOR });
+        quote:quoteAvailable ? quote : null, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions,assertionLimitReached:assertionLinks.length>=MAX_PROJECTED_ASSERTIONS_PER_ANCHOR });
     }
     entries.push({node,aliases,relations,evidence,evidenceLimitReached:mentions.length===100,aliasLimitReached:aliases.length>=MAX_PROJECTED_ALIASES_PER_NODE,relationLimitReached:relations.length>=MAX_PROJECTED_RELATIONS_PER_NODE});
   }
-  return {version:1,projectId,documentMappings:mappings,entries,nodeLimitReached:nodes.length===1000};
+  return {documentMappings:mappings,entries,nodeLimitReached:nodes.length===1000};
 }

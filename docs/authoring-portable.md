@@ -16,7 +16,7 @@ codexia-work/v1は**新しい作品のみ作成**します。既存作品の本�
 
 入力のスキーマ、IDの一意性、親子関係・循環、関連するノード/アンカーの存在、Evidence引用のSHA-256を検証します。旧Revision IDは持ち込まず、インポート先のRevisionへ正しく付け直します。完全に同じJSONの再送は同じ作品を返すため、タイムアウト後の再試行で作品が増殖しません。
 
-Standaloneでは認証済み作者のセッションが必要です。読み取りBearerだけで新規作品を作成することはできません。Hosted runtimeは既存の割当プロジェクトに限定されるため、新規作品のインポートを拒否します。エクスポートは割当済み作品のみ許可します。
+インポートにはBetter Authで認証された作者の権限が必要です。エクスポートはAPIが作者に許可した作品を対象とします。MCPクライアントはこれらのAPIを利用できません。
 
 ## JSON形式
 
@@ -59,7 +59,7 @@ Knowledgeの各要素は、nodesにid/type/name/attributes/status、aliasesにid
 - GET /api/v1/persistence/projects/{projectId}/archive: 作品JSONを取得。
 - POST /api/v1/persistence/import: JSONを送って新規作品を作成。結果はproject/replayed/unresolvedAnchors/omittedRecords。
 
-これらのAPIは、既存の認証、同一オリジン/CSRF、Hostedプロジェクト境界を通過します。作品をインポートする前に、未保存のブラウザーDraftを保護してください。
+APIは認証と作品へのアクセス権限を確認します。ブラウザーのオリジン制限と、Cookieを使う変更操作のCSRF保護が適用されます。作品をインポートする前に、未保存のブラウザーDraftを保護してください。
 
 ## 一度限りの旧データ取り込み
 

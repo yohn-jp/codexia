@@ -1,5 +1,5 @@
-import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type NativeChangeSetReference, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
+import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 import type { AuthorReviewFeedItem } from "./api";
@@ -51,12 +51,30 @@ const contribution: ResponseGuard<UiContribution> = (v): v is UiContribution => 
 const jsonValue = (v: unknown): boolean => v === null || text(v) || typeof v === "number" && Number.isFinite(v) || bool(v) || Array.isArray(v) && v.every(jsonValue) || record(v) && Object.values(v).every(jsonValue);
 const jsonObject = (v: unknown): v is Record<string, unknown> => record(v) && Object.values(v).every(jsonValue);
 const persistenceProject: ResponseGuard<PersistenceProject> = (v): v is PersistenceProject => record(v) && text(v.id) && text(v.title) && jsonObject(v.settings) && integer(v.version) && v.version > 0 && text(v.createdAt) && text(v.updatedAt);
-const nativeOperationTypes = ["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
+const nativeOperationTypes = ["document.create", "document.update", "document.delete", "document.save", "document.restore", "module.record.save", "knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
 const nullablePositiveVersion = (v: unknown): boolean => v === null || integer(v) && v > 0;
+const hierarchyParent = (value: unknown): boolean => record(value) && text(value.documentId) && text(value.lookupId);
+const hierarchyDocument = (value: unknown): boolean => record(value) && text(value.logicalId) && (
+  value.kind === "volume" ||
+  value.kind === "chapter" && hierarchyParent(value.volume) ||
+  value.kind === "scene" && hierarchyParent(value.volume) && hierarchyParent(value.chapter)
+);
+const textChange = (value: unknown): boolean => record(value) && integer(value.fromUtf16) && integer(value.toUtf16) &&
+  value.toUtf16 >= value.fromUtf16 && text(value.insert);
 const nativeOperation: ResponseGuard<ChangeSetOperation> = (v): v is ChangeSetOperation => {
   if (!record(v) || !oneOf(v.type, nativeOperationTypes) || !record(v.command)) return false;
   const c = v.command;
   switch (v.type) {
+    case "document.create": return [c.projectId, c.kind, c.title, c.orderKey, c.markdown, c.authorId, c.idempotencyKey].every(text)
+      && optional(c.documentId, text) && optional(c.parentId, nullableText) && optional(c.appendToEnd, bool)
+      && (v.hierarchy === undefined || hierarchyDocument(v.hierarchy));
+    case "document.update": return text(c.projectId) && text(c.documentId) && integer(c.expectedVersion) && c.expectedVersion > 0
+      && optional(c.parentId, nullableText) && optional(c.title, text) && optional(c.orderKey, text);
+    case "document.delete": return text(c.projectId) && text(c.documentId) && integer(c.expectedVersion) && c.expectedVersion > 0;
+    case "document.save": return [c.projectId, c.documentId, c.baseRevisionId, c.authorId, c.clientId, c.idempotencyKey].every(text)
+      && text(c.resultingSha256) && /^[0-9a-f]{64}$/u.test(c.resultingSha256) && Array.isArray(c.changes) && c.changes.every(textChange);
+    case "document.restore": return [c.projectId, c.documentId, c.baseRevisionId, c.sourceRevisionId, c.authorId, c.idempotencyKey].every(text);
+    case "module.record.save": return [c.projectId, c.moduleId, c.key].every(text) && jsonObject(c.value) && nullablePositiveVersion(c.expectedVersion);
     case "knowledge.node.save": return [c.projectId, c.id, c.type, c.name].every(text) && jsonObject(c.attributes) && oneOf(c.status, ["proposed", "confirmed", "retired"]) && nullablePositiveVersion(c.expectedVersion);
     case "knowledge.alias.save": return [c.projectId, c.id, c.nodeId, c.surface, c.normalized].every(text) && nullableText(c.scope) && oneOf(c.status, ["proposed", "confirmed", "ambiguous", "retired"]);
     case "knowledge.relation.save": return [c.projectId, c.id, c.sourceId, c.targetId, c.type].every(text) && jsonObject(c.attributes) && jsonObject(c.validity) && oneOf(c.status, ["proposed", "confirmed", "rejected", "retired"]) && nullablePositiveVersion(c.expectedVersion);
@@ -98,17 +116,12 @@ const persistenceAnchorView: ResponseGuard<PersistenceAnchorView> = (v): v is Pe
 /** The guards follow the public DTOs; additive fields are retained, not silently stripped. */
 export const responseContracts = {
   empty: (v: unknown): v is void => v === undefined,
-  version: (v: unknown): v is RuntimeVersion => record(v) && [v.name, v.version, v.profile].every(text) && bool(v.hosted) && (v.browserAuth === undefined || v.browserAuth === "cloudflare-access"),
-  loggedIn: (v: unknown): v is { authenticated: true } => record(v) && v.authenticated === true,
-  loggedOut: (v: unknown): v is { authenticated: false } => record(v) && v.authenticated === false,
-  session: (v: unknown): v is Session => record(v) && v.authenticated === true && text(v.authorScope) && (v.permissions === undefined || (Array.isArray(v.permissions) && v.permissions.every(p => oneOf(p, ["read", "write", "maintain", "admin"])))),
+  version: (v: unknown): v is RuntimeVersion => record(v) && [v.name, v.version, v.profile].every(text),
+  session: (v: unknown): v is Session => record(v) && v.authenticated === true && text(v.authorScope),
   tree, treeRead: (v: unknown): v is TreeRead => record(v) && snapshot(v.snapshot) && tree(v.tree),
   scene, sceneRead,
-  moduleSnapshot: (v: unknown): v is EditorSnapshotRead | SnapshotRead => record(v) && snapshot(v.snapshot) && (
-    "document" in v
-      ? v.document === null || record(v.document) && text(v.document.path) && text(v.document.revision) && /^[0-9a-f]{64}$/u.test(v.document.revision)
-      : array(document)(v.files)
-  ),
+  moduleSnapshot: (v: unknown): v is EditorSnapshotRead => record(v) && snapshot(v.snapshot)
+    && (v.document === null || record(v.document) && text(v.document.path) && text(v.document.revision) && /^[0-9a-f]{64}$/u.test(v.document.revision)),
   recentActivity: (v: unknown): v is RecentActivityResponse => record(v) && Array.isArray(v.items) && v.items.every(i => record(i) && text(i.sceneId) && nullableInteger(i.sentenceOffset) && optional(i.pageIndex, nullableInteger) && oneOf(i.deviceType, ["desktop", "mobile"]) && text(i.updatedAt)),
   proposal,
   proposals: (v: unknown): v is { proposals: ProposalStatus[] } => record(v) && array(proposalStatus)(v.proposals),
@@ -128,17 +141,17 @@ export const responseContracts = {
     Array.isArray(v.moduleRecords) && strings(v.omittedRecords),
   portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
     bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
-  persistenceProjects: array(persistenceProject),
   persistenceProjectPage: (v: unknown): v is { projects: PersistenceProject[]; nextCursor: string | null } =>
     record(v) && array(persistenceProject)(v.projects) && (v.nextCursor === null || (text(v.nextCursor) && v.nextCursor.length <= 512)),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),
   nativeChangeSets: (v: unknown): v is { changeSets: ChangeSet[] } => record(v) && array(changeSet)(v.changeSets),
   nativeChangeSet: nativeChangeSetRead,
   nativeChangeSetEnvelope: (v: unknown): v is { changeSet: ChangeSet } => record(v) && changeSet(v.changeSet),
+  nativeChangeSetReferenceEnvelope: (v: unknown): v is { changeSet: NativeChangeSetReference } =>
+    record(v) && record(v.changeSet) && text(v.changeSet.projectId) && text(v.changeSet.id) &&
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(v.changeSet.id),
   nativeChangeSetApplication: changeSetApplication,
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
-  persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } | PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) &&
-    (v.nextCursor === undefined && v.projectVersion === undefined || nullableText(v.nextCursor) && integer(v.projectVersion)),
   persistenceKnowledgePage: (v: unknown): v is PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) && nullableText(v.nextCursor) && integer(v.projectVersion),
   persistenceDocumentEnvelope: (v: unknown): v is { document: PersistenceDocument } => record(v) && persistenceDocument(v.document),
   apply: application,

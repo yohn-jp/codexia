@@ -260,17 +260,17 @@ MiB、ms、同時起動数の上限は対象Hostの実測と故障注入で検�
 
 **自動再試行の対象は冪等なRead/Computeに限定**。提案済みMutationは同一Operation IDとDigestで照合し、承認・適用をPluginが自律的に繰り返さない。
 
-### 7.4 Praetorium Runtime / Quiesceとの連動
+### 7.4 Writerの停止と再起動
 
-Pluginが止まることと、**Codexia Writerを安全に停止できることは別**。Hosted Runtimeの`/api/platform/v1/status`、`quiesce`、`resume`契約（[platform-runtime](../../packages/api/src/platform-runtime.ts)）に従い、Plugin Hostも活動・保存状態に参加する。
+Writerの停止可否を判断する際、Plugin Hostは実行中の処理と保存状態を報告する。
 
 - **Activity/Status:** Plugin Workerの実行中Job、未DrainのRPC、Plugin UIからHostへ受領した未保存Draft、未確定Proposal/Operationを、Host側の観測に反映する。失敗や接続断は`unknown`として扱い、単に「Pluginプロセスがない = safe」と判定しない。
 - **Quiesce:** Hostは新規Plugin編集/書込提案を停止し、進行中UI変更を確定済みBrowser Journalへflushする。Browserが不在でFlushを確認できない場合や、Pluginがクラッシュ中の場合は、元のCodexia/Writer不在証明・PostgreSQL耐久性契約に沿って停止可否を決める。
 - **Shutdown:** Deadline以内に停止しないPluginは当該Sandboxだけterminateする。ただし未保存編集の消失、未確認適用、旧Writerが生存していないかを別条件として確認し、単なるProcess killで`quiesced`を確定しない。
 - **Resume/Replacement:** PluginのActivation EpochとRuntime Epochを更新し、旧Sandboxから遅延到着したResponse/Event/Proposalを無効化する。新Runtime/新Pluginが旧Writerと同時に同じPostgreSQL正本へ書き込まない。
-- **プラットフォームの正本:** [Praetorium](https://github.com/yohn-jp/praetorium)のD1・Operation FenceとCodexiaのPostgreSQL revision/receiptをPlugin独自のローカル状態で置き換えない。Pod Ready/Worker停止をPostgreSQL適用成功証明として扱わない。
+- **適用の確認:** 原稿の適用結果はPostgreSQLのRevisionとReceiptで確認する。
 
-## 8. 外部リポジトリ、配布、Praetorium連携
+## 8. 外部リポジトリと配布
 
 ### 8.1 ソースとArtifactual Identity
 
@@ -280,7 +280,7 @@ independent Git repository
   -> immutable package artifact (manifest, WASM, UI assets, schemas)
   -> Digest + provenance + signature + optional SBOM
   -> operator-approved install/catalog
-  -> Praetorium / Codexia producer composition
+  -> Codexia build composition
   -> exact plugin digest pinned in runtime image/manifest
   -> metadata-only discovery; lazy sandbox execution
 ~~~
@@ -289,7 +289,7 @@ independent Git repository
 - 配布形式の第一候補は**OCI Artifact**（Digest pinning、Producer/Registryと再利用しやすい）。npm配布やWIT SDK bindingも選択できるが、Registry名でなく**承認された内容Digest**を最終識別子とする。
 - Plugin Artifactの`manifest`、WASM、Browser UI、Resourceアセット、API SchemaはBuild時に同一Digestへ束縛。Manifest内容とEntry Pathは署名済みBundle内だけ参照する。
 - **インストール/許可はHost管理**。プロジェクト内のYAMLやMarkdownから任意のPlugin URL/Packageを実行することはない。Projectは「承認済みPlugin IDと設定」だけ指定できる。
-- Hosted Compositionは既存のPraetoriumによるCatalog、Immutable Digest、Admissionと接続する。新たな認可DBや第二のPlugin Marketplace Authorityを設けない。Private/Internal Pluginも同じVersion/Digest/Scope契約を使う。
+- Codexiaのビルドには、Hostが許可したPluginをDigestで固定して組み込む。Private/Internal Pluginも同じVersion/Digest/Scope契約を使う。
 - Runtimeの`npm install`や任意コードダウンロード、`latest`タグ追従は禁止。アップグレードはHost Policyで承認したImage/Compositionの再配布とModule Recovery検証を必要とする。
 - SDKテストハーネスは外部リポジトリ単独で実行可能。**Coreのprivate importsを使うPluginはSDK準拠と認めない。**
 

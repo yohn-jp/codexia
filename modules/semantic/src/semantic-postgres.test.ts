@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
-import type { ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
+import type { ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
 import type { DocumentId } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { readCanonicalSnapshotEntities } from "@codexia/module-nlp";
+import { createStoryActions } from "@codexia/module-story";
 import { CoreStore } from "../../../packages/core/src/index.js";
 import { createSemanticActions } from "./actions.js";
 import {
@@ -29,21 +30,17 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
 }, async () => {
   const project = await core!.createProject({ title: "Semantic Snapshot " + randomUUID() });
 
-  const createHierarchy = async (input: Parameters<CoreStore["buildCreateHierarchyOperation"]>[1]) => {
-    const built = await core!.buildCreateHierarchyOperation(project.id, input);
-    const proposal: ChangeProposal = {
-      id: randomUUID(),
-      snapshot: built.snapshot,
-      source: "author",
-      operations: [built.operation],
-    };
-    await core!.propose(project.id, proposal);
-    await core!.approve(project.id, {
-      proposalId: proposal.id,
-      operationIds: [built.operation.id],
-      authorScope: "owner",
+  const createHierarchy = async (input: Parameters<CoreStore["proposeHierarchyCreate"]>[1]) => {
+    const { snapshot } = await core!.observe(project.id);
+    const { changeSet } = await core!.proposeHierarchyCreate(project.id, input, {
+      projectVersion: snapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID(),
     });
-    await core!.apply(project.id, built.operation);
+    const approved = await persistence!.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "owner",
+    }));
+    await persistence!.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: approved.version,
+    }));
   };
 
   await createHierarchy({ kind: "volume", id: "legacy-volume", title: "Legacy volume" });
@@ -89,7 +86,20 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   });
 
   const reader = await core!.reader(project.id);
-  const canonicalEntities = await readCanonicalSnapshotEntities(reader, new AbortController().signal);
+  const nativeStoryDocuments = reader.nativeStoryDocuments;
+  assert.ok(nativeStoryDocuments);
+  assert.equal(nativeStoryDocuments.length, 4, "only the volume, chapter and two scenes have typed hierarchy rows");
+  const hierarchyPaths = new Set(nativeStoryDocuments.map((document) => document.metadataPath));
+  const canonicalEntities = await readCanonicalSnapshotEntities({
+    snapshot: reader.snapshot,
+    nativeStoryDocuments,
+    list: (prefix) => reader.list(prefix),
+    async read(path, encoding) {
+      assert.ok(!hierarchyPaths.has(path), `hierarchy metadata already came from the pinned projection: ${path}`);
+      return reader.read(path, encoding);
+    },
+  }, new AbortController().signal);
+  assert.equal(canonicalEntities.find((entity) => entity.id === nativeDocumentId)?.type, "scene");
   assert.equal(canonicalEntities.some((entity) => entity.raw.id === noteDocumentId), false,
     "a note projected under a scene-shaped path must not enter the canonical scene/entity set");
   const legacyEntityId = "ms-legacy-volume-legacy-chapter-legacy-scene";
@@ -173,4 +183,92 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   assert.ok(nativePassage && /Quartz native passage/.test(nativePassage.text));
   assert.equal(nativePassage.type, "scene");
   assert.equal(indexedPassages.some((passage) => passage.filePath === notePath || /private note/.test(passage.text)), false);
+});
+
+test("Story edits only current characters and NLP excludes preserved characters", {
+  skip: !connectionString,
+}, async () => {
+  const project = await core!.createProject({ title: "Story archive isolation " + randomUUID() });
+  const currentPath = "bible/characters/char-collision/profile.yaml";
+  const separatePath = "bible/characters/char-separate/profile.yaml";
+  const archiveRoot = "meta/scriptorium/modules/story/legacy/files/bible/characters/";
+  const archivedCollisionPath = archiveRoot + "char-collision/profile.yaml";
+  const archiveOnlyPath = archiveRoot + "char-archive-only/profile.yaml";
+  const files = new Map([
+    [currentPath, "id: char-collision\ntype: character\nname: Current character\n"],
+    [separatePath, "id: char-separate\ntype: character\nname: Separate character\n"],
+    [archivedCollisionPath, "id: char-collision\ntype: character\nname: Preserved old character\n"],
+    [archiveOnlyPath, "id: char-archive-only\ntype: character\nname: Preserved only character\n"],
+  ]);
+  const moduleId = "core.artifacts";
+  await persistence!.transaction(async (transaction) => {
+    for (const [key, content] of files) {
+      await transaction.saveModuleRecord({
+        projectId: project.id, moduleId, key, value: { content, encoding: "utf8" }, expectedVersion: null,
+      });
+    }
+  });
+
+  const signal = new AbortController().signal;
+  const actions = createStoryActions({
+    cacheDirectory: "/unused/story-archive-test",
+    signal,
+    async acquireCapability() { throw new Error("Story character actions require no capability"); },
+    async createWorkerService() { throw new Error("Story character actions require no worker"); },
+  });
+  async function invoke(actionId: string, input: unknown) {
+    const reader = await core!.reader(project.id);
+    const context: ModuleActionContext = {
+      projectId: project.id,
+      reader,
+      signal,
+      async invoke() { throw new Error("Unexpected delegated action"); },
+      async linkedReader() { throw new Error("Unexpected linked reader"); },
+      async listActions() { return []; },
+      async runJob() { throw new Error("Unexpected job"); },
+      async propose(operations) {
+        return core!.propose(project.id, { id: randomUUID(), snapshot: reader.snapshot, source: "module", operations });
+      },
+    };
+    return actions.find((action) => action.id === actionId)!.invoke(input, context);
+  }
+  const artifact = (path: string) => persistence!.read((reader) => reader.getModuleRecord(project.id, moduleId, path));
+  const archivedCollision = await artifact(archivedCollisionPath);
+  const archiveOnly = await artifact(archiveOnlyPath);
+  assert.ok(archivedCollision && archiveOnly);
+
+  for (const [id, path, name] of [
+    ["char-collision", currentPath, "Edited current character"],
+    ["char-separate", separatePath, "Edited separate character"],
+  ] as const) {
+    const prior = await invoke("story.entities.get", { id });
+    assert.ok(prior.ok && prior.data);
+    const { revision } = prior.data as { revision: string };
+    const proposed = await invoke("story.entities.update", { id, patch: { name }, base_revision: revision });
+    assert.ok(proposed.ok && proposed.proposals?.length === 1);
+    const proposal = proposed.proposals[0]!;
+    const operation = proposal.operations[0]!;
+    await core!.approve(project.id, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "owner" });
+    await core!.apply(project.id, operation);
+    assert.deepEqual(operation.writes.map((write) => write.path), [path]);
+    assert.match(String((await artifact(path))?.value.content), new RegExp(`^name: ${name}$`, "m"));
+    const updated = await invoke("story.entities.get", { id });
+    assert.ok(updated.ok);
+    assert.equal((updated.data as { name: string }).name, name);
+  }
+
+  const missing = await invoke("story.entities.get", { id: "char-archive-only" });
+  assert.ok(missing.ok);
+  assert.equal(missing.data, null);
+  const blocked = await invoke("story.entities.update", { id: "char-archive-only", patch: { name: "Must not be written" } });
+  assert.ok(!blocked.ok);
+  assert.match(blocked.error.message, /Entity not found/);
+  assert.deepEqual(await artifact(archivedCollisionPath), archivedCollision);
+  assert.deepEqual(await artifact(archiveOnlyPath), archiveOnly);
+
+  const entities = await readCanonicalSnapshotEntities(await core!.reader(project.id), signal);
+  assert.deepEqual(entities.filter((entity) => entity.type === "character").map(({ id, name, filePath }) => ({ id, name, filePath })), [
+    { id: "char-collision", name: "Edited current character", filePath: currentPath },
+    { id: "char-separate", name: "Edited separate character", filePath: separatePath },
+  ]);
 });

@@ -53,20 +53,12 @@ function fixture(files = ['package.json']) {
     .map(profile => [profile, add('ci-profile-build-' + profile, null)]));
   const reports = new Map(plan.groups.map(group => [group, { group, sha: head, planDigest: planDigest(plan),
     results: VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task)).map(task => ({ task, status: 'passed' })) }]));
-  const evidence = new Map([...reports].map(([group, report]) => [group, add('ci-evidence-' + group, report)]));
-  const native = evidence.get('hosted-native-catalog');
+  for (const [group, report] of reports) add('ci-evidence-' + group, report);
   for (const [group, report] of reports) {
     const profile = requiredBuildProfile(group);
     if (profile) {
       report.profileArtifact = { profile, sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id),
         producerJob: 'build-' + profile, producerAttempt: 1, artifactId: profileArtifacts[profile].id, artifactDigest: digest };
-    }
-    if (group === 'hosted-native-catalog') {
-      report.nativeProducer = { identity: { sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id), producerJob: group, producerAttempt: 1 },
-        reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
-    } else if (group.startsWith('hosted-native-')) {
-      report.nativeArtifact = { sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id), producerJob: 'hosted-native-catalog',
-        producerAttempt: 1, artifactId: native.id, artifactDigest: digest, reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
     }
   }
   const state = { pr, prRun, currentRun, jobs, artifacts, contents, reports, runs: [prRun], mergedPulls: [pr] };
@@ -99,6 +91,24 @@ test('same-tree certification returns the exact plan and reports it verified alo
   assert.equal(receipt.evidence.length, plan.groups.length);
   assert.equal(receipt.prNumber, 7);
   assert.equal(receipt.tree, tree);
+});
+
+test('compact main proof accepts a full PR plan in the current reuse format and rejects its retired encoding', async () => {
+  const { args, plan, state } = fixture();
+  const artifact = state.artifacts.find(item => item.name === 'ci-plan');
+  const coverage = { task: 'coverage', sourceSha: base, proofSourceSha: base, planDigest: '1'.repeat(64),
+    workflowRunId: 10, workflowAttempt: 1, workflowId: workflow_id, repositoryId: repo.id, jobId: 40, workflowJob: 'types',
+    artifactId: 50, artifactName: 'ci-evidence-types-tests', artifactDigest: digest,
+    inputClosure: Object.fromEntries(['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']
+      .map(input => [input, '2'.repeat(64)])),
+    runtime: { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
+      cwd: '/home/runner/work/codexia/codexia', imageOS: null, imageVersion: null },
+    certification: { sourceSha: base, workflowRunId: 10, workflowAttempt: 1, workflowId: workflow_id, repositoryId: repo.id,
+      jobId: 41, step: 'Certify every required exact-source matrix element' } };
+  state.contents.set(artifact.id, { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v2', coverage, omitted: {} } });
+  assert.equal((await verifyReusableMainProof(args)).planDigest, planDigest(plan));
+  state.contents.set(artifact.id, { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage } });
+  await assert.rejects(verifyReusableMainProof(args), /Unknown task input reuse format/);
 });
 
 test('compact main evidence resolves from an exact PR checkout without relaxing main identity', async () => {
@@ -228,7 +238,7 @@ test('selected producer and Full-model evidence must still be valid for full pro
 });
 
 test('compact certification cannot proceed on a failed plan or executed heavy family', () => {
-  const needs = Object.fromEntries(['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].map(name =>
+  const needs = Object.fromEntries(['plan', 'unit', 'types', 'build', 'oci', 'browser'].map(name =>
     [name, { result: name === 'plan' ? 'success' : 'skipped' }]));
   assert.doesNotThrow(() => assertCompactNeeds(needs));
   assert.throws(() => assertCompactNeeds({ ...needs, plan: { result: 'failure' } }));

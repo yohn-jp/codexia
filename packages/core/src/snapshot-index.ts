@@ -1,14 +1,21 @@
 import YAML from "yaml";
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
-import type { Document } from "@codexia/persistence-contracts";
+import type { Document, DocumentRevisionKey } from "@codexia/persistence-contracts";
 
-export interface SnapshotIndexFile {
+export interface InlineSnapshotFile {
   content: string;
   encoding: "utf8" | "base64";
   revision: string;
   documentId?: string;
   metadata?: boolean;
 }
+
+export interface SnapshotRevisionFile extends DocumentRevisionKey {
+  revision: string;
+  metadata?: false;
+}
+
+export type SnapshotIndexFile = InlineSnapshotFile | SnapshotRevisionFile;
 
 export interface SnapshotDocumentPaths {
   bodyPath?: string;
@@ -25,7 +32,7 @@ export interface SnapshotIndex {
   volumes: Document[];
   chaptersByVolumeId: Map<string, Document[]>;
   scenesByChapterId: Map<string, Document[]>;
-  sceneCharacterCountsByDocumentId: Map<string, number>;
+  writingCharacterCountsByDocumentId: Map<string, number>;
 }
 
 const WHITESPACE = /\s/u;
@@ -34,9 +41,9 @@ export function manuscriptBody(content: string): string {
   return splitManuscriptMarkdown(content).body;
 }
 
-function countNonWhitespaceCodePoints(content: string): number {
+export function manuscriptCharacterCount(content: string): number {
   let count = 0;
-  for (const character of content) {
+  for (const character of manuscriptBody(content)) {
     if (!WHITESPACE.test(character)) count++;
   }
   return count;
@@ -46,6 +53,7 @@ function countNonWhitespaceCodePoints(content: string): number {
 export function createSnapshotIndex(
   documents: readonly Document[],
   files: Readonly<Record<string, SnapshotIndexFile>>,
+  logicalDocumentIdsWithoutFiles?: Readonly<Record<string, string>>,
 ): SnapshotIndex {
   const pathsByDocumentId = new Map<string, SnapshotDocumentPaths>();
   for (const [path, file] of Object.entries(files)) {
@@ -67,13 +75,13 @@ export function createSnapshotIndex(
   const volumes: Document[] = [];
   const chaptersByVolumeId = new Map<string, Document[]>();
   const scenesByChapterId = new Map<string, Document[]>();
-  const sceneCharacterCountsByDocumentId = new Map<string, number>();
 
   for (const document of documents) {
     documentsById.set(document.id, document);
     const metadataPath = pathsByDocumentId.get(document.id)?.metadataPath;
-    const metadata = metadataPath ? YAML.parse(files[metadataPath]!.content) : null;
-    const logicalId = typeof metadata?.id === "string" ? metadata.id : document.id;
+    const metadataFile = metadataPath ? files[metadataPath] : undefined;
+    const metadata = metadataFile && "content" in metadataFile ? YAML.parse(metadataFile.content) : null;
+    const logicalId = typeof metadata?.id === "string" ? metadata.id : logicalDocumentIdsWithoutFiles?.[document.id] ?? document.id;
     logicalIdByDocumentId.set(document.id, logicalId);
     logicalDocumentIds.add(logicalId);
     if (!firstDocumentByLookupId.has(document.id)) firstDocumentByLookupId.set(document.id, document);
@@ -95,11 +103,6 @@ export function createSnapshotIndex(
         scenesByChapterId.set(document.parentId, scenes);
       }
     }
-    // A scene's logical ID may resolve to an earlier non-scene document.
-    // Preserve the original first-match statistic for every document kind.
-    const bodyPath = pathsByDocumentId.get(document.id)?.bodyPath;
-    const bodyContent = bodyPath ? files[bodyPath]!.content : "";
-    sceneCharacterCountsByDocumentId.set(document.id, countNonWhitespaceCodePoints(manuscriptBody(bodyContent)));
   }
 
   return {
@@ -112,7 +115,7 @@ export function createSnapshotIndex(
     volumes,
     chaptersByVolumeId,
     scenesByChapterId,
-    sceneCharacterCountsByDocumentId,
+    writingCharacterCountsByDocumentId: new Map(),
   };
 }
 

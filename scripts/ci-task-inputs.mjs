@@ -36,8 +36,6 @@ export function taskWorkflowJob(task) {
   if (group.startsWith('unit-')) return 'unit';
   if (group.startsWith('types-')) return 'types';
   if (group.startsWith('browser-')) return 'browser';
-  if (group === 'hosted-native-catalog') return 'hosted_catalog';
-  if (group.startsWith('hosted-native-')) return 'hosted';
   if (group.startsWith('build-')) return 'build';
   if (group.startsWith('oci-')) return 'oci';
   throw new Error(`No workflow job identity for ${task}`);
@@ -54,11 +52,6 @@ function taskOverrides(task) {
       CODEXIA_E2E_DATABASE_URL: '<disposable-postgres-database-url>', CODEXIA_E2E_PORT: '<isolated-port>',
       CODEXIA_E2E_STATE_DIR: '<isolated-state-dir>', CODEXIA_E2E_OUTPUT_DIR: path.resolve('tests/e2e/test-results', task),
       CODEXIA_E2E_PROJECT_TITLE: '<disposable-fixture-title>', CODEXIA_CI_REPORT_DIR: '<task-report-dir>' };
-  }
-  if (task.startsWith('hosted-native-')) {
-    const selection = task.slice('hosted-native-'.length);
-    if (selection === 'catalog') return { CODEXIA_NATIVE_REPORT_PATH: '<native-report-path>' };
-    return { CODEXIA_NATIVE_REPORT_PATH: '<native-report-path>', CODEXIA_NATIVE_PRODUCER_REPORT: '<native-producer-report-path>' };
   }
   return {};
 }
@@ -78,13 +71,6 @@ export function taskInvocation(task, executable = process.execPath) {
   if (task.startsWith('browser-')) {
     const [, profile, ...suite] = task.split('-');
     return { executable, arguments: ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'], environmentKeys };
-  }
-  if (task.startsWith('hosted-native-')) {
-    const selection = task.slice('hosted-native-'.length);
-    const invocations = [];
-    if (selection === 'catalog') invocations.push({ executable: 'pnpm', arguments: ['--filter', '@codexia/module-*...', 'build'], environmentKeys: [] });
-    invocations.push({ executable, arguments: ['scripts/verify-hosted-native.mjs', '--selection', selection], environmentKeys });
-    return invocations;
   }
   throw new Error(`No canonical invocation for ${task}`);
 }
@@ -115,7 +101,6 @@ function taskProducerRecipe(task) {
   const profile = requiredBuildProfile(group);
   if (profile) prerequisites.push(`build-${profile}`);
   if (task === 'audit-core') prerequisites.push('build-core');
-  if (group.startsWith('hosted-native-') && group !== 'hosted-native-catalog') prerequisites.push('hosted-native-catalog');
   if (task.startsWith('unit-') || task.startsWith('typecheck-') || task.startsWith('test-types-') || task === 'safety') {
     prerequisites.push('workspace-build-prerequisites');
   }

@@ -37,7 +37,6 @@ export async function createModule(moduleContext: ModuleContext): Promise<Module
 }
 
 export { createAssistantActions, createAssistantQaStreamHttpContribution, createRewriteStreamHttpContribution } from "./actions.js";
-export { createAssistantMigrationProducer } from "./migration.js";
 export {
   applyAssistantSettingsPatch,
   ASSISTANT_FEATURE_IDS,

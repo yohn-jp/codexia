@@ -174,6 +174,45 @@ assert_restore_resource_absent(){
   podman "$kind" exists "$resource" || status=$?
   [[ "$status" == 1 ]] || die 'Isolated restore resource name is already in use or cannot be inspected'
 }
+rehearse_restore_maintenance(){
+  local candidate="$1" database="$2" history_volume="$3" status=0
+  local -a run=(podman run --rm --pull=never --read-only --cap-drop all --security-opt no-new-privileges --entrypoint node)
+  [[ "$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$database")" == none ]] || die 'Restored database must be isolated from all networks'
+  "${run[@]}" --network none "$candidate" --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const identity = JSON.parse(readFileSync("/app/update-identity.json", "utf8"));
+    if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full") process.exit(1);
+  ' || die 'Maintenance rehearsal requires the reviewed Full backend image loaded locally'
+
+  podman exec -i "$database" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d codexia <<'SQL'
+CREATE ROLE codexia_preflight LOGIN NOINHERIT;
+ALTER ROLE codexia_preflight SET default_transaction_read_only = on;
+ALTER ROLE codexia LOGIN;
+GRANT USAGE ON SCHEMA public TO codexia_preflight, codexia;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO codexia_preflight;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO codexia;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO codexia;
+SQL
+
+  local maintenance=/app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js
+  local reader=postgres://codexia_preflight@127.0.0.1:5432/codexia
+  local writer=postgres://codexia@127.0.0.1:5432/codexia
+  # The database has only loopback. The candidate joins that disposable network
+  # namespace without mounts, port publication, or a caller-supplied endpoint.
+  local -a database_run=("${run[@]}" --network "container:$database")
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || status=$?
+  [[ "$status" == 0 || "$status" == 2 ]] || die 'Isolated maintenance pre-check failed'
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$writer" "$candidate" "$maintenance" --apply >/dev/null || die 'Isolated maintenance apply failed'
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || die 'Isolated maintenance still required after apply'
+
+  local history_maintenance=/app/node_modules/@codexia/api/dist/maintain-job-history.js
+  local -a history_run=("${run[@]}" --network none --user 1000:1000 --env CODEXIA_USAGE_DIR=/history)
+  status=0
+  "${history_run[@]}" --volume "$history_volume:/history:ro,nocopy" "$candidate" "$history_maintenance" --check >/dev/null || status=$?
+  [[ "$status" == 0 || "$status" == 2 ]] || die 'Isolated job-history pre-check failed'
+  "${history_run[@]}" --volume "$history_volume:/history:rw,nocopy" "$candidate" "$history_maintenance" --apply >/dev/null || die 'Isolated job-history apply failed'
+  "${history_run[@]}" --volume "$history_volume:/history:ro,nocopy" "$candidate" "$history_maintenance" --check >/dev/null || die 'Isolated job-history maintenance still required after apply'
+}
 case "${1:-}" in
   backup-locked)
     [[ $# == 8 ]] || die 'Usage: backup-locked /absolute/backup/directory age1-recipient --approved --lock-file /absolute/lock --lock-fd fd'
@@ -182,7 +221,12 @@ case "${1:-}" in
     backup_artifact "$2" "$3"
     ;;
   drill)
-    [[ $# == 4 && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved'
+    [[ ( $# == 4 || $# == 6 ) && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved [--candidate-full-image IMAGE@sha256:DIGEST]'
+    candidate=
+    if [[ $# == 6 ]]; then
+      [[ "$5" == --candidate-full-image && "$6" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || die 'Use a digest-pinned reviewed Full backend image'
+      candidate="$6"
+    fi
     backup_directory "$2" read
     identity_mode="$(stat -Lc '%a' -- "$3")"
     identity_owner="$(stat -Lc '%u' -- "$3")"
@@ -280,11 +324,13 @@ case "${1:-}" in
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
     [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
+    if [[ -n "$candidate" ]]; then rehearse_restore_maintenance "$candidate" "$db" "$history"; fi
     cleanup_restore_resources
     trap - EXIT
     [[ "$(validate_artifact "$dir")" == "$artifact_hash" ]] || die 'Backup artifact changed during the restore drill'
     printf 'Isolated restore verified: database and history fingerprints match\n'
     printf 'Verified checksum manifest sha256: %s\n' "$artifact_hash"
+    if [[ -n "$candidate" ]]; then printf 'Isolated maintenance rehearsal verified: %s\n' "$candidate"; fi
     ;;
   *) die 'Use backup-locked or the explicitly approved drill';;
 esac

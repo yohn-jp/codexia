@@ -38,5 +38,4 @@ export { buildSemanticPassages } from "./passages.js";
 export { searchSnapshotLexically, combineHybridScores } from "./search.js";
 export { clusterSimilarTerms, shouldClusterByString } from "./termClustering.js";
 export { collectMentionGroups, detectSourceRuleContradictions, mergeContradictionCandidates } from "./contradictions.js";
-export { createSemanticMigrationProducer } from "./migration.js";
 export * from "./contracts.js";

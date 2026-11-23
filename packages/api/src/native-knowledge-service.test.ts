@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
+import type { ModuleActionContext } from "@codexia/contracts";
+import { CoreStore } from "@codexia/core";
 import type { ChangeSetOperation, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
+import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
 import {
   NativeKnowledgeServiceError, applyNativeChangeSet, approveNativeChangeSet, getNativeChangeSet,
   proposeNativeKnowledgeChange, readNativeKnowledge, rejectNativeChangeSet,
@@ -21,6 +24,68 @@ type NodeOperation = Extract<ChangeSetOperation, { type: "knowledge.node.save" }
 function nodeOperation(projectId: ProjectId, name: string, id = randomUUID() as KnowledgeNodeId): NodeOperation {
   return { type: "knowledge.node.save", command: { projectId, id, type: "person", name, attributes: {}, status: "proposed", expectedVersion: null } };
 }
+
+test("only author review reads include private Publishing ChangeSets and receipts", async () => {
+  const p = await project("private-publishing-review");
+  const ordinary = await proposeNativeKnowledgeChange({
+    persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer",
+    idempotencyKey: "ordinary", operations: [nodeOperation(p.id, "Visible character")],
+  });
+  const share = {
+    version: 1, grantVersion: 1, revocationVersion: 0, id: "private-review-grant",
+    label: "Private proofreading", tokenHash: createHash("sha256").update("test share descriptor").digest("hex"),
+    scope: { kind: "chapter", id: "proofreading-chapter" }, createdAt: "2026-04-01T10:00:00.000Z", expiresAt: "2026-04-02T10:00:00.000Z",
+  };
+  const identity = JSON.stringify(["publishing", "share-grants"]);
+  const privateReview = await persistence.transaction(tx => tx.createChangeSet({
+    projectId: p.id, authorId: "reviewer", idempotencyKey: "publishing-share",
+    operations: [{ type: "module.record.save", command: { projectId: p.id, moduleId: "publishing", key: "share-grants", value: { version: 1, grants: [share] }, expectedVersion: null } }],
+    readSet: [{ resource: "module_record", id: identity, expectedVersion: null }],
+    writeSet: [{ resource: "module_record", id: identity }],
+    provenance: { source: "publishing.native", actorId: "reviewer", details: { projectVersion: p.version } },
+  }));
+  const approved = await approveNativeChangeSet(persistence, p.id, privateReview.changeSet.id, 1, "reviewer");
+  await applyNativeChangeSet(persistence, p.id, approved.id, approved.version);
+
+  const baseUrl = `/api/v1/persistence/projects/${p.id}/changesets`;
+  const route = (url: string, canReviewPrivateChangeSets: boolean) => {
+    const request = { persistence, url, body: null, requestHeaders: {}, canReviewPrivateChangeSets,
+      async requireAuthor() { assert.fail("GET must use the host's verified review permission"); } };
+    return handlePersistenceRoute({ ...request, method: "GET" });
+  };
+  const externalList = await route(`${baseUrl}?limit=1`, false);
+  assert.equal(externalList?.status, 200);
+  assert.deepEqual((externalList.body as { changeSets: Array<{ id: string }> }).changeSets.map(set => set.id), [ordinary.changeSet.id]);
+  assert.equal((await route(`${baseUrl}/${approved.id}`, false))?.status, 404);
+  assert.equal((await route(`${baseUrl}/${ordinary.changeSet.id}`, false))?.status, 200);
+
+  const authorList = await route(`${baseUrl}?limit=1`, true);
+  assert.equal(authorList?.status, 200);
+  assert.deepEqual((authorList.body as { changeSets: Array<{ id: string }> }).changeSets.map(set => set.id), [approved.id]);
+  const authorDetail = await route(`${baseUrl}/${approved.id}`, true);
+  assert.equal(authorDetail?.status, 200);
+  assert.match(JSON.stringify((authorDetail.body as { receipt: unknown }).receipt), /Private proofreading/);
+
+  const port = { persistence, projectId: p.id, actorId: "reviewer", canReviewPrivateChangeSets: true, authorizeProposal: async () => {} };
+  const actions = createNativeKnowledgeActions({ ...port, origin: "external-agent" });
+  const unusedAccess = async () => assert.fail("review reads do not use other module capabilities");
+  const context: ModuleActionContext = {
+    projectId: p.id, reader: await new CoreStore({ persistence }).reader(p.id), signal: new AbortController().signal,
+    invoke: unusedAccess, listActions: unusedAccess, linkedReader: unusedAccess, propose: unusedAccess, runJob: unusedAccess,
+  };
+  const relevant = actions.find(action => action.id === "core.changesets.list")!;
+  const externalActionList = await relevant.invoke({ limit: 1 }, context);
+  assert.ok(externalActionList.ok);
+  assert.deepEqual((externalActionList.data as { changeSets: Array<{ id: string }> }).changeSets.map(set => set.id), [ordinary.changeSet.id]);
+  const get = actions.find(action => action.id === "core.changeset.get")!;
+  const externalActionDetail = await get.invoke({ changeSetId: approved.id }, context);
+  assert.ok(externalActionDetail.ok);
+  assert.equal(externalActionDetail.data, null);
+  const authorGet = createNativeKnowledgeActions({ ...port, origin: "author" }).find(action => action.id === "core.changeset.get")!;
+  const authorActionDetail = await authorGet.invoke({ changeSetId: approved.id }, context);
+  assert.ok(authorActionDetail.ok);
+  assert.match(JSON.stringify((authorActionDetail.data as { receipt: unknown }).receipt), /Private proofreading/);
+});
 
 test("native proposals stay noncanonical until approval, apply atomically, and retain durable receipts", async () => {
   const p = await project("native-proposal");

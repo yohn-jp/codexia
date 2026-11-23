@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { PUBLISHING_CHANGESET_SOURCE } from "@codexia/persistence-contracts";
 import type {
   ActorId, AssertionId, ChangeSet, ChangeSetApplicationResult, ChangeSetId, ChangeSetOperation,
   ChangeSetReadSetEntry, ChangeSetResource, ChangeSetWriteSetEntry, CreateChangeSetCommand,
@@ -212,15 +213,17 @@ export async function proposeNativeKnowledgeChange(input: ProposeNativeKnowledge
   return input.persistence.transaction(transaction => transaction.createChangeSet(command));
 }
 
-export async function getNativeChangeSet(persistence: Persistence, projectId: ProjectId, changeSetId: ChangeSetId): Promise<{ changeSet: ChangeSet; receipt: ChangeSetApplicationResult | undefined } | undefined> {
+export async function getNativeChangeSet(persistence: Persistence, projectId: ProjectId, changeSetId: ChangeSetId, canReviewPrivateChangeSets = false): Promise<{ changeSet: ChangeSet; receipt: ChangeSetApplicationResult | undefined } | undefined> {
   return persistence.read(async reader => {
     const changeSet = await reader.getChangeSet(projectId, changeSetId);
-    return changeSet ? { changeSet, receipt: await reader.getChangeSetReceipt(projectId, changeSetId) } : undefined;
+    if (!changeSet || (!canReviewPrivateChangeSets && changeSet.provenance.source === PUBLISHING_CHANGESET_SOURCE)) return undefined;
+    return { changeSet, receipt: await reader.getChangeSetReceipt(projectId, changeSetId) };
   });
 }
 
-export async function listNativeChangeSets(persistence: Persistence, projectId: ProjectId, limit = 50): Promise<readonly ChangeSet[]> {
-  return persistence.read(reader => reader.listChangeSets(projectId, limit));
+export async function listNativeChangeSets(persistence: Persistence, projectId: ProjectId, limit = 50, canReviewPrivateChangeSets = false): Promise<readonly ChangeSet[]> {
+  const options = canReviewPrivateChangeSets ? undefined : { excludeSources: [PUBLISHING_CHANGESET_SOURCE] };
+  return persistence.read(reader => reader.listChangeSets(projectId, limit, options));
 }
 
 export async function approveNativeChangeSet(persistence: Persistence, projectId: ProjectId, changeSetId: ChangeSetId, expectedVersion: number, actorId: ActorId): Promise<ChangeSet> {

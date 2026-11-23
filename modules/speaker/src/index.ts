@@ -44,7 +44,6 @@ export * from "./algorithms/speakerReranker.js";
 export * from "./algorithms/speakerRuleStats.js";
 export * from "./algorithms/speakerCorrectionLog.js";
 export * from "./algorithms/voice/index.js";
-export { createSpeakerMigrationProducer } from "./migration.js";
 export { runSpeakerPipeline } from "./algorithms/pipeline.js";
 
 const manifest: ModuleManifest = {

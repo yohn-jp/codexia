@@ -65,6 +65,7 @@ on:
       - scripts/component-release-record.mjs
       - scripts/push-app-lifecycle*.mjs
       - scripts/push-auth-lifecycle-oidc.mjs
+      - scripts/oci-better-auth-fixture.sh
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]

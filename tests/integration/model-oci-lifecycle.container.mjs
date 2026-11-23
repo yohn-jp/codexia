@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -6,25 +7,33 @@ import { findPackageJSON } from "node:module";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { seedModelFixture } from "./model-postgres-fixture.mjs";
 
 const OUTPUT_DIRECTORY = "/p13-output";
-const API_ORIGIN = "http://127.0.0.1:3000";
+const LOCAL_API_ORIGIN = "http://127.0.0.1:3000";
+const API_ORIGIN = new URL(process.env.CODEXIA_PUBLIC_ORIGIN).origin;
 const PROJECT_ID = process.env.P13_PROJECT_ID;
-const AUTH_TOKEN = process.env.CODEXIA_AUTH_TOKEN;
+const OWNER_SUBJECT = process.env.CODEXIA_OAUTH_OWNER_SUBJECT;
+const WEB_CLIENT_ID = process.env.P13_OAUTH_WEB_CLIENT;
+const execFile = promisify(execFileCallback);
 const MODEL_IDS = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
 };
 const EXPECTED_MODULES = ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp", "search"];
 const SETTINGS_PATHS = [
-  "meta/scriptorium/modules/nlp/feature-settings.json",
   "meta/scriptorium/modules/semantic/settings.json",
   "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
 ];
 
 assert.ok(PROJECT_ID && /^[0-9a-f-]{36}$/iu.test(PROJECT_ID), "project fixture ID is required");
-assert.ok(AUTH_TOKEN && AUTH_TOKEN.length >= 32, "API auth token is required");
+assert.ok(OWNER_SUBJECT && WEB_CLIENT_ID, "registered OAuth owner and web client are required");
+
+let failureStage = "startup";
+const reportedFailureCodes = new Set([
+  "ENOENT", "EACCES", "ERR_ASSERTION", "project_settings_reproposal_required", "snapshot_unavailable",
+]);
 
 function waitGate() {
   let resolve;
@@ -163,7 +172,7 @@ function createSampler(runtime, workerEntries) {
     healthInFlight = true;
     const started = performance.now();
     try {
-      const response = await fetch(API_ORIGIN + "/health/live", { signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(LOCAL_API_ORIGIN + "/health/live", { signal: AbortSignal.timeout(2_000) });
       if (!response.ok) healthFailures += 1;
       await response.arrayBuffer();
       healthLatencies.push(Number((performance.now() - started).toFixed(2)));
@@ -224,18 +233,37 @@ function createSampler(runtime, workerEntries) {
   };
 }
 
-let authorCookie;
-async function api(path, options = {}) {
-  if (!authorCookie) {
-    const login = await fetch(API_ORIGIN + "/api/login", {method:"POST",headers:{"content-type":"application/json",origin:API_ORIGIN},body:JSON.stringify({token:AUTH_TOKEN})});
-    assert.ok(login.ok, "author login failed");
-    const cookie = login.headers.get("set-cookie");
-    assert.ok(cookie, "author login did not establish session");
-    authorCookie = cookie.split(";",1)[0];
-    await login.arrayBuffer();
+let authorCredential;
+let pendingAuthorization;
+async function authorizeOwner() {
+  let accessToken;
+  try {
+    const { stdout } = await execFile(process.execPath, ["/fixture/fixture.mjs", "authorize", WEB_CLIENT_ID, OWNER_SUBJECT], {
+      encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024,
+    });
+    ({ accessToken } = JSON.parse(stdout));
+  } catch {
+    throw new Error("the verified OIDC and OAuth owner flow failed");
   }
-  const headers = { cookie: authorCookie, origin: API_ORIGIN };
-  const init = { method: options.method ?? "GET", headers };
+  assert.equal(typeof accessToken, "string", "the OAuth token endpoint must issue a bearer token");
+  const [, payload] = accessToken.split(".");
+  assert.ok(payload, "the owner access token must carry issuer claims");
+  // The fixture has already proved the token at /api/session. Read exp only to schedule another authorization.
+  const { exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  assert.ok(Number.isSafeInteger(exp) && exp * 1000 > Date.now(), "the issued owner token must have a future expiry");
+  authorCredential = { accessToken, expiresAt: exp * 1000 };
+  return accessToken;
+}
+
+function ownerAccessToken() {
+  if (authorCredential && authorCredential.expiresAt > Date.now() + 30_000) return authorCredential.accessToken;
+  pendingAuthorization ??= authorizeOwner().finally(() => { pendingAuthorization = undefined; });
+  return pendingAuthorization;
+}
+
+async function api(path, options = {}) {
+  const headers = { authorization: "Bearer " + await ownerAccessToken(), origin: API_ORIGIN };
+  const init = { method: options.method ?? "GET", headers, redirect: "error" };
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
@@ -247,6 +275,13 @@ async function api(path, options = {}) {
   catch { throw new Error("API returned a non-JSON response at " + path); }
   assert.equal(response.status, options.status ?? 200, "unexpected HTTP status for " + path + ": " + response.status);
   return value;
+}
+
+async function assertOwnerAuthorization() {
+  const anonymous = await fetch(API_ORIGIN + "/api/session", { redirect: "error" });
+  assert.equal(anonymous.status, 401, "the protected API must deny anonymous requests");
+  await anonymous.arrayBuffer();
+  assert.deepEqual(await api("/api/session"), { authenticated: true, authorScope: "owner" });
 }
 
 const projectPath = "/api/projects/" + encodeURIComponent(PROJECT_ID);
@@ -262,6 +297,41 @@ function actionData(result, actionId) {
   assert.equal(result.ok, true, actionId + " action failed: " + JSON.stringify(result.error ?? null));
   assert.ok(result.data && typeof result.data === "object", actionId + " must return action data");
   return result.data;
+}
+
+async function persistNlpConsent(settings) {
+  const defaults = actionData(await invoke("nlp.features", {}), "nlp.features before consent");
+  assert.deepEqual(defaults.settings.externalEnabled, {});
+  for (const id of Object.keys(settings.externalEnabled)) {
+    assert.equal(defaults.features.find(feature => feature.id === id)?.enabled, false, `${id} defaults to denied`);
+  }
+  const { changeSet: reference } = actionData(await invoke("nlp.updateExternalConsent", settings), "nlp.updateExternalConsent");
+  assert.equal(reference.projectId, PROJECT_ID);
+  const path = "/api/v1/persistence/projects/" + encodeURIComponent(PROJECT_ID) + "/changesets/" + encodeURIComponent(reference.id);
+  const { changeSet } = await api(path);
+  assert.equal(changeSet.status, "proposed");
+  const { changeSet: approved } = await api(path + "/approve", {
+    method: "POST", body: { expectedVersion: changeSet.version },
+  });
+  assert.equal(approved.status, "approved");
+  const beforeApply = actionData(await invoke("nlp.features", {}), "nlp.features before consent application");
+  assert.deepEqual(beforeApply.settings, defaults.settings, "approval alone does not persist consent");
+  const applied = await api(path + "/apply", { method: "POST", body: { expectedVersion: approved.version } });
+  assert.equal(applied.changeSet.id, reference.id);
+  assert.equal(applied.changeSet.status, "applied");
+}
+
+async function readNlpConsent(store, snapshot) {
+  const response = await invoke("nlp.features", {});
+  const { settings, features } = actionData(response, "nlp.features after consent application");
+  assert.deepEqual(response.snapshot, snapshot);
+  const stored = await store.readNlpFeatureSettingsSnapshotRecord(PROJECT_ID, snapshot);
+  assert.ok(stored, "the native NLP consent record must be present after application");
+  assert.deepEqual(settings, stored.value, "the OAuth API must read the applied settings at the same snapshot");
+  for (const [id, enabled] of Object.entries(stored.value.externalEnabled)) {
+    assert.equal(features.find(feature => feature.id === id)?.enabled, enabled);
+  }
+  return stored;
 }
 
 function statusFor(statuses, id) {
@@ -428,17 +498,34 @@ async function runLifecycle() {
   assert.ok((await fs.readdir(e5ModelDirectory)).length > 0);
   assert.ok((await fs.readdir(bgeModelDirectory)).length > 0);
   const {createPostgresPersistence, migratePostgresDatabase} = await import("@codexia/persistence-postgres");
+  failureStage = "fixture-seed";
   const databaseUrl = process.env.CODEXIA_DATABASE_URL;
   assert.ok(databaseUrl, "disposable PostgreSQL URL is required");
+  const { projectTitle, files, nlpSettings } = JSON.parse(await readFile(OUTPUT_DIRECTORY + "/fixture.json", "utf8"));
   await migratePostgresDatabase(databaseUrl);
   const persistence = createPostgresPersistence(databaseUrl);
   const store = new CoreStore({ persistence });
-  let server;
+  let server, betterAuth;
   try {
-    await persistence.transaction(tx=>tx.createProject({id:PROJECT_ID,title:"Synthetic OCI model lifecycle work"}));
-    await seedModelFixture(store,PROJECT_ID,JSON.parse(await readFile(OUTPUT_DIRECTORY+"/fixture.json","utf8")));
-    server = await start({ store, persistence, authToken: AUTH_TOKEN, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist" });
+    await persistence.transaction(tx => tx.createProject({ id: PROJECT_ID, title: projectTitle }));
+    await seedModelFixture(store, PROJECT_ID, files);
+    failureStage = "oauth-startup";
+    const { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } = await import(new URL("./better-auth.js", apiUrl).href);
+    const { readBetterAuthMigrationConfig } = await import(new URL("./migrate-auth.js", apiUrl).href);
+    const authConfig = readBetterAuthMigrationConfig();
+    betterAuth = createBetterAuthRuntime(authConfig);
+    await betterAuth.assertRegisteredClients();
+    await betterAuth.verifyIntrospectionCredentials();
+    server = await start({ store, persistence, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist",
+      betterAuth, closeBetterAuthOnShutdown: true, trustProxy: true,
+      oauthOwner: {
+        issuer: betterAuth.issuer, audience: betterAuth.audience, jwksUrl: betterAuth.issuer + "/jwks",
+        ownerSubject: authConfig.ownerSubject, requiredScopes: [CODEXIA_OWNER_SCOPE], allowedClientIds: authConfig.ownerClientIds,
+        verifyActiveToken: betterAuth.verifyActiveAccessToken,
+      },
+    });
   } catch (error) {
+    await betterAuth?.pool.end().catch(() => {});
     await runtime.shutdown();
     await persistence.close();
     throw error;
@@ -457,8 +544,12 @@ async function runLifecycle() {
   };
 
   try {
+    await assertOwnerAuthorization();
     const version = await api("/api/version");
     assert.equal(version.profile, "full");
+    failureStage = "consent-review";
+    await persistNlpConsent(nlpSettings);
+    failureStage = "model-lifecycle";
     const initialStatuses = await api(projectPath + "/modules");
     assert.deepEqual([...initialStatuses.map((item) => item.id)].sort(), [...EXPECTED_MODULES].sort());
     for (const id of EXPECTED_MODULES) statusFor(initialStatuses, id);
@@ -799,10 +890,12 @@ async function runLifecycle() {
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
     outcome.phases.push(await sampler.mark());
 
+    failureStage = "record-preservation";
     const currentReader = await store.reader(PROJECT_ID);
     outcome.projectId = PROJECT_ID;
     outcome.snapshot = currentReader.snapshot;
     outcome.preservedFiles = await preservedFiles(currentReader);
+    outcome.nlpConsent = await readNlpConsent(store, currentReader.snapshot);
     outcome.workerEntries = composition.moduleWorkerEntries;
     outcome.runtimeStatusesAtEnd = runtime.statuses();
     outcome.resourceMeasurements = await sampler.stop();
@@ -830,6 +923,7 @@ async function preservedFiles(reader) {
   }));
 }
 async function replacementProbe() {
+  failureStage = "replacement-startup";
   const composition = await import("/app/generated/server.mjs");
   assert.equal(composition.profile, "full");
   const projectPathname = "/api/projects/" + encodeURIComponent(PROJECT_ID);
@@ -842,6 +936,7 @@ async function replacementProbe() {
     assertions: {},
   };
   try {
+    await assertOwnerAuthorization();
     const version = await api("/api/version");
     assert.equal(version.profile, "full");
     const statuses = await api(projectPathname + "/modules");
@@ -859,6 +954,7 @@ async function replacementProbe() {
     outcome.assertions.allInstalledModulesEnabled = true;
     outcome.assertions.noWorkerAtReplacementIdle = true;
 
+    failureStage = "replacement-inference";
     probe.setPhase("replacement-semantic-index-restored");
     const status = actionData(await api(projectPathname + "/actions/semantic.index.status", {
       method: "POST",
@@ -889,13 +985,16 @@ async function replacementProbe() {
     };
     await waitFor(async () => (await captureMetrics(undefined, composition.moduleWorkerEntries)).compiledWorkerCount === 0,
       "replacement semantic worker did not exit after its capability lease was released", 30_000);
+    failureStage = "replacement-records";
     const {CoreStore} = await import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js");
     const {createPostgresPersistence} = await import("@codexia/persistence-postgres");
     const persistence = createPostgresPersistence(process.env.CODEXIA_DATABASE_URL);
     try {
-      const reader = await new CoreStore({persistence}).reader(PROJECT_ID);
+      const store = new CoreStore({ persistence });
+      const reader = await store.reader(PROJECT_ID);
       outcome.snapshot = reader.snapshot;
       outcome.preservedFiles = await preservedFiles(reader);
+      outcome.nlpConsent = await readNlpConsent(store, reader.snapshot);
     } finally { await persistence.close(); }
   } finally {
     outcome.resourceMeasurements = await probe.stop();
@@ -909,7 +1008,9 @@ try {
   else if (mode === "replacement-probe") await replacementProbe();
   else throw new Error("unknown P13 container mode");
 } catch (error) {
-  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({ status: "failed" }) + "\\n", { mode: 0o600 }).catch(() => {});
-  console.error("P13 OCI acceptance failed: " + (error instanceof Error ? error.message : String(error)));
+  const code = reportedFailureCodes.has(error?.code) ? error.code : undefined;
+  const failure = { status: "failed", stage: failureStage, ...(code ? { code } : {}) };
+  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify(failure) + "\n", { mode: 0o600 }).catch(() => {});
+  console.error("P13 OCI acceptance failed: " + JSON.stringify(failure));
   process.exitCode = 1;
 }

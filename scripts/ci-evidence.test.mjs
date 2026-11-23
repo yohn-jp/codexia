@@ -63,7 +63,7 @@ test('missing, stale, failed, skipped and duplicate evidence cannot certify sele
 });
 test('only unselected matrix placeholders may be skipped; executed extras fail', () => {
   const { plan, jobs, reports } = fixture('pull_request');
-  jobs.push({ name: 'hosted-native-${{ matrix.selection }}', head_sha: sha, status: 'completed', conclusion: 'skipped' });
+  jobs.push({ name: 'oci-${{ matrix.profile }}', head_sha: sha, status: 'completed', conclusion: 'skipped' });
   assert.doesNotThrow(() => assertPlanEvidence(plan, jobs, reports));
   jobs.at(-1).conclusion = 'success';
   assert.throws(() => assertPlanEvidence(plan, jobs, reports));

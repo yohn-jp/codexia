@@ -66,12 +66,13 @@ assert.match(terraformMain, /originRoutes/u);
 assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/codexia-api:3000"/u);
 assert.doesNotMatch(terraformVariables, /codexia-api-proxy/u, "retired proxy ingress must not be an accepted origin");
 
-assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
+assert.ok(apiClient.includes('"/api/session"'), 'the UI API client must keep using same-origin API paths');
 assert.doesNotMatch(apiClient, /VITE_API_URL/u, 'the frontend API origin is same-origin and must not be injected at build time');
 assert.match(apiSource, /CODEXIA_CORS_ALLOWED_ORIGINS/u, 'cross-origin browser access must remain deploy-time opt-in');
 
 assert.match(apiQuadlet, /^Image=CODEXIA_BACKEND_IMAGE$/mu);
-assert.match(apiQuadlet, /CODEXIA_AUTH_TOKEN_FILE=\/run\/secrets\/codexia-auth-token/u);
+assert.match(apiQuadlet, /^Secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL$/mu);
+assert.doesNotMatch(apiQuadlet, /CODEXIA_AUTH_TOKEN|codexia-auth-token/u);
 assert.doesNotMatch(apiQuadlet, /GITHUB_TOKEN|github-token/u, "PostgreSQL authoring does not mount Git credentials");
 assert.match(apiQuadlet, /CODEXIA_DATABASE_PASSWORD_FILE=\/run\/secrets\/app-password/u);
 assert.match(apiSource, /CODEXIA_DATABASE_URL is required for Codexia authoring/u, "PostgreSQL startup is always required");
@@ -85,8 +86,13 @@ assert.doesNotMatch(apiQuadlet, /^PublishPort=/mu, 'the API must not publish a h
 const databaseImage = /^Image=(\S+)$/mu.exec(databaseQuadlet)?.[1];
 assert.match(databaseImage ?? '', /^docker\.io\/library\/postgres:17-bookworm@sha256:[0-9a-f]{64}$/u,
   'the live database must use an immutable official PostgreSQL 17 image');
-const smokeImage = /^ARG POSTGRES_IMAGE=(\S+)$/mu.exec(await read('Dockerfile'))?.[1];
-assert.equal(smokeImage, databaseImage, 'the PostgreSQL smoke-test and database Quadlet must pin the same image');
+const backendSmoke = await read('scripts/verify-backend-image.sh');
+const backendSmokeImage = /^database_image="([^"\r\n]+)"$/mu.exec(backendSmoke)?.[1];
+assert.equal(backendSmokeImage, databaseImage, 'the backend image smoke test and database Quadlet must pin the same image');
+assert.match(backendSmoke, /^[\t ]+"\$database_image" >\/dev\/null$/mu,
+  'the backend image smoke test must run its pinned database image');
+const ociSmokeImage = /^[\t ]+(docker\.io\/library\/postgres:\S+)$/mu.exec(await read('scripts/verify-oci.sh'))?.[1];
+assert.equal(ociSmokeImage, databaseImage, 'the OCI smoke test and database Quadlet must pin the same image');
 assert.match(databaseQuadlet, /Network=codexia-data\.network/u);
 assert.match(databaseQuadlet, /Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data/u);
 assert.match(databaseQuadlet, /POSTGRES_USER=codexia_admin/u);
@@ -121,8 +127,11 @@ assert.match(operationsDocs, /codexia_initial_install_approved=true/u);
 assert.match(operationsDocs, /codexia_database_initialization_approved=true/u);
 assert.match(operationsDocs, /CODEXIA_INITIAL_INSTALL_APPROVED=true/u);
 assert.match(operationsDocs, /CODEXIA_DATABASE_INITIALIZATION_APPROVED=true/u);
-assert.match(operationsDocs, /auth-runtime.*optional/u);
-assert.match(operationsDocs, /Schema or persistence changes to a nonempty installation are currently unsupported/u);
+assert.match(operationsDocs, /auth-runtime.*before.*deploy/u);
+assert.ok(pushDeploymentDocs.includes('`node /app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js --check`'),
+  'The push deployment runbook must give the installed read-only maintenance command');
+assert.match(pushDeploymentDocs, /\]\(BACKUP\.md#rehearse-a-reviewed-full-candidate\)/u,
+  'The push deployment runbook must link the isolated restore rehearsal');
 assert.match(operationsDocs, /migration fingerprint, API epoch, and persistence format/u);
 assert.match(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=0/u);
 assert.doesNotMatch(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=1/u);

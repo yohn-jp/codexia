@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { collectGitHubPages } from './release-policy.mjs';
+import { CERTIFICATION_DEPENDENCIES } from './ci-contract.mjs';
 import { validateVerificationPlan } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
-import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
 import { assertReusedCoverageProof, assertReusedOmittedTaskProofs } from './ci-task-proof-reuse.mjs';
 
@@ -18,7 +18,7 @@ assert.match(CODEXIA_EXPECTED_SHA ?? '', /^[a-f0-9]{40}$/);
 assert.ok(GH_TOKEN, 'Read token is required');
 assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), CODEXIA_EXPECTED_SHA);
 const outcomes = JSON.parse(CODEXIA_REQUIRED_RESULTS ?? 'null');
-assert.ok(outcomes && Object.keys(outcomes).length === 8, 'All required DAG groups must be present');
+assert.deepEqual(Object.keys(outcomes ?? {}).sort(), CERTIFICATION_DEPENDENCIES.toSorted(), 'All required DAG groups must be present');
 assert.equal(outcomes.plan?.result, 'success', 'Impact planning did not succeed');
 assert.ok(Object.values(outcomes).every(value => ['success', 'skipped'].includes(value.result)), 'A required DAG group failed, was cancelled or unexecuted');
 const plan = validateVerificationPlan(JSON.parse(await readFile(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -66,9 +66,8 @@ if (plan.mode === 'affected') {
     request: async (url, options) => fetch(url, options) });
 }
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
-const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
+const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full']);
 assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);
-assertNativeArtifactEvidence(plan,producerJobs,reports,artifacts,GITHUB_RUN_ID);
 const message = `Verified ${plan.mode} plan: ${plan.tasks.length} validations at ${CODEXIA_EXPECTED_SHA}; run ${GITHUB_RUN_ID}. ${plan.excluded.length} explicitly NOT_SELECTED.\n`;
 console.log(message.trim());
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, message);

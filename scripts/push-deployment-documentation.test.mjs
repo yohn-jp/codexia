@@ -20,8 +20,8 @@ test('push deployment distinguishes approved first activation from image-only up
   assert.match(push, /First application activation/u);
   assert.match(push, /For an image-only update, the Ansible `deploy` stage requires a running, healthy Full API/u);
   assert.doesNotMatch(push, /The Ansible `deploy` stage requires a running, healthy Full API under the `codexia` rootless account\./u);
-  assert.match(push, /token-authenticated API.*Only after successful first activation/u);
-  assert.match(push, /first `deploy` activation, with both explicit approvals, creates the application schema/u);
+  assert.match(push, /`auth-runtime` before `deploy`/u);
+  assert.match(push, /before starting the API, `deploy` verifies the exact application migration ledger/u);
   assert.doesNotMatch(push, /current production job is an image-update path, not a fresh VM initializer/u);
 });
 
@@ -36,7 +36,7 @@ test('deployment and iOS docs distinguish explicit access-token revocation from 
 
 test('IAC retains the explicit staged deployment and authentication boundary', () => {
   const iac = files.get('iac');
-  assert.match(iac, /First activation requires `host`, `secrets`, `base`, then `deploy`/u);
-  assert.match(iac, /`auth-runtime` provisioning must follow the successful first `deploy`/u);
+  assert.match(iac, /`host`, `secrets`, `base`, and `auth-runtime` before `deploy`/u);
+  assert.match(iac, /initializes the application schema.*before provisioning the auth schema/u);
   assert.match(iac, /pristine-schema first activation or certified image update, encrypted off-VM backup, application health and rollback/u);
 });

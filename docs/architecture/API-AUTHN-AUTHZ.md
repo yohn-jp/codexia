@@ -1,7 +1,7 @@
 # API authentication and authorization
 
-> **Current implementation and accepted Passkey-first target for standalone authentication.** Existing OIDC-only and token paths described below remain current behavior until the target is implemented; this document is not deployment evidence.
-> This contract specializes [Core architecture](CORE.md) and [Internal boundaries](INTERNAL-BOUNDARIES.md). Better Auth runs inside the existing Fastify API and federates login to a configured OIDC provider. Cloudflare Access and Hosted/Praetorium grants remain separate compatibility boundaries documented in [Deployment](../deployment/README.md) and [Hosted deployment](../HOSTED-DEPLOYMENT.md). Core and PostgreSQL are not identity providers.
+> This document describes standalone OAuth admission and the accepted Passkey-first requirements. Production rollout evidence is tracked separately.
+> This contract specializes [Core architecture](CORE.md) and [Internal boundaries](INTERNAL-BOUNDARIES.md). Better Auth runs inside the Fastify API and supports Passkey sign-in with optional upstream OIDC federation. Cloudflare Access can protect static UI entry as described in [Deployment](../deployment/README.md). Better Auth issues the API credentials for authors and registered MCP clients.
 
 ## Decision and trust boundaries
 
@@ -54,15 +54,15 @@ The two frontends use the **same API token validation and resource authorization
 
 ## Implementation ownership and dependencies
 
-Implement at the existing Fastify admission point in `packages/api`, preserving its centralized request lifecycle, Hosted policy, failure semantics, and restricted MCP bearer path. Reuse the existing project authorization, persistence preconditions and proposal boundary; do not create a second auth router or reimplement Core permissions.
+Fastify admission in `packages/api` owns the request lifecycle, failure semantics, and restricted MCP bearer path. Reuse project authorization, persistence preconditions and the proposal boundary.
 
 Use Better Auth, Generic OAuth and OAuth Provider maintained plugins for protocol, session, client, token and key management. Use the existing `jose` verifier for API JWT profile validation and the official OAuth introspection endpoint for online token status. Do not hand-write discovery, token issuance, signature verification or a second auth router. Reuse Fastify 5 and the existing API admission boundary.
 
-Standalone local-token login and optional Access owner SSO are **current migration modes**, not the Passkey-first target. Hosted/Praetorium grants remain a separate architectural mode. Retire the standalone legacy modes only after the accepted transition and tests, without a hidden legacy fallback. No OAuth token may gain Hosted project authority by falling back to standalone identity. Never downgrade authentication on JWT/JWKS outage.
+Better Auth admits the enrolled owner through registered author clients and admits MCP clients through their explicit project assignments and limited scopes. Verification and introspection outages fail closed.
 
-### Current Better Auth standalone owner bearer (pre-Passkey target)
+### Better Auth standalone owner bearer
 
-The active standalone Better Auth configuration uses `CODEXIA_AUTH_DATABASE_URL`, `CODEXIA_PUBLIC_ORIGIN`, `CODEXIA_OIDC_ISSUER`, `CODEXIA_OIDC_CLIENT_ID`, `CODEXIA_OIDC_CLIENT_SECRET`, `CODEXIA_AUTH_SECRET`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET`, `CODEXIA_OAUTH_OWNER_SUBJECT`, and comma-separated `CODEXIA_OAUTH_OWNER_CLIENT_IDS`. `CODEXIA_API_AUDIENCE` defaults to `<public-origin>/api`; `CODEXIA_OAUTH_MCP_CLIENT_IDS` is a separate disjoint allowlist for the limited `mcp:read`, `mcp:compute`, and `mcp:propose` scopes. Secrets are supplied only through protected runtime configuration. The owner subject is the stable Better Auth internal user ID linked to the upstream (`iss`, `sub`) account. Owner client IDs are separately registered public clients and do not themselves confer owner identity.
+Standalone Better Auth requires `CODEXIA_AUTH_DATABASE_URL`, `CODEXIA_PUBLIC_ORIGIN`, `CODEXIA_AUTH_SECRET`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET`, `CODEXIA_OAUTH_OWNER_SUBJECT`, and comma-separated `CODEXIA_OAUTH_OWNER_CLIENT_IDS`. The `CODEXIA_OIDC_ISSUER`, `CODEXIA_OIDC_CLIENT_ID`, and `CODEXIA_OIDC_CLIENT_SECRET` settings are configured together only for upstream OIDC. `CODEXIA_API_AUDIENCE` defaults to `<public-origin>/api`. Standalone MCP uses a separate client allowlist and explicit project assignments for the limited `mcp:read`, `mcp:compute`, and `mcp:propose` scopes. Supply secrets through protected runtime configuration. The owner subject is the stable Better Auth user ID associated with the enrolled Passkey or linked OIDC account. The API requires both verified owner identity and a registered public client for author scope.
 
 The Better Auth Generic OAuth callback route was observed in the signed-out PostgreSQL fixture as `<CODEXIA_PUBLIC_ORIGIN>/api/auth/callback/workspace-oidc`. Register that exact HTTPS URI with the selected upstream provider for the configured public origin. The fixture used loopback HTTP only for its local synthetic IdP/API and does not qualify a production provider configuration. Google Workspace is the first intended provider; no Google client secret, provider-side callback registration, or real Google login has been configured or tested in this change.
 
@@ -72,7 +72,7 @@ Revocation rows expire logically at their token's `expires_at`; API admission an
 
 Register distinct Web and iOS public OAuth clients with exact redirect URIs, `token_endpoint_auth_method: none`, Authorization Code + Refresh Token, PKCE required, the exact API resource, and only intended scopes. Register a separate confidential client for API introspection; keep its secret only in protected runtime storage. Set `CODEXIA_OAUTH_OWNER_SUBJECT` to the established internal owner user ID and `CODEXIA_OAUTH_OWNER_CLIENT_IDS` to the registered public client IDs. Unauthenticated dynamic registration is disabled.
 
-Clients send `Authorization: Bearer <access_token>` to the existing `/api/*` API origin. The token grants only the configured owner internal subject the existing author operations; `/api/session` reports `{ authenticated: true, authorScope: "owner" }`. Other subjects receive 403, missing scopes receive 403, invalid access tokens and unknown keys receive 401, and unavailable verification/introspection dependencies fail closed. A valid legacy `CODEXIA_AUTH_TOKEN` bearer remains limited to existing read/compute/propose behavior and cannot become an author credential. Do not combine a bearer credential with the standalone owner session cookie. This mode does not activate Hosted authorization or change PostgreSQL project/object transaction guards.
+Clients send `Authorization: Bearer <access_token>` to the existing `/api/*` API origin. The token grants the configured internal owner the existing author operations, and `/api/session` reports `{ authenticated: true, authorScope: "owner" }`. Other subjects and missing scopes receive 403. Invalid access tokens and unknown keys receive 401. Unavailable verification or introspection dependencies fail closed. PostgreSQL project and object transaction guards apply to every author operation.
 
 Better Auth 1.7.26's official revocation endpoint returns `unsupported_token_type` for a signed JWT access token. The existing endpoint is wrapped by a narrow RFC 7009 adapter: after Better Auth authenticates a registered client, the adapter verifies the RFC 9068 token and records its exact issuer, `jti`, client, subject, session, and expiry in PostgreSQL. It returns the RFC success response for unknown and foreign-client tokens without recording them. API admission and OAuth introspection consult that exact record, so revoking one access token does not revoke sibling tokens or the login session; expiry and logout retain their existing behavior. The PostgreSQL fixture verifies token denial, inactive introspection, client ownership, harmless unknown responses, expired-token handling, and no sibling-token effect.
 
@@ -81,7 +81,7 @@ Cross-origin Web requests are optional and use `CODEXIA_CORS_ALLOWED_ORIGINS`, a
 
 ## Accepted target: Passkey-first authentication and identity management
 
-**Status: normative target, not an implementation or production acceptance claim.** This section defines the complete end state and supersedes the pre-migration OIDC-only and legacy-token assumptions above when implemented. Existing protocol, principal/ownership, manuscript and Hosted boundaries remain in force. The scope is a single standalone owner, not multi-tenant identity, SAML, SCIM, new organization roles or a second identity service.
+**Status: normative target.** Existing API protocol, principal, ownership and manuscript boundaries apply. The scope is a single standalone owner, excluding multi-tenant identity, SAML, SCIM, new organization roles and a separate identity service.
 
 ### Outcome and identity invariants
 
@@ -89,7 +89,7 @@ Cross-origin Web requests are optional and use `CODEXIA_CORS_ALLOWED_ORIGINS`, a
 - Better Auth in the existing Fastify process and PostgreSQL `codexia_auth` schema is the single standalone identity authority. A durable internal Better Auth `user.id` is the accepted owner subject. Passkeys and optional OIDC `(issuer, subject)` accounts attach to that same internal user; changing a device or an IdP does not change author/project ownership.
 - Passkey is the default human sign-in, independent of any OIDC service. OIDC is optional, must be explicitly configured by the already authenticated owner, and must never be needed for Passkey-only startup. No public self-registration, unapproved owner creation, implicit email-account linking, automatic second owner or downgrade to legacy token login.
 - Retain distinct registered OAuth public clients for Web and iOS, short-lived API-audience `at+jwt` tokens, PKCE S256, signed metadata, audience and scope checks, online introspection, exact-token revocation and the existing CSRF/origin boundaries. The browser retains the current in-memory access token; iOS retains its AppAuth system session and Keychain-protected refresh token. Neither needs a new native Passkey bridge or a cookie-based API rewrite.
-- The MCP Streamable HTTP endpoint is an **API protected resource**: Better Auth is its OAuth authorization server; Cloudflare Access is not a client authentication or authorization dependency. Keep the existing `oauthProvider()`, `mcp:read` / `mcp:compute` / `mcp:propose` limits, client allowlists, project assignments and `external-mcp` principal. Hosted/Praetorium's separate grant issuer is unchanged.
+- Better Auth is the OAuth authorization server for the MCP Streamable HTTP protected resource. Keep the existing `oauthProvider()`, `mcp:read` / `mcp:compute` / `mcp:propose` limits, client allowlists, project assignments and `external-mcp` principal. MCP admission relies on the API's OAuth checks.
 
 ### Maintained Better Auth components and persistence
 
@@ -142,7 +142,7 @@ The existing production deployment uses an Access-protected hostname and an orig
 - Phase A — Add maintained Passkey plugin, explicit auth-schema migration, owner-preserving enrollment and recovery. Remove upstream OIDC as a **configuration prerequisite** only after Passkey-only bootstrap and existing-owner continuity are proven.
 - Phase B — Complete Desktop/Mobile settings and optional owner-controlled OIDC registration, linking, test/activation and recovery. Preserve the fixed OIDC path until existing accounts are safely linked; then remove `genericOAuth` as a separate login authority. Do not use email-linked account migration.
 - Phase C — Prove Browser, iOS and remote MCP against Better Auth with only OAuth credentials. Implement and separately verify Access-independent API reachability, complete consent/grants, limited MCP clients, scope/project restrictions and publisher/deployment contracts. No unrestricted dynamic OAuth client registration is added.
-- Phase D — Search and remove **all** live `CODEXIA_AUTH_TOKEN` / `CODEXIA_AUTH_TOKEN_FILE`, `CODEXIA_AUTH_MODE=token`, `/api/login` static-token issuing/validation, operator setup and legacy Access-owner grant paths for standalone. Update Quadlet, Ansible, environment, secrets, CI, docs and tests in the same change set. No hidden compatibility/read-only bearer, fallback or token bootstrap survives. Hosted/Praetorium is not removed. Cutover must have a tested one-way rollout, protected DB backup and operator recovery; an auth failure never triggers downgrade to token mode.
+- Phase D — Retire static-token issuance and admission, legacy grant issuers, and Access-derived API owner authorization. Update Quadlet, Ansible, environment, secrets, CI, docs and tests together. Cutover requires a tested one-way rollout, a protected database backup and operator recovery.
 
 ### Definition of done — executable acceptance matrix
 
@@ -168,6 +168,6 @@ Official integration references: [Better Auth Passkey](https://www.better-auth.c
 - Deny missing, expired, forged, unknown-key, wrong-issuer, wrong-audience, wrong-token-type, wrong-owner and insufficient-scope tokens, including rotating JWKS and unavailable metadata.
 - Exercise BOLA/BFLA negative cases across each object-bearing API family, nested object IDs, bulk reads, cross-project writes, proposals, approvals, jobs, modules and SSE. A valid token must **not** bypass object access checks.
 - Verify browser CSRF/CORS and iOS bearer paths separately, including concurrent cookie/bearer ambiguity, logout/reauthentication, stale-author-scope recovery and long-lived streams that outlast a grant.
-- Existing Hosted MCP, local standalone access, current deployment and read-only external agents retain their authority boundaries. Record actual commands, results and environment blockers in PR/CI evidence, not this contract.
+- Verify registered MCP clients over both stdio and Streamable HTTP, including clients limited to read scope. Record executed commands, results and environment blockers in PR or CI evidence.
 
 References: [OWASP API1:2023 BOLA](https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 8252 (native OAuth apps)](https://www.rfc-editor.org/rfc/rfc8252), [RFC 7636 (PKCE)](https://www.rfc-editor.org/rfc/rfc7636), [Fastify JWT](https://github.com/fastify/fastify-jwt), [Fastify Auth](https://github.com/fastify/fastify-auth).

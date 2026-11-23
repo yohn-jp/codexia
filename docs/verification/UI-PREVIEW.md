@@ -1,6 +1,6 @@
 # UI preview and Impeccable Detector (Windows / Linux / macOS)
 
-The preview serves the built Desktop and Mobile UIs using the existing E2E server, real Codexia API and disposable PostgreSQL fixtures. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+The preview serves the built Desktop and Mobile UIs using the shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
 
 ## Design checks on GitHub
 
@@ -27,14 +27,14 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm ui:preview
 ```
 
-This builds the same Core profile and all three UI entry points as the existing release build, starts the disposable PostgreSQL database, applies the migrations via the existing E2E server, seeds one sample project/volume/chapter/two scenes, and checks the API and static UI entry points. It then signs in **through the real UI** in an isolated Playwright browser, opens a seeded scene in Desktop and Mobile and saves PNGs and inert HTML visual snapshots in `artifacts/ui-preview/snapshots/`. The preview command remains running.
+This builds the selected profile and the UI assets configured for the local OAuth issuer. The shared fixture migrates disposable PostgreSQL and registers a local owner and client. The preview seeds a sample project with a volume, chapter and two scenes through the authenticated API. It signs in through the real browser OAuth flow, opens a seeded scene in Desktop and Mobile, and saves PNGs and inert HTML in `artifacts/ui-preview/snapshots/`. The preview command remains running.
 
-The terminal prints an **ephemeral local owner token** and the real interactive addresses:
+The terminal prints the interactive addresses.
 
 - `http://127.0.0.1:4173/desktop/`
 - `http://127.0.0.1:4173/mobile/`
 
-Enter the displayed token at the login screen to explore the real app. **Never** use a production token or database URL. When the browser capture is successful, the terminal additionally prints two snapshot URLs from a second loopback-only server. These contain the authenticated **rendered document with scripts removed**; they cannot perform writes or API requests and are suitable for inspecting visual appearance only.
+To explore the preview in your browser, choose **OAuthでサインイン**, then **IDプロバイダーでサインイン**. Choose **許可して続ける** if prompted. The identity provider uses the disposable preview account. After capture, the terminal prints two snapshot URLs from a second loopback-only server. The server serves the rendered documents with scripts removed and prevents API requests.
 
 In a second PowerShell at the repository root, while preview is running:
 
@@ -48,7 +48,7 @@ The snapshots preserve the seeded, authenticated layout but **are not interactiv
 
 On exit (`Ctrl+C`) the script stops its API, removes its PostgreSQL container and temporary server state, and deletes the active scan session file. Screenshots and reports stay under `artifacts/` until removed. On an abnormal hard shutdown, find orphaned local containers using `docker ps --filter label=dev.codexia.purpose=ui-preview` (or `podman ps ...`), and stop only the identified preview container.
 
-Options: `--port 4173`, `--profile core|full`, `--engine auto|docker|podman`, `--skip-build` (only with already built artifacts), and `--no-capture` (API/DB interactive preview only; no authenticated snapshots). Full-profile modules require their existing build dependencies and are not needed for the Core UI baseline.
+Options include `--port 4173`, `--profile core|full`, `--engine auto|docker|podman`, `--skip-build`, and `--no-capture`. With `--skip-build`, the preview reuses previously built packages and profile artifacts and still builds UI assets for the current OAuth client. `--no-capture` serves the interactive preview only. Full-profile modules require their existing build dependencies.
 
 ### Troubleshooting
 

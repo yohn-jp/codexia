@@ -15,14 +15,6 @@
       - not ansible_check_mode
     fail_msg: Deployment requires the codexia SSH identity, certified immutable Full digest, exact-main certificate, compatible deployed UI and protected off-VM backup inputs.
 
-- name: Require an explicit standalone authentication deployment mode
-  ansible.builtin.assert:
-    that:
-      - codexia_auth_mode is defined and codexia_auth_mode is string and codexia_auth_mode in ['token', 'better-auth']
-      - (codexia_better_auth_activation_approved | default(false)) is boolean
-      - not ansible_check_mode
-    fail_msg: Push deployment requires CODEXIA_AUTH_MODE to be token or better-auth.
-
 - name: Read the provenance certificate from the protected workflow runner
   ansible.builtin.slurp:
     src: "{{ codexia_deployment_certificate_file }}"

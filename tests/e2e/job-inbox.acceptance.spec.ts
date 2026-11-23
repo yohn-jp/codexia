@@ -1,6 +1,6 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
+import { expect, test } from "./author-oauth-fixture";
 
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const now = "2026-10-17T00:00:00.000Z";
 
 function fixtureJob(overrides: Record<string, unknown>) {
@@ -18,9 +18,11 @@ function fixtureJob(overrides: Record<string, unknown>) {
   };
 }
 
-async function assertOwnerCookie(route: Route): Promise<void> {
+async function assertOwnerBearer(route: Route, browserAccessToken: Promise<string> | undefined): Promise<void> {
+  expect(browserAccessToken, "jobs and inbox require a successful author sign-in").toBeDefined();
   const headers = await route.request().allHeaders();
-  expect(headers.cookie).toContain("scriptorium_session=");
+  expect(headers.authorization === `Bearer ${await browserAccessToken}`, "requests use the access token issued to this browser").toBe(true);
+  expect(headers.cookie).toBeUndefined();
 }
 
 async function emitJobEvent(page: Page, event: Record<string, unknown>): Promise<void> {
@@ -31,8 +33,7 @@ async function emitJobEvent(page: Page, event: Record<string, unknown>): Promise
   }, event);
 }
 
-test("the authenticated inbox UI retains terminal jobs and marks notifications read", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("the authenticated inbox UI retains terminal jobs and marks notifications read", async ({ page, authorizeAuthor, authorServer }) => {
   const jobs = [
     fixtureJob({ id: "job-running-1" }),
     fixtureJob({
@@ -85,6 +86,7 @@ test("the authenticated inbox UI retains terminal jobs and marks notifications r
     },
   ];
   const apiRequestsBeforeLogin: string[] = [];
+  let browserAccessToken: Promise<string> | undefined;
   const readRequests: string[] = [];
   let gateNextJobsRead = false;
   let terminalEventSent = false;
@@ -157,7 +159,7 @@ test("the authenticated inbox UI retains terminal jobs and marks notifications r
 
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
-    if (path === "/api/jobs" || path === "/api/jobs/events" || path.startsWith("/api/inbox")) {
+    if (!browserAccessToken && (path === "/api/jobs" || path === "/api/jobs/events" || path.startsWith("/api/inbox"))) {
       apiRequestsBeforeLogin.push(path);
     }
   });
@@ -166,7 +168,7 @@ test("the authenticated inbox UI retains terminal jobs and marks notifications r
     const path = new URL(url).pathname;
     return path === "/api/jobs" || path === "/api/jobs/events" || path.startsWith("/api/jobs/");
   }, async (route) => {
-    await assertOwnerCookie(route);
+    await assertOwnerBearer(route, browserAccessToken);
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/jobs/events") {
       await route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
@@ -189,7 +191,7 @@ test("the authenticated inbox UI retains terminal jobs and marks notifications r
   });
 
   await page.route("**/api/inbox**", async (route) => {
-    await assertOwnerCookie(route);
+    await assertOwnerBearer(route, browserAccessToken);
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() === "GET") {
       const unreadOnly = new URL(route.request().url()).searchParams.get("unread") === "1";
@@ -215,12 +217,16 @@ test("the authenticated inbox UI retains terminal jobs and marks notifications r
     await route.fulfill({ json: { item: inboxItems.find((candidate) => candidate.id === itemId) } });
   });
 
-  await page.goto("/desktop/");
-  await expect(page.getByLabel("アクセス・トークン")).toBeVisible();
+  await page.goto(new URL("/desktop/", authorServer.apiOrigin).href);
+  await expect(page.getByRole("button", { name: "OAuthでサインイン" })).toBeVisible();
   expect(apiRequestsBeforeLogin).toEqual([]);
-  await page.getByLabel("アクセス・トークン").fill(authToken);
-  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  browserAccessToken = page.waitForResponse((response) =>
+    response.url() === `${authorServer.apiOrigin}/api/auth/oauth2/token` && response.ok()).then(async (response) => {
+    const body = await response.json() as { access_token?: string };
+    if (!body.access_token) throw new Error("Better Auth issued no browser access token");
+    return body.access_token;
+  });
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
 
   const inboxButton = page.getByRole("button", { name: /受信箱/u });
   await expect(inboxButton).toContainText("2");

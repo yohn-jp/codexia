@@ -116,17 +116,23 @@ test('task execution proof trust accepts a non-coverage task only from its exact
     expected: { ...expected, artifactDigest: `sha256:${'d'.repeat(64)}` } }), /artifact digest mismatch/);
 });
 
-test('task proof reuse metadata is limited to a complete coverage receipt and stays outside the plan digest', () => {
-  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
+test('a full PR reuses static coverage with an empty omission set and an unchanged plan digest', () => {
+  const plan = createVerificationPlan({ files: ['package.json'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
   const receipt = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: 'e'.repeat(64), workflowRunId: 42,
     workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types',
     artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
     inputClosure: proof('coverage').inputClosure, runtime: proof('coverage').runtime,
     certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
       jobId: 85, step: 'Certify every required exact-source matrix element' } };
-  const reusedPlan = { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage: receipt } };
+  const reusedPlan = { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v2', coverage: receipt, omitted: {} } };
   assert.doesNotThrow(() => validateVerificationPlan(reusedPlan));
   assert.equal(createPlanDigest(reusedPlan), createPlanDigest(plan));
+  assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: {
+    format: 'codexia-ci-task-input-reuse/v1', coverage: receipt,
+  } }), /Unknown task input reuse format/);
+  assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
+    ...reusedPlan.taskInputReuse, omitted: { 'unit-root': receipt },
+  } }), /proof inventory/);
   assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
     ...reusedPlan.taskInputReuse, coverage: { ...receipt, artifactDigest: 'invalid' },
   } }), /artifact digest/);

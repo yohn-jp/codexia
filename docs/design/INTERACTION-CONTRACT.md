@@ -38,7 +38,7 @@
 
 | 操作 | 許可と開始 | 待機・完了 | 失敗・戻り先 |
 | --- | --- | --- | --- |
-| 起動・直接リンク | version、session、persistence、対象取得と回復照合 | 表示可能な情報を先に出す。照合後に編集可 | SSO時に独自トークンフォームを出さない。API不明、権限、DB不良を区別 |
+| 起動・直接リンク | version、session、persistence、対象取得と回復照合 | 表示可能な情報を先に出す。照合後に編集可 | サインインが必要ならOAuthへ案内する。API不明、権限、DB不良を区別 |
 | 同一原稿の一時参照 | 既存guardで必要なjournal保護 | sheet/panel表示、editor状態を保持 | guard拒否ならその場に理由、元の入力とfocus |
 | 別文書・別作品 | author/project/document、navigation generation、guard | 正規ルートの対象が確定したら遷移 | 遅延・古い応答を破棄、入力を保持 |
 | 構成変更 | stable ID、expectedVersion、必要な確認、guard | APIの結果から構成を更新 | 競合時は最新状態、対象行とフォーム保持 |
@@ -51,9 +51,9 @@
 | 提案承認・却下 | proposal authority、ID、version、権限 | 正規の状態再取得 | 不明時に同じ提案の照合、正本未適用 |
 | 提案適用 | 承認済み、適用対象・version、既存guard | receiptと正本更新、保護中本文を維持 | stale/replay/unknownの既存処理。自動承認・新規適用なし |
 | 配置変更／保存 | Workspace guardとcatalog | 現配置の変化／明示的なlayout保存 | 元layout保持、原稿保存成功と表示しない |
-| サインアウト・shell変更 | protectTransitionと現在scope | Access logout／既存token logout／Hosted logoutまたは既存shell切替 | 保護できない時は遷移拒否。復帰時は同一authorで照合 |
+| サインアウト・shell変更 | `protectTransition`で現在の作者の下書きを保護 | OAuthサインアウトまたはshell切替 | 保護できない時は遷移拒否。復帰時は同じ作者で照合 |
 
-認証モードは `api.version` が示す既存情報を利用する。AccessのSSOモード、ローカルのトークンモード、Hosted grantを別々に扱う。Accessログアウトは他のAccessアプリのセッションにも影響するため、明示操作として説明できる導線を設ける。再認証のためのトップレベル遷移は入力を失わない既存の回復契約を優先する。Bearerをブラウザ作者権限として利用しない。UI改善のため認証エンドポイントを追加・緩和しない。
+DesktopとMobileはBetter AuthのOAuthで作者としてサインインする。OAuthサインアウトや再認証のためのページ遷移に先立ち、`protectTransition`で下書きを回復用Journalに保存できることを確認する。Webのサインアウトはメモリ内のAPIアクセス・トークンを破棄し、Better Authにブラウザーセッションの終了を要求する。終了を確認できなければ画面に伝える。Cloudflare Accessは静的UIの入口を制御する。APIは作者用クライアント、本人、対象作品への権限を検証する。
 
 ## 実装境界
 

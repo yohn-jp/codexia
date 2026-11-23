@@ -6,6 +6,9 @@ import type {
   ActionResult,
   ChangeOperation,
   ChangeProposal,
+  KnowledgeProjectionData,
+  KnowledgeProjectionEntry,
+  KnowledgeProjectionEvidence,
   ModuleActionContext,
   ModuleContext,
   ProposalStatus,
@@ -67,7 +70,7 @@ function makeReader(files: Map<string, string>, repositoryId = "repo-work", docu
   };
 }
 
-test("scene lists exclude native notes while retaining native and mapped scenes", async () => {
+test("Story keeps native notes as manuscripts and preserves native and mapped scenes", async () => {
   const nativeSceneId = "11111111-1111-4111-8111-111111111111";
   const nativeNoteId = "22222222-2222-4222-8222-222222222222";
   const scenePath = `plot/volumes/vol-main/chapters/ch-main-1/scenes/${nativeSceneId}.yaml`;
@@ -81,14 +84,18 @@ test("scene lists exclude native notes while retaining native and mapped scenes"
   const reader = makeReader(files, "repo-story-note-filter", {
     [scenePath]: "scene",
     [notePath]: "note",
+    [`documents/${nativeNoteId}.md`]: "note",
   });
   const context = makeActionContext(reader);
 
   const scenes = (await invoke<Array<{ id: string }>>("story.entities.list", { type: "scene" }, context)).data;
   assert.deepEqual(new Set(scenes.map((entity) => entity.id)), new Set(["sc-1", "sc-2", nativeSceneId]));
 
-  const allEntities = (await invoke<Array<{ id: string }>>("story.entities.list", {}, context)).data;
-  assert.ok(allEntities.some((entity) => entity.id === nativeNoteId));
+  const allEntities = (await invoke<Array<{ id: string; type: string; body?: string }>>("story.entities.list", {}, context)).data;
+  assert.equal(allEntities.some((entity) => entity.id === nativeNoteId), false);
+  const note = allEntities.find((entity) => entity.id === `doc-ms-${nativeNoteId}`);
+  assert.equal(note?.type, "manuscript");
+  assert.equal(note?.body, "Private note body.");
   assert.ok(allEntities.some((entity) => entity.id === "sc-1"));
 
   const snapshot = await readStorySnapshot(reader);
@@ -97,28 +104,46 @@ test("scene lists exclude native notes while retaining native and mapped scenes"
 });
 
 test("Story consumes the pinned typed native hierarchy while preserving its file adapter metadata", async () => {
-  const metadataPath = "plot/volumes/v1/chapters/c1/scenes/s1.yaml";
+  const metadataPath = "plot/imported/s1.yaml";
   const bodyPath = "documents/11111111-1111-4111-8111-111111111111.md";
-  const metadata = { id: "s1", title: "Typed scene", order: "0001", chapter: "c1", volume: "v1", manuscript: bodyPath };
+  const missingPath = "documents/00000000-0000-4000-8000-000000000000.md";
+  const locationPath = "bible/locations/cafe.yaml";
+  const metadata = { id: "s1", title: "Typed scene", order: "0001", chapter: "c1", volume: "v1", manuscript: bodyPath, importedFields: { translation: "草稿" } };
+  const metadataContent = yaml(metadata);
+  const nativeScene = {
+    id: "s1", kind: "scene", title: "Typed scene", orderKey: "0001", metadataPath,
+    metadataRevision: revision(metadataContent), metadataContent, documentOrder: 2, metadata,
+  };
   const reader: SnapshotReader = {
     snapshot: { projectId: "native-story", projectVersion: 17 },
-    nativeStoryDocuments: [{ id: "s1", kind: "scene", title: "Typed scene", orderKey: "0001", metadataPath,
-      metadataRevision: revision(yaml(metadata)), documentOrder: 2, metadata }],
-    async read(path) {
-      if (path === metadataPath) return { content: yaml(metadata), revision: revision(yaml(metadata)), documentKind: "scene", documentOrder: 2 };
-      if (path === bodyPath) return { content: "Scene body", revision: revision("Scene body"), documentKind: "scene", documentOrder: 2 };
-      return null;
+    nativeStoryDocuments: [nativeScene],
+    async read() { assert.fail("the pinned file selection uses the available batch reader"); },
+    async readMany(paths: readonly string[]) {
+      assert.deepEqual(paths, [locationPath, missingPath, bodyPath]);
+      return [
+        { content: "id: cafe\nname: Café\n", revision: "cafe-revision" },
+        null,
+        { content: "Scene body", revision: revision("Scene body"), documentKind: "scene", documentOrder: 2 },
+      ];
     },
-    async list(prefix) { return prefix === "plot" ? [metadataPath] : prefix === "documents" ? [bodyPath] : []; },
+    async list(prefix) {
+      if (prefix === "documents") return [bodyPath, missingPath];
+      return prefix === "bible" ? [locationPath] : [];
+    },
   };
   const story = await readStorySnapshot(reader);
   assert.equal(story.snapshot, reader.snapshot);
+  assert.equal(story.entities.get("s1")?.type, "scene", "native kind is independent of the adapter path convention");
+  assert.equal(story.documentOrderByEntityId?.get("s1"), 2, "hierarchy ordering comes from the selected native projection");
   assert.equal(story.entities.get("s1")?.name, undefined, "native and YAML readers preserve the same optional name field");
   assert.equal(story.entities.get("s1")?.raw.title, "Typed scene");
   assert.equal(story.entities.get("s1")?.raw.chapter, "c1");
-  assert.equal(story.files.get(metadataPath)?.revision, revision(yaml(metadata)));
-  assert.equal(story.files.get(metadataPath)?.content, yaml(metadata), "the adapter retains exact file bytes for existing Story change-set consumers");
+  assert.deepEqual(story.entities.get("s1")?.raw.importedFields, { translation: "草稿" });
+  assert.equal(story.files.get(metadataPath)?.revision, revision(metadataContent));
+  assert.equal(story.files.get(metadataPath)?.content, metadataContent, "the adapter retains exact file bytes for existing Story change-set consumers");
   assert.equal(story.files.get(metadataPath)?.documentOrder, 2);
+  assert.deepEqual([...story.files.keys()], [locationPath, bodyPath, metadataPath]);
+  assert.equal(story.files.get(bodyPath)?.revision, revision("Scene body"));
   assert.equal(story.entities.get("doc-ms-11111111-1111-4111-8111-111111111111")?.body, "Scene body");
 });
 
@@ -389,12 +414,44 @@ test("snapshot materialization reads each pinned Story snapshot without proposin
   assert.deepEqual(secondProposals, []);
 });
 
-test("graph query accepts the browser string-array filter and rejects scalar filters", async () => {
-  const context = makeActionContext(makeReader(fixtureFiles()));
-  const graph = await invoke<{ nodes: Array<{ id: string; type: string }>; edges: unknown[] }>(
-    "story.graph.query", { types: ["character"] }, context,
-  );
-  assert.deepEqual(graph.data.nodes.map((node) => node.type), ["character"]);
+test("graph query keeps native documents for manuscript graphs and skips them for explicit non-manuscript types", async () => {
+  const noteId = "22222222-2222-4222-8222-222222222222";
+  const notePath = `documents/${noteId}.md`;
+  const reader = makeReader(fixtureFiles({
+    [notePath]: "---\ntitle: Author note\n---\nAn editable author document.\n",
+    "manuscript/source-entity.yaml": yaml({ id: "char-source", type: "character", name: "Source character" }),
+  }), "repo-graph", { [notePath]: "note" });
+  const documentsRead: string[] = [];
+  const context = makeActionContext({
+    ...reader,
+    async list(prefix) {
+      if (prefix === "documents") documentsRead.push(prefix);
+      return reader.list(prefix);
+    },
+    async read(path) {
+      if (path.startsWith("documents/")) documentsRead.push(path);
+      return reader.read(path);
+    },
+  });
+  type Graph = { nodes: Array<{ id: string; type: string; name: string }>; edges: Array<{ from: string; to: string; kind: string }> };
+  const graph = await invoke<Graph>("story.graph.query", { types: ["character"] }, context);
+  assert.deepEqual(graph.data.nodes, [
+    { id: "char-uma", type: "character", name: "Uma" },
+    { id: "char-source", type: "character", name: "Source character" },
+  ]);
+  assert.deepEqual(graph.snapshot, reader.snapshot);
+  const empty = await invoke<Graph>("story.graph.query", { types: [] }, context);
+  assert.deepEqual(empty.data, { nodes: [], edges: [] });
+  assert.equal(documentsRead.length, 0, "a graph with these explicit types does not need native document bodies");
+
+  const defaults = await invoke<Graph>("story.graph.query", {}, context);
+  assert.deepEqual(defaults.data.nodes.map(({ id }) => id), ["char-uma", "loc-cafe", "char-source"]);
+  const manuscripts = await invoke<Graph>("story.graph.query", { types: ["scene", "manuscript"] }, context);
+  assert.ok(manuscripts.data.nodes.some(({ id, name }) => id === `doc-ms-${noteId}` && name === "Author note"));
+  assert.ok(manuscripts.data.nodes.some(({ id }) => id === "ms-vol-main-ch-main-1-sc-1"));
+  assert.ok(manuscripts.data.edges.some(({ from, to, kind }) =>
+    from === "sc-1" && to === "ms-vol-main-ch-main-1-sc-1" && kind === "manuscript"));
+  assert.ok(documentsRead.includes(notePath));
   const invalid = await actionById("story.graph.query").invoke({ types: "character" }, context);
   assert.equal(invalid.ok, false);
   if (!invalid.ok) {
@@ -1496,30 +1553,58 @@ test("world time metadata changes remain proposals and invalid ranges fail", asy
   assert.equal((await invoke<{ worldTime: unknown }>("story.world-state.temporal", { sceneId: "sc-1" }, context)).data.worldTime, null);
 });
 
-test("native Knowledge uses explicit ID, not matching names, and keeps unconfirmed evidence out of scoped contexts", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const entry=(id:string,attributes:Record<string,unknown>,status="confirmed",evidence:unknown[]=[])=>
-    ({node:{id,name:"Uma",type:"character",status,attributes},aliases:[],relations:[],evidence,evidenceLimitReached:false});
-  const files=fixtureFiles({
-    "bible/characters/char-other/profile.yaml":yaml({id:"char-other",name:"Uma",type:"character"}),
-    [path]:JSON.stringify({version:1,projectId:"repo-work",entries:[
-      entry("explicit",{storyEntityId:"char-uma"}),entry("same-name",{}),
-      entry("candidate",{storyEntityId:"char-uma"},"proposed"),
-      entry("wrong-scene",{}, "confirmed",[{current:false,anchor:{documentId:"sc-1",status:"confirmed"},mention:{status:"confirmed"},assertions:[]}])
-    ]})
+function knowledgeEntry(id: string, values: Partial<KnowledgeProjectionEntry> = {}): KnowledgeProjectionEntry {
+  return {
+    node: { id, name: "Uma", type: "character", status: "confirmed", attributes: {}, deletedAt: null },
+    aliases: [], relations: [], evidence: [], aliasLimitReached: false, relationLimitReached: false, evidenceLimitReached: false,
+    ...values,
+  };
+}
+
+function knowledgeEvidence(values: Partial<KnowledgeProjectionEvidence> = {}): KnowledgeProjectionEvidence {
+  return {
+    anchor: { id: "evidence-1", documentId: "doc", revisionId: "revision-1", status: "confirmed" },
+    mention: { status: "confirmed" }, current: true, storySceneId: null, quote: null, assertions: [], assertionLimitReached: false,
+    ...values,
+  };
+}
+
+function withKnowledge(reader: SnapshotReader, entries: KnowledgeProjectionData["entries"], extras: Partial<KnowledgeProjectionData> = {}): SnapshotReader {
+  return {
+    ...reader,
+    knowledge: { source: { kind: "knowledge-projection", snapshot: reader.snapshot, revision: "1".repeat(64) }, entries, documentMappings: [], nodeLimitReached: false, ...extras },
+  };
+}
+
+test("native Knowledge uses explicit ID, preserves scope, and refuses another project or snapshot", async () => {
+  const node = (id: string, attributes: Record<string, unknown>, status = "confirmed") => ({ id, name: "Uma", type: "character", status, attributes, deletedAt: null });
+  const files = fixtureFiles({
+    "bible/characters/char-other/profile.yaml": yaml({ id: "char-other", name: "Uma", type: "character" }),
   });
-  const context=makeActionContext(makeReader(files));
-  const author=await invoke<{parts:Array<{kind:string;value:unknown}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},context);
-  const knowledge=author.data.parts.filter(part=>part.kind==="native-knowledge");
-  assert.equal(knowledge.length,2);assert.match(JSON.stringify(knowledge),/"knowledgeId":"explicit"/);
-  assert.match(JSON.stringify(knowledge),/"knowledgeId":"candidate","name":"Uma","type":"character","status":"candidate"/);
-  assert.doesNotMatch(JSON.stringify(knowledge),/same-name|wrong-scene/);
-  for(const scope of ["reader","character"]){
-    const result=await invoke<{parts:Array<{kind:string}>}>("story.context.package",{sceneId:"sc-1",scope,characterId:"char-uma"},context);
-    assert.equal(result.data.parts.some(part=>part.kind==="native-knowledge"),false);
+  const reader = withKnowledge(makeReader(files), [
+    knowledgeEntry("explicit", { node: node("explicit", { storyEntityId: "char-uma" }) }),
+    knowledgeEntry("same-name"),
+    knowledgeEntry("candidate", { node: node("candidate", { storyEntityId: "char-uma" }, "proposed") }),
+    knowledgeEntry("wrong-scene", { evidence: [knowledgeEvidence({ current: false })] }),
+  ]);
+  const context = makeActionContext(reader);
+  const author = await invoke<{ parts: Array<{ kind: string; value: unknown }> }>("story.context.package", { sceneId: "sc-1", scope: "author", budget: 200000 }, context);
+  const knowledge = author.data.parts.filter(part => part.kind === "native-knowledge");
+  assert.equal(knowledge.length, 2);
+  assert.match(JSON.stringify(knowledge), /"knowledgeId":"explicit"/u);
+  assert.match(JSON.stringify(knowledge), /"knowledgeId":"candidate","name":"Uma","type":"character","status":"candidate"/u);
+  assert.doesNotMatch(JSON.stringify(knowledge), /same-name|wrong-scene/u);
+  for (const scope of ["reader", "character"]) {
+    const result = await invoke<{ parts: Array<{ kind: string }> }>("story.context.package", { sceneId: "sc-1", scope, characterId: "char-uma" }, context);
+    assert.equal(result.data.parts.some(part => part.kind === "native-knowledge"), false);
   }
-  const wrong=makeActionContext(makeReader(files,"another-project"));
-  assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
+  for (const snapshot of [{ ...reader.snapshot, projectId: "another-project" }, { ...reader.snapshot, projectVersion: reader.snapshot.projectVersion + 1 }]) {
+    const result = await actionById("story.knowledge.links").invoke({}, makeActionContext({ ...reader, snapshot }));
+    assert.equal(result.ok, false);
+  }
+  const unavailable = await actionById("story.knowledge.links").invoke({}, makeActionContext(makeReader(files)));
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.error.code, "snapshot_unavailable");
 });
 
 test("Story context is a snapshot-bound action with no Assistant/provider dependency", async () => {
@@ -1611,54 +1696,61 @@ test("author context maps thread relations to the target scene and matches the o
   }
 });
 
-test("native Knowledge associates evidence through canonical document UUID mapping", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",documentMappings:[{documentId:"doc-uuid-1",storySceneId:"sc-1",mapping:"explicit"}],entries:[{
-    node:{id:"knowledge-1",name:"Cafe",type:"location",status:"confirmed",attributes:{}},aliases:[],relations:[],evidence:[{
-      current:false,stale:true,storySceneId:"sc-1",sourceDocumentId:"doc-uuid-1",sourceRevisionId:"revision-1",quote:null,mention:{status:"confirmed"},anchor:{id:"evidence-1",documentId:"doc-uuid-1",revisionId:"revision-1",fromUtf16:0,toUtf16:11,status:"confirmed",quoteSha256:"sha"},assertions:[]
-    }],evidenceLimitReached:false
-  }]})});
-  type ContextPart={kind:string;value:{evidence:Array<{storySceneId:string;sourceRevisionId:string;quote:string|null;status:string}>}};
-  const result=await invoke<{parts:ContextPart[]}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
-  const knowledge=result.data.parts.find(part=>part.kind==="native-knowledge")!;
-  assert.equal(knowledge.value.evidence[0]?.storySceneId,"sc-1");
-  assert.equal(knowledge.value.evidence[0]?.sourceRevisionId,"revision-1");
-  assert.equal(knowledge.value.evidence[0]?.quote,null,"quote is explicitly missing when the projection has no verified source quote");
-  assert.equal(knowledge.value.evidence[0]?.status,"stale");
-});
-
-test("legacy immutable Knowledge projections retain stale status and candidate evidence", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
-    node:{id:"legacy",name:"Legacy",type:"character",status:"confirmed",attributes:{storyEntityId:"char-uma"}},aliases:[],relations:[],
-    evidence:[
-      {current:false,anchor:{id:"old",documentId:"doc",revisionId:"old-revision",status:"confirmed"},mention:{status:"confirmed"},assertions:[]},
-      {current:true,anchor:{id:"candidate",documentId:"doc",revisionId:"new-revision",status:"proposed"},mention:{status:"proposed"},assertions:[]}
-    ],evidenceLimitReached:false
-  }]})});
-  const result=await invoke<{parts:Array<{kind:string;value:{evidence:Array<{status:string;quote:string|null}>}}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
-  const part=result.data.parts.find(part=>part.kind==="native-knowledge");
-  assert.deepEqual(part?.value.evidence.map(item=>[item.status,item.quote]),[["stale",null],["candidate",null]]);
-});
-
-test("restricted context does not expose omission details or unacquired facts", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
-    node:{id:"secret-node",name:"Secret Alias",type:"lore",status:"confirmed",attributes:{}},aliases:[],relations:[],evidence:[],evidenceLimitReached:false
-  }]})});
-  const result=await invoke("story.context.package",{sceneId:"sc-1",scope:"reader",budget:128},makeActionContext(makeReader(files)));
-  assert.doesNotMatch(JSON.stringify(result.data),/secret-node|Secret Alias/);
-});
-
-test("reader context includes explicitly disclosed Knowledge without its aliases or evidence", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  const files=fixtureFiles({
-    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml":yaml({id:"sc-1",title:"Door",type:"scene",volume:"vol-main",chapter:"ch-main-1",order:1,appears:["char-uma"],state_events:[{sceneId:"sc-1",kind:"knowledge",subject:"char-uma",object:"native-id",payload:{layer:"reader-knowledge"},status:"confirmed"}],manuscript:"manuscript/vol-main/ch-main-1/sc-1.md"}),
-    [path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{node:{id:"native-id",name:"Secret Name",type:"lore",status:"confirmed",attributes:{storyEntityId:"char-uma"}},aliases:[{surface:"Secret Alias",status:"confirmed"}],relations:[],evidence:[],evidenceLimitReached:false}]})
+test("native Knowledge uses anchor identities for scene mapping and revision evidence", async () => {
+  const entry = (id: string, documentId: string) => knowledgeEntry(id, {
+    evidence: [knowledgeEvidence({ current: false, storySceneId: "sc-1", anchor: { id: `evidence-${id}`, documentId, revisionId: "revision-1", status: "confirmed" } })],
   });
-  const result=await invoke("story.context.package",{sceneId:"sc-1",scope:"reader"},makeActionContext(makeReader(files)));
-  assert.match(JSON.stringify(result.data),/native-id/);
-  assert.doesNotMatch(JSON.stringify(result.data),/Secret Name|Secret Alias|"type":"lore"/);
+  const reader = withKnowledge(makeReader(fixtureFiles()), [entry("knowledge-1", "doc-uuid-1"), entry("other-document", "doc-uuid-2")], {
+    documentMappings: [{ documentId: "doc-uuid-1", storySceneId: "sc-1", mapping: "explicit" }],
+  });
+  type ContextPart = { kind: string; value: { knowledgeId: string; source: unknown; evidence: Array<{
+    storySceneId: string; sourceDocumentId: string; sourceRevisionId: string; quote: string | null; status: string;
+  }> } };
+  const result = await invoke<{ parts: ContextPart[] }>("story.context.package", {
+    sceneId: "sc-1", scope: "author", budget: 200000,
+  }, makeActionContext(reader));
+  const knowledge = result.data.parts.filter(part => part.kind === "native-knowledge");
+  assert.deepEqual(knowledge.map(part => part.value.knowledgeId), ["knowledge-1"]);
+  assert.deepEqual(knowledge[0]!.value.source, { kind: "knowledge-projection", snapshot: reader.snapshot, revision: "1".repeat(64) });
+  const evidence = knowledge[0]!.value.evidence[0]!;
+  assert.equal(evidence.storySceneId, "sc-1");
+  assert.equal(evidence.sourceDocumentId, "doc-uuid-1");
+  assert.equal(evidence.sourceRevisionId, "revision-1");
+  assert.equal(evidence.quote, null);
+  assert.equal(evidence.status, "stale");
+});
+
+test("pinned Knowledge projections retain stale status and candidate evidence", async () => {
+  const reader = withKnowledge(makeReader(fixtureFiles()), [knowledgeEntry("legacy", {
+    node: { id: "legacy", name: "Legacy", type: "character", status: "confirmed", attributes: { storyEntityId: "char-uma" }, deletedAt: null },
+    evidence: [knowledgeEvidence({ current: false }), knowledgeEvidence({ mention: { status: "proposed" } })],
+  })]);
+  const result = await invoke<{ parts: Array<{ kind: string; value: { evidence: Array<{ status: string; quote: string | null }> } }> }>(
+    "story.context.package", { sceneId: "sc-1", scope: "author", budget: 200000 }, makeActionContext(reader),
+  );
+  const part = result.data.parts.find(item => item.kind === "native-knowledge");
+  assert.deepEqual(part?.value.evidence.map(item => [item.status, item.quote]), [["stale", null], ["candidate", null]]);
+});
+
+test("restricted context does not expose omission details or unacquired facts", async () => {
+  const reader = withKnowledge(makeReader(fixtureFiles()), [knowledgeEntry("secret-node", {
+    node: { id: "secret-node", name: "Secret Alias", type: "lore", status: "confirmed", attributes: {}, deletedAt: null },
+  })]);
+  const result = await invoke("story.context.package", { sceneId: "sc-1", scope: "reader", budget: 128 }, makeActionContext(reader));
+  assert.doesNotMatch(JSON.stringify(result.data), /secret-node|Secret Alias/u);
+});
+
+test("reader context includes explicitly disclosed Knowledge without its aliases or evidence", async () => {
+  const files = fixtureFiles({
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml": yaml({ id: "sc-1", title: "Door", type: "scene", volume: "vol-main", chapter: "ch-main-1", order: 1, appears: ["char-uma"], state_events: [{ sceneId: "sc-1", kind: "knowledge", subject: "char-uma", object: "native-id", payload: { layer: "reader-knowledge" }, status: "confirmed" }], manuscript: "manuscript/vol-main/ch-main-1/sc-1.md" }),
+  });
+  const reader = withKnowledge(makeReader(files), [knowledgeEntry("native-id", {
+    node: { id: "native-id", name: "Secret Name", type: "lore", status: "confirmed", attributes: { storyEntityId: "char-uma" }, deletedAt: null },
+    aliases: [{ nodeId: "native-id", surface: "Secret Alias", status: "confirmed", scope: null }],
+  })]);
+  const result = await invoke("story.context.package", { sceneId: "sc-1", scope: "reader" }, makeActionContext(reader));
+  assert.match(JSON.stringify(result.data), /native-id/u);
+  assert.doesNotMatch(JSON.stringify(result.data), /Secret Name|Secret Alias|"type":"lore"/u);
 });
 
 test("author manuscript quotes truncate on Unicode boundaries within the UTF-8 byte budget", async()=>{
@@ -1686,27 +1778,20 @@ test("large manuscript truncation preserves structured world state under the sam
   assert.equal(result.data.used<=result.data.budget,true);
 });
 
-test("author context reports all native projection bounds without revealing them in restricted scopes", async()=>{
-  const path="meta/scriptorium/knowledge-context/v1.json";
-  for(const legacy of [false,true]){
-    const entry={
-      node:{id:"bounded-node",name:"Secret inventory",type:"character",status:"confirmed",attributes:{storyEntityId:"char-uma"}},
-      aliases:Array.from({length:500},(_,i)=>({surface:"a"+i,status:"confirmed"})),
-      relations:Array.from({length:500},(_,i)=>({id:"r"+i,status:"confirmed",sourceId:"bounded-node",targetId:"bounded-node"})),
-      evidence:[{current:true,anchor:{id:"anchor",status:"confirmed"},mention:{status:"confirmed"},
-        assertions:Array.from({length:100},(_,i)=>({assertion:{id:"fact"+i,status:"confirmed"},role:"supports"})),
-        ...(legacy?{}:{assertionLimitReached:true})}],
-      evidenceLimitReached:false,...(legacy?{}:{aliasLimitReached:true,relationLimitReached:true})
-    };
-    const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[entry],nodeLimitReached:false})});
-    const context=makeActionContext(makeReader(files));
-    const author=await invoke<{knowledgeTruncated:boolean;omissions:Array<{reason:string}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},context);
-    assert.equal(author.data.knowledgeTruncated,true);
-    for(const reason of ["alias-inventory-limit","relation-inventory-limit","assertion-inventory-limit"])
-      assert.ok(author.data.omissions.some(item=>item.reason===reason),reason);
-    for(const scope of ["reader","character"]){
-      const result=await invoke("story.context.package",{sceneId:"sc-1",scope,characterId:"char-uma"},context);
-      assert.doesNotMatch(JSON.stringify(result.data),/knowledgeTruncated|inventory-limit|Secret inventory|bounded-node/);
-    }
+test("author context reports native projection bounds without revealing them in restricted scopes", async () => {
+  const reader = withKnowledge(makeReader(fixtureFiles()), [knowledgeEntry("bounded-node", {
+    node: { id: "bounded-node", name: "Secret inventory", type: "character", status: "confirmed", attributes: { storyEntityId: "char-uma" }, deletedAt: null },
+    evidence: [knowledgeEvidence({ assertionLimitReached: true })],
+    aliasLimitReached: true, relationLimitReached: true, evidenceLimitReached: true,
+  })], { nodeLimitReached: true });
+  const context = makeActionContext(reader);
+  const author = await invoke<{ knowledgeTruncated: boolean; omissions: Array<{ reason: string }> }>("story.context.package", { sceneId: "sc-1", scope: "author", budget: 200000 }, context);
+  assert.equal(author.data.knowledgeTruncated, true);
+  for (const reason of ["alias-inventory-limit", "relation-inventory-limit", "assertion-inventory-limit", "mention-inventory-limit", "node-inventory-limit"]) {
+    assert.ok(author.data.omissions.some(item => item.reason === reason), reason);
+  }
+  for (const scope of ["reader", "character"]) {
+    const result = await invoke("story.context.package", { sceneId: "sc-1", scope, characterId: "char-uma" }, context);
+    assert.doesNotMatch(JSON.stringify(result.data), /knowledgeTruncated|inventory-limit|Secret inventory|bounded-node/u);
   }
 });

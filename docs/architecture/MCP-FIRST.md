@@ -32,6 +32,10 @@ Bind requests to the authenticated actor, authorized project and selected snapsh
 
 MCP may read, compute and submit proposals, not authorize or apply canonical changes, publish, reconcile author recovery, or perform direct author persistence mutations. Ordinary authenticated author edits retain their current save protocol. Proposal creation, explicit author approval and transactional application are separate operations; proposal status and receipts are queryable. Do not treat a client-supplied approval flag as author authority.
 
+Streamable HTTP uses the API's OAuth-protected `/mcp` endpoint. Better Auth issues the access token to a registered MCP client. The API enforces that client's project assignments and the requested `mcp:read`, `mcp:compute` or `mcp:propose` scope. Both transports use this authorization boundary. See [API authentication and authorization](API-AUTHN-AUTHZ.md).
+
+For a local stdio connection, supply `codexia-mcp` with an already-issued OAuth access token for a registered MCP client through `CODEXIA_MCP_ACCESS_TOKEN`. Use `CODEXIA_API_URL` for the configured API origin and, if needed, `CODEXIA_PROJECT_ID` for an assigned project. The CLI forwards the token as a bearer credential and keeps it in process memory. Obtain a new access token through the registered OAuth client when the API reports expiration.
+
 ## Domain surfaces
 
 | Domain | Contract |

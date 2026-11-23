@@ -286,6 +286,7 @@ function HostFixture() {
           refresh={refresh}
           journal={journal as never}
           onProposalStored={onProposalStored}
+          onNativeChangeSetProposed={() => { throw new Error("Unexpected native ChangeSet in the lifecycle fixture"); }}
           readCurrentEditor={readCurrentEditor}
         />
       )}

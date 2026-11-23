@@ -130,7 +130,6 @@
           ansible.builtin.command:
             argv: [podman, secret, exists, "{{ item }}"]
           loop:
-            - codexia-auth-token
             - codexia-tunnel-token
             - codexia-postgres-admin-password
             - codexia-postgres-app-password

@@ -31,6 +31,8 @@ function fixtureFetch(overrides = {}) {
   const fetchImpl = async (input, init) => {
     const url = new URL(input);
     calls.push({ url, init });
+    assert.equal(url.origin, origin);
+    assert.equal(init.method, 'GET');
     assert.equal(init.credentials, 'omit');
     assert.equal(init.redirect, 'manual');
     const headers = new Headers(init.headers);
@@ -75,25 +77,23 @@ test('public OAuth edge probe checks protocol metadata, MCP challenge, API denia
     oauthConsentStatus: 200,
     oauthStaticAssetCount: 6,
   });
-  assert.deepEqual(calls.map(({ url, init }) => [url.pathname, init.method]), [
-    ['/.well-known/oauth-protected-resource/api', 'GET'],
-    ['/.well-known/oauth-authorization-server/api/auth', 'GET'],
-    ['/.well-known/openid-configuration/api/auth', 'GET'],
-    ['/api/auth/jwks', 'GET'],
-    ['/api/auth/codexia/auth-methods', 'GET'],
-    ['/api/auth/get-session', 'GET'],
-    ['/oauth/login', 'GET'],
-    ['/oauth/assets/icon.svg', 'GET'],
-    ['/oauth/assets/styles.css', 'GET'],
-    ['/oauth/assets/login.js', 'GET'],
-    ['/oauth/consent', 'GET'],
-    ['/oauth/assets/icon.svg', 'GET'],
-    ['/oauth/assets/styles.css', 'GET'],
-    ['/oauth/assets/consent.js', 'GET'],
-    ['/mcp', 'GET'],
-    ['/api/projects', 'GET'],
-    ['/desktop', 'GET'],
-  ]);
+  assert.deepEqual(new Set(calls.map(({ url }) => url.href)), new Set([
+    '/.well-known/oauth-protected-resource/api',
+    '/.well-known/oauth-authorization-server/api/auth',
+    '/.well-known/openid-configuration/api/auth',
+    '/api/auth/jwks',
+    '/api/auth/codexia/auth-methods',
+    '/api/auth/get-session',
+    '/oauth/login',
+    '/oauth/consent',
+    '/oauth/assets/icon.svg',
+    '/oauth/assets/styles.css',
+    '/oauth/assets/login.js',
+    '/oauth/assets/consent.js',
+    '/mcp',
+    '/api/projects',
+    '/desktop',
+  ].map(path => origin + path)));
 });
 
 test('public OAuth metadata cannot be hidden behind an Access redirect or edge challenge', async () => {

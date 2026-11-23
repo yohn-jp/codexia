@@ -18,7 +18,6 @@ const commands = [
   ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { CODEXIA_PROFILE: "full" }],
   ["node", ["--test", "tests/integration/mcp-acceptance.test.mjs"], { CODEXIA_MCP_ACCEPTANCE_MODULES: "story,nlp,diagnostics,semantic,speaker,assistant,publishing,mcp" }],
   ["node", ["--test", "modules/diagnostics/tests/production.acceptance.mjs"]],
-  ["node", ["--test", "tests/integration/migration-acceptance.test.mjs"]],
   ["bash", ["scripts/verify-oci.sh"], { CODEXIA_PROFILE: "full", CODEXIA_OCI_IMAGE: process.env.CODEXIA_OCI_FULL_IMAGE ?? "codexia:verification-full" }],
 ];
 for (const [command, args, overrides = {}] of commands) {

@@ -1,12 +1,15 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test, type AuthorSession } from "./author-oauth-fixture";
 import { randomUUID } from "node:crypto";
 import type { ProposalStatus } from "@codexia/contracts";
-import { createWritingFixture } from "./postgres-fixture";
+import { createPostgresPersistence } from "@codexia/persistence-postgres";
+import { CoreStore } from "../../packages/core/src/index.js";
+import { createOAuthWritingFixture } from "./postgres-fixture";
 
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
 const scenePath = "plot/volumes/vol-review/chapters/ch-review/scenes/scene-review.yaml";
 const manuscriptPath = "manuscript/vol-review/ch-review/scene-review.md";
+const correctionsPath = "meta/scriptorium/modules/speaker/corrections.jsonl";
 
 interface Project {
   id: string;
@@ -21,13 +24,28 @@ interface ProposalActionResult {
   error?: { code: string; message: string };
 }
 
-async function createReviewProject(page: Page): Promise<Project> {
-  const origin = new URL(page.url()).origin;
+async function readReviewFiles(projectId: string, paths: readonly string[]): Promise<Map<string, string>> {
+  const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error("Browser acceptance requires its disposable PostgreSQL database");
+  const persistence = createPostgresPersistence(databaseUrl);
+  try {
+    const reader = await new CoreStore({ persistence }).reader(projectId);
+    const files = new Map<string, string>();
+    for (const path of paths) {
+      const file = await reader.read(path);
+      if (file) files.set(path, file.content);
+    }
+    return files;
+  } finally { await persistence.close(); }
+}
+
+async function createReviewProject(author: AuthorSession): Promise<Project> {
+  const { origin } = author;
   const title = `Review Contributions ${randomUUID()}`;
-  const projectResponse = await page.request.post(`${origin}/api/projects`, { headers: { Origin: origin }, data: { title } });
+  const projectResponse = await author.fetch(`${origin}/api/projects`, { method: "POST", headers: { Origin: origin }, data: { title } });
   expect(projectResponse.status(), await projectResponse.text()).toBe(201);
   const project = await projectResponse.json() as Project;
-  const snapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
+  const snapshotResponse = await author.fetch(`/api/projects/${encodeURIComponent(project.id)}/snapshot?projection=editor`);
   expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
   const current = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
   expect(current.snapshot.projectId).toBe(project.id);
@@ -101,34 +119,26 @@ async function createReviewProject(page: Page): Promise<Project> {
     writes,
     message: "Seed Story and Speaker review data in PostgreSQL",
   };
-  const proposalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/proposals`, {
+  const proposalResponse = await author.fetch(`${origin}/api/projects/${encodeURIComponent(project.id)}/proposals`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { id: randomUUID(), snapshot: current.snapshot, operations: [operation] },
   });
   expect(proposalResponse.status(), await proposalResponse.text()).toBe(201);
   const proposal = await proposalResponse.json() as { id: string };
-  const approvalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/approvals`, {
+  const approvalResponse = await author.fetch(`${origin}/api/projects/${encodeURIComponent(project.id)}/approvals`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { proposalId: proposal.id, operationIds: [operation.id] },
   });
   expect(approvalResponse.status(), await approvalResponse.text()).toBe(204);
-  const applyResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/apply`, { headers: { Origin: origin }, data: operation });
+  const applyResponse = await author.fetch(`${origin}/api/projects/${encodeURIComponent(project.id)}/apply`, { method: "POST", headers: { Origin: origin }, data: operation });
   expect(applyResponse.status(), await applyResponse.text()).toBe(201);
-  const seededSnapshot = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
-  expect(seededSnapshot.ok(), await seededSnapshot.text()).toBe(true);
-  const seeded = await seededSnapshot.json() as { files: Array<{ path: string; content: string }> };
-  const seededFiles = new Map(seeded.files.map((file) => [file.path, file.content]));
+  const seededFiles = await readReviewFiles(project.id, [zukanPath, scenePath, manuscriptPath]);
   expect(seededFiles.get(zukanPath)).toContain("zukan-review-queue-item");
   expect(seededFiles.get(scenePath)).toContain("char-akari");
   expect(seededFiles.get(manuscriptPath)).toContain("この古地図を探している");
   return project;
-}
-
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/desktop/");
-  await page.getByLabel("アクセス・トークン").fill(authToken);
-  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
 }
 
 function actionResponse(response: { url(): string; request(): { method(): string } }, actionId: string): boolean {
@@ -155,25 +165,27 @@ async function openWorkspaceReviewPanel(page: Page): Promise<void> {
   await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
 }
 
-async function readProposalStatus(page: Page, projectId: string, proposalId: string): Promise<ProposalStatus> {
-  const origin = new URL(page.url()).origin;
-  const response = await page.request.get(
-    `${origin}/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}`,
+async function readProposalStatus(author: AuthorSession, projectId: string, proposalId: string): Promise<ProposalStatus> {
+  const response = await author.fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}`,
   );
   expect(response.ok(), await response.text()).toBe(true);
   return await response.json() as ProposalStatus;
 }
 
-test("Core presents native Knowledge review without Story or Speaker contributions", async ({ page }) => {
+test("Core presents native Knowledge review without Story or Speaker contributions", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE === "full", "This case verifies the Core-only contribution boundary.");
-  const { project } = await createWritingFixture(page);
+  const { project, author } = await createOAuthWritingFixture(
+    authorizeAuthor, page, "desktop", "日本語の原稿", "最初の本文。\n次の文章です。",
+  );
   const projectPath = `/api/v1/persistence/projects/${project.id}`;
-  const projectResponse = await page.request.get(projectPath);
+  const projectResponse = await author.fetch(projectPath);
   expect(projectResponse.ok()).toBe(true);
   const { project: current } = await projectResponse.json() as { project: { version: number } };
   const nodeId = randomUUID();
-  const proposalResponse = await page.request.post(`${projectPath}/changesets`, {
-    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID() },
+  const proposalResponse = await author.fetch(`${projectPath}/changesets`, {
+    method: "POST",
+    headers: { Origin: author.origin, "Idempotency-Key": randomUUID() },
     data: {
       projectVersion: current.version,
       operations: [{
@@ -193,7 +205,7 @@ test("Core presents native Knowledge review without Story or Speaker contributio
   expect(proposalResponse.status()).toBe(201);
   const { changeSet } = await proposalResponse.json() as { changeSet: { id: string } };
 
-  const contributionResponse = await page.request.get(`/api/projects/${project.id}/contributions`);
+  const contributionResponse = await author.fetch(`/api/projects/${project.id}/contributions`);
   expect(contributionResponse.ok()).toBe(true);
   const contributions = await contributionResponse.json() as Array<{ module: string }>;
   expect(contributions.filter(({ module }) => module === "story" || module === "speaker")).toEqual([]);
@@ -209,19 +221,18 @@ test("Core presents native Knowledge review without Story or Speaker contributio
   await expect(card).toContainText(changeSet.id);
   await expect(card).toContainText("灯台守の候補");
   await expect(card.getByRole("button", { name: "承認する" })).toBeEnabled();
-  const canonicalNode = await page.request.get(`${projectPath}/nodes/${nodeId}`);
+  const canonicalNode = await author.fetch(`${projectPath}/nodes/${nodeId}`);
   expect(canonicalNode.status()).toBe(404);
 });
 
-test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page }) => {
+test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page, authorizeAuthor }) => {
   test.setTimeout(180_000);
   test.skip(process.env.CODEXIA_PROFILE !== "full", "Story and Speaker review contributions are selected by the full profile.");
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page);
-  const project = await createReviewProject(page);
+  const initialAuthor = await authorizeAuthor("desktop");
+  const project = await createReviewProject(initialAuthor);
   // Open the seeded project through its canonical route. A prior workspace
   // selection can otherwise keep an older document active during async guards.
-  await page.goto(`/desktop/projects/${encodeURIComponent(project.id)}`);
+  const author = await authorizeAuthor("desktop", page, { path: `/desktop/projects/${encodeURIComponent(project.id)}` });
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page.locator(".pg-document-list")).toContainText("Review Volume", { timeout: 30_000 });
   await expect(page.locator(".pg-document-list")).toContainText("Review Scene");
@@ -248,7 +259,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(zukanProposalResult.data?.suggestion).toMatchObject({ id: "zukan-review-queue-item", status: "rejected" });
     const zukanProposalId = zukanProposalResult.proposals?.[0]?.id;
     expect(zukanProposalId).toBeTruthy();
-    const zukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
+    const zukanStatus = await readProposalStatus(author, project.id, zukanProposalId!);
     expect(zukanStatus.state).toBe("proposed");
     expect(zukanStatus.approvedOperationIds).toEqual([]);
     expect(zukanStatus.applications).toEqual([]);
@@ -284,28 +295,24 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(speakerProposalResult.ok).toBe(true);
     const speakerProposalId = speakerProposalResult.proposals?.[0]?.id;
     expect(speakerProposalId).toBeTruthy();
-    const speakerStatus = await readProposalStatus(page, project.id, speakerProposalId!);
+    const speakerStatus = await readProposalStatus(author, project.id, speakerProposalId!);
     expect(speakerStatus.state).toBe("proposed");
     expect(speakerStatus.approvedOperationIds).toEqual([]);
     expect(speakerStatus.applications).toEqual([]);
     expect(speakerStatus.appliedOperationIds).toEqual([]);
     expect(speakerStatus.proposal.operations[0]?.writes.map((write) => write.path)).toEqual(expect.arrayContaining([
       scenePath,
-      "meta/scriptorium/modules/speaker/corrections.jsonl",
+      correctionsPath,
     ]));
     // A module refresh can remount its transient status; the canonical speaker
     // attribution must remain unresolved until the Core proposal is applied.
     await expect(speakerPanel.getByRole("heading", { name: "未確定・低信頼の話者帰属" })).toBeVisible();
     await expect(speakerPanel.getByText("『この古地図を探している。』")).toBeVisible();
 
-    const origin = new URL(page.url()).origin;
-    const proposedSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
-    expect(proposedSnapshotResponse.ok(), await proposedSnapshotResponse.text()).toBe(true);
-    const proposedSnapshot = await proposedSnapshotResponse.json() as { files: Array<{ path: string; content: string }> };
-    const proposedFiles = new Map(proposedSnapshot.files.map((file) => [file.path, file.content]));
+    const proposedFiles = await readReviewFiles(project.id, [zukanPath, scenePath, correctionsPath]);
     expect(JSON.parse(proposedFiles.get(zukanPath)!.trim()).status).toBe("pending");
     expect(proposedFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
-    expect(proposedFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
+    expect(proposedFiles.has(correctionsPath)).toBe(false);
 
     await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
     await page.locator(".pg-document-list")
@@ -316,9 +323,11 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(selectedSceneId).toBeTruthy();
     await page.getByRole("button", { name: "モバイル ↗" }).click();
     await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
+    await authorizeAuthor("mobile", page, { continueCurrentPage: true });
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "レビュー", exact: true }).click();
     await expect(page.locator(".proposal-review").getByRole("heading", { name: "確認待ちの提案" })).toBeVisible();
     await page.reload();
+    await authorizeAuthor("mobile", page, { continueCurrentPage: true });
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "レビュー", exact: true }).click();
     const mobileZukanCard = page.locator(".proposal-card").filter({ hasText: zukanProposalId! });
     const mobileSpeakerCard = page.locator(".proposal-card").filter({ hasText: speakerProposalId! });
@@ -326,7 +335,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     await expect(mobileSpeakerCard).toContainText("承認待ち");
     await mobileZukanCard.getByRole("button", { name: "承認して PostgreSQL Revision" }).click();
     await expect(mobileZukanCard).toContainText("PostgreSQL 保存済み");
-    const mobileApprovedZukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
+    const mobileApprovedZukanStatus = await readProposalStatus(author, project.id, zukanProposalId!);
     const mobileZukanOperationIds = zukanProposalResult.proposals?.[0]?.operations.map((operation) => operation.id) ?? [];
     expect(mobileApprovedZukanStatus.approvedOperationIds).toEqual(mobileZukanOperationIds);
     expect(mobileApprovedZukanStatus.appliedOperationIds).toEqual(mobileZukanOperationIds);
@@ -335,14 +344,12 @@ test("full profile renders Story and Speaker review queues and turns both author
     await page.getByRole("button", { name: "設定を開く" }).click();
     await page.getByRole("button", { name: "Desktop版へ切り替え" }).click();
     await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await openWorkspaceReviewPanel(page);
     await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("PostgreSQL 保存済み");
     await expect(page.locator(".proposal-card").filter({ hasText: speakerProposalId! })).toContainText("承認待ち");
-    const finalSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
-    expect(finalSnapshotResponse.ok(), await finalSnapshotResponse.text()).toBe(true);
-    const finalSnapshot = await finalSnapshotResponse.json() as { files: Array<{ path: string; content: string }> };
-    const finalFiles = new Map(finalSnapshot.files.map((file) => [file.path, file.content]));
+    const finalFiles = await readReviewFiles(project.id, [zukanPath, scenePath, correctionsPath]);
     expect(JSON.parse(finalFiles.get(zukanPath)!.trim()).status).toBe("rejected");
     expect(finalFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
-    expect(finalFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
+    expect(finalFiles.has(correctionsPath)).toBe(false);
 });

@@ -1138,7 +1138,6 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const story = await readStorySnapshot(context.reader);
       return [...story.entities.values()].filter((entity) =>
         (!input.type || entity.type === input.type) &&
-        (input.type !== "scene" || story.files.get(entity.filePath)?.documentKind !== "note") &&
         (!input.tag || entity.tags?.includes(String(input.tag))))
         .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id, "ja"))
         .map((entity) => entityWithRevision(entity, story));
@@ -1288,31 +1287,6 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       await context.propose([operation]);
       return { ...scene, raw: update.raw, revision: sourceEntityRevision({ ...scene, raw: update.raw }) };
     }),
-    action("story.entities.reorder", propose, fieldSchema(["type", "parentId", "orderedIds"]), async (input, context) => {
-      if (input.type !== "chapter" && input.type !== "scene") throw new TypeError("type must be chapter or scene");
-      const parentId = stringValue(input.parentId, "parentId");
-      if (!Array.isArray(input.orderedIds) || !input.orderedIds.every((id) => typeof id === "string")) throw new TypeError("orderedIds must be a string array");
-      const story = await readStorySnapshot(context.reader);
-      assertSourceRevision(input, contentRevision(getVolumeTree(story).data));
-      const parentField = input.type === "chapter" ? "volume" : "chapter";
-      const siblings = [...story.entities.values()].filter((entity) => entity.type === input.type && entity.raw[parentField] === parentId);
-      const orderedIds = input.orderedIds as string[];
-      if (orderedIds.length !== siblings.length || new Set(orderedIds).size !== orderedIds.length || orderedIds.some((id) => !siblings.some((entity) => entity.id === id))) throw new TypeError("orderedIds must include every sibling exactly once");
-      const writes: ProposedWrite[] = [];
-      const reads: FileRevision[] = [];
-      for (let index = 0; index < orderedIds.length; index++) {
-        const entity = story.entities.get(orderedIds[index]!)!;
-        const revision = story.revisions.get(entity.filePath);
-        if (!revision) throw new TypeError(`Entity file is missing: ${entity.filePath}`);
-        const raw = { ...entity.raw, order: index + 1 };
-        reads.push({ path: entity.filePath, revision });
-        writes.push({ path: entity.filePath, revision, content: yamlContent(raw) });
-      }
-      if (writes.length === 0) return { ok: true, changedPaths: [] };
-      const operation = buildOperation({ reader: context.reader, operationId: requestedOperationId(input), reads, writes, message: `Reorder Story ${input.type} siblings`, effect: "structure" });
-      await context.propose([operation]);
-      return { ok: true, changedPaths: writes.map((write) => write.path) };
-    }),
     action("story.entities.backlinks", read, fieldSchema(["id"], ["id"]), async (input, context) => getBacklinks({ ...await readStorySnapshot(context.reader), toId: stringValue(input.id, "id") }).data),
     action("story.entities.appearances", read, fieldSchema(["id"], ["id"]), async (input, context) => getEntityAppearances({ ...await readStorySnapshot(context.reader), entityId: stringValue(input.id, "id") }).data),
     action("story.entities.voice-patterns", read, fieldSchema(["id"], ["id"]), async (input, context) => {
@@ -1388,7 +1362,9 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.graph.query", read, objectSchema, async (input, context) => {
       if (input.types !== undefined && (!Array.isArray(input.types) || !input.types.every((type) => typeof type === "string"))) throw new TypeError("types must be a string array");
-      const graph = getGraphData({ ...await readStorySnapshot(context.reader), types: input.types as StoryEntityType[] | undefined }).data;
+      const types = input.types as StoryEntityType[] | undefined;
+      const story = await readStorySnapshot(context.reader, { includeNativeDocuments: types === undefined || types.includes("manuscript") });
+      const graph = getGraphData({ ...story, types }).data;
       const maxNodes = typeof input.maxNodes === "number" && Number.isInteger(input.maxNodes) ? Math.max(1, Math.min(2000, input.maxNodes)) : 1000;
       const nodes = graph.nodes.slice(0, maxNodes);
       const nodeIds = new Set(nodes.map((node) => node.id));
@@ -1409,6 +1385,9 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.world-state.temporal", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => temporalScene(await readStorySnapshot(context.reader), stringValue(input.sceneId, "sceneId"))),
     action("story.knowledge.links",read,fieldSchema([],["sceneId"]),async(input,context)=>{
+      if (!context.reader.knowledge) {
+        throw Object.assign(new Error("Knowledge links are unavailable for this snapshot"), { code: "snapshot_unavailable" });
+      }
       const story=await readStorySnapshot(context.reader,{includeManuscripts:false});
       return nativeKnowledge(context.reader,story,input.sceneId as string|undefined);
     }),

@@ -1,9 +1,10 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test as base, type AuthorizeAuthor, type AuthorSession } from "./author-oauth-fixture";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { authToken, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import { expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, manuscriptEditor, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
@@ -265,8 +266,7 @@ test("mobile browser back and forward synchronize guarded routes and workspace p
   expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 2, journalCalls: 2, journalWrites: 2, unusedOutcomes: 0 });
 });
 
-test("a newer browser history selection supersedes a pending guarded popstate", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("a newer browser history selection supersedes a pending guarded popstate", async ({ page, authorizeAuthor }) => {
   await page.addInitScript(() => {
     const descriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
     if (!descriptor?.get || !descriptor.set) throw new Error("IndexedDB transaction completion hooks are unavailable.");
@@ -297,8 +297,7 @@ test("a newer browser history selection supersedes a pending guarded popstate", 
       },
     });
   });
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
   const second = fixture.scenes[1]!;
   const secondRoute = new RegExp(`/desktop/projects/${fixture.project.id}/scenes/${second.document.id}$`);
   const secondSceneButton = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.document.id}"] > .pg-outline-row > .pg-outline-document`);
@@ -419,20 +418,18 @@ interface WorkspaceSnapshotRecord {
   floating: Array<{ panelId: string; left: number; top: number; width: number; height: number }>;
 }
 
-async function signIn(page: Page, mode: "desktop" | "mobile"): Promise<void> {
-  await ownerLogin(page, `/${mode}/`);
-}
-
-async function createWorkspaceFixture(page: Page): Promise<WorkspaceFixture> {
-  const origin = new URL(page.url()).origin;
-  const projectResponse = await page.request.post("/api/v1/persistence/projects", {
+async function createWorkspaceFixture(author: AuthorSession): Promise<WorkspaceFixture> {
+  const { origin } = author;
+  const projectResponse = await author.fetch("/api/v1/persistence/projects", {
+    method: "POST",
     headers: { Origin: origin },
     data: { title: `Modular workspace ${randomUUID()}` },
   });
   expect(projectResponse.status()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string; title: string } };
   const createDocument = async (input: { parentId?: string; kind: string; title: string; orderKey: string; markdown: string }) => {
-    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents`, {
+      method: "POST",
       headers: { Origin: origin, "Idempotency-Key": randomUUID() },
       data: input,
     });
@@ -446,19 +443,19 @@ async function createWorkspaceFixture(page: Page): Promise<WorkspaceFixture> {
   return { project, scenes: [one, two], scene: one };
 }
 
-async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<void> {
-  const origin = new URL(page.url()).origin;
+async function seedTermRegistry(author: AuthorSession, fixture: WorkspaceFixture): Promise<void> {
+  const { origin } = author;
   const projectPath = `/api/projects/${fixture.project.id}`;
-  const snapshotResponse = await page.request.get(`${projectPath}/snapshot`);
+  const documentId = fixture.scenes[1]!.document.id;
+  const snapshotResponse = await author.fetch(`${projectPath}/snapshot?projection=editor&documentId=${encodeURIComponent(documentId)}`);
   expect(snapshotResponse.ok()).toBe(true);
   const snapshotRead = await snapshotResponse.json() as {
     snapshot: { projectId: string; projectVersion: number };
-    files: Array<{ path: string; revision: string; content: string }>;
+    document: { path: string; revision: string } | null;
   };
-  const targetPath = `documents/${fixture.scenes[1]!.document.id}.md`;
-  expect(snapshotRead.files.some((file) => file.path === targetPath)).toBe(true);
+  const targetPath = `documents/${documentId}.md`;
+  expect(snapshotRead.document?.path).toBe(targetPath);
   const registryPath = "meta/scriptorium/modules/search/terms.json";
-  const existing = snapshotRead.files.find((file) => file.path === registryPath);
   const terms = {
     schemaVersion: 1,
     terms: [
@@ -472,35 +469,40 @@ async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<
     projectId: fixture.project.id,
     baseProjectVersion: snapshotRead.snapshot.projectVersion,
     effect: "metadata",
-    reads: [{ path: registryPath, revision: existing?.revision ?? null }],
-    writes: [{ path: registryPath, revision: existing?.revision ?? null, content: JSON.stringify(terms) }],
+    reads: [{ path: registryPath, revision: null }],
+    writes: [{ path: registryPath, revision: null, content: JSON.stringify(terms) }],
     message: "Acceptance terminology registry",
   };
   const proposalId = `terms-proposal-${randomUUID()}`;
-  const proposal = await page.request.post(`${projectPath}/proposals`, {
+  const proposal = await author.fetch(`${projectPath}/proposals`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { id: proposalId, snapshot: snapshotRead.snapshot, operations: [operation] },
   });
   expect(proposal.status()).toBe(201);
-  const approval = await page.request.post(`${projectPath}/approvals`, {
+  const approval = await author.fetch(`${projectPath}/approvals`, {
+    method: "POST",
     headers: { Origin: origin },
     data: { proposalId, operationIds: [operation.id] },
   });
   expect(approval.status()).toBe(204);
-  const applied = await page.request.post(`${projectPath}/apply`, { headers: { Origin: origin }, data: operation });
+  const applied = await author.fetch(`${projectPath}/apply`, { method: "POST", headers: { Origin: origin }, data: operation });
   expect(applied.status()).toBe(201);
 }
 
-async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneIndex = 0, seedTerms = false): Promise<WorkspaceFixture> {
-  const fixture = await createWorkspaceFixture(page);
-  if (seedTerms) await seedTermRegistry(page, fixture);
+async function openFixtureScene(
+  page: Page, authorizeAuthor: AuthorizeAuthor, mode: "desktop" | "mobile", sceneIndex = 0, seedTerms = false,
+): Promise<WorkspaceFixture & { author: AuthorSession }> {
+  const initialAuthor = await authorizeAuthor(mode);
+  const fixture = await createWorkspaceFixture(initialAuthor);
+  if (seedTerms) await seedTermRegistry(initialAuthor, fixture);
   const scene = fixture.scenes[sceneIndex];
   expect(scene).toBeTruthy();
   // Select by canonical project/document IDs. Several fixtures use the same
   // visible "Scene One" title; a stale prior project can otherwise satisfy
   // the heading check before asynchronous guarded navigation commits.
   const route = `/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}${mode === "mobile" ? "?view=writing" : ""}`;
-  await page.goto(route);
+  const author = await authorizeAuthor(mode, page, { path: route });
   await expect(page).toHaveURL(new RegExp(`/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}`));
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   fixture.scene = scene!;
@@ -514,7 +516,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
     .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
   await expectNoUnsavedDeviceChanges(page);
-  return fixture;
+  return { ...fixture, author };
 }
 
 async function readJournal(page: Page): Promise<DraftRecord[]> {
@@ -551,20 +553,12 @@ async function replaceEditor(page: Page, markdown: string): Promise<void> {
   await page.keyboard.insertText(markdown);
 }
 
-async function readPersistedDocument(page: Page, projectId: string, documentId: string): Promise<{ id: string; markdown: string }> {
-  const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
+async function readPersistedDocument(author: AuthorSession, projectId: string, documentId: string): Promise<{ id: string; markdown: string }> {
+  const response = await author.fetch(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
   expect(response.ok()).toBe(true);
   const value = await response.json() as { revision?: { id: string; markdown: string } };
   expect(value.revision?.markdown).toBeDefined();
   return value.revision!;
-}
-
-async function restartApi(): Promise<void> {
-  const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
-  const origin = `http://127.0.0.1:${e2ePort}`;
-  const response = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/restart-api`, { method: "POST" });
-  expect(response.status).toBe(204);
-  expect((await fetch(`${origin}/api/health`)).ok).toBe(true);
 }
 
 function workspaceToolbar(page: Page) {
@@ -634,10 +628,8 @@ async function saveWorkspace(page: Page): Promise<WorkspaceState> {
   return (JSON.parse(storage.raw!) as WorkspaceSnapshotRecord).layout;
 }
 
-test("desktop workspace presets, arbitrary docking, panel visibility and layout persistence preserve drafts", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+test("desktop workspace presets, arbitrary docking, panel visibility and layout persistence preserve drafts", async ({ page, authorizeAuthor }) => {
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
 
   const workspace = page.locator(".st-workspace");
   const toolbar = workspaceToolbar(page);
@@ -707,15 +699,14 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
 
   const persisted = await workspaceStorage(page, "desktop");
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.locator(".st-workspace")).toBeVisible();
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
   await expect.poll(async () => (await workspaceStorage(page, "desktop")).raw).toBe(persisted.raw);
 });
 
-test("desktop preset sizing updates the live split without replacing the editor or overwriting a saved layout", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+test("desktop preset sizing updates the live split without replacing the editor or overwriting a saved layout", async ({ page, authorizeAuthor }) => {
+  await openFixtureScene(page, authorizeAuthor, "desktop");
 
   const workspace = page.locator(".st-workspace");
   const toolbar = workspaceToolbar(page);
@@ -805,15 +796,15 @@ test("desktop preset sizing updates the live split without replacing the editor 
   expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
 
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.locator(".st-workspace")).toHaveAttribute("data-preset", "custom");
   await expect.poll(async () => Math.abs(await editorShare() - savedEditorShare)).toBeLessThan(0.02);
   expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
 });
 
-test("narrow Desktop keeps the manuscript internally scrollable while shell and workspace controls stay reachable", async ({ page }) => {
+test("narrow Desktop keeps the manuscript internally scrollable while shell and workspace controls stay reachable", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 320, height: 760 });
-  await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  await openFixtureScene(page, authorizeAuthor, "desktop");
 
   const workspace = page.locator(".st-workspace");
   const toolbar = workspaceToolbar(page);
@@ -863,10 +854,8 @@ test("narrow Desktop keeps the manuscript internally scrollable while shell and 
   await expect(page).toHaveURL(/\/desktop\//u);
 });
 
-test("malformed workspace settings are retained until the owner explicitly saves a replacement", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+test("malformed workspace settings are retained until the owner explicitly saves a replacement", async ({ page, authorizeAuthor }) => {
+  await openFixtureScene(page, authorizeAuthor, "desktop");
   await saveWorkspace(page);
 
   const storage = await workspaceStorage(page, "desktop");
@@ -874,6 +863,7 @@ test("malformed workspace settings are retained until the owner explicitly saves
   const malformed = '{"version":99,"preset":"custom","root":{"type":"leaf","panelId":"untrusted"},"hiddenPanelIds":[]}';
   await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key: storage.key, raw: malformed });
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
 
   await expect(page.locator(".st-workspace")).toBeVisible();
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toBeVisible();
@@ -885,11 +875,9 @@ test("malformed workspace settings are retained until the owner explicitly saves
     .toMatchObject({ version: 1, preset: "writing" });
 });
 
-test("mobile workspace tabs support keyboard navigation and preserve the editor draft", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile workspace tabs support keyboard navigation and preserve the editor draft", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  const fixture = await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "mobile");
 
   const tabs = page.getByRole("tablist", { name: "パネル" });
   const editorTab = tabs.getByRole("tab", { name: "原稿", exact: true });
@@ -922,11 +910,9 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
   expect((JSON.parse(mobileStorage.raw!) as WorkspaceSnapshotRecord).layout.version).toBe(1);
 });
 
-test("mobile route buttons restore their workspace panel without adding duplicate history entries", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile route buttons restore their workspace panel without adding duplicate history entries", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  await openFixtureScene(page, "mobile");
+  await openFixtureScene(page, authorizeAuthor, "mobile");
 
   const navigation = page.getByRole("navigation", { name: "モバイル画面" });
   const editorPanel = page.locator('[data-workspace-panel="editor"]');
@@ -956,10 +942,8 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   expect(await page.evaluate(() => history.length)).toBe(historyLengthAtLibrary + 2);
 });
 
-test("editor remains unavailable until delayed browser recovery completes, then reapplies the exact draft", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+test("editor remains unavailable until delayed browser recovery completes, then reapplies the exact draft", async ({ page, authorizeAuthor }) => {
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
   const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
   await page.route(`**${documentUrl}`, async (route) => {
     if (route.request().method() === "PATCH") {
@@ -1006,10 +990,11 @@ test("editor remains unavailable until delayed browser recovery completes, then 
     });
   });
   await page.reload();
+  const recoveredAuthor = await authorizeAuthor("desktop", page, { continueCurrentPage: true });
 
   await expect(page.locator(".st-workspace")).toBeVisible();
   await expect(page.locator(".pg-editor")).toHaveCount(0);
-  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
+  expect((await readPersistedDocument(recoveredAuthor, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
   await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __workspaceRecoveryGate?: { opened: boolean } }).__workspaceRecoveryGate?.opened))).toBe(true);
 
   await page.evaluate(() => {
@@ -1022,13 +1007,16 @@ test("editor remains unavailable until delayed browser recovery completes, then 
   await page.unroute(`**${documentUrl}`);
   await page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/u }).click();
   await expectServerSaved(page);
-  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(draft);
+  expect((await readPersistedDocument(recoveredAuthor, fixture.project.id, fixture.scene.document.id)).markdown).toBe(draft);
 });
 
-test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscript and recovery record", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscript and recovery record", async ({ page, authorizeAuthor }) => {
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
+
+  const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
+  await page.route(`**${documentUrl}`, (route) => route.request().method() === "PATCH"
+    ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic save interruption" }) })
+    : route.continue());
 
   const draft = "Existing recovery record survives an unavailable browser journal.";
   const editor = manuscriptEditor(page);
@@ -1037,6 +1025,7 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   await page.keyboard.insertText(draft);
   await expect(editor).toHaveText(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
+  await expectServerSaveFailure(page);
   const beforeFailure = await readJournal(page);
   expect(beforeFailure.some((entry) => entry.documentId === fixture.scene.document.id && entry.markdown === draft)).toBe(true);
 
@@ -1073,24 +1062,22 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   });
   await page.reload();
   await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
+  const recoveredAuthor = await authorizeAuthor("desktop", page, { continueCurrentPage: true });
 
-  await page.getByLabel("アクセス・トークン").fill(authToken);
-  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("ブラウザーの保存領域を利用できません");
   await expect(page.locator(".pg-document-list")).toContainText("Scene One");
   await expect(page.locator(".pg-editor")).toHaveCount(0);
-  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
+  expect((await readPersistedDocument(recoveredAuthor, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
   const retained = await page.evaluate(() => (window as Window & {
     __readNativeRecoveryJournal?: () => Promise<DraftRecord[]>;
   }).__readNativeRecoveryJournal?.());
   expect(retained).toEqual(beforeFailure);
 });
 
-test("PostgreSQL API restart preserves canonical content and replays the exact browser draft", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+test("PostgreSQL API restart preserves canonical content and replays the exact browser draft", async ({ page, authorizeAuthor, authorServer }) => {
+  test.setTimeout(180_000);
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
   const authorText = "Exact browser recovery draft survives an API restart.";
   const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
   let releaseSave!: () => void;
@@ -1107,35 +1094,29 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   await replaceEditor(page, authorText);
   await expectDraft(page, fixture.scene.document.id, authorText);
   await saveStarted;
-  await restartApi();
-  // Owner sessions are process-local and deliberately expire across API replacement.
-  // Reauthenticate before asserting canonical PostgreSQL data and journal replay.
-  const login = await page.request.post("/api/login", {
-    headers: { Origin: new URL(page.url()).origin }, data: { token: authToken },
-  });
-  expect(login.status()).toBe(200);
+  await authorServer.restartApi();
+  expect((await fetch(`${fixture.author.origin}/api/health`)).ok).toBe(true);
   releaseSave();
   await expectServerSaveFailure(page);
-  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
+  expect((await readPersistedDocument(fixture.author, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
 
   await page.reload();
+  const recoveredAuthor = await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page.locator(".cm-content")).toHaveText(authorText);
   await expectDraft(page, fixture.scene.document.id, authorText);
   await page.unroute(`**${documentUrl}`);
   await page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/u }).click();
   await expectServerSaved(page);
-  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(authorText);
+  expect((await readPersistedDocument(recoveredAuthor, fixture.project.id, fixture.scene.document.id)).markdown).toBe(authorText);
   expect((await readJournal(page)).some((entry) => entry.documentId === fixture.scene.document.id)).toBe(false);
 });
 
-test("Core-only workspace keeps authoring available without search or terminology panels", async ({ page }) => {
+test("Core-only workspace keeps authoring available without search or terminology panels", async ({ page, authorizeAuthor }) => {
   test.skip(profile !== "core", "Run this acceptance with CODEXIA_PROFILE=core.");
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
 
-  const contributions = await page.request.get(`/api/projects/${encodeURIComponent(fixture.project.id)}/contributions`);
+  const contributions = await fixture.author.fetch(`/api/projects/${encodeURIComponent(fixture.project.id)}/contributions`);
   expect(contributions.ok()).toBe(true);
   const contributionIds = (await contributions.json() as Array<{ id: string }>).map((item) => item.id);
   expect(contributionIds.some((id) => id.startsWith("search."))).toBe(false);
@@ -1151,20 +1132,18 @@ test("Core-only workspace keeps authoring available without search or terminolog
   await expectDraft(page, fixture.scene.document.id, draft);
 });
 
-test("full profile exposes optional lexical search and terminology without changing manuscript source", async ({ page }) => {
+test("full profile exposes optional lexical search and terminology without changing manuscript source", async ({ page, authorizeAuthor }) => {
   test.skip(profile !== "full", "Run this acceptance with CODEXIA_PROFILE=full.");
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop", 0, true);
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop", 0, true);
   const projectId = fixture.project.id;
 
-  const contributionsResponse = await page.request.get(`/api/projects/${encodeURIComponent(projectId)}/contributions`);
+  const contributionsResponse = await fixture.author.fetch(`/api/projects/${encodeURIComponent(projectId)}/contributions`);
   expect(contributionsResponse.ok()).toBe(true);
   const contributions = await contributionsResponse.json() as Array<{ id: string; module: string }>;
   expect(contributions.some((item) => item.id === "search.panel" && item.module === "search")).toBe(true);
   expect(contributions.some((item) => item.id === "search.terms" && item.module === "search")).toBe(true);
 
-  const modulesResponse = await page.request.get(`/api/projects/${encodeURIComponent(projectId)}/modules`);
+  const modulesResponse = await fixture.author.fetch(`/api/projects/${encodeURIComponent(projectId)}/modules`);
   expect(modulesResponse.ok()).toBe(true);
   const modules = await modulesResponse.json() as Array<{ id: string; availability: string }>;
   expect(modules.find((module) => module.id === "search")?.availability).toMatch(/^(enabled-idle|active)$/u);
@@ -1172,28 +1151,33 @@ test("full profile exposes optional lexical search and terminology without chang
   // Exercise the real Search action -> Runtime -> Core -> PostgreSQL proposal boundary.
   const projectPath = `/api/projects/${encodeURIComponent(projectId)}`;
   const origin = new URL(page.url()).origin;
-  const snapshotResponse = await page.request.get(`${projectPath}/snapshot`);
-  expect(snapshotResponse.ok()).toBe(true);
-  const snapshotRead = await snapshotResponse.json() as { files: Array<{ path: string; content: string }> };
-  const registry = snapshotRead.files.find(file => file.path === "meta/scriptorium/modules/search/terms.json");
-  expect(registry).toBeDefined();
-  const existing = (JSON.parse(registry!.content) as { terms: Array<{ id: string; canonical: string; aliases: string[]; targetPath: string }> }).terms[0]!;
+  const registry = await fixture.author.fetch(`${projectPath}/actions/search.terms.list`, {
+    method: "POST", headers: { Origin: origin }, data: { input: {} },
+  });
+  expect(registry.status()).toBe(200);
+  const listed = await registry.json() as {
+    ok: boolean;
+    data: { terms: Array<{ id: string; canonical: string; targetPath: string }> };
+  };
+  expect(listed.ok).toBe(true);
+  const existing = listed.data.terms.find(term => term.canonical === "Beacon Quay");
+  if (!existing) throw new Error("The seeded Beacon Quay term was not listed");
   const proposedInputs = [
     { action: "search.terms.propose", input: { canonical: "New Harbor", aliases: [], targetPath: existing.targetPath }, kind: "term_registry_update" },
     { action: "search.terms.propose", input: { ...existing, aliases: ["Updated alias"] }, kind: "term_registry_update" },
     { action: "search.terms.remove", input: { id: existing.id }, kind: "term_registry_remove" },
   ];
   for (const { action, input, kind } of proposedInputs) {
-    const response = await page.request.post(`${projectPath}/actions/${action}`, { headers: { Origin: origin }, data: { input } });
+    const response = await fixture.author.fetch(`${projectPath}/actions/${action}`, { method: "POST", headers: { Origin: origin }, data: { input } });
     expect(response.status()).toBe(200);
     const result = await response.json() as { ok: boolean; data?: { proposal: { id: string } } };
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    const persisted = await page.request.get(`${projectPath}/proposals/${result.data!.proposal.id}`);
+    const persisted = await fixture.author.fetch(`${projectPath}/proposals/${result.data!.proposal.id}`);
     expect(persisted.status()).toBe(200);
     expect(await persisted.json()).toMatchObject({ proposal: { id: result.data!.proposal.id, evidence: [{ module: "search", kind }] } });
   }
 
-  const sourceBefore = (await readPersistedDocument(page, projectId, fixture.scene.document.id)).markdown;
+  const sourceBefore = (await readPersistedDocument(fixture.author, projectId, fixture.scene.document.id)).markdown;
   expect(sourceBefore).toContain("Beacon Quay appears in this scene.");
   expect(sourceBefore).not.toMatch(/\[Beacon Quay\]\(/u);
 
@@ -1238,15 +1222,13 @@ test("full profile exposes optional lexical search and terminology without chang
   await expect(termLink).toBeVisible();
   await termLink.click();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
-  const sourceAfter = (await readPersistedDocument(page, projectId, fixture.scene.document.id)).markdown;
+  const sourceAfter = (await readPersistedDocument(fixture.author, projectId, fixture.scene.document.id)).markdown;
   expect(sourceAfter).toBe(sourceBefore);
 });
 
 
-test("desktop floating panels preserve drafts and saved layout geometry", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  const fixture = await openFixtureScene(page, "desktop");
+test("desktop floating panels preserve drafts and saved layout geometry", async ({ page, authorizeAuthor }) => {
+  const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
 
   const workspace = page.locator(".st-workspace");
   await openPanelMenu(page);
@@ -1296,6 +1278,7 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   const savedRecord = JSON.parse(stored.raw!) as WorkspaceSnapshotRecord;
   expect(savedRecord.floating).toMatchObject([{ panelId: "outline", ...beforeReload }]);
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(floating).toBeVisible();
   await expect.poll(floatingPlacement).toEqual(beforeReload);
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
@@ -1306,10 +1289,8 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await expect(workspace.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
 });
 
-test("a failed workspace record write preserves the previous dock and floating layout on reload", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
-  await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+test("a failed workspace record write preserves the previous dock and floating layout on reload", async ({ page, authorizeAuthor }) => {
+  await openFixtureScene(page, authorizeAuthor, "desktop");
 
   const workspace = page.locator(".st-workspace");
   await openPanelMenu(page);
@@ -1353,6 +1334,7 @@ test("a failed workspace record write preserves the previous dock and floating l
   expect(await page.evaluate((key) => localStorage.getItem(key), oldSnapshot.key)).toBe(previousSnapshotBytes);
 
   await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.locator('[data-floating-panel="outline"]')).toBeVisible();
   const afterReloadSnapshot = await page.evaluate((key) => localStorage.getItem(key), oldSnapshot.key);
   expect(afterReloadSnapshot).toBe(previousSnapshotBytes);
@@ -1362,11 +1344,9 @@ test("a failed workspace record write preserves the previous dock and floating l
 });
 
 
-test("mobile writing reference sheet keeps the editor mounted and preserves the real draft", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile writing reference sheet keeps the editor mounted and preserves the real draft", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  const fixture = await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "mobile");
 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const manuscript = page.locator(".manuscript-input");
@@ -1400,11 +1380,9 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await expectDraft(page, fixture.scene.document.id, draft);
 });
 
-test("mobile reference sheet scene selection uses the existing guarded navigation", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile reference sheet scene selection uses the existing guarded navigation", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  const fixture = await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "mobile");
 
   const draft = "シーンを変更しても回復できる下書き。";
   await page.locator('[data-workspace-panel="editor"] .cm-content').fill(draft);
@@ -1422,13 +1400,11 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   await expectDraft(page, fixture.scene.document.id, draft);
 });
 
-test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 CSS pixels", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 CSS pixels", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  const fixture = await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "mobile");
   const documentsUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents`;
-  const documentsResponse = await page.request.get(documentsUrl);
+  const documentsResponse = await fixture.author.fetch(documentsUrl);
   expect(documentsResponse.ok()).toBe(true);
   const existing = await documentsResponse.json() as { documents: Array<{ id: string; parentId: string | null }> };
   const parentId = existing.documents.find((document) => document.id === fixture.scene.document.id)?.parentId;
@@ -1436,8 +1412,9 @@ test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 
   const created: Array<{ id: string; title: string }> = [];
   for (let index = 0; index < 24; index += 1) {
     const title = `Outline ${String(index + 1).padStart(2, "0")}`;
-    const response = await page.request.post(documentsUrl, {
-      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+    const response = await fixture.author.fetch(documentsUrl, {
+      method: "POST",
+      headers: { Origin: fixture.author.origin, "Idempotency-Key": crypto.randomUUID() },
       data: { kind: "scene", parentId, title, orderKey: String(index + 10).padStart(4, "0"), markdown: `# ${title}\n\n本文。` },
     });
     expect(response.status(), await response.text()).toBe(201);
@@ -1448,7 +1425,7 @@ test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 
   const targetUrl = `/mobile/projects/${fixture.project.id}/scenes/${target.id}?view=writing`;
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto(targetUrl);
+    await authorizeAuthor("mobile", page, { path: targetUrl });
     await expect(page.getByRole("heading", { name: target.title, exact: true })).toBeVisible();
     await page.evaluate(() => {
       const windowWithSheet = window as Window & { __referenceSheetPresented?: boolean };
@@ -1475,11 +1452,9 @@ test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 
 });
 
 
-test("mobile contextual reference refuses to cover a composing manuscript", async ({ page }) => {
-  expect(authToken.length).toBeGreaterThanOrEqual(32);
+test("mobile contextual reference refuses to cover a composing manuscript", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, "mobile");
-  const fixture = await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, authorizeAuthor, "mobile");
 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const draft = "変換中でも原稿を失わない";
@@ -1502,10 +1477,9 @@ test("mobile contextual reference refuses to cover a composing manuscript", asyn
 });
 
 
-test("desktop activity stays selected on denied navigation and narrow appearance remains operable", async ({ page }) => {
+test("desktop activity stays selected on denied navigation and narrow appearance remains operable", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  await openFixtureScene(page, authorizeAuthor, "desktop");
   const editor = manuscriptEditor(page);
   await editor.click();
   const navigation = page.getByRole("toolbar", { name: "ワークスペース配置" });

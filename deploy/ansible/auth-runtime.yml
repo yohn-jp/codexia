@@ -40,6 +40,36 @@
       - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
     fail_msg: Better Auth provisioning requires explicit approval, the rootless Codexia account, protected secret files and validated public configuration.
 
+- name: Require a complete optional MCP client and project configuration
+  ansible.builtin.assert:
+    that:
+      - (codexia_oauth_mcp_client_ids is defined) == (codexia_oauth_mcp_project_assignments is defined)
+      - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_mcp_client_ids is not defined
+    fail_msg: Configure registered MCP clients and explicit project assignments together after owner enrollment.
+
+- name: Restrict MCP clients to their own registrations and explicit project assignments
+  ansible.builtin.assert:
+    that:
+      - codexia_oauth_mcp_client_ids is string and codexia_oauth_mcp_client_ids is match('^[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$')
+      - codexia_auth_mcp_client_ids | unique(case_sensitive=true) | list | length == codexia_auth_mcp_client_ids | length
+      - codexia_auth_mcp_client_ids | intersect(codexia_oauth_owner_client_ids.split(',') + [codexia_oauth_introspection_client_id]) | length == 0
+      - codexia_oauth_mcp_project_assignments is mapping
+      - codexia_auth_mcp_client_ids | symmetric_difference(codexia_oauth_mcp_project_assignments.keys() | list) | length == 0
+    fail_msg: MCP project assignments must match the unique registered MCP client IDs, separate from owner and introspection clients.
+  vars:
+    codexia_auth_mcp_client_ids: "{{ codexia_oauth_mcp_client_ids.split(',') }}"
+  when: codexia_oauth_mcp_client_ids is defined
+
+- name: Require each configured MCP client to have unique assigned project UUIDs
+  ansible.builtin.assert:
+    that:
+      - item.value is sequence and item.value is not string and item.value is not mapping and item.value | length > 0
+      - item.value | unique(case_sensitive=true) | list | length == item.value | length
+      - >-
+        item.value | select('match', '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') | list | length == item.value | length
+    fail_msg: Each configured MCP client requires at least one unique PostgreSQL project UUID.
+  loop: "{{ codexia_oauth_mcp_project_assignments | default({}) | dict2items }}"
+
 - name: Verify the declared rootless Codexia service identity
   ansible.builtin.command:
     argv: [getent, passwd, "{{ codexia_service_user }}"]
@@ -235,6 +265,26 @@
   when: codexia_auth_database_state_value.roleExists
   no_log: true
 
+- name: Require explicit approval and a reviewed immutable Full image before initializing application storage
+  ansible.builtin.assert:
+    that:
+      - codexia_database_initialization_approved | default(false) | bool
+      - (codexia_auth_bootstrap_image | default('')) is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+    fail_msg: Initialize a pristine application schema with explicit approval and a locally available reviewed Full image before provisioning the auth schema.
+  when: not codexia_auth_database_state_value.applicationLedgerExists
+
+- name: Initialize only a pristine application schema under the shared host lock
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
+      - initialize-application
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - "{{ codexia_auth_bootstrap_image }}"
+    expand_argument_vars: false
+  register: codexia_auth_application_schema
+  changed_when: "'INITIALIZED_FRESH_SCHEMA' in codexia_auth_application_schema.stdout"
+  when: not codexia_auth_database_state_value.applicationLedgerExists
+
 - name: Create only missing auth Podman secrets after validating existing database ownership
   ansible.builtin.command:
     argv: [podman, secret, create, "{{ item.item.key }}", '-']
@@ -256,7 +306,7 @@
   changed_when: not codexia_auth_database_state_value.roleExists or not codexia_auth_database_state_value.schemaExists
   no_log: true
 
-- name: Write only nonsecret Better Auth runtime settings for the opt-in Quadlet
+- name: Write only nonsecret Better Auth runtime settings for the API Quadlet
   ansible.builtin.template:
     src: "{{ repo_root }}/deploy/ansible/auth-runtime.env.j2"
     dest: "{{ home }}/.config/codexia-auth/runtime.env"
@@ -302,4 +352,4 @@
 
 - name: Report staged auth role, schema and environment without enabling runtime
   ansible.builtin.debug:
-    msg: Better Auth role and owned schema are verified; secret identities are provisioned without rotation; nonsecret runtime settings are staged. No service was restarted and no migration was run.
+    msg: Better Auth role and owned schema are verified; secret identities are provisioned without rotation; nonsecret runtime settings are staged. No API service was started or restarted.

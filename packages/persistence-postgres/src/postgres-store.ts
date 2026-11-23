@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { nextOrderKey } from "@codexia/contracts";
+import { assertProjectPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
 import {
+  CORE_DOCUMENT_PATHS,
+  HIERARCHY_CREATE_SOURCE,
+  HIERARCHY_DELETE_SOURCE,
+  HIERARCHY_REORDER_SOURCE,
+  NLP_FEATURE_SETTINGS_CHANGESET_SOURCE,
+  PUBLISHING_CHANGESET_SOURCE,
+  hierarchyDocumentPaths,
   PersistenceError,
   type Assertion,
   type AssertionEvidence,
@@ -18,6 +25,7 @@ import {
   type CreateProjectCommand,
   type Document,
   type DocumentHeadRevisionLookup,
+  type DocumentHeadRevisionHash,
   type DocumentId,
   type DocumentRevision,
   type DocumentRevisionKey,
@@ -26,6 +34,7 @@ import {
   type EvidenceAnchor,
   type EvidenceAnchorHistory,
   type EvidenceId,
+  type HierarchyDocumentCreate,
   type IdempotencyKey,
   type JsonObject,
   type KnowledgeAlias,
@@ -44,6 +53,7 @@ import {
   type Project,
   type ProjectPageCursor,
   type ProjectId,
+  type ProposalReviewQueueOptions,
   type RevisionId,
   type RestoreDocumentRevisionCommand,
   type SaveAssertionCommand,
@@ -409,7 +419,12 @@ function operationWriteTargets(operation: ChangeSetOperation): readonly ChangeSe
   switch (operation.type) {
     case "document.create":
       if (!operation.command.documentId) throw validationError("ChangeSet document creates require a stable documentId");
-      return [{ resource: "document", id: operation.command.documentId }];
+      return [
+        { resource: "document", id: operation.command.documentId },
+        ...(operation.hierarchy ? [{
+          resource: "module_record" as const, id: JSON.stringify([CORE_DOCUMENT_PATHS, operation.command.documentId]),
+        }] : []),
+      ];
     case "document.update":
     case "document.delete":
     case "document.save":
@@ -488,9 +503,50 @@ function validateChangeSetOperations(
   allowKnowledgeMerge = false,
 ): void {
   if (operations.length === 0) throw validationError("A ChangeSet must contain at least one operation");
+  const first = operations[0];
+  if (provenance.source === HIERARCHY_CREATE_SOURCE &&
+      (operations.length !== 1 || first?.type !== "document.create" || !first.hierarchy)) {
+    throw validationError("A hierarchy create must be the only operation in its native ChangeSet");
+  }
+  if (provenance.source === PUBLISHING_CHANGESET_SOURCE || provenance.source === NLP_FEATURE_SETTINGS_CHANGESET_SOURCE) {
+    const publishing = provenance.source === PUBLISHING_CHANGESET_SOURCE;
+    const moduleId = publishing ? "publishing" : "nlp";
+    const label = publishing ? "Publishing" : "NLP feature settings";
+    const observation = readSet[0];
+    if (operations.length !== 1 || first?.type !== "module.record.save" || first.command.moduleId !== moduleId ||
+        !(publishing ? isPublishingRecordKey(first.command.key) : first.command.key === NLP_FEATURE_SETTINGS_KEY) ||
+        !provenance.actorId?.trim() || readSet.length !== 1 ||
+        observation?.resource !== "module_record" || observation.id !== JSON.stringify([moduleId, first.command.key]) ||
+        observation.expectedVersion !== first.command.expectedVersion) {
+      throw validationError(`${label} ChangeSets require one versioned ${label} record update`);
+    }
+    if (!publishing && provenance.details.origin !== "author" && provenance.details.origin !== "external-agent") {
+      throw validationError("NLP feature settings require a verified proposal origin");
+    }
+    const { key, value } = first.command;
+    let normalized: JsonObject;
+    try {
+      if (!publishing) normalized = parseNlpFeatureSettings(value);
+      else normalized = key === PUBLISHING_EPISODES_KEY ? parsePublishingEpisodesRecord(value) : parsePublishingShareGrantIndex(value);
+    } catch {
+      throw validationError(`${label} record does not match its canonical format`);
+    }
+    if (digest(normalized) !== digest(value)) throw validationError(`${label} record is not normalized`);
+  }
   for (const operation of operations) {
+    if (operation.type === "document.create" && operation.hierarchy !== undefined && provenance.source !== HIERARCHY_CREATE_SOURCE) {
+      throw validationError("Hierarchy documents require a native hierarchy ChangeSet");
+    }
     if (operation.type === "knowledge.merge" && !allowKnowledgeMerge) throw validationError("Knowledge merge operations require the native merge proposal entrypoint");
     if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
+    if (operation.type === "module.record.save" && operation.command.moduleId === "publishing" &&
+        isPublishingRecordKey(operation.command.key) && provenance.source !== PUBLISHING_CHANGESET_SOURCE) {
+      throw validationError("Protected Publishing records require a Publishing ChangeSet");
+    }
+    if (operation.type === "module.record.save" && operation.command.moduleId === "nlp" &&
+        operation.command.key === NLP_FEATURE_SETTINGS_KEY && provenance.source !== NLP_FEATURE_SETTINGS_CHANGESET_SOURCE) {
+      throw validationError("NLP feature settings require a scoped ChangeSet");
+    }
     if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
   }
   assertNonEmpty(provenance.source, "ChangeSet provenance source");
@@ -574,12 +630,6 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapProject);
   }
 
-  async listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
-    const result = await this.query("SELECT id FROM project WHERE ($2::uuid IS NULL OR id > $2::uuid) ORDER BY id LIMIT $1", [limit, after ?? null]);
-    return result.rows.map(row => asString(row.id) as ProjectId);
-  }
-
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
     const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL", [projectId, documentId]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;
@@ -607,12 +657,13 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapRevision(result.rows[0]) : undefined;
   }
 
-  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+  private async selectDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[], includeBody: boolean) {
     if (heads.length === 0) return [];
+    const fields = includeBody
+      ? "revision.project_id, revision.document_id, revision.id, revision.parent_revision_id, revision.markdown, revision.sha256, revision.author_id, revision.created_at"
+      : "revision.sha256";
     const result = await this.query(
-      `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id,
-         revision.project_id, revision.document_id, revision.id, revision.parent_revision_id,
-         revision.markdown, revision.sha256, revision.author_id, revision.created_at
+      `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id, ${fields}
        FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY
          AS requested(document_id, revision_id, request_order)
        LEFT JOIN document_revision AS revision
@@ -620,10 +671,22 @@ class PostgresTransaction implements PersistenceTransaction {
        ORDER BY requested.request_order`,
       [projectId, heads.map((head) => head.documentId), heads.map((head) => head.revisionId)],
     );
-    return result.rows.map((row) => ({
+    return result.rows;
+  }
+
+  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+    return (await this.selectDocumentHeadRevisions(projectId, heads, true)).map(row => ({
       documentId: asString(row.requested_document_id) as DocumentId,
       revisionId: asString(row.requested_revision_id) as RevisionId,
       revision: row.id === null ? null : mapRevision(row),
+    }));
+  }
+
+  async getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]> {
+    return (await this.selectDocumentHeadRevisions(projectId, heads, false)).map(row => ({
+      documentId: asString(row.requested_document_id) as DocumentId,
+      revisionId: asString(row.requested_revision_id) as RevisionId,
+      sha256: row.sha256 === null ? null : asString(row.sha256).trim(),
     }));
   }
 
@@ -966,9 +1029,23 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapChangeSet(result.rows[0]) : undefined;
   }
 
-  async listChangeSets(projectId: ProjectId, limit = 50): Promise<readonly ChangeSet[]> {
+  private async changeSetRowByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<DbRow | undefined> {
+    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [projectId, key]);
+    return result.rows[0];
+  }
+
+  async getChangeSetByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<ChangeSet | undefined> {
+    const row = await this.changeSetRowByIdempotencyKey(projectId, key);
+    return row ? mapChangeSet(row) : undefined;
+  }
+
+  async listChangeSets(projectId: ProjectId, limit = 50, { excludeSources = [] }: { excludeSources?: readonly string[] } = {}): Promise<readonly ChangeSet[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("ChangeSet page size must be between 1 and 200");
-    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2", [projectId, limit]);
+    const result = await this.query(
+      `SELECT * FROM change_set WHERE project_id = $1 AND COALESCE(provenance->>'source', '') <> ALL($2::text[])
+       ORDER BY created_at DESC, id LIMIT $3`,
+      [projectId, excludeSources, limit],
+    );
     return result.rows.map(mapChangeSet);
   }
 
@@ -1065,7 +1142,9 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map((row) => this.mapModuleRecord(row));
   }
 
-  async listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
+  async listProposalReviewQueue(
+    projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, { excludePrivateProposals }: ProposalReviewQueueOptions = {},
+  ): Promise<{
     unresolvedCount: number; records: readonly { record: ModuleRecord; projectVersion: number }[];
   }> {
     if ((projectIds !== null && (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length)) ||
@@ -1075,12 +1154,17 @@ class PostgresTransaction implements PersistenceTransaction {
       JOIN module_record m ON m.project_id = p.id AND m.module_id = $2
       LEFT JOIN unnest($1::uuid[]) WITH ORDINALITY AS scope(project_id, position) ON p.id = scope.project_id
       WHERE ($1::uuid[] IS NULL OR scope.project_id IS NOT NULL)
-        AND m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'`;
-    const args = [projectIds, moduleId];
+        AND m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'
+        AND (cardinality($3::text[]) = 0 OR NOT EXISTS (
+          SELECT 1
+          FROM jsonb_path_query(m.value, '$.proposal.operations[*].writes[*].path') AS write_path(value)
+          WHERE write_path.value #>> '{}' = ANY($3::text[])
+        ))`;
+    const args = [projectIds, moduleId, excludePrivateProposals ? PRIVATE_PUBLISHING_PATHS : []];
     const count = await this.query(`SELECT count(*) AS count ${scope}`, args);
     const unresolvedCount = asNumber(count.rows[0]?.count);
     const page = await this.query(`SELECT m.*, p.version AS project_version ${scope}
-      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $3`, [...args, limit]);
+      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $4`, [...args, limit]);
     return { unresolvedCount, records: page.rows.map(row => ({
       record: this.mapModuleRecord(row), projectVersion: asNumber(row.project_version),
     })) };
@@ -1655,6 +1739,11 @@ class PostgresTransaction implements PersistenceTransaction {
     await this.lockProject(command.projectId);
     assertNonEmpty(command.authorId, "ChangeSet author id");
     assertNonEmpty(command.idempotencyKey, "ChangeSet idempotency key");
+    const scopedModuleRecord = command.provenance.source === PUBLISHING_CHANGESET_SOURCE ||
+      command.provenance.source === NLP_FEATURE_SETTINGS_CHANGESET_SOURCE;
+    if (scopedModuleRecord && command.authorId !== command.provenance.actorId) {
+      throw validationError("Scoped ChangeSet author and proposal actor must match");
+    }
     validateChangeSetOperations(
       command.projectId,
       command.operations,
@@ -1673,21 +1762,27 @@ class PostgresTransaction implements PersistenceTransaction {
       provenance: command.provenance,
     });
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
-    const existing = await this.query(
-      "SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2",
-      [command.projectId, command.idempotencyKey],
-    );
-    if (existing.rows[0]) {
-      if (asString(existing.rows[0].request_sha256).trim() !== requestSha256) throw idempotencyConflict(command.idempotencyKey);
-      return { changeSet: mapChangeSet(existing.rows[0]), replayed: true };
+    const existing = await this.changeSetRowByIdempotencyKey(command.projectId, command.idempotencyKey);
+    if (existing) {
+      if (asString(existing.request_sha256).trim() !== requestSha256) throw idempotencyConflict(command.idempotencyKey);
+      return { changeSet: mapChangeSet(existing), replayed: true };
     }
     let readSet = command.readSet;
-    if (command.provenance.source === "native-knowledge-service") {
+    if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE ||
+        command.provenance.source === HIERARCHY_DELETE_SOURCE || command.provenance.source === HIERARCHY_CREATE_SOURCE ||
+        scopedModuleRecord) {
       const sourceVersion = command.provenance.details.projectVersion;
       if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
+    }
+    if (command.provenance.source === "native-knowledge-service") {
       readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
       await this.assertChangeSetReadSet(command.projectId, readSet);
+    }
+    if (scopedModuleRecord) await this.assertChangeSetReadSet(command.projectId, readSet);
+    const firstOperation = command.operations[0];
+    if (firstOperation?.type === "document.create" && firstOperation.hierarchy) {
+      await this.checkHierarchyCreate(firstOperation.command, firstOperation.hierarchy);
     }
     const id = command.id ?? randomUUID() as ChangeSetId;
     const result = await this.query(
@@ -1710,9 +1805,8 @@ class PostgresTransaction implements PersistenceTransaction {
       throw validationError("Knowledge merge proposal is malformed");
     }
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
-    const existing = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [command.projectId, command.idempotencyKey]);
-    if (existing.rows[0]) {
-      const stored = mapChangeSet(existing.rows[0]);
+    const stored = await this.getChangeSetByIdempotencyKey(command.projectId, command.idempotencyKey);
+    if (stored) {
       const details = stored.provenance.details;
       const same = stored.authorId === command.actorId && stored.provenance.source === "native-knowledge-merge"
         && stored.provenance.actorId === command.actorId && details.projectVersion === command.projectVersion
@@ -1820,9 +1914,16 @@ class PostgresTransaction implements PersistenceTransaction {
       case "document.update": return this.updateDocument(operation.command);
       case "document.delete": return this.deleteDocument(operation.command);
       case "module.record.save": return this.saveModuleRecord(operation.command);
-      case "document.create": return this.createDocument(operation.command);
+      case "document.create": {
+        if (!operation.hierarchy) return this.createDocument(operation.command);
+        if (!approvedBy) throw validationError("Approved hierarchy creation lacks its author approval identity");
+        return this.createHierarchyDocument(operation.command, operation.hierarchy, approvedBy);
+      }
       case "document.save": return this.saveDocument(operation.command);
-      case "document.restore": return this.restoreDocumentRevision(operation.command);
+      case "document.restore": {
+        if (!approvedBy) throw validationError("Approved restore lacks its author approval identity");
+        return this.restoreDocumentRevision({ ...operation.command, authorId: approvedBy });
+      }
       case "knowledge.node.save": return this.saveKnowledgeNode(operation.command);
       case "knowledge.alias.save": return this.saveKnowledgeAlias(operation.command);
       case "knowledge.relation.save": return this.saveKnowledgeRelation(operation.command);
@@ -1906,6 +2007,151 @@ class PostgresTransaction implements PersistenceTransaction {
       for (const target of operationWriteTargets(operation)) earlier.add(changeSetResourceKey(target.resource, target.id));
     }
     return [...resolved.values()];
+  }
+
+  private async checkHierarchyCreate(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate) {
+    const { projectId, documentId } = command;
+    const { kind, logicalId } = hierarchy;
+    const volume = kind === "volume" ? undefined : hierarchy.volume;
+    const chapter = kind === "scene" ? hierarchy.chapter : undefined;
+    const parentId = chapter?.documentId ?? volume?.documentId ?? null;
+    if (!documentId || kind !== command.kind || !["volume", "chapter", "scene"].includes(kind) ||
+        typeof logicalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(logicalId) ||
+        (kind !== "volume" && !volume) || (kind === "scene" && !chapter) ||
+        command.parentId !== parentId || command.appendToEnd !== true ||
+        (kind !== "scene" && command.markdown !== "")) {
+      throw validationError("A hierarchy creation requires a canonical document and parent scope");
+    }
+    const paths = hierarchyDocumentPaths(hierarchy);
+    try {
+      assertProjectPath(paths.metadataPath);
+      if (paths.manuscriptPath) assertProjectPath(paths.manuscriptPath);
+      for (const reference of [volume, chapter]) {
+        if (reference && (!reference.lookupId || reference.lookupId.includes("/"))) throw new Error("Invalid parent path segment");
+      }
+    } catch {
+      throw validationError("A hierarchy creation requires path-safe identities");
+    }
+    const { metadataPath, manuscriptPath } = paths;
+    const reservedPaths = manuscriptPath ? [metadataPath, manuscriptPath] : [metadataPath];
+    const documents = await this.listDocuments(projectId, undefined, MAX_ACTIVE_DOCUMENTS_PER_PROJECT + 1);
+    const mappingRows = await this.listModuleRecords(projectId, CORE_DOCUMENT_PATHS);
+    const documentById = new Map(documents.map(document => [document.id, document]));
+    const mappingById = new Map(mappingRows.map(record => [record.key, record.value]));
+    function matchesLookup(document: Document, lookupId: string): boolean {
+      const metadata = mappingById.get(document.id)?.metadata;
+      const logicalId = metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.id === "string"
+        ? metadata.id : document.id;
+      return lookupId === document.id || lookupId === logicalId;
+    }
+    const currentVolume = volume && documentById.get(volume.documentId);
+    const currentChapter = chapter && documentById.get(chapter.documentId);
+    if ((volume && (!currentVolume || currentVolume.kind !== "volume" || currentVolume.parentId !== null ||
+                    !matchesLookup(currentVolume, volume.lookupId))) ||
+        (chapter && (!currentChapter || currentChapter.kind !== "chapter" || currentChapter.parentId !== volume?.documentId ||
+                     !matchesLookup(currentChapter, chapter.lookupId)))) {
+      throw new PersistenceError("conflict", "A hierarchy parent changed since the proposal was created", {
+        resource: "hierarchy_parent_changed", id: parentId ?? projectId,
+      });
+    }
+    if (documents.some(document => matchesLookup(document, logicalId))) {
+      throw new PersistenceError("conflict", "The hierarchy identity already exists", { resource: "hierarchy_id_exists", id: logicalId });
+    }
+    for (const mapping of mappingRows) {
+      const path = reservedPaths.find(path => mapping.value.metadataPath === path || mapping.value.manuscriptPath === path);
+      if (path) {
+        const active = documentById.has(mapping.key as DocumentId);
+        throw new PersistenceError("conflict", active ? "The hierarchy path already exists" : "The hierarchy path is reserved by retained document history", {
+          resource: active ? "hierarchy_path_exists" : "hierarchy_path_reserved", id: path,
+        });
+      }
+    }
+    for (const path of reservedPaths) {
+      const artifact = await this.getModuleRecord(projectId, "core.artifacts", path);
+      if (artifact && artifact.value.deleted !== true) {
+        throw new PersistenceError("conflict", "The hierarchy path already exists", { resource: "hierarchy_path_exists", id: path });
+      }
+    }
+    const orderKey = nextOrderKey(documents.filter(document => document.parentId === parentId && document.kind === kind)
+      .map(document => document.orderKey));
+    return { paths, orderKey };
+  }
+
+  private async createHierarchyDocument(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate, authorId: string): Promise<DocumentWriteResult> {
+    const { paths, orderKey } = await this.checkHierarchyCreate(command, hierarchy);
+    const created = await this.createDocument({ ...command, orderKey, appendToEnd: false, authorId });
+    await this.saveModuleRecord({
+      projectId: command.projectId, moduleId: CORE_DOCUMENT_PATHS, key: created.document.id, expectedVersion: null,
+      value: { ...paths, metadata: { id: hierarchy.logicalId, title: created.document.title, order: created.document.orderKey } },
+    });
+    return created;
+  }
+
+  private async assertHierarchyReorderScope(changeSet: ChangeSet): Promise<void> {
+    const { projectId, operations, readSet, provenance } = changeSet;
+    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
+    const expected = operations.map(operation => {
+      if (operation.type !== "document.update" || operation.command.parentId !== undefined || operation.command.title !== undefined ||
+          operation.command.orderKey === undefined || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
+        throw validationError("A hierarchy reorder must contain versioned order updates only");
+      }
+      return operation.command.documentId;
+    }).sort();
+    await this.assertHierarchySiblingScope(projectId, provenance.details, expected);
+  }
+
+  private async assertHierarchyDeleteScope(changeSet: ChangeSet): Promise<void> {
+    const { projectId, operations, readSet, provenance } = changeSet;
+    const { siblingIds } = provenance.details;
+    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
+    const selected = operations.map(operation => {
+      if (operation.type !== "document.delete" || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
+        throw validationError("A hierarchy deletion must contain versioned document deletions only");
+      }
+      return operation.command.documentId;
+    });
+    const targetId = selected.at(-1);
+    if (!targetId || !Array.isArray(siblingIds) || !siblingIds.every(id => typeof id === "string") ||
+        !siblingIds.includes(targetId) || new Set(selected).size !== selected.length) {
+      throw validationError("A hierarchy deletion requires a canonical subtree and sibling set");
+    }
+    await this.assertHierarchySiblingScope(projectId, provenance.details, siblingIds);
+    const current = await this.query(
+      `WITH RECURSIVE subtree AS (
+        SELECT id FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL
+        UNION
+        SELECT child.id FROM document child JOIN subtree parent ON child.parent_id = parent.id
+          WHERE child.project_id = $1 AND child.deleted_at IS NULL
+      ) SELECT id FROM subtree`,
+      [projectId, targetId],
+    );
+    const expected = new Set<string>(selected);
+    if (current.rows.length !== expected.size || current.rows.some(row => !expected.has(asString(row.id)))) {
+      throw new PersistenceError("conflict", "The hierarchy subtree changed since it was read", {
+        resource: "hierarchy_subtree", id: targetId,
+      });
+    }
+  }
+
+  private async assertHierarchySiblingScope(projectId: ProjectId, details: JsonObject, expected: readonly string[]): Promise<void> {
+    const { kind, parentId, volumeId } = details;
+    if (!((kind === "volume" && parentId === null && volumeId === null) ||
+          (kind === "chapter" && typeof parentId === "string" && parentId === volumeId) ||
+          (kind === "scene" && typeof parentId === "string" && typeof volumeId === "string"))) {
+      throw validationError("A hierarchy change requires a canonical sibling scope");
+    }
+    const scopeConflict = () => new PersistenceError("conflict", "The hierarchy sibling set changed since it was read", {
+      resource: "hierarchy_siblings", id: parentId ?? projectId,
+    });
+    if (volumeId !== null && (await this.getDocument(projectId, volumeId as DocumentId))?.kind !== "volume") throw scopeConflict();
+    if (kind === "scene") {
+      const chapter = await this.getDocument(projectId, parentId as DocumentId);
+      if (chapter?.kind !== "chapter" || chapter.parentId !== volumeId) throw scopeConflict();
+    }
+    const rows = await this.listDocuments(projectId, parentId as DocumentId | null, MAX_ACTIVE_DOCUMENTS_PER_PROJECT + 1);
+    const actual = rows.filter(document => document.kind === kind).map(document => document.id).sort();
+    if (rows.length > MAX_ACTIVE_DOCUMENTS_PER_PROJECT || actual.length !== expected.length ||
+        actual.some((id, index) => id !== expected[index])) throw scopeConflict();
   }
 
   private async currentChangeSetReadSetEntry(projectId: ProjectId, entry: ChangeSetReadSetEntry): Promise<{ actualVersion: number | null; actualRevisionId: string | null }> {
@@ -2046,6 +2292,8 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.provenance,
       changeSet.operations.some(operation => operation.type === "knowledge.merge"),
     );
+    if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
+    if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
     await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
     const results: ChangeSetOperationResult[] = [];
     for (const operation of changeSet.operations) results.push(await this.applyOperation(operation, changeSet.approvedBy));
@@ -2080,6 +2328,70 @@ export class PostgresPersistence implements Persistence {
 
   async checkHealth(): Promise<void> {
     await this.pool.query("SELECT 1");
+  }
+
+  async findUnprovenCurrentSnapshotProjectIds(
+    projectionEpoch: number,
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    const { projectId = null, after = null, limit = 100 } = options;
+    if (!Number.isSafeInteger(projectionEpoch) || projectionEpoch < 1 ||
+        !Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw validationError("Invalid snapshot projection epoch or project page size");
+    }
+    const result = await this.pool.query<{ id: ProjectId }>(
+      `SELECT p.id
+       FROM project p
+       JOIN module_record snapshot ON snapshot.project_id = p.id
+         AND snapshot.module_id = 'core.authority.snapshots'
+         AND snapshot.key = 'snapshot:' || p.version
+       WHERE ($2::uuid IS NULL OR p.id = $2)
+         AND ($3::uuid IS NULL OR p.id > $3)
+         AND NOT EXISTS (
+           SELECT 1 FROM module_record proof
+           WHERE proof.project_id = snapshot.project_id AND proof.module_id = snapshot.module_id
+             AND proof.key = 'proof:projection:' || $1::text || ':' || snapshot.key
+             AND proof.value->'snapshotRecordVersion' = to_jsonb(snapshot.version)
+         )
+       ORDER BY p.id LIMIT $4`,
+      [projectionEpoch, projectId, after, limit],
+    );
+    return result.rows.map(row => row.id);
+  }
+
+  async findUnmigratedPublishingProjectIds(
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    return this.findLegacyArtifactProjectIds(PRIVATE_PUBLISHING_PATHS, options);
+  }
+
+  async findUnmigratedNlpFeatureSettingsProjectIds(
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    return this.findLegacyArtifactProjectIds([NLP_LEGACY_FEATURE_SETTINGS_PATH], options);
+  }
+
+  private async findLegacyArtifactProjectIds(
+    paths: readonly string[], options: { projectId?: ProjectId; after?: ProjectId; limit?: number },
+  ): Promise<readonly ProjectId[]> {
+    const { projectId = null, after = null, limit = 100 } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw validationError("Invalid legacy artifact maintenance project page size");
+    }
+    const result = await this.pool.query<{ id: ProjectId }>(
+      `SELECT p.id FROM project p
+       WHERE ($2::uuid IS NULL OR p.id = $2)
+         AND ($3::uuid IS NULL OR p.id > $3)
+         AND EXISTS (
+           SELECT 1 FROM module_record source
+           WHERE source.project_id = p.id AND source.module_id = 'core.artifacts'
+             AND source.key = ANY($1::text[])
+             AND source.value->'deleted' IS DISTINCT FROM 'true'::jsonb
+         )
+       ORDER BY p.id LIMIT $4`,
+      [paths, projectId, after, limit],
+    );
+    return result.rows.map(row => row.id);
   }
 
   /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */

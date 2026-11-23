@@ -34,6 +34,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/profile-package.mjs',
   'scripts/verify-oci.sh',
   'scripts/verify-oci-http.mjs',
+  'scripts/oci-better-auth-fixture.sh',
+  'scripts/push-auth-lifecycle-oidc.mjs',
   'tests/integration/model-oci-lifecycle.acceptance.mjs',
   'tests/integration/model-oci-lifecycle-arguments.mjs',
   'tests/integration/model-oci-lifecycle-arguments.test.mjs',
@@ -172,7 +174,7 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     if (isNonExecutableDocumentation(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
-    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api'].includes(owner.id)) {
+    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].includes(owner.id)) {
       const spec = BROWSER_SHARDS.find(item => file === `tests/e2e/${item.file}`);
       if (spec) {
         add('test-types-app-e2e');
@@ -202,8 +204,6 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   }
   // A selected browser suite always consumes the same-profile build result.
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
-  if ([...selected].some(task => task.startsWith('hosted-native-'))) add('hosted-native-catalog');
-  if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
     version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null, forceFull,
@@ -225,7 +225,7 @@ export function validateVerificationPlan(plan) {
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 function assertTaskInputReuse(plan, reuse) {
   if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
-  if (!['codexia-ci-task-input-reuse/v1', 'codexia-ci-task-input-reuse/v2'].includes(reuse.format)) throw new Error('Unknown task input reuse format');
+  if (reuse.format !== 'codexia-ci-task-input-reuse/v2') throw new Error('Unknown task input reuse format');
   if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
   const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
@@ -257,11 +257,6 @@ function assertTaskInputReuse(plan, reuse) {
       if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
     }
   };
-  if (reuse.format === 'codexia-ci-task-input-reuse/v1') {
-    if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
-    assertReceipt(reuse.coverage, 'coverage');
-    return;
-  }
   if (Object.keys(reuse).some(key => !['format', 'coverage', 'omitted'].includes(key))) throw new Error('Unsupported task input proof task');
   if (reuse.coverage !== undefined) assertReceipt(reuse.coverage, 'coverage');
   const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
@@ -287,8 +282,6 @@ export function verificationPlanOutputs(plan) {
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
       .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
-    hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
-    hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
     full_model_oci: String(plan.full_model_oci),
   };
 }

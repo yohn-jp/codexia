@@ -18,9 +18,9 @@ test('independent stable release lines use monotonically increasing workflow pat
 });
 test('frontend and backend releases are independent, but profile and API epoch must match',()=>{
   const ui={format:'codexia-frontend-identity/v1',version:'0.4.8',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
-  const api={name:'codexia',version:'0.8.2',hosted:false,profile:'full',apiEpoch:1};
+  const api={name:'codexia',version:'0.8.2',auth:['oauth-owner','oauth-mcp'],profile:'full',apiEpoch:1};
   assert.doesNotThrow(()=>assertFrontendCompatibility(ui,api));
-  for(const changed of [{apiEpoch:2},{apiEpoch:undefined},{profile:'core'},{hosted:true},{version:'latest'}]){
+  for(const changed of [{apiEpoch:2},{apiEpoch:undefined},{profile:'core'},{auth:['oauth-owner']},{version:'latest'}]){
     assert.throws(()=>assertFrontendCompatibility(ui,{...api,...changed}));
   }
 });
@@ -39,7 +39,7 @@ test('frontend release order rejects stale versions and preserves same-version i
 });
 
 const candidate={format:'codexia-frontend-identity/v1',version:'0.4.10',sourceSha:'b'.repeat(40),profile:'full',apiEpoch:1};
-const liveBackend={name:'codexia',version:'0.8.2',hosted:false,profile:'full',apiEpoch:1};
+const liveBackend={name:'codexia',version:'0.8.2',auth:['oauth-owner','oauth-mcp'],profile:'full',apiEpoch:1};
 const liveFrontend={format:'codexia-frontend-identity/v1',version:'0.4.9',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
 const releaseEnv={GITHUB_SHA:candidate.sourceSha,CODEXIA_PUBLIC_ORIGIN:'https://codexia.example.com',CODEXIA_ACCESS_CLIENT_ID:'client-id',CODEXIA_ACCESS_CLIENT_SECRET:'client-secret'};
 const jsonResponse=value=>new Response(JSON.stringify(value),{status:200,headers:{'content-type':'application/json'}});

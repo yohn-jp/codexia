@@ -32,8 +32,9 @@ test('mixed-version acceptance only admits explicitly named disposable loopback 
 
 test('mixed-version verification rejects external composition and release identity overrides', () => {
   assert.doesNotThrow(() => assertIsolatedEnvironment({}));
-  for (const name of ['CODEXIA_BROWSER_MODULE_PROFILE_PATH', 'SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH',
-    'CODEXIA_STANDALONE_IDENTITY', 'CODEXIA_E2E_BASE_URL', 'CODEXIA_E2E_COMPAT_FRONTEND_DIR']) {
+  for (const name of ['CODEXIA_BROWSER_MODULE_PROFILE_PATH',
+    'CODEXIA_STANDALONE_IDENTITY', 'CODEXIA_E2E_BASE_URL',
+    'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_COMPAT_FRONTEND_SOURCE']) {
     assert.throws(() => assertIsolatedEnvironment({ [name]: 'override' }), new RegExp(name));
   }
 });

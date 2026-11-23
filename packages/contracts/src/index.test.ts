@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
+import { assertChangeOperation, createDocumentSource, nextOrderKey, SNAPSHOT_READ_MANY_LIMIT, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
 test("new decimal order keys sort after padded, unpadded, and reordered siblings", () => {
   const first = nextOrderKey([]);
   assert.match(first, /^\d+$/u);
@@ -86,6 +86,21 @@ test("scope guards bind unseen insertions, deletions and file revisions independ
     async read(path) { const revision = files.get(path); return revision ? { content: "", revision } : null; },
   };
   const initial = await snapshotScopeRevision(reader, "bible");
+  const hashOnly: SnapshotReader = {
+    ...reader,
+    async list() { assert.fail("Hash-only scope enumeration should use its revision list"); },
+    async read() { assert.fail("A hash-only scope should not read manuscript contents"); },
+    async listRevisions() { return [...files].reverse().map(([path, revision]) => ({ path, revision })); },
+  };
+  assert.equal(await snapshotScopeRevision(hashOnly, "bible"), initial);
+  for (const path of ["manuscript/outside.md", "bible/../outside.md"]) {
+    await assert.rejects(snapshotScopeRevision({
+      ...hashOnly, async listRevisions() { return [{ path, revision: "a".repeat(64) }]; },
+    }, "bible"));
+  }
+  await assert.rejects(snapshotScopeRevision({
+    ...hashOnly, async listRevisions() { return [{ path: "bible/a.yaml", revision: null }]; },
+  }, "bible"));
   reverse = true;
   assert.equal(await snapshotScopeRevision(reader, "bible"), initial);
   files.set("bible/new.yaml", "c".repeat(64));
@@ -172,4 +187,23 @@ test("document source rejects unsafe and out-of-scope snapshot paths", async () 
     async listRevisions() { return [{ path: "meta/other.md", revision: "a".repeat(64) }]; },
   };
   await assert.rejects(createDocumentSource(outsideReader).enumerate("manuscript"));
+});
+
+test("document source uses bounded native body batches in input order", async () => {
+  const paths = Array.from({ length: SNAPSHOT_READ_MANY_LIMIT + 1 }, (_, index) => `documents/${index}.md`).reverse();
+  const sizes: number[] = [];
+  const reader: SnapshotReader = {
+    snapshot: { projectId: operation.projectId, projectVersion: operation.baseProjectVersion },
+    async list() { return paths; },
+    async read() { assert.fail("Native batching must not open individual reads"); },
+    async readMany(batch) {
+      sizes.push(batch.length);
+      return batch.map(path => ({ content: path, revision: "a".repeat(64) }));
+    },
+  };
+  assert.deepEqual((await createDocumentSource(reader).readMany(paths)).map(({ path, content }) => [path, content]),
+    paths.map(path => [path, path]));
+  assert.deepEqual(sizes, [SNAPSHOT_READ_MANY_LIMIT, 1]);
+  await assert.rejects(createDocumentSource({ ...reader, async readMany() { return []; } }).readMany([paths[0]!]),
+    /Invalid snapshot document batch/u);
 });

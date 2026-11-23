@@ -1093,12 +1093,120 @@ test("optional capabilities do not block profile resolution and cannot activate 
   await runtime.shutdown();
 });
 
+test("own module records bind to the executing module and admitted snapshot", async (t) => {
+  const publishing = manifest("publishing");
+  const story = manifest("story");
+  const nlp = manifest("nlp");
+  const nlpInput = { key: "feature-settings", value: { externalEnabled: { rewrite: true } }, expectedVersion: null, idempotencyKey: "consent-1" };
+  const input = { key: "share-grants", value: { count: 2 }, expectedVersion: 4, idempotencyKey: "publish-1" };
+  let completedReads = 0;
+  const readAction: ModuleAction = {
+    id: "read-record", effect: "read", inputSchema: schema, outputSchema: schema,
+    async invoke(_input, context) {
+      const record = await context.readOwnModuleRecord?.("shared-key");
+      if (record) completedReads += 1;
+      return { ok: true, snapshot: context.reader.snapshot, data: { record, canPropose: !!context.proposeOwnModuleRecord } };
+    },
+  };
+  const runtime = new ModuleRuntime({
+    manifests: [publishing, story, nlp], enabled: ["publishing", "story", "nlp"], cacheDirectory: "/tmp/codexia-runtime-test",
+    loaders: {
+      story: async () => definition(story, readAction),
+      nlp: async () => definition(nlp, {
+        id: "propose-record", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const reference = await context.proposeOwnModuleRecord?.(nlpInput);
+          return { ok: true, snapshot: context.reader.snapshot, data: reference ?? null };
+        },
+      }),
+      publishing: async () => ({ ...definition(publishing, readAction), actions: [readAction, {
+        id: "propose-record", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const supplied = { ...input, moduleId: "story", projectId: "another-project", snapshot: { ...snapshot, projectVersion: 99 } };
+          const reference = await context.proposeOwnModuleRecord?.(supplied);
+          return { ok: true, snapshot: context.reader.snapshot, data: reference ?? null };
+        },
+      }] }),
+    },
+  });
+  t.after(() => runtime.shutdown());
+  const reads: unknown[] = [];
+  const proposals: unknown[] = [];
+  const reference = { id: "native-proposal", projectId: snapshot.projectId };
+  const host: ActionHostContext = {
+    ...readContext(), projectId: snapshot.projectId, access: "owner", caller: "author",
+    async readOwnModuleRecord(scope, key, signal) {
+      assert.equal(signal.aborted, false);
+      reads.push({ scope, key });
+      return { value: { module: scope.moduleId }, version: 4 };
+    },
+    async proposeOwnModuleRecord(scope, request, signal) {
+      assert.equal(signal.aborted, false);
+      proposals.push({ scope, request });
+      return reference;
+    },
+  };
+
+  for (const moduleId of ["story", "publishing"]) {
+    const result = await runtime.invokeAction(moduleId, "read-record", {}, host);
+    assert.deepEqual(result, { ok: true, snapshot, data: { record: { value: { module: moduleId }, version: 4 }, canPropose: false } });
+  }
+  assert.deepEqual(reads, ["story", "publishing"].map(moduleId => ({
+    scope: { moduleId, snapshot, access: "owner", caller: "author", effect: "read" }, key: "shared-key",
+  })));
+  const proposed = await runtime.invokeAction("publishing", "propose-record", {}, host);
+  assert.deepEqual(proposed, { ok: true, snapshot, data: reference });
+  assert.deepEqual(proposals, [{ scope: { moduleId: "publishing", snapshot, access: "owner", caller: "author", effect: "propose" }, request: input }]);
+
+  const publicAction = await runtime.invokeAction("publishing", "read-record", {}, { ...host, access: "public", caller: "external-agent" });
+  assert.deepEqual(publicAction, { ok: true, snapshot, data: { record: undefined, canPropose: false } });
+  const external = await runtime.invokeAction("publishing", "propose-record", {}, { ...host, caller: "external-agent" });
+  assert.deepEqual(external, { ok: true, snapshot, data: null });
+  const externalNlp = { ...host, caller: "external-agent" as const };
+  const nlpProposal = await runtime.invokeAction("nlp", "propose-record", {}, { ...externalNlp, allowedEffects: ["propose"] });
+  assert.deepEqual(nlpProposal, { ok: true, snapshot, data: reference });
+  assert.deepEqual(proposals.at(-1), {
+    scope: { moduleId: "nlp", snapshot, access: "owner", caller: "external-agent", effect: "propose" }, request: nlpInput,
+  });
+  const nlpWithoutProposalEffect = await runtime.invokeAction("nlp", "propose-record", {}, { ...externalNlp, allowedEffects: ["read"] });
+  assert.ok(!nlpWithoutProposalEffect.ok);
+  assert.equal(nlpWithoutProposalEffect.error.code, "action_effect_denied");
+  const denied = await runtime.invokeAction("publishing", "propose-record", {}, { ...host, allowedEffects: ["read"] });
+  assert.ok(!denied.ok);
+  assert.equal(denied.error.code, "action_effect_denied");
+  const wrongProject = await runtime.invokeAction("publishing", "read-record", {}, { ...host, projectId: "another-project" });
+  assert.ok(!wrongProject.ok);
+  assert.equal(wrongProject.error.code, "action_snapshot_mismatch");
+  const wrongReference = await runtime.invokeAction("publishing", "propose-record", {}, {
+    ...host,
+    async proposeOwnModuleRecord() { return { ...reference, projectId: "another-project" }; },
+  });
+  assert.ok(!wrongReference.ok);
+  assert.equal(wrongReference.error.code, "action_snapshot_mismatch");
+
+  const controller = new AbortController();
+  const cancelled = await runtime.invokeAction("publishing", "read-record", {}, {
+    ...host, signal: controller.signal,
+    async readOwnModuleRecord(_scope, _key, signal) {
+      controller.abort();
+      assert.equal(signal.aborted, true);
+      return { value: { late: true }, version: 4 };
+    },
+  });
+  assert.ok(!cancelled.ok);
+  assert.equal(cancelled.error.code, "action_cancelled");
+  assert.equal(completedReads, 2, "a late record cannot reach the cancelled action");
+  assert.equal(reads.length, 2);
+  assert.equal(proposals.length, 2);
+});
+
 test("HTTP contributions are hidden until activation and public reads cannot propose; streamed calls drain on cancel", async () => {
   const metadata = manifest("publishing");
   const story = manifest("story");
   let proposals = 0;
   let storyImports = 0;
   let linkedReaderCalls = 0;
+  const ownRecordReads: unknown[] = [];
   const runtime = new ModuleRuntime({
     manifests: [metadata, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: {
@@ -1125,7 +1233,8 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
             try { await context.linkedReader("repo-linked"); } catch (error) {
               linkedReaderError = (error as { code?: string }).code;
             }
-            return Response.json({ actions, nested, linkedReaderError });
+            const record = await context.readOwnModuleRecord?.("share-grants");
+            return Response.json({ actions, nested, linkedReaderError, configured: !!record, canProposeOwnRecord: !!context.proposeOwnModuleRecord });
           } },
           { id: "stream", path: "public/stream", methods: ["GET"], access: "public", effect: "read", async handle() {
             return new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.enqueue(new TextEncoder().encode("chunk")); } }));
@@ -1140,9 +1249,14 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
   const descriptors = runtime.httpContributions("publishing");
   assert.equal(descriptors.length, 3);
   assert.equal("handle" in descriptors[0]!, false);
-  const host = {
-    ...readContext(),
-    access: "public" as const,
+  const host: ActionHostContext = {
+    ...readContext(), projectId: snapshot.projectId,
+    access: "public", caller: "external-agent",
+    async readOwnModuleRecord(scope, key) {
+      ownRecordReads.push({ scope, key });
+      return { value: { tokenHash: "private-share-fixture" }, version: 2 };
+    },
+    async proposeOwnModuleRecord() { throw new Error("The public route must not get a proposal port"); },
     actions: [{ module: "core" as const, action: {
       id: "status", effect: "read" as const, inputSchema: schema, outputSchema: schema,
       async invoke(_input: unknown, context: ModuleActionContext) {
@@ -1168,7 +1282,12 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
     actions: [],
     nested: { ok: false, snapshot, error: { code: "public_action_unavailable", message: "Public routes cannot invoke composed actions", retryable: false } },
     linkedReaderError: "public_access_restricted",
+    configured: true,
+    canProposeOwnRecord: false,
   });
+  assert.deepEqual(ownRecordReads, [{
+    scope: { moduleId: "publishing", snapshot, access: "public", caller: "external-agent", effect: "read" }, key: "share-grants",
+  }]);
   assert.equal(storyImports, 0, "public route contexts do not enumerate or activate private modules");
   assert.equal(linkedReaderCalls, 0, "public route contexts cannot access linked repositories");
 

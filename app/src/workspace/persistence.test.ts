@@ -2,20 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspacePreset, hideWorkspacePanel, resizeWorkspaceSplit } from "./layout";
 import {
-  loadWorkspaceLayout,
   loadWorkspaceSnapshot,
-  saveWorkspaceLayout,
   saveWorkspaceSnapshot,
   workspaceSnapshotStorageKey,
-  workspaceStorageKey,
   type WorkspaceStorage,
 } from "./persistence";
 
 class MemoryStorage implements WorkspaceStorage {
   values = new Map<string, string>();
   failKey: string | null = null;
+  reads: string[] = [];
   writes: string[] = [];
-  getItem(key: string): string | null { return this.values.get(key) ?? null; }
+  getItem(key: string): string | null {
+    this.reads.push(key);
+    return this.values.get(key) ?? null;
+  }
   setItem(key: string, value: string): void {
     this.writes.push(key);
     if (key === this.failKey) throw new Error("quota exceeded");
@@ -41,12 +42,13 @@ test("a workspace save commits dock layout and floating geometry together for on
 
   assert.equal(loadWorkspaceSnapshot(storage, "author:two", "desktop", panelIds).state, "missing");
   assert.equal(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds).state, "missing");
+  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "mobile", snapshot), false);
   assert.equal(saveWorkspaceSnapshot(storage, "author:one", "mobile", { layout: desktop, floating: [] }), true);
   assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds), { layout: desktop, floating: [], state: "valid" });
   assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { ...snapshot, state: "valid" });
 });
 
-test("existing split-key layouts restore together and remain intact until an explicit atomic save", () => {
+test("only the atomic record is read and an explicit save preserves bytes at retired keys", () => {
   const storage = new MemoryStorage();
   const layout = {
     version: 1,
@@ -63,12 +65,17 @@ test("existing split-key layouts restore together and remain intact until an exp
   storage.values.set(legacyFloatingKey, legacyFloatingBytes);
 
   const loaded = loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds);
-  assert.deepEqual(loaded, { layout, floating, state: "valid" });
-  assert.equal(loadWorkspaceSnapshot(storage, "author:two", "desktop", panelIds).state, "missing");
+  const currentKey = "scriptorium:workspace:v2:author%3Aone:desktop";
+  assert.deepEqual(loaded, {
+    layout: createWorkspacePreset("writing", panelIds), floating: [], state: "missing",
+  });
+  assert.deepEqual(storage.reads, [currentKey]);
   assert.deepEqual(storage.writes, []);
 
-  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", loaded), true);
-  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { layout, floating, state: "valid" });
+  const saved = { layout: hideWorkspacePanel(createWorkspacePreset("research", panelIds), "outline"), floating };
+  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", saved), true);
+  assert.deepEqual(storage.writes, [currentKey]);
+  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { ...saved, state: "valid" });
   assert.equal(storage.getItem(legacyDockKey), legacyDockBytes);
   assert.equal(storage.getItem(legacyFloatingKey), legacyFloatingBytes);
 });
@@ -122,34 +129,23 @@ test("unavailable module layouts and floating panels survive Core-only restorati
   assert.deepEqual(loaded.floating, floating);
 });
 
-test("loading malformed state preserves its stored bytes until an explicit valid save", () => {
-  const storage = new MemoryStorage();
-  const key = workspaceStorageKey("author:one", "desktop");
-  const malformed = "{ this is not a workspace layout";
-  storage.values.set(key, malformed);
-
-  const loaded = loadWorkspaceLayout(storage, "author:one", "desktop", panelIds);
-  assert.equal(loaded.state, "invalid");
-  assert.equal(loaded.layout.preset, "writing");
-  assert.equal(storage.getItem(key), malformed);
-
-  const replacement = createWorkspacePreset("research", panelIds);
-  assert.equal(saveWorkspaceLayout(storage, "author:one", "desktop", replacement), true);
-  assert.notEqual(storage.getItem(key), malformed);
-  assert.equal(loadWorkspaceLayout(storage, "author:one", "desktop", panelIds).state, "valid");
-});
-
 test("oversized or non-declarative payloads are rejected without storage writes", () => {
   const storage = new MemoryStorage();
-  const key = workspaceStorageKey("author:one", "desktop");
-  const oversized = "x".repeat(64 * 1024 + 1);
+  const key = workspaceSnapshotStorageKey("author:one", "desktop");
+  const layout = createWorkspacePreset("writing", panelIds);
+  const atLimit = JSON.stringify({ version: 2, layout, floating: [] }).padEnd(72 * 1024 + 128, " ");
+  storage.values.set(key, atLimit);
+  assert.equal(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds).state, "valid");
+  const oversized = atLimit + " ";
   storage.values.set(key, oversized);
-  assert.equal(loadWorkspaceLayout(storage, "author:one", "desktop", panelIds).state, "invalid");
+  assert.equal(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds).state, "invalid");
   assert.equal(storage.getItem(key), oversized);
 
-  const layout = createWorkspacePreset("writing", panelIds);
-  assert.equal(saveWorkspaceLayout(storage, "author:one", "desktop", { ...layout, secret: "not allowed" } as never), false);
+  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", {
+    layout: { ...layout, secret: "not allowed" } as never, floating: [],
+  }), false);
   assert.equal(storage.getItem(key), oversized);
+  assert.deepEqual(storage.writes, []);
 });
 
 test("storage errors fall back without pretending that persistence succeeded", () => {
@@ -157,6 +153,9 @@ test("storage errors fall back without pretending that persistence succeeded", (
     getItem() { throw new Error("blocked"); },
     setItem() { throw new Error("blocked"); },
   };
-  assert.equal(loadWorkspaceLayout(inaccessible, "author:one", "mobile", panelIds).state, "unavailable");
-  assert.equal(saveWorkspaceLayout(inaccessible, "author:one", "mobile", createWorkspacePreset("writing", panelIds)), false);
+  const layout = createWorkspacePreset("writing", panelIds);
+  assert.deepEqual(loadWorkspaceSnapshot(inaccessible, "author:one", "mobile", panelIds), {
+    layout, floating: [], state: "unavailable",
+  });
+  assert.equal(saveWorkspaceSnapshot(inaccessible, "author:one", "mobile", { layout, floating: [] }), false);
 });
