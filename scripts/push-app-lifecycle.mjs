@@ -32,13 +32,13 @@ const reportPath = env.CODEXIA_LIFECYCLE_REPORT_FILE || path.join(tempRoot, 'cod
 const preparedPath = path.join(path.dirname(evidencePath), 'prepared-images.json');
 // #605 removed the unconditional static-token prerequisite. Earlier certified
 // images can supply a rejection control, but cannot be an OAuth-only update.
-const authOnlyBootBaseline = '6fc808d1674f4bf5a420473c3fea167dd139ea17';
+const lifecycleBootChangeCommit = '6fc808d1674f4bf5a420473c3fea167dd139ea17';
 
 function check(condition, message) { assert.ok(condition, message); }
 function positive(value) { return Number.isSafeInteger(Number(value)) && Number(value) > 0; }
 function followsAuthOnlyBoot(source) {
   try {
-    execFileSync('git', ['merge-base', '--is-ancestor', authOnlyBootBaseline, source], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['merge-base', '--is-ancestor', lifecycleBootChangeCommit, source], { cwd: root, stdio: 'ignore' });
     return true;
   } catch (error) {
     if (error.status !== 1) throw new Error('Published source is unavailable in the full lifecycle checkout');

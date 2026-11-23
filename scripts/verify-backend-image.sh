@@ -145,11 +145,13 @@ echo "Backend OCI checks passed: health/readiness, auth boundary, no UI assets, 
 # snapshot states plus a live legacy grant on a project without any snapshot.
 preflight_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
 publishing_project="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+legacy_grant_digest_input='codexia disposable OCI fixture: historical Publishing grant digest'
+expected_legacy_grant_digest="$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(process.argv[1]).digest("hex"))' "$legacy_grant_digest_input")"
 printf '%s' "$preflight_password" > "$secret_directory/preflight-password"
 chmod 0444 "$secret_directory/preflight-password"
 "$engine" exec -i "$database_container" psql -X -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
   -v legacy="$legacy_project" -v incompatible="$incompatible_project" -v publishing="$publishing_project" \
-  -v preflight_password="$preflight_password" <<'SQL'
+  -v preflight_password="$preflight_password" -v legacy_grant_digest_input="$legacy_grant_digest_input" <<'SQL'
 CREATE ROLE codexia_preflight LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'preflight_password';
 ALTER ROLE codexia_preflight SET default_transaction_read_only = on;
 ALTER ROLE codexia_auth_runtime IN DATABASE codexia_verify SET default_transaction_read_only = on;
@@ -162,7 +164,11 @@ UPDATE module_record SET value=value - 'knowledge'
 INSERT INTO project(id, title) VALUES (:'publishing', 'Publishing without a saved snapshot');
 INSERT INTO module_record(project_id, module_id, key, value) VALUES (:'publishing', 'core.artifacts',
  'meta/scriptorium/modules/publishing/share-grants.jsonl',
- jsonb_build_object('content', '{"id":"fixture-grant","tokenHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","scope":"ch-first","label":"Historical share","createdAt":"2025-01-01T00:00:00.000Z","expiresAt":"2099-01-01T00:00:00.000Z","grantVersion":3,"revocationVersion":1}'));
+ jsonb_build_object('content', jsonb_build_object(
+   'id', 'fixture-grant', 'tokenHash', encode(sha256(convert_to(:'legacy_grant_digest_input', 'UTF8')), 'hex'),
+   'scope', 'ch-first', 'label', 'Historical share', 'createdAt', '2025-01-01T00:00:00.000Z',
+   'expiresAt', '2099-01-01T00:00:00.000Z', 'grantVersion', 3, 'revocationVersion', 1
+ )::text));
 SQL
 db_state() {
   "$engine" exec "$database_container" psql -X -A -t -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
@@ -232,7 +238,7 @@ grep -Fxq 'Snapshot projection maintenance requires the writable PostgreSQL role
 
 snapshot_maintenance codexia "$database_password" --apply --project "$publishing_project" | grep -Fxq '{"status":"ready","projectsProcessed":0,"publishingRowsMigrated":1}'
 "$engine" exec -i "$database_container" psql -X -A -t -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
-  -v publishing="$publishing_project" <<'SQL' | grep -Fxq 'fixture-grant|chapter|ch-first|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|3|1|2099-01-01T00:00:00.000Z'
+  -v publishing="$publishing_project" <<'SQL' | grep -Fxq "fixture-grant|chapter|ch-first|$expected_legacy_grant_digest|3|1|2099-01-01T00:00:00.000Z"
 SELECT grant_data->>'id', grant_data#>>'{scope,kind}', grant_data#>>'{scope,id}', grant_data->>'tokenHash',
        grant_data->>'grantVersion', grant_data->>'revocationVersion', grant_data->>'expiresAt'
 FROM module_record CROSS JOIN LATERAL jsonb_array_elements(value->'grants') grant_data
