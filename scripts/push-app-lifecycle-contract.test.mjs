@@ -121,11 +121,40 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
   assert.equal(workflow.jobs.lifecycle['runs-on'], 'ubuntu-26.04');
   assert.equal(workflow.jobs.lifecycle.environment, undefined);
   assert.deepEqual(workflow.jobs.lifecycle.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
-  assert.equal(workflow.jobs.lifecycle.needs, undefined);
-  assert.ok(workflow.jobs.lifecycle.steps.some(step => step.run === 'bash deploy/ansible/test-push-app-lifecycle.sh'));
-  assert.ok(workflow.jobs.lifecycle.steps.some(step => step.uses?.startsWith('actions/upload-artifact@')));
-  assert.match(workflow.jobs.lifecycle.steps.find(step => step.name === 'Install disposable host and filesystem capabilities').run, /docker info --format/u,
-    'the disposable fixture must verify the host Docker builder before use');
+  assert.equal(workflow.jobs.lifecycle.needs, 'fixture');
+  assert.deepEqual(workflow.jobs.lifecycle.strategy.matrix.scenario, ['app', 'auth']);
+  assert.equal(workflow.jobs.lifecycle.strategy['fail-fast'], false);
+  assert.deepEqual(workflow.jobs.fixture.permissions, { contents: 'read' });
+  const producer = workflow.jobs.fixture.steps;
+  assert.ok(producer.some(step => step.run === 'bash deploy/fixtures/sshfs-server/build.sh'));
+  assert.ok(producer.some(step => step.uses?.startsWith('actions/upload-artifact@') && step.id === 'archive'));
+  const consumer = workflow.jobs.lifecycle.steps;
+  assert.ok(consumer.some(step => step.run === 'bash deploy/ansible/test-push-app-lifecycle.sh'));
+  assert.ok(consumer.some(step => step.uses?.startsWith('actions/download-artifact@') &&
+    step.with['artifact-ids'] === '${{ needs.fixture.outputs.artifact_id }}'));
+  assert.ok(consumer.some(step => step.run?.includes('verify-sshfs-fixture-artifact.mjs')));
+  assert.ok(consumer.some(step => step.uses?.startsWith('actions/upload-artifact@') &&
+    step.with.name.includes('${{ matrix.scenario }}')));
+  assert.doesNotMatch(consumer.find(step => step.name === 'Install disposable host and filesystem capabilities').run,
+    /docker info|docker build/u, 'lifecycle consumers must not rebuild the key-free fixture');
+});
+
+test('real app and Better Auth transitions execute independently and missing states cannot pass', () => {
+  const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
+  const image = readFileSync(new URL('../deploy/fixtures/sshfs-server/Dockerfile', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../deploy/fixtures/sshfs-server/entrypoint.sh', import.meta.url), 'utf8');
+  const producer = readFileSync(new URL('../deploy/fixtures/sshfs-server/build.sh', import.meta.url), 'utf8');
+  assert.match(fixture, /case "\\$\\{CODEXIA_LIFECYCLE_SCENARIO:\?\\}" in[\\s\\S]*?app\\)[\\s\\S]*?run_application_lifecycle[\\s\\S]*?auth\\)[\\s\\S]*?run_better_auth_lifecycle/u);
+  assert.match(fixture, /r\\.status=required\\.length>0&&\\[\\.\\.\\.required,'fixture_cleanup'\\]\\.every/u);
+  assert.match(fixture, /Lifecycle report has unverified required transitions/u);
+  assert.match(fixture, /run_deploy "\\$initial_key" false "\\$fault_dir"/u);
+  assert.match(fixture, /verify-sshfs-fixture-artifact.mjs/u);
+  assert.match(fixture, /authorized_keys:\\ro/u);
+  assert.doesNotMatch(fixture, /docker build|docker save|docker pull/u);
+  assert.match(producer, /docker build --platform linux\\/amd64/u);
+  assert.match(producer, /ssh .*codexia-backup@127\\.0\\.0\\.1 true/u);
+  assert.doesNotMatch(image, /COPY.*authorized_keys/u, 'per-run keys must never be packaged into the image');
+  assert.match(entry, /test -s \\/home\\/codexia-backup\\/\\.ssh\\/authorized_keys/u);
 });
 
 test('every lifecycle PR path also produces an exact-source backend artifact', () => {
