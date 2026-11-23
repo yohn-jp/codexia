@@ -11,6 +11,7 @@
 | サイト相対ルート | 機能 | データの範囲 |
 | --- | --- | --- |
 | `/` | Development Portal | サイトマップとデータ出典。サイト全体の台帳は `site-manifest.json` |
+| `/api/` | API Reference | TypeSpecから生成したOpenAPI 3.1をScalarで静的表示。contractの出典・生成器lock・入力digest・出力digestを`site-manifest.json`と`api/manifest.json`に記録 |
 | `/architecture/` | Architecture Atlas | ビルド対象 SHA の正本 Markdown。図の URL ハッシュと原文行を保持 |
 | `/graph/` | Code Map | 同じビルド対象 SHA から Graphify が抽出した静的参照。既存の `?file=` と集約概観の URL を保持 |
 | `/ci/` | CI Observatory | 閲覧時に公開APIからPRリビジョン一覧をページ単位で取得。選択したリビジョンだけjob/stepを取得。API履歴制約・未解決runを明示し、個別タスク時間は未計測 |
@@ -22,6 +23,23 @@ PR ではパッケージを `repository-audit-preview` に保存する。
 Chromium は 1440×900、768×1024、390×844、320×800 で画面遷移、ディープリンク、監査ファイルのダウンロード、CI API のエラーと再試行を確認する。
 PR の `repository-audit-screenshots` には検証時の画面を保存する。
 本番公開は main の Pages デプロイジョブが担当し、配信先での受入は対象デプロイに対して確認する。
+
+## API Reference の観測
+
+`/api/` はPagesと同一source SHAの`@codexia/http-contract check-generated`でTypeSpecとの生成一致を確認したOpenAPI 3.1を、Scalar 1.83.0でローカルbundleとして表示する。
+OpenAPIのsecurity scheme、operation、parameter、request/response schema、HTTP status/error responseを読める。
+公開画面は契約上のtargetを示し、Fastifyでのroute/schema適用や本番受入を証明しない。
+security schemeは値を入力するUIを出さず、名称・方式・cookie名の読み取り専用要約を表示する。
+
+Pages生成時に認証operationのrequest/response例を除き、契約に含まれるAPI server定義を公開用コピーから削除する。
+ScalarのTry It操作、認証値入力、Authorize controls、AI操作を無効化し、Content Security Policyの`connect-src 'self'`で外部fetchを制限する。
+security schemeやerror semanticsは文書に残し、認証値や保護されたschemaの実行時取得は行わない。
+
+`api/manifest.json`にはPages source SHA、TypeSpec OpenAPI入力のpathとSHA-256、Scalar npm integrity、npm lockのpathとSHA-256、bundle出力のSHA-256を記録する。
+`site-manifest.json`も同じScalar manifestを保持し、artifact verifierが固定された入力・lock・出力を照合する。
+esbuild bundleのEOF legal noticesを残し、ScalarのMIT licenseを`api/THIRD_PARTY_NOTICES.txt`として同一digest registryに含める。
+PRでは従来の`repository-audit-preview` artifactにのみ格納し、`main`の同じpublisherだけがPagesへ公開する。
+ChromiumのPR smokeは1440、768、390、320 CSS pxで描画とreflowを確認する。公開済みPagesの配信先受入はこのローカルsmokeとは別に扱う。
 
 ## PR #646 時点の観測記録
 
