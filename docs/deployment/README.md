@@ -18,7 +18,7 @@ The Worker has no API route and no origin-proxy fallback.
 
 The route contract in `deploy/cloudflare/ui-routes.json` assigns a catch-all to the assets-only Worker and more-specific scriptless exclusions to the Tunnel for API, health, MCP and OAuth metadata paths. This also covers query-string root requests. Unknown static paths and missing assets return 404. No Worker script, binding, or Worker-first route is deployed. Static 200 proxies in `edge/frontend/static/_redirects` serve the distinct Desktop/Mobile and reader shells without executing code at the edge.
 
-Static response headers are defined in `edge/frontend/static/_headers`. Script execution is restricted to same-origin external scripts; dynamic CodeMirror styles require inline styles in the static delivery CSP. The API-hosted UI retains per-response style nonces. The static frontend contains no secrets or origin-proxy code. Static asset requests do not incur Worker invocation charges.
+Static response headers are defined in `edge/frontend/static/_headers`. The static UI sends host-only HSTS (`max-age=31536000`) without `includeSubDomains` or `preload`; this header does not assert the production zone's current HTTPS/HSTS settings. Script execution is restricted to same-origin external scripts; dynamic CodeMirror styles require inline styles in the static delivery CSP. The API-hosted UI retains per-response style nonces. The static frontend contains no secrets or origin-proxy code. Static asset requests do not incur Worker invocation charges.
 
 ## Authentication, API URL, and CORS
 
