@@ -166,6 +166,30 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verify-frontend-compatibility.mjs',
   'scripts/verify-frontend-compatibility.test.mjs',
 ]);
+// Standalone native iOS sources belong to the dedicated Xcode workflows, not
+// the Desktop/Core/Full verification graph. Unknown file kinds remain fail-closed.
+export const NATIVE_IOS_WORKFLOW_INPUTS = Object.freeze([
+  '.github/workflows/ios-api.yml',
+  '.github/workflows/ios-editor.yml',
+]);
+const NATIVE_IOS_ROOTS = Object.freeze([
+  'ios/CodexiaTransport/',
+  'ios/CodexiaApp/',
+  'ios/CodexiaEditor/',
+]);
+const NATIVE_IOS_GENERATOR_INPUTS = new Set([
+  'ios/CodexiaTransport/generate.sh',
+  'ios/CodexiaTransport/normalize-openapi.py',
+  'ios/CodexiaTransport/openapi-generator-config.yaml',
+]);
+export function isNativeIosOwnedInput(file) {
+  if (NATIVE_IOS_WORKFLOW_INPUTS.includes(file)) return true;
+  if (!NATIVE_IOS_ROOTS.some(root => file.startsWith(root))) return false;
+  return /\\.(?:swift|entitlements|pbxproj|xcscheme|plist|xcconfig)$/u.test(file) ||
+    /\\/(?:Package\\.swift|Package\\.resolved|\\.gitignore)$/u.test(file) ||
+    NATIVE_IOS_GENERATOR_INPUTS.has(file);
+}
+
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/ios/', 'app/native/']);
 const DB_CONTRACT_SOURCE_PATHS = new Set([
@@ -233,6 +257,12 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add('unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap');
       continue;
     }
+    if (event === 'pull_request' && isNativeIosOwnedInput(file)) {
+      // Native compile/SDK/simulator proof is owned by the matching iOS workflow.
+      // Root contract tests and canonical coverage still certify PR admission.
+      add('unit-root');
+      continue;
+    }
     if (isNonExecutableDocumentation(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
@@ -251,8 +281,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       const knownWorkspaceFixture = WORKSPACES.some(item =>
         file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
       // The Swift native client is built by its independent iOS lifecycle, not model OCI.
-      const knownNativeClientSource = file.startsWith('ios/CodexiaTransport/Sources/') && file.endsWith('.swift');
-      if (!owner && !knownWorkspaceFixture && !knownNativeClientSource && event === 'pull_request') fullModelOci = true;
+      if (!owner && !knownWorkspaceFixture && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }

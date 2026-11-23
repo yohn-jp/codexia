@@ -596,3 +596,56 @@ test('the Passkey browser acceptance source is owned by the API unit, package ty
   assert.ok(browserSpec.tasks.includes('browser-full-passkey-bootstrap'));
   assert.ok(browserSpec.tasks.includes('test-types-app-e2e'));
 });
+
+test('native Swift-only PR inputs select owner contract without unrelated Desktop or OCI jobs', async () => {
+  const owned = [
+    '.github/workflows/ios-api.yml',
+    '.github/workflows/ios-editor.yml',
+    'ios/CodexiaTransport/.gitignore',
+    'ios/CodexiaTransport/Package.swift',
+    'ios/CodexiaTransport/Package.resolved',
+    'ios/CodexiaTransport/generate.sh',
+    'ios/CodexiaTransport/normalize-openapi.py',
+    'ios/CodexiaTransport/openapi-generator-config.yaml',
+    'ios/CodexiaTransport/KeychainProbe/KeychainHost.entitlements',
+    'ios/CodexiaTransport/KeychainProbe/KeychainProbe.xcodeproj/project.pbxproj',
+    'ios/CodexiaTransport/KeychainProbe/KeychainProbe.xcodeproj/xcshareddata/xcschemes/KeychainProbe.xcscheme',
+    'ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift',
+    'ios/CodexiaTransport/Tests/CodexiaTransportTests/OAuthTests.swift',
+    'ios/CodexiaApp/CodexiaApp.xcodeproj/project.pbxproj',
+    'ios/CodexiaApp/UITests/AuthoringFlowUITests.swift',
+    'ios/CodexiaEditor/.gitignore',
+    'ios/CodexiaEditor/Package.swift',
+    'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift',
+  ];
+  for (const file of owned) {
+    const result = await plan([file]);
+    assert.equal(result.mode, 'affected', file);
+    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    assert.equal(result.full_model_oci, false, file);
+  }
+  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage']);
+  const nativeApi = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
+  for (const input of ['.github/workflows/ios-api.yml', 'ios/CodexiaTransport/**', 'packages/http-contract/openapi/codexia.openapi.yaml']) {
+    assert.ok(nativeApi.on.pull_request.paths.includes(input), input);
+  }
+  assert.equal(nativeApi.jobs.api['runs-on'], 'xcode-27');
+});
+
+test('native ownership fails closed for unsupported or mixed inputs and main', async () => {
+  const { VERIFICATION_TASKS } = await import('./contract.mjs');
+  const source = 'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift';
+  for (const file of [
+    'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',
+    'ios/Unreviewed/Sources/Unexpected.swift',
+    '.github/workflows/ios-other.yml',
+    'packages/http-contract/openapi/codexia.openapi.yaml',
+    'pnpm-lock.yaml',
+    'packages/api/src/server.ts',
+  ]) {
+    const mixed = await plan([source, file]);
+    assert.deepEqual(mixed.tasks, VERIFICATION_TASKS, file);
+  }
+  assert.deepEqual((await plan([source], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+});

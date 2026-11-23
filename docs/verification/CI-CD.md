@@ -70,6 +70,15 @@ flowchart TD
 | Change/input owner | Required proof | Avoid when unrelated |
 | --- | --- | --- |
 | Native iOS SwiftUI/transport and Xcode projects | Native Swift build, API contract, simulator/physical acceptance as specified by iOS design | Desktop browser E2E, backend OCI, real-model OCI |
+
+Native-only PR admission is bounded to reviewed `ios/CodexiaTransport/`,
+`ios/CodexiaApp/` and `ios/CodexiaEditor/` Swift/Xcode/configuration inputs
+and the dedicated `ios-api.yml` / `ios-editor.yml` workflow contracts.
+The exact PR diff still receives `unit-root` contract proof and canonical
+`coverage`; native Swift build, Xcode and simulator acceptance remain owned by
+the native workflows. A shared OpenAPI, lockfile, unclassified native extension,
+unknown directory or missing diff retains the conservative full plan.
+
 | Database contract-only tests / isolated proof fixtures | DB contract, affected type/unit and coverage | Backend/frontend image release builds, app host lifecycle, real-model OCI |
 | Runtime Backend/Core/Full sources and packaging inputs | Applicable unit/type, actual Core/Full OCI, API/integration and exact-image identity | Unrelated Pages and iOS workflows |
 | Desktop React, static assets, or frontend build inputs | Desktop type/build, affected browser shards, UI asset packaging/delivery | Backend publication and VM lifecycle unless shared runtime inputs change |
