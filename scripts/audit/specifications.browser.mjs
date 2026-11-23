@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -36,7 +37,14 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
     assert.equal((await page.goto(`${base}/architecture/#system-1`)).status(), 200);
-    assert.ok(await page.locator('body').innerText());
+    const image = page.locator('#svg-image:not([hidden])');
+    await image.waitFor();
+    assert.match(await image.getAttribute('src'), /^svg\/system-1\.svg(?:\?.*)?$/u);
+    const dimensions = await image.evaluate(img => ({width:img.naturalWidth,height:img.naturalHeight}));
+    assert.ok(dimensions.width > 0 && dimensions.height > 0, 'LikeC4 SVG did not render');
+    const svg = await page.request.get(`${base}/${registry.likec4.output.path}`);
+    assert.equal(svg.status(), 200);
+    assert.equal(createHash('sha256').update(await svg.body()).digest('hex'), registry.likec4.output.sha256, 'LikeC4 SVG digest differs from site manifest');
   } finally {
     if (browser) await browser.close();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

@@ -55,7 +55,8 @@ function fixture() {
   put(join(site,'architecture','atlas.css'),'');
   put(join(site,'architecture','atlas.js'),'');
   put(join(site,'architecture','svg','user-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
-  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',image:'svg/user-1.svg'}]}));
+  put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',image:'svg/user-1.svg'},{id:'system-1',image:'svg/system-1.svg',sourceModel:'docs/architecture/likec4/model.likec4',sourceModelSha256:digest(readFileSync('docs/architecture/likec4/model.likec4'))}]}));
   put(join(site,'graph','source.json'),JSON.stringify({sourceSha:sha}));
   put(join(site,'graph','analysis.mjs'),'export const analyze = true;\n');
   put(join(site,'graph','communities.html'),'<html><body><a href="./">Graph</a></body></html>');
@@ -182,7 +183,7 @@ test('records and validates LikeC4 source, lock and published SVG provenance',()
     const atlasPath=join(site,'architecture','manifest.json');
     const atlas=JSON.parse(readFileSync(atlasPath,'utf8'));
     const model=readFileSync('docs/architecture/likec4/model.likec4');
-    atlas.diagrams.push({id:'system-1', image:'svg/system-1.svg', sourceModel:'docs/architecture/likec4/model.likec4', sourceModelSha256:digest(model)});
+    assert.ok(atlas.diagrams.some(item => item.id === 'system-1'));
     put(atlasPath,JSON.stringify(atlas));
     put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     const registry=generate(site,sha,origin);
@@ -194,4 +195,9 @@ test('records and validates LikeC4 source, lock and published SVG provenance',()
     put(join(site,'architecture','svg','system-1.svg'),'<svg>changed</svg>');
     assert.throws(()=>verify(site,origin),/LikeC4.*digest/u);
   } finally {cleanup(site);}
+});
+
+test('rejects an Atlas without its required LikeC4 system view',()=>{
+ const site=fixture();
+ try {const atlasPath=join(site,'architecture','manifest.json'); const atlas=JSON.parse(readFileSync(atlasPath,'utf8')); atlas.diagrams=atlas.diagrams.filter(item=>item.id!=='system-1'); put(atlasPath,JSON.stringify(atlas)); assert.throws(()=>generate(site,sha,origin),/LikeC4.*system-1/u);} finally {cleanup(site);}
 });

@@ -49,7 +49,7 @@ function likec4Provenance(site, sourceSha) {
   if (!existsSync(atlasPath)) return undefined;
   const atlas = JSON.parse(readPageFile(atlasPath, 'utf8'));
   const diagram = atlas.diagrams?.find(item => item.id === 'system-1');
-  if (!diagram) return undefined;
+  assert.ok(diagram, 'LikeC4 system-1 view missing');
   assert.equal(atlas.sourceSha, sourceSha, 'LikeC4 Atlas source mismatch');
   const paths = { model:'docs/architecture/likec4/model.likec4', derivative:'docs/architecture/likec4/generated/system-overview.mmd', lock:'scripts/architecture/package-lock.json' };
   const atSource = path => execFileSync('git', ['show', `${sourceSha}:${path}`]);
