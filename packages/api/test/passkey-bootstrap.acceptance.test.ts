@@ -12,6 +12,9 @@ import { Pool } from "pg";
 import { verifyAuthSchema } from "../src/auth-schema.js";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
 import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "../src/better-auth.js";
+import { createOwnerSetupApp } from "../src/owner-setup.js";
+import { issueOwnerSetupGrant, installedSetupOwner } from "../src/owner-setup-store.js";
+import { migrateBetterAuth } from "../src/migrate-auth.js";
 import { createServer as createApiServer, type ApiServerOptions } from "../src/server.js";
 
 const grantIdentifier = "codexia:first-owner-passkey:v1";
@@ -146,12 +149,14 @@ async function newPasskeyPage(browser: Browser, contexts: BrowserContext[], orig
 async function registerPasskey(
   page: Page,
   token: string,
-  options: { readonly createSession?: boolean; readonly tamper?: "origin" | "challenge" | "rp" | "userVerification"; readonly rpId?: string } = {},
+  options: { readonly createSession?: boolean; readonly setup?: boolean; readonly hold?: boolean; readonly tamper?: "origin" | "challenge" | "rp" | "userVerification"; readonly rpId?: string } = {},
 ): Promise<RegistrationAttempt> {
-  return page.evaluate(async ({ token, createSession, tamper, rpId, context }) => {
-    const optionsResponse = await fetch(`/api/auth/passkey/generate-register-options?context=${encodeURIComponent(context)}`, {
+  return page.evaluate(async ({ token, createSession, setup, hold, tamper, rpId, context }) => {
+    const header = setup ? "x-codexia-setup-transaction" : "x-codexia-owner-enrollment";
+    const query = setup ? "" : "?context=" + encodeURIComponent(context);
+    const optionsResponse = await fetch("/api/auth/passkey/generate-register-options" + query, {
       method: "GET",
-      headers: { "x-codexia-owner-enrollment": token },
+      headers: { [header]: token },
       credentials: "same-origin",
     });
     if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status };
@@ -202,11 +207,11 @@ async function registerPasskey(
       for (const byte of bytes) binary += String.fromCharCode(byte);
       encoded.response.attestationObject = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
     }
-    const verified = await fetch("/api/auth/passkey/verify-registration", {
+    const verified = hold ? undefined : await fetch("/api/auth/passkey/verify-registration", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-codexia-owner-enrollment": token,
+        [header]: token,
       },
       credentials: "same-origin",
       // Better Auth 1.7.26 leaves createSession undefined by default; the
@@ -217,10 +222,10 @@ async function registerPasskey(
       optionsStatus: optionsResponse.status,
       rpId: options.rp?.id,
       userVerification: options.authenticatorSelection?.userVerification,
-      verifyStatus: verified.status,
+      ...(verified ? { verifyStatus: verified.status } : {}),
       response: encoded,
     };
-  }, { token, createSession: options.createSession, tamper: options.tamper, rpId: options.rpId, context: grantContext });
+  }, { token, createSession: options.createSession, setup: options.setup, hold: options.hold, tamper: options.tamper, rpId: options.rpId, context: grantContext });
 }
 
 async function authenticatePasskey(page: Page, persistedCredentialId: string): Promise<{
@@ -785,3 +790,181 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal(signedIn.status, 200);
   assert.equal(signedIn.userId, owner.id);
 });
+
+if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
+  "same-origin setup-only Fastify commits one verified owner and closes setup before OAuth activation",
+  { timeout: 120_000 },
+  async (t) => {
+    const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL!;
+    assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+    const previousEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    const database = new Pool({ connectionString: databaseUrl });
+    let createdRole = false;
+    let app: ReturnType<typeof createOwnerSetupApp> | undefined;
+    let authPool: Pool | undefined;
+    let browser: Browser | undefined;
+    let normalAuth: ReturnType<typeof createBetterAuthRuntime> | undefined;
+    t.after(async () => {
+      await browser?.close();
+      await app?.close();
+      await authPool?.end();
+      await normalAuth?.pool.end();
+      if (createdRole) {
+        await database.query("DROP SCHEMA codexia_auth CASCADE");
+        await database.query("DROP ROLE codexia_auth_runtime");
+      }
+      await database.end();
+      if (previousEnvironment === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousEnvironment;
+    });
+    const password = randomBytes(32).toString("base64url");
+    await database.query(`CREATE ROLE codexia_auth_runtime LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE`);
+    createdRole = true;
+    await database.query("CREATE SCHEMA codexia_auth AUTHORIZATION codexia_auth_runtime");
+    const runtimeDatabase = new URL(databaseUrl);
+    runtimeDatabase.username = "codexia_auth_runtime";
+    runtimeDatabase.password = password;
+    const portProbe = createHttpServer();
+    const port = await listen(portProbe);
+    await close(portProbe);
+    const config = {
+      databaseUrl: runtimeDatabase.href,
+      publicOrigin: `http://localhost:${port}`,
+      authSecret: randomBytes(32).toString("base64url"),
+      oauthIntrospectionClientId: "setup-fixture-introspection",
+      oauthIntrospectionClientSecret: randomBytes(32).toString("base64url"),
+      ownerClientIds: ["setup-fixture-web", "setup-fixture-ios"],
+      allowInsecureLoopbackForTests: true,
+    } as const;
+
+    await migrateBetterAuth({ ...config, installOwnerSetupSchema: true });
+    app = createOwnerSetupApp(config, [config.publicOrigin + "/desktop/"]);
+    await app.verifySchema();
+    await app.listen({ host: "localhost", port });
+    authPool = new Pool({ connectionString: runtimeDatabase.href, options: "-c search_path=codexia_auth" });
+    const setupPath = "/api/auth/codexia/setup";
+    const originHeaders = { origin: config.publicOrigin, "content-type": "application/json", host: new URL(config.publicOrigin).host };
+    const status = async () => (await app!.inject({ method: "GET", url: setupPath + "/status" })).json();
+    assert.deepEqual(await status(), { state: "blocked" });
+    assert.equal((await app.inject({
+      method: "POST", url: setupPath + "/authorize", headers: originHeaders, payload: { key: "X".repeat(43) },
+    })).statusCode, 403);
+
+    const handoffs: { key: string; grantId: string; expiresAt: Date }[] = [];
+    assert.equal(await issueOwnerSetupGrant(authPool, { freshInstall: true }, async (value) => { handoffs.push(value); }), true);
+    const original = handoffs[0]!;
+    assert.ok(original);
+    assert.equal(Buffer.from(original.key, "base64url").length, 32);
+    const grant = (await authPool.query(
+      "SELECT grant_digest, extract(epoch FROM expires_at - issued_at)::int AS ttl FROM owner_setup",
+    )).rows[0];
+    assert.deepEqual(grant, { grant_digest: createHash("sha256").update(original.key).digest("hex"), ttl: 86400 });
+    assert.equal(await issueOwnerSetupGrant(authPool, { freshInstall: true }, async () => assert.fail("rerun exported a second key")), false);
+    assert.deepEqual(await status(), { state: "setup-pending" });
+    const elapsed = await authPool.query("UPDATE owner_setup SET issued_at = now() - interval '25 hours', expires_at = now() - interval '1 hour'");
+    assert.equal(elapsed.rowCount, 1);
+    assert.deepEqual(await status(), { state: "expired" });
+    assert.equal((await app.inject({
+      method: "POST", url: setupPath + "/authorize", headers: originHeaders, payload: { key: original.key },
+    })).statusCode, 403);
+    await assert.rejects(installedSetupOwner(authPool, undefined));
+    assert.equal(await issueOwnerSetupGrant(authPool, { replaceGrantId: original.grantId }, async (value) => { handoffs.push(value); }), true);
+    assert.notEqual(handoffs[1]?.key, original.key);
+    assert.equal(await issueOwnerSetupGrant(authPool, { replaceGrantId: original.grantId }, async () => assert.fail("replayed reissue")), false);
+    const key = handoffs[1]!.key;
+
+    browser = await chromium.launch({
+      headless: true,
+      ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
+    });
+    async function setupPage() {
+      const browserContext = await browser!.newContext();
+      const page = await browserContext.newPage();
+      await page.route(config.publicOrigin + "/", (route) => route.fulfill({
+        contentType: "text/html", body: "<!doctype html><title>Owner setup acceptance fixture</title><h1>Owner setup</h1>",
+      }));
+      await page.goto(config.publicOrigin);
+      await attachVirtualAuthenticator(browserContext, page);
+      return page;
+    }
+    const first = await setupPage();
+    const second = await setupPage();
+    const rejected = await setupPage();
+    const authorize = async (page: Page, name: string) => page.evaluate(async ({ setupPath, key, name }) => {
+      const headers = { "content-type": "application/json" };
+      const grant = await fetch(setupPath + "/authorize", {
+        method: "POST", headers, body: JSON.stringify({ key }),
+      });
+      if (!grant.ok) throw new Error("Expected local fixture key admission");
+      const { transaction } = await grant.json();
+      const profile = await fetch(setupPath + "/profile", {
+        method: "POST", headers: { ...headers, "x-codexia-setup-transaction": transaction },
+        body: JSON.stringify({ name, email: name + "@example.test" }),
+      });
+      return (await profile.json()).transaction as string;
+    }, { setupPath, key, name });
+
+    const badTransaction = await authorize(rejected!, "rejected");
+    for (const tamper of ["origin", "challenge", "rp", "userVerification"] as const) {
+      const failed = await registerPasskey(rejected!, badTransaction, { setup: true, tamper });
+      assert.equal(failed.verifyStatus, 400, tamper);
+      assert.equal((await authPool.query('SELECT 1 FROM "user"')).rowCount, 0);
+      assert.equal((await authPool.query('SELECT 1 FROM "passkey"')).rowCount, 0);
+    }
+
+    const [firstToken, secondToken] = await Promise.all([authorize(first, "first"), authorize(second, "second")]);
+    await first.bringToFront();
+    const firstAttempt = await registerPasskey(first, firstToken, { setup: true, hold: true });
+    await second.bringToFront();
+    const secondAttempt = await registerPasskey(second, secondToken, { setup: true, hold: true });
+    const finish = async (page: Page, token: string, response: Record<string, unknown> | undefined) =>
+      page.evaluate(async ({ token, response }) => {
+        const result = await fetch("/api/auth/passkey/verify-registration", {
+          method: "POST", headers: { "content-type": "application/json", "x-codexia-setup-transaction": token },
+          body: JSON.stringify({ response }),
+        });
+        return result.status;
+      }, { token, response });
+    const attempts = await Promise.all([
+      finish(first, firstToken, firstAttempt.response),
+      finish(second, secondToken, secondAttempt.response),
+    ]);
+    assert.equal(attempts.filter((attempt) => attempt === 200).length, 1);
+    const winner = attempts[0] === 200 ? 0 : 1;
+    assert.equal([firstAttempt, secondAttempt][winner]?.rpId, "localhost");
+    assert.equal([firstAttempt, secondAttempt][winner]?.userVerification, "required");
+    const winningPage = [first, second][winner]!;
+    const winnerToken = [firstToken, secondToken][winner]!;
+    const losingToken = [firstToken, secondToken][winner === 0 ? 1 : 0]!;
+    assert.equal((await authPool.query('SELECT 1 FROM "user"')).rowCount, 1);
+    assert.equal((await authPool.query('SELECT 1 FROM "passkey"')).rowCount, 1);
+    const enrolledId = await installedSetupOwner(authPool, undefined);
+    assert.deepEqual(await status(), { state: "owner-enrolled", clientsReady: false });
+    assert.equal((await app.inject({
+      method: "POST", url: setupPath + "/complete",
+      headers: { ...originHeaders, "x-codexia-setup-transaction": losingToken }, payload: {},
+    })).statusCode, 403);
+    const completed = await winningPage.evaluate(async ({ setupPath, winnerToken }) => {
+      const response = await fetch(setupPath + "/complete", {
+        method: "POST", headers: { "content-type": "application/json", "x-codexia-setup-transaction": winnerToken },
+        body: "{}",
+      });
+      return { status: response.status, body: await response.json() };
+    }, { setupPath, winnerToken });
+    assert.deepEqual(completed, { status: 200, body: { state: "owner-enrolled", clientsReady: true, sessionConfirmed: true } });
+    assert.equal(await app.prepareActivation(), enrolledId);
+    assert.equal((await authPool.query('SELECT 1 FROM "oauthClient"')).rowCount, 3);
+    assert.equal((await app.inject({
+      method: "POST", url: setupPath + "/authorize", headers: originHeaders, payload: { key },
+    })).statusCode, 403);
+    assert.equal(await issueOwnerSetupGrant(authPool, { freshInstall: true }, async () => assert.fail("owner data reopened setup")), false);
+    await assert.rejects(installedSetupOwner(authPool, randomUUID()), /single approved owner/u);
+    normalAuth = createBetterAuthRuntime({ ...config, ownerSubject: enrolledId });
+    const browserCookies = await winningPage.context().cookies();
+    const cookie = browserCookies.map(({ name, value }) => name + "=" + value).join("; ");
+    assert.equal(await normalAuth.auth.api.getSession({ headers: new Headers({ cookie }) }), null);
+    await normalAuth.assertRegisteredClients();
+    await normalAuth.verifyIntrospectionCredentials();
+  },
+);

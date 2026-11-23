@@ -5,6 +5,8 @@ export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
 
 // This is the catalog after the official Better Auth migrations and Codexia's
 // revocation migration on PostgreSQL 17. The database acceptance test rebuilds it.
+// Existing installations retain their current catalog, including on rollback.
+const EXPECTED_SETUP_AUTH_SCHEMA = "sha256:84216a5edc821188a4f1394d203835482d86f5cfe6ab61c1f486d78a5a62d612";
 const EXPECTED_AUTH_SCHEMA = "sha256:4f186ac756d8300d8b62e192fd8d8962ebcb5a6b4b277e24f48205b08607df95";
 
 export async function authSchemaFingerprint(pool: Pool): Promise<string> {
@@ -41,9 +43,9 @@ export async function authSchemaFingerprint(pool: Pool): Promise<string> {
   return `sha256:${createHash("sha256").update(JSON.stringify(result.rows.map(row => row.definition))).digest("hex")}`;
 }
 
-export async function verifyAuthSchema(pool: Pool): Promise<void> {
+export async function verifyAuthSchema(pool: Pool, requireOwnerSetup = false): Promise<void> {
   const installed = await authSchemaFingerprint(pool);
-  if (installed !== EXPECTED_AUTH_SCHEMA) {
-    throw new Error(`Better Auth schema requires explicit maintenance (expected ${EXPECTED_AUTH_SCHEMA}, observed ${installed})`);
+  if (installed !== EXPECTED_SETUP_AUTH_SCHEMA && (requireOwnerSetup || installed !== EXPECTED_AUTH_SCHEMA)) {
+    throw new Error(`Better Auth schema requires explicit maintenance (observed ${installed})`);
   }
 }

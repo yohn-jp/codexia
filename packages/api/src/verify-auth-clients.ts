@@ -2,13 +2,16 @@ import { realpathSync } from "node:fs";
 import { createBetterAuthRuntime } from "./better-auth.js";
 import { assertAuthMigrationDatabaseIdentity, readBetterAuthMigrationConfig } from "./migrate-auth.js";
 import { fileURLToPath } from "node:url";
+import { installedSetupOwner } from "./owner-setup-store.js";
 import { verifyAuthSchema } from "./auth-schema.js";
 
 export async function verifyBetterAuthClientRegistrations(): Promise<void> {
-  const runtime = createBetterAuthRuntime({ ...readBetterAuthMigrationConfig(), readOnlyDatabase: true });
+  const config = readBetterAuthMigrationConfig();
+  const runtime = createBetterAuthRuntime({ ...config, readOnlyDatabase: true });
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await verifyAuthSchema(runtime.pool);
+    await installedSetupOwner(runtime.pool, config.ownerSubject);
     await runtime.assertRegisteredClients();
     await runtime.verifyIntrospectionCredentials();
     process.stdout.write("Better Auth schema, public clients and introspection client verified.\n");

@@ -279,7 +279,7 @@ MCP clientは割当projectとread/compute/proposeまで。承認/applyやowner�
 **Conformance status**: UNMAPPED
 **Applicability**: FUTURE_TARGET
 **Design owner**: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
-**Implementation identifiers**: 目標の /console/setup と setup-only API は現行未実装。旧bootstrapを目標仕様と混同しない
+**Implementation identifiers**: /console/setup、setup-only Fastify、codexia_auth.owner_setup、Ansible の protected owner-setup operation。公開経路と初回配備の運用受入は別途確認する
 **Verification identifiers**: tests/e2e/passkey-bootstrap.acceptance.spec.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
