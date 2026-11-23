@@ -68,10 +68,10 @@ function setZoom(next, preservePosition = true) {
     canvas.scrollLeft = 0;
     return;
   }
-  requestAnimationFrame(() => {
-    canvas.scrollLeft = horizontalPosition * Math.max(0, canvas.scrollWidth - canvas.clientWidth);
-    canvas.scrollTop = verticalPosition * Math.max(0, canvas.scrollHeight - canvas.clientHeight);
-  });
+  // Apply the preserved position in the same input turn as the zoom change.
+  // A deferred animation frame can overwrite a scroll made immediately afterward.
+  canvas.scrollLeft = horizontalPosition * Math.max(0, canvas.scrollWidth - canvas.clientWidth);
+  canvas.scrollTop = verticalPosition * Math.max(0, canvas.scrollHeight - canvas.clientHeight);
 }
 
 function fitWholeDiagram() {
