@@ -10,6 +10,162 @@ public import Foundation
 extension Components {
     /// Types generated from the `#/components/schemas` section of the OpenAPI document.
     public enum Schemas {
+        /// - Remark: Generated from `#/components/schemas/ActionResultBody`.
+        public struct ActionResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/ok`.
+            public var ok: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/snapshot`.
+            public var snapshot: Components.Schemas.ActionResultBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/data`.
+            public var data: OpenAPIRuntime.OpenAPIValueContainer?
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/proposalsPayload`.
+            public struct proposalsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `proposalsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/proposals`.
+            public typealias proposalsPayload = [Components.Schemas.ActionResultBody.proposalsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/proposals`.
+            public var proposals: Components.Schemas.ActionResultBody.proposalsPayload?
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/error`.
+            public struct errorPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `errorPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ActionResultBody/error`.
+            public var error: Components.Schemas.ActionResultBody.errorPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ActionResultBody`.
+            ///
+            /// - Parameters:
+            ///   - ok:
+            ///   - snapshot:
+            ///   - data:
+            ///   - proposals:
+            ///   - error:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                ok: Swift.Bool? = nil,
+                snapshot: Components.Schemas.ActionResultBody.snapshotPayload? = nil,
+                data: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                proposals: Components.Schemas.ActionResultBody.proposalsPayload? = nil,
+                error: Components.Schemas.ActionResultBody.errorPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.ok = ok
+                self.snapshot = snapshot
+                self.data = data
+                self.proposals = proposals
+                self.error = error
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case ok
+                case snapshot
+                case data
+                case proposals
+                case error
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.ok = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .ok
+                )
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ActionResultBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.data = try container.decodeIfPresent(
+                    OpenAPIRuntime.OpenAPIValueContainer.self,
+                    forKey: .data
+                )
+                self.proposals = try container.decodeIfPresent(
+                    Components.Schemas.ActionResultBody.proposalsPayload.self,
+                    forKey: .proposals
+                )
+                self.error = try container.decodeIfPresent(
+                    Components.Schemas.ActionResultBody.errorPayload.self,
+                    forKey: .error
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "ok",
+                    "snapshot",
+                    "data",
+                    "proposals",
+                    "error"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.ok,
+                    forKey: .ok
+                )
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.data,
+                    forKey: .data
+                )
+                try container.encodeIfPresent(
+                    self.proposals,
+                    forKey: .proposals
+                )
+                try container.encodeIfPresent(
+                    self.error,
+                    forKey: .error
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/ApiError`.
         public struct ApiError: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ApiError/error`.
@@ -57,6 +213,196 @@ extension Components {
                 case details
             }
         }
+        /// - Remark: Generated from `#/components/schemas/ApiSessionBody`.
+        public struct ApiSessionBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ApiSessionBody/authenticated`.
+            public var authenticated: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/ApiSessionBody/authorScope`.
+            public var authorScope: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ApiSessionBody`.
+            ///
+            /// - Parameters:
+            ///   - authenticated:
+            ///   - authorScope:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                authenticated: Swift.Bool? = nil,
+                authorScope: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.authenticated = authenticated
+                self.authorScope = authorScope
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case authenticated
+                case authorScope
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.authenticated = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .authenticated
+                )
+                self.authorScope = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .authorScope
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "authenticated",
+                    "authorScope"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.authenticated,
+                    forKey: .authenticated
+                )
+                try container.encodeIfPresent(
+                    self.authorScope,
+                    forKey: .authorScope
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AssertionEvidenceListBody`.
+        public struct AssertionEvidenceListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AssertionEvidenceListBody/evidencePayload`.
+            public struct evidencePayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `evidencePayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/AssertionEvidenceListBody/evidence`.
+            public typealias evidencePayload = [Components.Schemas.AssertionEvidenceListBody.evidencePayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/AssertionEvidenceListBody/evidence`.
+            public var evidence: Components.Schemas.AssertionEvidenceListBody.evidencePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `AssertionEvidenceListBody`.
+            ///
+            /// - Parameters:
+            ///   - evidence:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                evidence: Components.Schemas.AssertionEvidenceListBody.evidencePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.evidence = evidence
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case evidence
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.evidence = try container.decodeIfPresent(
+                    Components.Schemas.AssertionEvidenceListBody.evidencePayload.self,
+                    forKey: .evidence
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "evidence"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.evidence,
+                    forKey: .evidence
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AssertionResponseBody`.
+        public struct AssertionResponseBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AssertionResponseBody/assertion`.
+            public var assertion: Components.Schemas.PersistenceAssertionBody?
+            /// - Remark: Generated from `#/components/schemas/AssertionResponseBody/evidencePayload`.
+            public struct evidencePayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `evidencePayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/AssertionResponseBody/evidence`.
+            public typealias evidencePayload = [Components.Schemas.AssertionResponseBody.evidencePayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/AssertionResponseBody/evidence`.
+            public var evidence: Components.Schemas.AssertionResponseBody.evidencePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `AssertionResponseBody`.
+            ///
+            /// - Parameters:
+            ///   - assertion:
+            ///   - evidence:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                assertion: Components.Schemas.PersistenceAssertionBody? = nil,
+                evidence: Components.Schemas.AssertionResponseBody.evidencePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.assertion = assertion
+                self.evidence = evidence
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case assertion
+                case evidence
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.assertion = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceAssertionBody.self,
+                    forKey: .assertion
+                )
+                self.evidence = try container.decodeIfPresent(
+                    Components.Schemas.AssertionResponseBody.evidencePayload.self,
+                    forKey: .evidence
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "assertion",
+                    "evidence"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.assertion,
+                    forKey: .assertion
+                )
+                try container.encodeIfPresent(
+                    self.evidence,
+                    forKey: .evidence
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/AuthMethodsBody`.
         public struct AuthMethodsBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/AuthMethodsBody/passkey`.
@@ -78,6 +424,344 @@ extension Components {
             public enum CodingKeys: String, CodingKey {
                 case passkey
                 case upstreamOidc
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody`.
+        public struct AuthorReviewItemBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case core_hyphen_proposal = "core-proposal"
+                case native_hyphen_change_hyphen_set = "native-change-set"
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/kind`.
+            public var kind: Components.Schemas.AuthorReviewItemBody.kindPayload?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case partially_approved = "partially_approved"
+                case approved = "approved"
+                case applied = "applied"
+                case rejected = "rejected"
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/state`.
+            public var state: Components.Schemas.AuthorReviewItemBody.statePayload?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/approvalModel`.
+            @frozen public enum approvalModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case per_hyphen_operation = "per-operation"
+                case whole_hyphen_change_hyphen_set = "whole-change-set"
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/approvalModel`.
+            public var approvalModel: Components.Schemas.AuthorReviewItemBody.approvalModelPayload?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/applicationModel`.
+            @frozen public enum applicationModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case per_hyphen_operation = "per-operation"
+                case transaction = "transaction"
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/applicationModel`.
+            public var applicationModel: Components.Schemas.AuthorReviewItemBody.applicationModelPayload?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/status`.
+            public var status: Components.Schemas.CoreProposalStatusBody?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receiptsPayload`.
+            public struct receiptsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `receiptsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipts`.
+            public typealias receiptsPayload = [Components.Schemas.AuthorReviewItemBody.receiptsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipts`.
+            public var receipts: Components.Schemas.AuthorReviewItemBody.receiptsPayload?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/stale`.
+            public var stale: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt`.
+            public struct receiptPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt/changeSet`.
+                public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+                /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt/resultsPayload`.
+                public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `resultsPayloadPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt/results`.
+                public typealias resultsPayload = [Components.Schemas.AuthorReviewItemBody.receiptPayload.resultsPayloadPayload]
+                /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt/results`.
+                public var results: Components.Schemas.AuthorReviewItemBody.receiptPayload.resultsPayload?
+                /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt/replayed`.
+                public var replayed: Swift.Bool?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `receiptPayload`.
+                ///
+                /// - Parameters:
+                ///   - changeSet:
+                ///   - results:
+                ///   - replayed:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                    results: Components.Schemas.AuthorReviewItemBody.receiptPayload.resultsPayload? = nil,
+                    replayed: Swift.Bool? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.changeSet = changeSet
+                    self.results = results
+                    self.replayed = replayed
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case changeSet
+                    case results
+                    case replayed
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.changeSet = try container.decodeIfPresent(
+                        Components.Schemas.PersistenceChangeSetBody.self,
+                        forKey: .changeSet
+                    )
+                    self.results = try container.decodeIfPresent(
+                        Components.Schemas.AuthorReviewItemBody.receiptPayload.resultsPayload.self,
+                        forKey: .results
+                    )
+                    self.replayed = try container.decodeIfPresent(
+                        Swift.Bool.self,
+                        forKey: .replayed
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "changeSet",
+                        "results",
+                        "replayed"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.changeSet,
+                        forKey: .changeSet
+                    )
+                    try container.encodeIfPresent(
+                        self.results,
+                        forKey: .results
+                    )
+                    try container.encodeIfPresent(
+                        self.replayed,
+                        forKey: .replayed
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/AuthorReviewItemBody/receipt`.
+            public var receipt: Components.Schemas.AuthorReviewItemBody.receiptPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `AuthorReviewItemBody`.
+            ///
+            /// - Parameters:
+            ///   - kind:
+            ///   - id:
+            ///   - projectId:
+            ///   - createdAt:
+            ///   - state:
+            ///   - approvalModel:
+            ///   - applicationModel:
+            ///   - status:
+            ///   - receipts:
+            ///   - stale:
+            ///   - changeSet:
+            ///   - receipt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                kind: Components.Schemas.AuthorReviewItemBody.kindPayload? = nil,
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                createdAt: Foundation.Date? = nil,
+                state: Components.Schemas.AuthorReviewItemBody.statePayload? = nil,
+                approvalModel: Components.Schemas.AuthorReviewItemBody.approvalModelPayload? = nil,
+                applicationModel: Components.Schemas.AuthorReviewItemBody.applicationModelPayload? = nil,
+                status: Components.Schemas.CoreProposalStatusBody? = nil,
+                receipts: Components.Schemas.AuthorReviewItemBody.receiptsPayload? = nil,
+                stale: Swift.Bool? = nil,
+                changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                receipt: Components.Schemas.AuthorReviewItemBody.receiptPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.kind = kind
+                self.id = id
+                self.projectId = projectId
+                self.createdAt = createdAt
+                self.state = state
+                self.approvalModel = approvalModel
+                self.applicationModel = applicationModel
+                self.status = status
+                self.receipts = receipts
+                self.stale = stale
+                self.changeSet = changeSet
+                self.receipt = receipt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case kind
+                case id
+                case projectId
+                case createdAt
+                case state
+                case approvalModel
+                case applicationModel
+                case status
+                case receipts
+                case stale
+                case changeSet
+                case receipt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.kind = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.kindPayload.self,
+                    forKey: .kind
+                )
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.state = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.statePayload.self,
+                    forKey: .state
+                )
+                self.approvalModel = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.approvalModelPayload.self,
+                    forKey: .approvalModel
+                )
+                self.applicationModel = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.applicationModelPayload.self,
+                    forKey: .applicationModel
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.self,
+                    forKey: .status
+                )
+                self.receipts = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.receiptsPayload.self,
+                    forKey: .receipts
+                )
+                self.stale = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .stale
+                )
+                self.changeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.self,
+                    forKey: .changeSet
+                )
+                self.receipt = try container.decodeIfPresent(
+                    Components.Schemas.AuthorReviewItemBody.receiptPayload.self,
+                    forKey: .receipt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "kind",
+                    "id",
+                    "projectId",
+                    "createdAt",
+                    "state",
+                    "approvalModel",
+                    "applicationModel",
+                    "status",
+                    "receipts",
+                    "stale",
+                    "changeSet",
+                    "receipt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.kind,
+                    forKey: .kind
+                )
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.state,
+                    forKey: .state
+                )
+                try container.encodeIfPresent(
+                    self.approvalModel,
+                    forKey: .approvalModel
+                )
+                try container.encodeIfPresent(
+                    self.applicationModel,
+                    forKey: .applicationModel
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.receipts,
+                    forKey: .receipts
+                )
+                try container.encodeIfPresent(
+                    self.stale,
+                    forKey: .stale
+                )
+                try container.encodeIfPresent(
+                    self.changeSet,
+                    forKey: .changeSet
+                )
+                try container.encodeIfPresent(
+                    self.receipt,
+                    forKey: .receipt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft`.
@@ -385,6 +1069,91 @@ extension Components {
                 case expectedVersion
             }
         }
+        /// - Remark: Generated from `#/components/schemas/ChapterWritingStatsBody`.
+        public struct ChapterWritingStatsBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ChapterWritingStatsBody/chapterId`.
+            public var chapterId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ChapterWritingStatsBody/charCount`.
+            public var charCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/ChapterWritingStatsBody/pages400`.
+            public var pages400: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/ChapterWritingStatsBody/scenes`.
+            public var scenes: [Components.Schemas.SceneWritingStatsBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ChapterWritingStatsBody`.
+            ///
+            /// - Parameters:
+            ///   - chapterId:
+            ///   - charCount:
+            ///   - pages400:
+            ///   - scenes:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                chapterId: Swift.String? = nil,
+                charCount: Swift.Int32? = nil,
+                pages400: Swift.Double? = nil,
+                scenes: [Components.Schemas.SceneWritingStatsBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.chapterId = chapterId
+                self.charCount = charCount
+                self.pages400 = pages400
+                self.scenes = scenes
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case chapterId
+                case charCount
+                case pages400
+                case scenes
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.chapterId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .chapterId
+                )
+                self.charCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .charCount
+                )
+                self.pages400 = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .pages400
+                )
+                self.scenes = try container.decodeIfPresent(
+                    [Components.Schemas.SceneWritingStatsBody].self,
+                    forKey: .scenes
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "chapterId",
+                    "charCount",
+                    "pages400",
+                    "scenes"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.chapterId,
+                    forKey: .chapterId
+                )
+                try container.encodeIfPresent(
+                    self.charCount,
+                    forKey: .charCount
+                )
+                try container.encodeIfPresent(
+                    self.pages400,
+                    forKey: .pages400
+                )
+                try container.encodeIfPresent(
+                    self.scenes,
+                    forKey: .scenes
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft`.
         public struct CompatibleS3BackupConfigDraft: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/provider`.
@@ -488,6 +1257,207 @@ extension Components {
                 case retentionRequest
             }
         }
+        /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody`.
+        public struct CoreChangeProposalBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot/projectId`.
+                public var projectId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot/projectVersion`.
+                public var projectVersion: Swift.Int32?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - projectVersion:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    projectId: Swift.String? = nil,
+                    projectVersion: Swift.Int32? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.projectId = projectId
+                    self.projectVersion = projectVersion
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case projectVersion
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.projectId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .projectId
+                    )
+                    self.projectVersion = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .projectVersion
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "projectId",
+                        "projectVersion"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.projectId,
+                        forKey: .projectId
+                    )
+                    try container.encodeIfPresent(
+                        self.projectVersion,
+                        forKey: .projectVersion
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot`.
+            public var snapshot: Components.Schemas.CoreChangeProposalBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operationsPayload`.
+            public struct operationsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `operationsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operations`.
+            public typealias operationsPayload = [Components.Schemas.CoreChangeProposalBody.operationsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operations`.
+            public var operations: Components.Schemas.CoreChangeProposalBody.operationsPayload?
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/source`.
+            @frozen public enum sourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case author = "author"
+                case module = "module"
+                case mcp = "mcp"
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/source`.
+            public var source: Components.Schemas.CoreChangeProposalBody.sourcePayload?
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidencePayload`.
+            public struct evidencePayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `evidencePayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidence`.
+            public typealias evidencePayload = [Components.Schemas.CoreChangeProposalBody.evidencePayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidence`.
+            public var evidence: Components.Schemas.CoreChangeProposalBody.evidencePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `CoreChangeProposalBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - snapshot:
+            ///   - operations:
+            ///   - source:
+            ///   - evidence:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                snapshot: Components.Schemas.CoreChangeProposalBody.snapshotPayload? = nil,
+                operations: Components.Schemas.CoreChangeProposalBody.operationsPayload? = nil,
+                source: Components.Schemas.CoreChangeProposalBody.sourcePayload? = nil,
+                evidence: Components.Schemas.CoreChangeProposalBody.evidencePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.snapshot = snapshot
+                self.operations = operations
+                self.source = source
+                self.evidence = evidence
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case snapshot
+                case operations
+                case source
+                case evidence
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.CoreChangeProposalBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.operations = try container.decodeIfPresent(
+                    Components.Schemas.CoreChangeProposalBody.operationsPayload.self,
+                    forKey: .operations
+                )
+                self.source = try container.decodeIfPresent(
+                    Components.Schemas.CoreChangeProposalBody.sourcePayload.self,
+                    forKey: .source
+                )
+                self.evidence = try container.decodeIfPresent(
+                    Components.Schemas.CoreChangeProposalBody.evidencePayload.self,
+                    forKey: .evidence
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "snapshot",
+                    "operations",
+                    "source",
+                    "evidence"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.operations,
+                    forKey: .operations
+                )
+                try container.encodeIfPresent(
+                    self.source,
+                    forKey: .source
+                )
+                try container.encodeIfPresent(
+                    self.evidence,
+                    forKey: .evidence
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/CoreProjectCreateRequest`.
         public struct CoreProjectCreateRequest: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/CoreProjectCreateRequest/title`.
@@ -501,6 +1471,244 @@ extension Components {
             }
             public enum CodingKeys: String, CodingKey {
                 case title
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody`.
+        public struct CoreProposalStatusBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/proposal`.
+            public struct proposalPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `proposalPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/proposal`.
+            public var proposal: Components.Schemas.CoreProposalStatusBody.proposalPayload?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/payloadComplete`.
+            public var payloadComplete: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/originalDigest`.
+            public var originalDigest: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/operationIds`.
+            public var operationIds: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case partially_approved = "partially_approved"
+                case approved = "approved"
+                case applied = "applied"
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/state`.
+            public var state: Components.Schemas.CoreProposalStatusBody.statePayload?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedOperationIds`.
+            public var approvedOperationIds: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedByOperationId`.
+            public struct approvedByOperationIdPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: Swift.String]
+                /// Creates a new `approvedByOperationIdPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: Swift.String] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedByOperationId`.
+            public var approvedByOperationId: Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applicationsPayload`.
+            public struct applicationsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `applicationsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applications`.
+            public typealias applicationsPayload = [Components.Schemas.CoreProposalStatusBody.applicationsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applications`.
+            public var applications: Components.Schemas.CoreProposalStatusBody.applicationsPayload?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/appliedOperationIds`.
+            public var appliedOperationIds: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/stale`.
+            public var stale: Swift.Bool?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `CoreProposalStatusBody`.
+            ///
+            /// - Parameters:
+            ///   - proposal:
+            ///   - payloadComplete:
+            ///   - originalDigest:
+            ///   - operationIds:
+            ///   - state:
+            ///   - approvedOperationIds:
+            ///   - approvedByOperationId:
+            ///   - applications:
+            ///   - appliedOperationIds:
+            ///   - stale:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                proposal: Components.Schemas.CoreProposalStatusBody.proposalPayload? = nil,
+                payloadComplete: Swift.Bool? = nil,
+                originalDigest: Swift.String? = nil,
+                operationIds: [Swift.String]? = nil,
+                state: Components.Schemas.CoreProposalStatusBody.statePayload? = nil,
+                approvedOperationIds: [Swift.String]? = nil,
+                approvedByOperationId: Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload? = nil,
+                applications: Components.Schemas.CoreProposalStatusBody.applicationsPayload? = nil,
+                appliedOperationIds: [Swift.String]? = nil,
+                stale: Swift.Bool? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.proposal = proposal
+                self.payloadComplete = payloadComplete
+                self.originalDigest = originalDigest
+                self.operationIds = operationIds
+                self.state = state
+                self.approvedOperationIds = approvedOperationIds
+                self.approvedByOperationId = approvedByOperationId
+                self.applications = applications
+                self.appliedOperationIds = appliedOperationIds
+                self.stale = stale
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case proposal
+                case payloadComplete
+                case originalDigest
+                case operationIds
+                case state
+                case approvedOperationIds
+                case approvedByOperationId
+                case applications
+                case appliedOperationIds
+                case stale
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.proposal = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.proposalPayload.self,
+                    forKey: .proposal
+                )
+                self.payloadComplete = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .payloadComplete
+                )
+                self.originalDigest = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .originalDigest
+                )
+                self.operationIds = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .operationIds
+                )
+                self.state = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.statePayload.self,
+                    forKey: .state
+                )
+                self.approvedOperationIds = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .approvedOperationIds
+                )
+                self.approvedByOperationId = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload.self,
+                    forKey: .approvedByOperationId
+                )
+                self.applications = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.applicationsPayload.self,
+                    forKey: .applications
+                )
+                self.appliedOperationIds = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .appliedOperationIds
+                )
+                self.stale = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .stale
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "proposal",
+                    "payloadComplete",
+                    "originalDigest",
+                    "operationIds",
+                    "state",
+                    "approvedOperationIds",
+                    "approvedByOperationId",
+                    "applications",
+                    "appliedOperationIds",
+                    "stale"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.proposal,
+                    forKey: .proposal
+                )
+                try container.encodeIfPresent(
+                    self.payloadComplete,
+                    forKey: .payloadComplete
+                )
+                try container.encodeIfPresent(
+                    self.originalDigest,
+                    forKey: .originalDigest
+                )
+                try container.encodeIfPresent(
+                    self.operationIds,
+                    forKey: .operationIds
+                )
+                try container.encodeIfPresent(
+                    self.state,
+                    forKey: .state
+                )
+                try container.encodeIfPresent(
+                    self.approvedOperationIds,
+                    forKey: .approvedOperationIds
+                )
+                try container.encodeIfPresent(
+                    self.approvedByOperationId,
+                    forKey: .approvedByOperationId
+                )
+                try container.encodeIfPresent(
+                    self.applications,
+                    forKey: .applications
+                )
+                try container.encodeIfPresent(
+                    self.appliedOperationIds,
+                    forKey: .appliedOperationIds
+                )
+                try container.encodeIfPresent(
+                    self.stale,
+                    forKey: .stale
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/DocumentChange`.
@@ -534,6 +1742,61 @@ extension Components {
                 case fromUtf16
                 case toUtf16
                 case insert
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DocumentEvidenceListBody`.
+        public struct DocumentEvidenceListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DocumentEvidenceListBody/revisionId`.
+            public var revisionId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DocumentEvidenceListBody/anchors`.
+            public var anchors: [Components.Schemas.EvidenceAnchorDetailBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DocumentEvidenceListBody`.
+            ///
+            /// - Parameters:
+            ///   - revisionId:
+            ///   - anchors:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                revisionId: Swift.String? = nil,
+                anchors: [Components.Schemas.EvidenceAnchorDetailBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.revisionId = revisionId
+                self.anchors = anchors
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case revisionId
+                case anchors
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.revisionId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .revisionId
+                )
+                self.anchors = try container.decodeIfPresent(
+                    [Components.Schemas.EvidenceAnchorDetailBody].self,
+                    forKey: .anchors
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "revisionId",
+                    "anchors"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.revisionId,
+                    forKey: .revisionId
+                )
+                try container.encodeIfPresent(
+                    self.anchors,
+                    forKey: .anchors
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/DocumentRevisionPageResponse`.
@@ -591,6 +1854,1037 @@ extension Components {
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
+        /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody`.
+        public struct EvidenceAnchorBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/documentId`.
+            public var documentId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/revisionId`.
+            public var revisionId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/fromUtf16`.
+            public var fromUtf16: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/toUtf16`.
+            public var toUtf16: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/quoteSha256`.
+            public var quoteSha256: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case needs_review = "needs_review"
+                case orphaned = "orphaned"
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/status`.
+            public var status: Components.Schemas.EvidenceAnchorBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/version`.
+            public var version: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `EvidenceAnchorBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - documentId:
+            ///   - revisionId:
+            ///   - fromUtf16:
+            ///   - toUtf16:
+            ///   - quoteSha256:
+            ///   - status:
+            ///   - version:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                documentId: Swift.String? = nil,
+                revisionId: Swift.String? = nil,
+                fromUtf16: Swift.Int32? = nil,
+                toUtf16: Swift.Int32? = nil,
+                quoteSha256: Swift.String? = nil,
+                status: Components.Schemas.EvidenceAnchorBody.statusPayload? = nil,
+                version: Swift.Int32? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.documentId = documentId
+                self.revisionId = revisionId
+                self.fromUtf16 = fromUtf16
+                self.toUtf16 = toUtf16
+                self.quoteSha256 = quoteSha256
+                self.status = status
+                self.version = version
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case documentId
+                case revisionId
+                case fromUtf16
+                case toUtf16
+                case quoteSha256
+                case status
+                case version
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.documentId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .documentId
+                )
+                self.revisionId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .revisionId
+                )
+                self.fromUtf16 = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .fromUtf16
+                )
+                self.toUtf16 = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .toUtf16
+                )
+                self.quoteSha256 = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .quoteSha256
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAnchorBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "documentId",
+                    "revisionId",
+                    "fromUtf16",
+                    "toUtf16",
+                    "quoteSha256",
+                    "status",
+                    "version",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.documentId,
+                    forKey: .documentId
+                )
+                try container.encodeIfPresent(
+                    self.revisionId,
+                    forKey: .revisionId
+                )
+                try container.encodeIfPresent(
+                    self.fromUtf16,
+                    forKey: .fromUtf16
+                )
+                try container.encodeIfPresent(
+                    self.toUtf16,
+                    forKey: .toUtf16
+                )
+                try container.encodeIfPresent(
+                    self.quoteSha256,
+                    forKey: .quoteSha256
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody`.
+        public struct EvidenceAnchorDetailBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/anchor`.
+            public var anchor: Components.Schemas.EvidenceAnchorBody?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quote`.
+            public var quote: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource`.
+            public struct quoteSourcePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/revisionId`.
+                public var revisionId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/fromUtf16`.
+                public var fromUtf16: Swift.Int32?
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/toUtf16`.
+                public var toUtf16: Swift.Int32?
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/quoteSha256`.
+                public var quoteSha256: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case needs_review = "needs_review"
+                    case orphaned = "orphaned"
+                }
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/status`.
+                public var status: Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload.statusPayload?
+                /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource/historical`.
+                public var historical: Swift.Bool?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `quoteSourcePayload`.
+                ///
+                /// - Parameters:
+                ///   - revisionId:
+                ///   - fromUtf16:
+                ///   - toUtf16:
+                ///   - quoteSha256:
+                ///   - status:
+                ///   - historical:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    revisionId: Swift.String? = nil,
+                    fromUtf16: Swift.Int32? = nil,
+                    toUtf16: Swift.Int32? = nil,
+                    quoteSha256: Swift.String? = nil,
+                    status: Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload.statusPayload? = nil,
+                    historical: Swift.Bool? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.revisionId = revisionId
+                    self.fromUtf16 = fromUtf16
+                    self.toUtf16 = toUtf16
+                    self.quoteSha256 = quoteSha256
+                    self.status = status
+                    self.historical = historical
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case revisionId
+                    case fromUtf16
+                    case toUtf16
+                    case quoteSha256
+                    case status
+                    case historical
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.revisionId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .revisionId
+                    )
+                    self.fromUtf16 = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .fromUtf16
+                    )
+                    self.toUtf16 = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .toUtf16
+                    )
+                    self.quoteSha256 = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .quoteSha256
+                    )
+                    self.status = try container.decodeIfPresent(
+                        Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload.statusPayload.self,
+                        forKey: .status
+                    )
+                    self.historical = try container.decodeIfPresent(
+                        Swift.Bool.self,
+                        forKey: .historical
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "revisionId",
+                        "fromUtf16",
+                        "toUtf16",
+                        "quoteSha256",
+                        "status",
+                        "historical"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.revisionId,
+                        forKey: .revisionId
+                    )
+                    try container.encodeIfPresent(
+                        self.fromUtf16,
+                        forKey: .fromUtf16
+                    )
+                    try container.encodeIfPresent(
+                        self.toUtf16,
+                        forKey: .toUtf16
+                    )
+                    try container.encodeIfPresent(
+                        self.quoteSha256,
+                        forKey: .quoteSha256
+                    )
+                    try container.encodeIfPresent(
+                        self.status,
+                        forKey: .status
+                    )
+                    try container.encodeIfPresent(
+                        self.historical,
+                        forKey: .historical
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/quoteSource`.
+            public var quoteSource: Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/mentions`.
+            public var mentions: [Components.Schemas.EvidenceMentionBody]?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/assertions`.
+            public var assertions: [Components.Schemas.EvidenceAssertionLinkBody]?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/historyPayload`.
+            public struct historyPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `historyPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/history`.
+            public typealias historyPayload = [Components.Schemas.EvidenceAnchorDetailBody.historyPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/EvidenceAnchorDetailBody/history`.
+            public var history: Components.Schemas.EvidenceAnchorDetailBody.historyPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `EvidenceAnchorDetailBody`.
+            ///
+            /// - Parameters:
+            ///   - anchor:
+            ///   - quote:
+            ///   - quoteSource:
+            ///   - mentions:
+            ///   - assertions:
+            ///   - history:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                anchor: Components.Schemas.EvidenceAnchorBody? = nil,
+                quote: Swift.String? = nil,
+                quoteSource: Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload? = nil,
+                mentions: [Components.Schemas.EvidenceMentionBody]? = nil,
+                assertions: [Components.Schemas.EvidenceAssertionLinkBody]? = nil,
+                history: Components.Schemas.EvidenceAnchorDetailBody.historyPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.anchor = anchor
+                self.quote = quote
+                self.quoteSource = quoteSource
+                self.mentions = mentions
+                self.assertions = assertions
+                self.history = history
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case anchor
+                case quote
+                case quoteSource
+                case mentions
+                case assertions
+                case history
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.anchor = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAnchorBody.self,
+                    forKey: .anchor
+                )
+                self.quote = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .quote
+                )
+                self.quoteSource = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAnchorDetailBody.quoteSourcePayload.self,
+                    forKey: .quoteSource
+                )
+                self.mentions = try container.decodeIfPresent(
+                    [Components.Schemas.EvidenceMentionBody].self,
+                    forKey: .mentions
+                )
+                self.assertions = try container.decodeIfPresent(
+                    [Components.Schemas.EvidenceAssertionLinkBody].self,
+                    forKey: .assertions
+                )
+                self.history = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAnchorDetailBody.historyPayload.self,
+                    forKey: .history
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "anchor",
+                    "quote",
+                    "quoteSource",
+                    "mentions",
+                    "assertions",
+                    "history"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.anchor,
+                    forKey: .anchor
+                )
+                try container.encodeIfPresent(
+                    self.quote,
+                    forKey: .quote
+                )
+                try container.encodeIfPresent(
+                    self.quoteSource,
+                    forKey: .quoteSource
+                )
+                try container.encodeIfPresent(
+                    self.mentions,
+                    forKey: .mentions
+                )
+                try container.encodeIfPresent(
+                    self.assertions,
+                    forKey: .assertions
+                )
+                try container.encodeIfPresent(
+                    self.history,
+                    forKey: .history
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EvidenceAssertionLinkBody`.
+        public struct EvidenceAssertionLinkBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EvidenceAssertionLinkBody/link`.
+            public struct linkPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `linkPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceAssertionLinkBody/link`.
+            public var link: Components.Schemas.EvidenceAssertionLinkBody.linkPayload?
+            /// - Remark: Generated from `#/components/schemas/EvidenceAssertionLinkBody/assertion`.
+            public struct assertionPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `assertionPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceAssertionLinkBody/assertion`.
+            public var assertion: Components.Schemas.EvidenceAssertionLinkBody.assertionPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `EvidenceAssertionLinkBody`.
+            ///
+            /// - Parameters:
+            ///   - link:
+            ///   - assertion:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                link: Components.Schemas.EvidenceAssertionLinkBody.linkPayload? = nil,
+                assertion: Components.Schemas.EvidenceAssertionLinkBody.assertionPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.link = link
+                self.assertion = assertion
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case link
+                case assertion
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.link = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAssertionLinkBody.linkPayload.self,
+                    forKey: .link
+                )
+                self.assertion = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceAssertionLinkBody.assertionPayload.self,
+                    forKey: .assertion
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "link",
+                    "assertion"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.link,
+                    forKey: .link
+                )
+                try container.encodeIfPresent(
+                    self.assertion,
+                    forKey: .assertion
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody`.
+        public struct EvidenceMentionBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/link`.
+            public var link: Components.Schemas.PersistenceMentionLink?
+            /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node`.
+            public struct nodePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/id`.
+                public var id: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/projectId`.
+                public var projectId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/type`.
+                public var _type: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/name`.
+                public var name: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/attributes`.
+                public struct attributesPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `attributesPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/attributes`.
+                public var attributes: Components.Schemas.EvidenceMentionBody.nodePayload.attributesPayload?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case retired = "retired"
+                }
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/status`.
+                public var status: Components.Schemas.EvidenceMentionBody.nodePayload.statusPayload?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/version`.
+                public var version: Swift.Int32?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/deletedAt`.
+                public var deletedAt: Foundation.Date?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/createdAt`.
+                public var createdAt: Foundation.Date?
+                /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node/updatedAt`.
+                public var updatedAt: Foundation.Date?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `nodePayload`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                ///   - projectId:
+                ///   - _type:
+                ///   - name:
+                ///   - attributes:
+                ///   - status:
+                ///   - version:
+                ///   - deletedAt:
+                ///   - createdAt:
+                ///   - updatedAt:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    id: Swift.String? = nil,
+                    projectId: Swift.String? = nil,
+                    _type: Swift.String? = nil,
+                    name: Swift.String? = nil,
+                    attributes: Components.Schemas.EvidenceMentionBody.nodePayload.attributesPayload? = nil,
+                    status: Components.Schemas.EvidenceMentionBody.nodePayload.statusPayload? = nil,
+                    version: Swift.Int32? = nil,
+                    deletedAt: Foundation.Date? = nil,
+                    createdAt: Foundation.Date? = nil,
+                    updatedAt: Foundation.Date? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.id = id
+                    self.projectId = projectId
+                    self._type = _type
+                    self.name = name
+                    self.attributes = attributes
+                    self.status = status
+                    self.version = version
+                    self.deletedAt = deletedAt
+                    self.createdAt = createdAt
+                    self.updatedAt = updatedAt
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case id
+                    case projectId
+                    case _type = "type"
+                    case name
+                    case attributes
+                    case status
+                    case version
+                    case deletedAt
+                    case createdAt
+                    case updatedAt
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.id = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .id
+                    )
+                    self.projectId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .projectId
+                    )
+                    self._type = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: ._type
+                    )
+                    self.name = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .name
+                    )
+                    self.attributes = try container.decodeIfPresent(
+                        Components.Schemas.EvidenceMentionBody.nodePayload.attributesPayload.self,
+                        forKey: .attributes
+                    )
+                    self.status = try container.decodeIfPresent(
+                        Components.Schemas.EvidenceMentionBody.nodePayload.statusPayload.self,
+                        forKey: .status
+                    )
+                    self.version = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .version
+                    )
+                    self.deletedAt = try container.decodeIfPresent(
+                        Foundation.Date.self,
+                        forKey: .deletedAt
+                    )
+                    self.createdAt = try container.decodeIfPresent(
+                        Foundation.Date.self,
+                        forKey: .createdAt
+                    )
+                    self.updatedAt = try container.decodeIfPresent(
+                        Foundation.Date.self,
+                        forKey: .updatedAt
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "id",
+                        "projectId",
+                        "type",
+                        "name",
+                        "attributes",
+                        "status",
+                        "version",
+                        "deletedAt",
+                        "createdAt",
+                        "updatedAt"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.id,
+                        forKey: .id
+                    )
+                    try container.encodeIfPresent(
+                        self.projectId,
+                        forKey: .projectId
+                    )
+                    try container.encodeIfPresent(
+                        self._type,
+                        forKey: ._type
+                    )
+                    try container.encodeIfPresent(
+                        self.name,
+                        forKey: .name
+                    )
+                    try container.encodeIfPresent(
+                        self.attributes,
+                        forKey: .attributes
+                    )
+                    try container.encodeIfPresent(
+                        self.status,
+                        forKey: .status
+                    )
+                    try container.encodeIfPresent(
+                        self.version,
+                        forKey: .version
+                    )
+                    try container.encodeIfPresent(
+                        self.deletedAt,
+                        forKey: .deletedAt
+                    )
+                    try container.encodeIfPresent(
+                        self.createdAt,
+                        forKey: .createdAt
+                    )
+                    try container.encodeIfPresent(
+                        self.updatedAt,
+                        forKey: .updatedAt
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceMentionBody/node`.
+            public var node: Components.Schemas.EvidenceMentionBody.nodePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `EvidenceMentionBody`.
+            ///
+            /// - Parameters:
+            ///   - link:
+            ///   - node:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                link: Components.Schemas.PersistenceMentionLink? = nil,
+                node: Components.Schemas.EvidenceMentionBody.nodePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.link = link
+                self.node = node
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case link
+                case node
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.link = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceMentionLink.self,
+                    forKey: .link
+                )
+                self.node = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceMentionBody.nodePayload.self,
+                    forKey: .node
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "link",
+                    "node"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.link,
+                    forKey: .link
+                )
+                try container.encodeIfPresent(
+                    self.node,
+                    forKey: .node
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody`.
+        public struct EvidenceQuoteSourceBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/revisionId`.
+            public var revisionId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/fromUtf16`.
+            public var fromUtf16: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/toUtf16`.
+            public var toUtf16: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/quoteSha256`.
+            public var quoteSha256: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case needs_review = "needs_review"
+                case orphaned = "orphaned"
+            }
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/status`.
+            public var status: Components.Schemas.EvidenceQuoteSourceBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/EvidenceQuoteSourceBody/historical`.
+            public var historical: Swift.Bool?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `EvidenceQuoteSourceBody`.
+            ///
+            /// - Parameters:
+            ///   - revisionId:
+            ///   - fromUtf16:
+            ///   - toUtf16:
+            ///   - quoteSha256:
+            ///   - status:
+            ///   - historical:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                revisionId: Swift.String? = nil,
+                fromUtf16: Swift.Int32? = nil,
+                toUtf16: Swift.Int32? = nil,
+                quoteSha256: Swift.String? = nil,
+                status: Components.Schemas.EvidenceQuoteSourceBody.statusPayload? = nil,
+                historical: Swift.Bool? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.revisionId = revisionId
+                self.fromUtf16 = fromUtf16
+                self.toUtf16 = toUtf16
+                self.quoteSha256 = quoteSha256
+                self.status = status
+                self.historical = historical
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case revisionId
+                case fromUtf16
+                case toUtf16
+                case quoteSha256
+                case status
+                case historical
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.revisionId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .revisionId
+                )
+                self.fromUtf16 = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .fromUtf16
+                )
+                self.toUtf16 = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .toUtf16
+                )
+                self.quoteSha256 = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .quoteSha256
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.EvidenceQuoteSourceBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.historical = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .historical
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "revisionId",
+                    "fromUtf16",
+                    "toUtf16",
+                    "quoteSha256",
+                    "status",
+                    "historical"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.revisionId,
+                    forKey: .revisionId
+                )
+                try container.encodeIfPresent(
+                    self.fromUtf16,
+                    forKey: .fromUtf16
+                )
+                try container.encodeIfPresent(
+                    self.toUtf16,
+                    forKey: .toUtf16
+                )
+                try container.encodeIfPresent(
+                    self.quoteSha256,
+                    forKey: .quoteSha256
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.historical,
+                    forKey: .historical
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueBody`.
+        public struct GlobalReviewQueueBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueBody/unresolvedCount`.
+            public var unresolvedCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueBody/items`.
+            public var items: [Components.Schemas.GlobalReviewQueueItemBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `GlobalReviewQueueBody`.
+            ///
+            /// - Parameters:
+            ///   - unresolvedCount:
+            ///   - items:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                unresolvedCount: Swift.Int32? = nil,
+                items: [Components.Schemas.GlobalReviewQueueItemBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.unresolvedCount = unresolvedCount
+                self.items = items
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case unresolvedCount
+                case items
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.unresolvedCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .unresolvedCount
+                )
+                self.items = try container.decodeIfPresent(
+                    [Components.Schemas.GlobalReviewQueueItemBody].self,
+                    forKey: .items
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "unresolvedCount",
+                    "items"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.unresolvedCount,
+                    forKey: .unresolvedCount
+                )
+                try container.encodeIfPresent(
+                    self.items,
+                    forKey: .items
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueItemBody`.
+        public struct GlobalReviewQueueItemBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueItemBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/GlobalReviewQueueItemBody/proposal`.
+            public var proposal: Components.Schemas.CoreProposalStatusBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `GlobalReviewQueueItemBody`.
+            ///
+            /// - Parameters:
+            ///   - projectId:
+            ///   - proposal:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                projectId: Swift.String? = nil,
+                proposal: Components.Schemas.CoreProposalStatusBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.projectId = projectId
+                self.proposal = proposal
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case projectId
+                case proposal
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.proposal = try container.decodeIfPresent(
+                    Components.Schemas.CoreProposalStatusBody.self,
+                    forKey: .proposal
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "projectId",
+                    "proposal"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.proposal,
+                    forKey: .proposal
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/HealthResponse`.
         public struct HealthResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/HealthResponse/status`.
@@ -608,6 +2902,752 @@ extension Components {
             }
             public enum CodingKeys: String, CodingKey {
                 case status
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/InboxItemBody`.
+        public struct InboxItemBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case job_hyphen_complete = "job-complete"
+            }
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/kind`.
+            public var kind: Components.Schemas.InboxItemBody.kindPayload?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/jobId`.
+            public var jobId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/jobType`.
+            public var jobType: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/title`.
+            public var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/body`.
+            public var body: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case done = "done"
+                case error = "error"
+            }
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/status`.
+            public var status: Components.Schemas.InboxItemBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/read`.
+            public var read: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/userId`.
+            public var userId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/projectKey`.
+            public var projectKey: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/InboxItemBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `InboxItemBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - kind:
+            ///   - jobId:
+            ///   - jobType:
+            ///   - title:
+            ///   - body:
+            ///   - status:
+            ///   - read:
+            ///   - userId:
+            ///   - projectKey:
+            ///   - createdAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                kind: Components.Schemas.InboxItemBody.kindPayload? = nil,
+                jobId: Swift.String? = nil,
+                jobType: Swift.String? = nil,
+                title: Swift.String? = nil,
+                body: Swift.String? = nil,
+                status: Components.Schemas.InboxItemBody.statusPayload? = nil,
+                read: Swift.Bool? = nil,
+                userId: Swift.String? = nil,
+                projectKey: Swift.String? = nil,
+                createdAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.kind = kind
+                self.jobId = jobId
+                self.jobType = jobType
+                self.title = title
+                self.body = body
+                self.status = status
+                self.read = read
+                self.userId = userId
+                self.projectKey = projectKey
+                self.createdAt = createdAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case kind
+                case jobId
+                case jobType
+                case title
+                case body
+                case status
+                case read
+                case userId
+                case projectKey
+                case createdAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.kind = try container.decodeIfPresent(
+                    Components.Schemas.InboxItemBody.kindPayload.self,
+                    forKey: .kind
+                )
+                self.jobId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .jobId
+                )
+                self.jobType = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .jobType
+                )
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.body = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .body
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.InboxItemBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.read = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .read
+                )
+                self.userId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .userId
+                )
+                self.projectKey = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectKey
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "kind",
+                    "jobId",
+                    "jobType",
+                    "title",
+                    "body",
+                    "status",
+                    "read",
+                    "userId",
+                    "projectKey",
+                    "createdAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.kind,
+                    forKey: .kind
+                )
+                try container.encodeIfPresent(
+                    self.jobId,
+                    forKey: .jobId
+                )
+                try container.encodeIfPresent(
+                    self.jobType,
+                    forKey: .jobType
+                )
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encodeIfPresent(
+                    self.body,
+                    forKey: .body
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.read,
+                    forKey: .read
+                )
+                try container.encodeIfPresent(
+                    self.userId,
+                    forKey: .userId
+                )
+                try container.encodeIfPresent(
+                    self.projectKey,
+                    forKey: .projectKey
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/InboxListBody`.
+        public struct InboxListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/InboxListBody/items`.
+            public var items: [Components.Schemas.InboxItemBody]?
+            /// - Remark: Generated from `#/components/schemas/InboxListBody/unreadCount`.
+            public var unreadCount: Swift.Int32?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `InboxListBody`.
+            ///
+            /// - Parameters:
+            ///   - items:
+            ///   - unreadCount:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                items: [Components.Schemas.InboxItemBody]? = nil,
+                unreadCount: Swift.Int32? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.items = items
+                self.unreadCount = unreadCount
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case items
+                case unreadCount
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.items = try container.decodeIfPresent(
+                    [Components.Schemas.InboxItemBody].self,
+                    forKey: .items
+                )
+                self.unreadCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .unreadCount
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "items",
+                    "unreadCount"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.items,
+                    forKey: .items
+                )
+                try container.encodeIfPresent(
+                    self.unreadCount,
+                    forKey: .unreadCount
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/InboxReadAllBody`.
+        public struct InboxReadAllBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/InboxReadAllBody/marked`.
+            public var marked: Swift.Int32?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `InboxReadAllBody`.
+            ///
+            /// - Parameters:
+            ///   - marked:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                marked: Swift.Int32? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.marked = marked
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case marked
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.marked = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .marked
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "marked"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.marked,
+                    forKey: .marked
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/InboxReadItemBody`.
+        public struct InboxReadItemBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/InboxReadItemBody/item`.
+            public var item: Components.Schemas.InboxItemBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `InboxReadItemBody`.
+            ///
+            /// - Parameters:
+            ///   - item:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                item: Components.Schemas.InboxItemBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.item = item
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case item
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.item = try container.decodeIfPresent(
+                    Components.Schemas.InboxItemBody.self,
+                    forKey: .item
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "item"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.item,
+                    forKey: .item
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody`.
+        public struct KnowledgeAliasBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/nodeId`.
+            public var nodeId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/surface`.
+            public var surface: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/normalized`.
+            public var normalized: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/scope`.
+            public var scope: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case ambiguous = "ambiguous"
+                case retired = "retired"
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/status`.
+            public var status: Components.Schemas.KnowledgeAliasBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `KnowledgeAliasBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - nodeId:
+            ///   - surface:
+            ///   - normalized:
+            ///   - scope:
+            ///   - status:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                nodeId: Swift.String? = nil,
+                surface: Swift.String? = nil,
+                normalized: Swift.String? = nil,
+                scope: Swift.String? = nil,
+                status: Components.Schemas.KnowledgeAliasBody.statusPayload? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.nodeId = nodeId
+                self.surface = surface
+                self.normalized = normalized
+                self.scope = scope
+                self.status = status
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case nodeId
+                case surface
+                case normalized
+                case scope
+                case status
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.nodeId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .nodeId
+                )
+                self.surface = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .surface
+                )
+                self.normalized = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .normalized
+                )
+                self.scope = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .scope
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeAliasBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "nodeId",
+                    "surface",
+                    "normalized",
+                    "scope",
+                    "status",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.nodeId,
+                    forKey: .nodeId
+                )
+                try container.encodeIfPresent(
+                    self.surface,
+                    forKey: .surface
+                )
+                try container.encodeIfPresent(
+                    self.normalized,
+                    forKey: .normalized
+                )
+                try container.encodeIfPresent(
+                    self.scope,
+                    forKey: .scope
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody`.
+        public struct KnowledgeMergePreviewBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/projectVersion`.
+            public var projectVersion: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/source`.
+            public var source: Components.Schemas.KnowledgeNodeBody?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/target`.
+            public var target: Components.Schemas.KnowledgeNodeBody?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/sourceAliases`.
+            public var sourceAliases: [Components.Schemas.KnowledgeAliasBody]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/targetAliases`.
+            public var targetAliases: [Components.Schemas.KnowledgeAliasBody]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/sourceRelations`.
+            public var sourceRelations: [Components.Schemas.KnowledgeRelationBody]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/targetRelations`.
+            public var targetRelations: [Components.Schemas.KnowledgeRelationBody]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/sourceMentionsPayload`.
+            public struct sourceMentionsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `sourceMentionsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/sourceMentions`.
+            public typealias sourceMentionsPayload = [Components.Schemas.KnowledgeMergePreviewBody.sourceMentionsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/sourceMentions`.
+            public var sourceMentions: Components.Schemas.KnowledgeMergePreviewBody.sourceMentionsPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/targetMentionsPayload`.
+            public struct targetMentionsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `targetMentionsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/targetMentions`.
+            public typealias targetMentionsPayload = [Components.Schemas.KnowledgeMergePreviewBody.targetMentionsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/targetMentions`.
+            public var targetMentions: Components.Schemas.KnowledgeMergePreviewBody.targetMentionsPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/assertions`.
+            public var assertions: [Components.Schemas.PersistenceAssertionBody]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/conflicts`.
+            public var conflicts: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewBody/previewDigest`.
+            public var previewDigest: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `KnowledgeMergePreviewBody`.
+            ///
+            /// - Parameters:
+            ///   - projectVersion:
+            ///   - source:
+            ///   - target:
+            ///   - sourceAliases:
+            ///   - targetAliases:
+            ///   - sourceRelations:
+            ///   - targetRelations:
+            ///   - sourceMentions:
+            ///   - targetMentions:
+            ///   - assertions:
+            ///   - conflicts:
+            ///   - previewDigest:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                projectVersion: Swift.Int32? = nil,
+                source: Components.Schemas.KnowledgeNodeBody? = nil,
+                target: Components.Schemas.KnowledgeNodeBody? = nil,
+                sourceAliases: [Components.Schemas.KnowledgeAliasBody]? = nil,
+                targetAliases: [Components.Schemas.KnowledgeAliasBody]? = nil,
+                sourceRelations: [Components.Schemas.KnowledgeRelationBody]? = nil,
+                targetRelations: [Components.Schemas.KnowledgeRelationBody]? = nil,
+                sourceMentions: Components.Schemas.KnowledgeMergePreviewBody.sourceMentionsPayload? = nil,
+                targetMentions: Components.Schemas.KnowledgeMergePreviewBody.targetMentionsPayload? = nil,
+                assertions: [Components.Schemas.PersistenceAssertionBody]? = nil,
+                conflicts: [Swift.String]? = nil,
+                previewDigest: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.projectVersion = projectVersion
+                self.source = source
+                self.target = target
+                self.sourceAliases = sourceAliases
+                self.targetAliases = targetAliases
+                self.sourceRelations = sourceRelations
+                self.targetRelations = targetRelations
+                self.sourceMentions = sourceMentions
+                self.targetMentions = targetMentions
+                self.assertions = assertions
+                self.conflicts = conflicts
+                self.previewDigest = previewDigest
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case projectVersion
+                case source
+                case target
+                case sourceAliases
+                case targetAliases
+                case sourceRelations
+                case targetRelations
+                case sourceMentions
+                case targetMentions
+                case assertions
+                case conflicts
+                case previewDigest
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.projectVersion = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                self.source = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.self,
+                    forKey: .source
+                )
+                self.target = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.self,
+                    forKey: .target
+                )
+                self.sourceAliases = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeAliasBody].self,
+                    forKey: .sourceAliases
+                )
+                self.targetAliases = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeAliasBody].self,
+                    forKey: .targetAliases
+                )
+                self.sourceRelations = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeRelationBody].self,
+                    forKey: .sourceRelations
+                )
+                self.targetRelations = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeRelationBody].self,
+                    forKey: .targetRelations
+                )
+                self.sourceMentions = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeMergePreviewBody.sourceMentionsPayload.self,
+                    forKey: .sourceMentions
+                )
+                self.targetMentions = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeMergePreviewBody.targetMentionsPayload.self,
+                    forKey: .targetMentions
+                )
+                self.assertions = try container.decodeIfPresent(
+                    [Components.Schemas.PersistenceAssertionBody].self,
+                    forKey: .assertions
+                )
+                self.conflicts = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .conflicts
+                )
+                self.previewDigest = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .previewDigest
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "projectVersion",
+                    "source",
+                    "target",
+                    "sourceAliases",
+                    "targetAliases",
+                    "sourceRelations",
+                    "targetRelations",
+                    "sourceMentions",
+                    "targetMentions",
+                    "assertions",
+                    "conflicts",
+                    "previewDigest"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.projectVersion,
+                    forKey: .projectVersion
+                )
+                try container.encodeIfPresent(
+                    self.source,
+                    forKey: .source
+                )
+                try container.encodeIfPresent(
+                    self.target,
+                    forKey: .target
+                )
+                try container.encodeIfPresent(
+                    self.sourceAliases,
+                    forKey: .sourceAliases
+                )
+                try container.encodeIfPresent(
+                    self.targetAliases,
+                    forKey: .targetAliases
+                )
+                try container.encodeIfPresent(
+                    self.sourceRelations,
+                    forKey: .sourceRelations
+                )
+                try container.encodeIfPresent(
+                    self.targetRelations,
+                    forKey: .targetRelations
+                )
+                try container.encodeIfPresent(
+                    self.sourceMentions,
+                    forKey: .sourceMentions
+                )
+                try container.encodeIfPresent(
+                    self.targetMentions,
+                    forKey: .targetMentions
+                )
+                try container.encodeIfPresent(
+                    self.assertions,
+                    forKey: .assertions
+                )
+                try container.encodeIfPresent(
+                    self.conflicts,
+                    forKey: .conflicts
+                )
+                try container.encodeIfPresent(
+                    self.previewDigest,
+                    forKey: .previewDigest
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/KnowledgeMergePreviewRequest`.
@@ -658,6 +3698,1214 @@ extension Components {
                 case confirm
                 case projectVersion
                 case previewDigest
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/KnowledgeMergeResultBody`.
+        public struct KnowledgeMergeResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergeResultBody/target`.
+            public var target: Components.Schemas.KnowledgeNodeBody?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergeResultBody/source`.
+            public var source: Components.Schemas.KnowledgeNodeBody?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeMergeResultBody/auditId`.
+            public var auditId: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `KnowledgeMergeResultBody`.
+            ///
+            /// - Parameters:
+            ///   - target:
+            ///   - source:
+            ///   - auditId:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                target: Components.Schemas.KnowledgeNodeBody? = nil,
+                source: Components.Schemas.KnowledgeNodeBody? = nil,
+                auditId: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.target = target
+                self.source = source
+                self.auditId = auditId
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case target
+                case source
+                case auditId
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.target = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.self,
+                    forKey: .target
+                )
+                self.source = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.self,
+                    forKey: .source
+                )
+                self.auditId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .auditId
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "target",
+                    "source",
+                    "auditId"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.target,
+                    forKey: .target
+                )
+                try container.encodeIfPresent(
+                    self.source,
+                    forKey: .source
+                )
+                try container.encodeIfPresent(
+                    self.auditId,
+                    forKey: .auditId
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody`.
+        public struct KnowledgeNodeBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/type`.
+            public var _type: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/name`.
+            public var name: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/attributes`.
+            public struct attributesPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `attributesPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/attributes`.
+            public var attributes: Components.Schemas.KnowledgeNodeBody.attributesPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case retired = "retired"
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/status`.
+            public var status: Components.Schemas.KnowledgeNodeBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/version`.
+            public var version: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/deletedAt`.
+            public var deletedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeNodeBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `KnowledgeNodeBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - _type:
+            ///   - name:
+            ///   - attributes:
+            ///   - status:
+            ///   - version:
+            ///   - deletedAt:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                _type: Swift.String? = nil,
+                name: Swift.String? = nil,
+                attributes: Components.Schemas.KnowledgeNodeBody.attributesPayload? = nil,
+                status: Components.Schemas.KnowledgeNodeBody.statusPayload? = nil,
+                version: Swift.Int32? = nil,
+                deletedAt: Foundation.Date? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self._type = _type
+                self.name = name
+                self.attributes = attributes
+                self.status = status
+                self.version = version
+                self.deletedAt = deletedAt
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case _type = "type"
+                case name
+                case attributes
+                case status
+                case version
+                case deletedAt
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self._type = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: ._type
+                )
+                self.name = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .name
+                )
+                self.attributes = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.attributesPayload.self,
+                    forKey: .attributes
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.deletedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .deletedAt
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "type",
+                    "name",
+                    "attributes",
+                    "status",
+                    "version",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self._type,
+                    forKey: ._type
+                )
+                try container.encodeIfPresent(
+                    self.name,
+                    forKey: .name
+                )
+                try container.encodeIfPresent(
+                    self.attributes,
+                    forKey: .attributes
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encodeIfPresent(
+                    self.deletedAt,
+                    forKey: .deletedAt
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody`.
+        public struct KnowledgeRelationBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/sourceId`.
+            public var sourceId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/targetId`.
+            public var targetId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/type`.
+            public var _type: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/attributes`.
+            public struct attributesPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `attributesPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/attributes`.
+            public var attributes: Components.Schemas.KnowledgeRelationBody.attributesPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/validity`.
+            public struct validityPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `validityPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/validity`.
+            public var validity: Components.Schemas.KnowledgeRelationBody.validityPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case rejected = "rejected"
+                case retired = "retired"
+            }
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/status`.
+            public var status: Components.Schemas.KnowledgeRelationBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/version`.
+            public var version: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/KnowledgeRelationBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `KnowledgeRelationBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - sourceId:
+            ///   - targetId:
+            ///   - _type:
+            ///   - attributes:
+            ///   - validity:
+            ///   - status:
+            ///   - version:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                sourceId: Swift.String? = nil,
+                targetId: Swift.String? = nil,
+                _type: Swift.String? = nil,
+                attributes: Components.Schemas.KnowledgeRelationBody.attributesPayload? = nil,
+                validity: Components.Schemas.KnowledgeRelationBody.validityPayload? = nil,
+                status: Components.Schemas.KnowledgeRelationBody.statusPayload? = nil,
+                version: Swift.Int32? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.sourceId = sourceId
+                self.targetId = targetId
+                self._type = _type
+                self.attributes = attributes
+                self.validity = validity
+                self.status = status
+                self.version = version
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case sourceId
+                case targetId
+                case _type = "type"
+                case attributes
+                case validity
+                case status
+                case version
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.sourceId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .sourceId
+                )
+                self.targetId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .targetId
+                )
+                self._type = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: ._type
+                )
+                self.attributes = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeRelationBody.attributesPayload.self,
+                    forKey: .attributes
+                )
+                self.validity = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeRelationBody.validityPayload.self,
+                    forKey: .validity
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeRelationBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "sourceId",
+                    "targetId",
+                    "type",
+                    "attributes",
+                    "validity",
+                    "status",
+                    "version",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.sourceId,
+                    forKey: .sourceId
+                )
+                try container.encodeIfPresent(
+                    self.targetId,
+                    forKey: .targetId
+                )
+                try container.encodeIfPresent(
+                    self._type,
+                    forKey: ._type
+                )
+                try container.encodeIfPresent(
+                    self.attributes,
+                    forKey: .attributes
+                )
+                try container.encodeIfPresent(
+                    self.validity,
+                    forKey: .validity
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotListBody`.
+        public struct ManuscriptSnapshotListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotListBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotListBody/snapshot`.
+            public var snapshot: Components.Schemas.ManuscriptSnapshotListBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotListBody/snapshots`.
+            public var snapshots: [Components.Schemas.ManuscriptSnapshotMetaBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ManuscriptSnapshotListBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - snapshots:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ManuscriptSnapshotListBody.snapshotPayload? = nil,
+                snapshots: [Components.Schemas.ManuscriptSnapshotMetaBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.snapshots = snapshots
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case snapshots
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ManuscriptSnapshotListBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.snapshots = try container.decodeIfPresent(
+                    [Components.Schemas.ManuscriptSnapshotMetaBody].self,
+                    forKey: .snapshots
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "snapshots"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.snapshots,
+                    forKey: .snapshots
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody`.
+        public struct ManuscriptSnapshotMetaBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/sceneId`.
+            public var sceneId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/manuscriptId`.
+            public var manuscriptId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/createdAt`.
+            public var createdAt: Swift.Int64?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/charCount`.
+            public var charCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/source`.
+            @frozen public enum sourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case postgres = "postgres"
+            }
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/source`.
+            public var source: Components.Schemas.ManuscriptSnapshotMetaBody.sourcePayload?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/label`.
+            public var label: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/trigger`.
+            @frozen public enum triggerPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case manual = "manual"
+                case submit = "submit"
+                case idle = "idle"
+            }
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotMetaBody/trigger`.
+            public var trigger: Components.Schemas.ManuscriptSnapshotMetaBody.triggerPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ManuscriptSnapshotMetaBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - sceneId:
+            ///   - manuscriptId:
+            ///   - createdAt:
+            ///   - charCount:
+            ///   - source:
+            ///   - label:
+            ///   - trigger:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                sceneId: Swift.String? = nil,
+                manuscriptId: Swift.String? = nil,
+                createdAt: Swift.Int64? = nil,
+                charCount: Swift.Int32? = nil,
+                source: Components.Schemas.ManuscriptSnapshotMetaBody.sourcePayload? = nil,
+                label: Swift.String? = nil,
+                trigger: Components.Schemas.ManuscriptSnapshotMetaBody.triggerPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.sceneId = sceneId
+                self.manuscriptId = manuscriptId
+                self.createdAt = createdAt
+                self.charCount = charCount
+                self.source = source
+                self.label = label
+                self.trigger = trigger
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case sceneId
+                case manuscriptId
+                case createdAt
+                case charCount
+                case source
+                case label
+                case trigger
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.sceneId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .sceneId
+                )
+                self.manuscriptId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .manuscriptId
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Swift.Int64.self,
+                    forKey: .createdAt
+                )
+                self.charCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .charCount
+                )
+                self.source = try container.decodeIfPresent(
+                    Components.Schemas.ManuscriptSnapshotMetaBody.sourcePayload.self,
+                    forKey: .source
+                )
+                self.label = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .label
+                )
+                self.trigger = try container.decodeIfPresent(
+                    Components.Schemas.ManuscriptSnapshotMetaBody.triggerPayload.self,
+                    forKey: .trigger
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "sceneId",
+                    "manuscriptId",
+                    "createdAt",
+                    "charCount",
+                    "source",
+                    "label",
+                    "trigger"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.sceneId,
+                    forKey: .sceneId
+                )
+                try container.encodeIfPresent(
+                    self.manuscriptId,
+                    forKey: .manuscriptId
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.charCount,
+                    forKey: .charCount
+                )
+                try container.encodeIfPresent(
+                    self.source,
+                    forKey: .source
+                )
+                try container.encodeIfPresent(
+                    self.label,
+                    forKey: .label
+                )
+                try container.encodeIfPresent(
+                    self.trigger,
+                    forKey: .trigger
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody`.
+        public struct ManuscriptSnapshotReadBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/snapshot`.
+            public var snapshot: Components.Schemas.ManuscriptSnapshotReadBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot`.
+            public struct manuscriptSnapshotPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/id`.
+                public var id: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/sceneId`.
+                public var sceneId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/manuscriptId`.
+                public var manuscriptId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/createdAt`.
+                public var createdAt: Swift.Int64?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/charCount`.
+                public var charCount: Swift.Int32?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/source`.
+                @frozen public enum sourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case postgres = "postgres"
+                }
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/source`.
+                public var source: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.sourcePayload?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/label`.
+                public var label: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/trigger`.
+                @frozen public enum triggerPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case manual = "manual"
+                    case submit = "submit"
+                    case idle = "idle"
+                }
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/trigger`.
+                public var trigger: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.triggerPayload?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/body`.
+                public var body: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/document`.
+                public struct documentPayload: Codable, Hashable, Sendable {
+                    /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/document/path`.
+                    public var path: Swift.String?
+                    /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/document/content`.
+                    public var content: Swift.String?
+                    /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/document/revision`.
+                    public var revision: Swift.String?
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `documentPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - path:
+                    ///   - content:
+                    ///   - revision:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(
+                        path: Swift.String? = nil,
+                        content: Swift.String? = nil,
+                        revision: Swift.String? = nil,
+                        additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                    ) {
+                        self.path = path
+                        self.content = content
+                        self.revision = revision
+                        self.additionalProperties = additionalProperties
+                    }
+                    public enum CodingKeys: String, CodingKey {
+                        case path
+                        case content
+                        case revision
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        let container = try decoder.container(keyedBy: CodingKeys.self)
+                        self.path = try container.decodeIfPresent(
+                            Swift.String.self,
+                            forKey: .path
+                        )
+                        self.content = try container.decodeIfPresent(
+                            Swift.String.self,
+                            forKey: .content
+                        )
+                        self.revision = try container.decodeIfPresent(
+                            Swift.String.self,
+                            forKey: .revision
+                        )
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                            "path",
+                            "content",
+                            "revision"
+                        ])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        var container = encoder.container(keyedBy: CodingKeys.self)
+                        try container.encodeIfPresent(
+                            self.path,
+                            forKey: .path
+                        )
+                        try container.encodeIfPresent(
+                            self.content,
+                            forKey: .content
+                        )
+                        try container.encodeIfPresent(
+                            self.revision,
+                            forKey: .revision
+                        )
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot/document`.
+                public var document: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.documentPayload?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `manuscriptSnapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - id:
+                ///   - sceneId:
+                ///   - manuscriptId:
+                ///   - createdAt:
+                ///   - charCount:
+                ///   - source:
+                ///   - label:
+                ///   - trigger:
+                ///   - body:
+                ///   - document:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    id: Swift.String? = nil,
+                    sceneId: Swift.String? = nil,
+                    manuscriptId: Swift.String? = nil,
+                    createdAt: Swift.Int64? = nil,
+                    charCount: Swift.Int32? = nil,
+                    source: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.sourcePayload? = nil,
+                    label: Swift.String? = nil,
+                    trigger: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.triggerPayload? = nil,
+                    body: Swift.String? = nil,
+                    document: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.documentPayload? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.id = id
+                    self.sceneId = sceneId
+                    self.manuscriptId = manuscriptId
+                    self.createdAt = createdAt
+                    self.charCount = charCount
+                    self.source = source
+                    self.label = label
+                    self.trigger = trigger
+                    self.body = body
+                    self.document = document
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case id
+                    case sceneId
+                    case manuscriptId
+                    case createdAt
+                    case charCount
+                    case source
+                    case label
+                    case trigger
+                    case body
+                    case document
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.id = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .id
+                    )
+                    self.sceneId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .sceneId
+                    )
+                    self.manuscriptId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .manuscriptId
+                    )
+                    self.createdAt = try container.decodeIfPresent(
+                        Swift.Int64.self,
+                        forKey: .createdAt
+                    )
+                    self.charCount = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .charCount
+                    )
+                    self.source = try container.decodeIfPresent(
+                        Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.sourcePayload.self,
+                        forKey: .source
+                    )
+                    self.label = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .label
+                    )
+                    self.trigger = try container.decodeIfPresent(
+                        Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.triggerPayload.self,
+                        forKey: .trigger
+                    )
+                    self.body = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .body
+                    )
+                    self.document = try container.decodeIfPresent(
+                        Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.documentPayload.self,
+                        forKey: .document
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "id",
+                        "sceneId",
+                        "manuscriptId",
+                        "createdAt",
+                        "charCount",
+                        "source",
+                        "label",
+                        "trigger",
+                        "body",
+                        "document"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.id,
+                        forKey: .id
+                    )
+                    try container.encodeIfPresent(
+                        self.sceneId,
+                        forKey: .sceneId
+                    )
+                    try container.encodeIfPresent(
+                        self.manuscriptId,
+                        forKey: .manuscriptId
+                    )
+                    try container.encodeIfPresent(
+                        self.createdAt,
+                        forKey: .createdAt
+                    )
+                    try container.encodeIfPresent(
+                        self.charCount,
+                        forKey: .charCount
+                    )
+                    try container.encodeIfPresent(
+                        self.source,
+                        forKey: .source
+                    )
+                    try container.encodeIfPresent(
+                        self.label,
+                        forKey: .label
+                    )
+                    try container.encodeIfPresent(
+                        self.trigger,
+                        forKey: .trigger
+                    )
+                    try container.encodeIfPresent(
+                        self.body,
+                        forKey: .body
+                    )
+                    try container.encodeIfPresent(
+                        self.document,
+                        forKey: .document
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ManuscriptSnapshotReadBody/manuscriptSnapshot`.
+            public var manuscriptSnapshot: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ManuscriptSnapshotReadBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - manuscriptSnapshot:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ManuscriptSnapshotReadBody.snapshotPayload? = nil,
+                manuscriptSnapshot: Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.manuscriptSnapshot = manuscriptSnapshot
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case manuscriptSnapshot
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ManuscriptSnapshotReadBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.manuscriptSnapshot = try container.decodeIfPresent(
+                    Components.Schemas.ManuscriptSnapshotReadBody.manuscriptSnapshotPayload.self,
+                    forKey: .manuscriptSnapshot
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "manuscriptSnapshot"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.manuscriptSnapshot,
+                    forKey: .manuscriptSnapshot
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/NodeEvidenceListBody`.
+        public struct NodeEvidenceListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/NodeEvidenceListBody/evidence`.
+            public var evidence: [Components.Schemas.EvidenceAnchorDetailBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `NodeEvidenceListBody`.
+            ///
+            /// - Parameters:
+            ///   - evidence:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                evidence: [Components.Schemas.EvidenceAnchorDetailBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.evidence = evidence
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case evidence
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.evidence = try container.decodeIfPresent(
+                    [Components.Schemas.EvidenceAnchorDetailBody].self,
+                    forKey: .evidence
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "evidence"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.evidence,
+                    forKey: .evidence
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody`.
+        public struct OAuthConsentContextBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody/client`.
+            public struct clientPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody/client/name`.
+                public var name: Swift.String?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `clientPayload`.
+                ///
+                /// - Parameters:
+                ///   - name:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    name: Swift.String? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.name = name
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case name
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.name = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .name
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "name"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.name,
+                        forKey: .name
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody/client`.
+            public var client: Components.Schemas.OAuthConsentContextBody.clientPayload?
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody/requestedScopes`.
+            public var requestedScopes: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentContextBody/redirectUri`.
+            public var redirectUri: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `OAuthConsentContextBody`.
+            ///
+            /// - Parameters:
+            ///   - client:
+            ///   - requestedScopes:
+            ///   - redirectUri:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                client: Components.Schemas.OAuthConsentContextBody.clientPayload? = nil,
+                requestedScopes: [Swift.String]? = nil,
+                redirectUri: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.client = client
+                self.requestedScopes = requestedScopes
+                self.redirectUri = redirectUri
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case client
+                case requestedScopes
+                case redirectUri
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.client = try container.decodeIfPresent(
+                    Components.Schemas.OAuthConsentContextBody.clientPayload.self,
+                    forKey: .client
+                )
+                self.requestedScopes = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .requestedScopes
+                )
+                self.redirectUri = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .redirectUri
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "client",
+                    "requestedScopes",
+                    "redirectUri"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.client,
+                    forKey: .client
+                )
+                try container.encodeIfPresent(
+                    self.requestedScopes,
+                    forKey: .requestedScopes
+                )
+                try container.encodeIfPresent(
+                    self.redirectUri,
+                    forKey: .redirectUri
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/OAuthConsentContextRequest`.
@@ -1252,6 +5500,239 @@ extension Components {
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
+        /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody`.
+        public struct PersistenceAssertionBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/proposition`.
+            public struct propositionPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `propositionPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/proposition`.
+            public var proposition: Components.Schemas.PersistenceAssertionBody.propositionPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/modality`.
+            public var modality: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/perspective`.
+            public var perspective: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/narrativeTime`.
+            public struct narrativeTimePayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `narrativeTimePayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/narrativeTime`.
+            public var narrativeTime: Components.Schemas.PersistenceAssertionBody.narrativeTimePayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/confidence`.
+            public var confidence: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case rejected = "rejected"
+                case retired = "retired"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/status`.
+            public var status: Components.Schemas.PersistenceAssertionBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/version`.
+            public var version: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAssertionBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceAssertionBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - proposition:
+            ///   - modality:
+            ///   - perspective:
+            ///   - narrativeTime:
+            ///   - confidence:
+            ///   - status:
+            ///   - version:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                proposition: Components.Schemas.PersistenceAssertionBody.propositionPayload? = nil,
+                modality: Swift.String? = nil,
+                perspective: Swift.String? = nil,
+                narrativeTime: Components.Schemas.PersistenceAssertionBody.narrativeTimePayload? = nil,
+                confidence: Swift.Double? = nil,
+                status: Components.Schemas.PersistenceAssertionBody.statusPayload? = nil,
+                version: Swift.Int32? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.proposition = proposition
+                self.modality = modality
+                self.perspective = perspective
+                self.narrativeTime = narrativeTime
+                self.confidence = confidence
+                self.status = status
+                self.version = version
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case proposition
+                case modality
+                case perspective
+                case narrativeTime
+                case confidence
+                case status
+                case version
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.proposition = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceAssertionBody.propositionPayload.self,
+                    forKey: .proposition
+                )
+                self.modality = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .modality
+                )
+                self.perspective = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .perspective
+                )
+                self.narrativeTime = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceAssertionBody.narrativeTimePayload.self,
+                    forKey: .narrativeTime
+                )
+                self.confidence = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .confidence
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceAssertionBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "proposition",
+                    "modality",
+                    "perspective",
+                    "narrativeTime",
+                    "confidence",
+                    "status",
+                    "version",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.proposition,
+                    forKey: .proposition
+                )
+                try container.encodeIfPresent(
+                    self.modality,
+                    forKey: .modality
+                )
+                try container.encodeIfPresent(
+                    self.perspective,
+                    forKey: .perspective
+                )
+                try container.encodeIfPresent(
+                    self.narrativeTime,
+                    forKey: .narrativeTime
+                )
+                try container.encodeIfPresent(
+                    self.confidence,
+                    forKey: .confidence
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/PersistenceAssertionEnvelope`.
         public struct PersistenceAssertionEnvelope: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PersistenceAssertionEnvelope/assertion`.
@@ -1516,6 +5997,654 @@ extension Components {
                 try container.encodeIfPresent(
                     self.expectedVersion,
                     forKey: .expectedVersion
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody`.
+        public struct PersistenceChangeSetApplicationBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody/resultsPayload`.
+            public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `resultsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody/results`.
+            public typealias resultsPayload = [Components.Schemas.PersistenceChangeSetApplicationBody.resultsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody/results`.
+            public var results: Components.Schemas.PersistenceChangeSetApplicationBody.resultsPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApplicationBody/replayed`.
+            public var replayed: Swift.Bool?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetApplicationBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - results:
+            ///   - replayed:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                results: Components.Schemas.PersistenceChangeSetApplicationBody.resultsPayload? = nil,
+                replayed: Swift.Bool? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.changeSet = changeSet
+                self.results = results
+                self.replayed = replayed
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case results
+                case replayed
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.changeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.self,
+                    forKey: .changeSet
+                )
+                self.results = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetApplicationBody.resultsPayload.self,
+                    forKey: .results
+                )
+                self.replayed = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .replayed
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "changeSet",
+                    "results",
+                    "replayed"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.changeSet,
+                    forKey: .changeSet
+                )
+                try container.encodeIfPresent(
+                    self.results,
+                    forKey: .results
+                )
+                try container.encodeIfPresent(
+                    self.replayed,
+                    forKey: .replayed
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApprovalBody`.
+        public struct PersistenceChangeSetApprovalBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetApprovalBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetApprovalBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.changeSet = changeSet
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.changeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.self,
+                    forKey: .changeSet
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "changeSet"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.changeSet,
+                    forKey: .changeSet
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody`.
+        public struct PersistenceChangeSetBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/authorId`.
+            public var authorId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case approved = "approved"
+                case applied = "applied"
+                case rejected = "rejected"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/status`.
+            public var status: Components.Schemas.PersistenceChangeSetBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/operationsPayload`.
+            public struct operationsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `operationsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/operations`.
+            public typealias operationsPayload = [Components.Schemas.PersistenceChangeSetBody.operationsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/operations`.
+            public var operations: Components.Schemas.PersistenceChangeSetBody.operationsPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/readSetPayload`.
+            public struct readSetPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `readSetPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/readSet`.
+            public typealias readSetPayload = [Components.Schemas.PersistenceChangeSetBody.readSetPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/readSet`.
+            public var readSet: Components.Schemas.PersistenceChangeSetBody.readSetPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/writeSetPayload`.
+            public struct writeSetPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `writeSetPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/writeSet`.
+            public typealias writeSetPayload = [Components.Schemas.PersistenceChangeSetBody.writeSetPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/writeSet`.
+            public var writeSet: Components.Schemas.PersistenceChangeSetBody.writeSetPayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/provenance`.
+            public struct provenancePayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `provenancePayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/provenance`.
+            public var provenance: Components.Schemas.PersistenceChangeSetBody.provenancePayload?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/version`.
+            public var version: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/idempotencyKey`.
+            public var idempotencyKey: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/approvedAt`.
+            public var approvedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/approvedBy`.
+            public var approvedBy: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/appliedAt`.
+            public var appliedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/rejectedAt`.
+            public var rejectedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetBody/rejectedBy`.
+            public var rejectedBy: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - authorId:
+            ///   - status:
+            ///   - operations:
+            ///   - readSet:
+            ///   - writeSet:
+            ///   - provenance:
+            ///   - version:
+            ///   - idempotencyKey:
+            ///   - createdAt:
+            ///   - approvedAt:
+            ///   - approvedBy:
+            ///   - appliedAt:
+            ///   - rejectedAt:
+            ///   - rejectedBy:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                projectId: Swift.String? = nil,
+                authorId: Swift.String? = nil,
+                status: Components.Schemas.PersistenceChangeSetBody.statusPayload? = nil,
+                operations: Components.Schemas.PersistenceChangeSetBody.operationsPayload? = nil,
+                readSet: Components.Schemas.PersistenceChangeSetBody.readSetPayload? = nil,
+                writeSet: Components.Schemas.PersistenceChangeSetBody.writeSetPayload? = nil,
+                provenance: Components.Schemas.PersistenceChangeSetBody.provenancePayload? = nil,
+                version: Swift.Int32? = nil,
+                idempotencyKey: Swift.String? = nil,
+                createdAt: Foundation.Date? = nil,
+                approvedAt: Foundation.Date? = nil,
+                approvedBy: Swift.String? = nil,
+                appliedAt: Foundation.Date? = nil,
+                rejectedAt: Foundation.Date? = nil,
+                rejectedBy: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.authorId = authorId
+                self.status = status
+                self.operations = operations
+                self.readSet = readSet
+                self.writeSet = writeSet
+                self.provenance = provenance
+                self.version = version
+                self.idempotencyKey = idempotencyKey
+                self.createdAt = createdAt
+                self.approvedAt = approvedAt
+                self.approvedBy = approvedBy
+                self.appliedAt = appliedAt
+                self.rejectedAt = rejectedAt
+                self.rejectedBy = rejectedBy
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case authorId
+                case status
+                case operations
+                case readSet
+                case writeSet
+                case provenance
+                case version
+                case idempotencyKey
+                case createdAt
+                case approvedAt
+                case approvedBy
+                case appliedAt
+                case rejectedAt
+                case rejectedBy
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.authorId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .authorId
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.operations = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.operationsPayload.self,
+                    forKey: .operations
+                )
+                self.readSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.readSetPayload.self,
+                    forKey: .readSet
+                )
+                self.writeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.writeSetPayload.self,
+                    forKey: .writeSet
+                )
+                self.provenance = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.provenancePayload.self,
+                    forKey: .provenance
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.idempotencyKey = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .idempotencyKey
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.approvedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .approvedAt
+                )
+                self.approvedBy = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .approvedBy
+                )
+                self.appliedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .appliedAt
+                )
+                self.rejectedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .rejectedAt
+                )
+                self.rejectedBy = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .rejectedBy
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "authorId",
+                    "status",
+                    "operations",
+                    "readSet",
+                    "writeSet",
+                    "provenance",
+                    "version",
+                    "idempotencyKey",
+                    "createdAt",
+                    "approvedAt",
+                    "approvedBy",
+                    "appliedAt",
+                    "rejectedAt",
+                    "rejectedBy"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.authorId,
+                    forKey: .authorId
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.operations,
+                    forKey: .operations
+                )
+                try container.encodeIfPresent(
+                    self.readSet,
+                    forKey: .readSet
+                )
+                try container.encodeIfPresent(
+                    self.writeSet,
+                    forKey: .writeSet
+                )
+                try container.encodeIfPresent(
+                    self.provenance,
+                    forKey: .provenance
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encodeIfPresent(
+                    self.idempotencyKey,
+                    forKey: .idempotencyKey
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.approvedAt,
+                    forKey: .approvedAt
+                )
+                try container.encodeIfPresent(
+                    self.approvedBy,
+                    forKey: .approvedBy
+                )
+                try container.encodeIfPresent(
+                    self.appliedAt,
+                    forKey: .appliedAt
+                )
+                try container.encodeIfPresent(
+                    self.rejectedAt,
+                    forKey: .rejectedAt
+                )
+                try container.encodeIfPresent(
+                    self.rejectedBy,
+                    forKey: .rejectedBy
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetListBody`.
+        public struct PersistenceChangeSetListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetListBody/changeSets`.
+            public var changeSets: [Components.Schemas.PersistenceChangeSetBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetListBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSets:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                changeSets: [Components.Schemas.PersistenceChangeSetBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.changeSets = changeSets
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSets
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.changeSets = try container.decodeIfPresent(
+                    [Components.Schemas.PersistenceChangeSetBody].self,
+                    forKey: .changeSets
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "changeSets"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.changeSets,
+                    forKey: .changeSets
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResponseBody`.
+        public struct PersistenceChangeSetResponseBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResponseBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResponseBody/receipt`.
+            public struct receiptPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `receiptPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResponseBody/receipt`.
+            public var receipt: Components.Schemas.PersistenceChangeSetResponseBody.receiptPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetResponseBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - receipt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                receipt: Components.Schemas.PersistenceChangeSetResponseBody.receiptPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.changeSet = changeSet
+                self.receipt = receipt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case receipt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.changeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.self,
+                    forKey: .changeSet
+                )
+                self.receipt = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetResponseBody.receiptPayload.self,
+                    forKey: .receipt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "changeSet",
+                    "receipt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.changeSet,
+                    forKey: .changeSet
+                )
+                try container.encodeIfPresent(
+                    self.receipt,
+                    forKey: .receipt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResultBody`.
+        public struct PersistenceChangeSetResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResultBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetBody?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetResultBody/replayed`.
+            public var replayed: Swift.Bool?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceChangeSetResultBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - replayed:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetBody? = nil,
+                replayed: Swift.Bool? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.changeSet = changeSet
+                self.replayed = replayed
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case replayed
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.changeSet = try container.decodeIfPresent(
+                    Components.Schemas.PersistenceChangeSetBody.self,
+                    forKey: .changeSet
+                )
+                self.replayed = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .replayed
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "changeSet",
+                    "replayed"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.changeSet,
+                    forKey: .changeSet
+                )
+                try container.encodeIfPresent(
+                    self.replayed,
+                    forKey: .replayed
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
@@ -3297,6 +8426,131 @@ extension Components {
                 case updatedAt
             }
         }
+        /// - Remark: Generated from `#/components/schemas/PersistenceNodeBody`.
+        public struct PersistenceNodeBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeBody/node`.
+            public var node: Components.Schemas.KnowledgeNodeBody?
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeBody/aliases`.
+            public var aliases: [Components.Schemas.KnowledgeAliasBody]?
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeBody/relations`.
+            public var relations: [Components.Schemas.KnowledgeRelationBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceNodeBody`.
+            ///
+            /// - Parameters:
+            ///   - node:
+            ///   - aliases:
+            ///   - relations:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                node: Components.Schemas.KnowledgeNodeBody? = nil,
+                aliases: [Components.Schemas.KnowledgeAliasBody]? = nil,
+                relations: [Components.Schemas.KnowledgeRelationBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.node = node
+                self.aliases = aliases
+                self.relations = relations
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case node
+                case aliases
+                case relations
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.node = try container.decodeIfPresent(
+                    Components.Schemas.KnowledgeNodeBody.self,
+                    forKey: .node
+                )
+                self.aliases = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeAliasBody].self,
+                    forKey: .aliases
+                )
+                self.relations = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeRelationBody].self,
+                    forKey: .relations
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "node",
+                    "aliases",
+                    "relations"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.node,
+                    forKey: .node
+                )
+                try container.encodeIfPresent(
+                    self.aliases,
+                    forKey: .aliases
+                )
+                try container.encodeIfPresent(
+                    self.relations,
+                    forKey: .relations
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody`.
+        public struct PersistenceNodeListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/nodes`.
+            public var nodes: [Components.Schemas.KnowledgeNodeBody]?
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/nextCursor`.
+            public var nextCursor: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceNodeListBody`.
+            ///
+            /// - Parameters:
+            ///   - nodes:
+            ///   - nextCursor:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                nodes: [Components.Schemas.KnowledgeNodeBody]? = nil,
+                nextCursor: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.nodes = nodes
+                self.nextCursor = nextCursor
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case nodes
+                case nextCursor
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.nodes = try container.decodeIfPresent(
+                    [Components.Schemas.KnowledgeNodeBody].self,
+                    forKey: .nodes
+                )
+                self.nextCursor = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .nextCursor
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "nodes",
+                    "nextCursor"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.nodes,
+                    forKey: .nodes
+                )
+                try container.encodeIfPresent(
+                    self.nextCursor,
+                    forKey: .nextCursor
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/PersistenceProjectCreateRequest`.
         public struct PersistenceProjectCreateRequest: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PersistenceProjectCreateRequest/id`.
@@ -3389,6 +8643,46 @@ extension Components {
                 case expectedVersion
                 case title
                 case settings
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceReviewFeedBody`.
+        public struct PersistenceReviewFeedBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceReviewFeedBody/items`.
+            public var items: [Components.Schemas.AuthorReviewItemBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceReviewFeedBody`.
+            ///
+            /// - Parameters:
+            ///   - items:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                items: [Components.Schemas.AuthorReviewItemBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.items = items
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case items
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.items = try container.decodeIfPresent(
+                    [Components.Schemas.AuthorReviewItemBody].self,
+                    forKey: .items
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "items"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.items,
+                    forKey: .items
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/PersistenceStatusResponse`.
@@ -3484,6 +8778,268 @@ extension Components {
                 case updatedAt
             }
         }
+        /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody`.
+        public struct ProjectActionDescriptorBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody/module`.
+            public var module: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody/effect`.
+            @frozen public enum effectPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case read = "read"
+                case compute = "compute"
+                case propose = "propose"
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody/effect`.
+            public var effect: Components.Schemas.ProjectActionDescriptorBody.effectPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectActionDescriptorBody/job`.
+            public var job: Swift.Bool?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectActionDescriptorBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - module:
+            ///   - effect:
+            ///   - job:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                module: Swift.String? = nil,
+                effect: Components.Schemas.ProjectActionDescriptorBody.effectPayload? = nil,
+                job: Swift.Bool? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.module = module
+                self.effect = effect
+                self.job = job
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case module
+                case effect
+                case job
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.module = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .module
+                )
+                self.effect = try container.decodeIfPresent(
+                    Components.Schemas.ProjectActionDescriptorBody.effectPayload.self,
+                    forKey: .effect
+                )
+                self.job = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .job
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "module",
+                    "effect",
+                    "job"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.module,
+                    forKey: .module
+                )
+                try container.encodeIfPresent(
+                    self.effect,
+                    forKey: .effect
+                )
+                try container.encodeIfPresent(
+                    self.job,
+                    forKey: .job
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectActionsBody`.
+        public struct ProjectActionsBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectActionsBody/actions`.
+            public var actions: [Components.Schemas.ProjectActionDescriptorBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectActionsBody`.
+            ///
+            /// - Parameters:
+            ///   - actions:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                actions: [Components.Schemas.ProjectActionDescriptorBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.actions = actions
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case actions
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.actions = try container.decodeIfPresent(
+                    [Components.Schemas.ProjectActionDescriptorBody].self,
+                    forKey: .actions
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "actions"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.actions,
+                    forKey: .actions
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectObservationBody`.
+        public struct ProjectObservationBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/snapshot/projectId`.
+                public var projectId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/snapshot/projectVersion`.
+                public var projectVersion: Swift.Int32?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - projectVersion:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    projectId: Swift.String? = nil,
+                    projectVersion: Swift.Int32? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.projectId = projectId
+                    self.projectVersion = projectVersion
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case projectVersion
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.projectId = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .projectId
+                    )
+                    self.projectVersion = try container.decodeIfPresent(
+                        Swift.Int32.self,
+                        forKey: .projectVersion
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "projectId",
+                        "projectVersion"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.projectId,
+                        forKey: .projectId
+                    )
+                    try container.encodeIfPresent(
+                        self.projectVersion,
+                        forKey: .projectVersion
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/snapshot`.
+            public var snapshot: Components.Schemas.ProjectObservationBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/observedAt`.
+            public var observedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case fresh = "fresh"
+                case failed = "failed"
+                case unknown = "unknown"
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectObservationBody/state`.
+            public var state: Components.Schemas.ProjectObservationBody.statePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectObservationBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - observedAt:
+            ///   - state:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectObservationBody.snapshotPayload? = nil,
+                observedAt: Foundation.Date? = nil,
+                state: Components.Schemas.ProjectObservationBody.statePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.observedAt = observedAt
+                self.state = state
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case observedAt
+                case state
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectObservationBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.observedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .observedAt
+                )
+                self.state = try container.decodeIfPresent(
+                    Components.Schemas.ProjectObservationBody.statePayload.self,
+                    forKey: .state
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "observedAt",
+                    "state"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.observedAt,
+                    forKey: .observedAt
+                )
+                try container.encodeIfPresent(
+                    self.state,
+                    forKey: .state
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/ProjectPageResponse`.
         public struct ProjectPageResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ProjectPageResponse/projects`.
@@ -3507,6 +9063,61 @@ extension Components {
                 case nextCursor
             }
         }
+        /// - Remark: Generated from `#/components/schemas/ProjectReadBody`.
+        public struct ProjectReadBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectReadBody/project`.
+            public var project: Components.Schemas.Project?
+            /// - Remark: Generated from `#/components/schemas/ProjectReadBody/observation`.
+            public var observation: Components.Schemas.ProjectObservationBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectReadBody`.
+            ///
+            /// - Parameters:
+            ///   - project:
+            ///   - observation:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                project: Components.Schemas.Project? = nil,
+                observation: Components.Schemas.ProjectObservationBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.project = project
+                self.observation = observation
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case project
+                case observation
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.project = try container.decodeIfPresent(
+                    Components.Schemas.Project.self,
+                    forKey: .project
+                )
+                self.observation = try container.decodeIfPresent(
+                    Components.Schemas.ProjectObservationBody.self,
+                    forKey: .observation
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "project",
+                    "observation"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.project,
+                    forKey: .project
+                )
+                try container.encodeIfPresent(
+                    self.observation,
+                    forKey: .observation
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/ProjectResponse`.
         public struct ProjectResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ProjectResponse/project`.
@@ -3520,6 +9131,1165 @@ extension Components {
             }
             public enum CodingKeys: String, CodingKey {
                 case project
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectReviewQueueBody`.
+        public struct ProjectReviewQueueBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectReviewQueueBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectReviewQueueBody/snapshot`.
+            public var snapshot: Components.Schemas.ProjectReviewQueueBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectReviewQueueBody/proposals`.
+            public var proposals: [Components.Schemas.CoreProposalStatusBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectReviewQueueBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - proposals:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectReviewQueueBody.snapshotPayload? = nil,
+                proposals: [Components.Schemas.CoreProposalStatusBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.proposals = proposals
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case proposals
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectReviewQueueBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.proposals = try container.decodeIfPresent(
+                    [Components.Schemas.CoreProposalStatusBody].self,
+                    forKey: .proposals
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "proposals"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.proposals,
+                    forKey: .proposals
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectSceneBody`.
+        public struct ProjectSceneBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneBody/title`.
+            public var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneBody/text`.
+            public var text: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneBody/revision`.
+            public var revision: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectSceneBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - title:
+            ///   - text:
+            ///   - revision:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                title: Swift.String? = nil,
+                text: Swift.String? = nil,
+                revision: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.title = title
+                self.text = text
+                self.revision = revision
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case title
+                case text
+                case revision
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.text = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .text
+                )
+                self.revision = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .revision
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "title",
+                    "text",
+                    "revision"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encodeIfPresent(
+                    self.text,
+                    forKey: .text
+                )
+                try container.encodeIfPresent(
+                    self.revision,
+                    forKey: .revision
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse`.
+        public struct ProjectSceneResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/snapshot`.
+            public var snapshot: Components.Schemas.ProjectSceneResponse.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/scene`.
+            public var scene: Components.Schemas.ProjectSceneBody?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/document`.
+            public struct documentPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/document/path`.
+                public var path: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/document/content`.
+                public var content: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/document/revision`.
+                public var revision: Swift.String?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `documentPayload`.
+                ///
+                /// - Parameters:
+                ///   - path:
+                ///   - content:
+                ///   - revision:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    path: Swift.String? = nil,
+                    content: Swift.String? = nil,
+                    revision: Swift.String? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.path = path
+                    self.content = content
+                    self.revision = revision
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case path
+                    case content
+                    case revision
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.path = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .path
+                    )
+                    self.content = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .content
+                    )
+                    self.revision = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .revision
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "path",
+                        "content",
+                        "revision"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.path,
+                        forKey: .path
+                    )
+                    try container.encodeIfPresent(
+                        self.content,
+                        forKey: .content
+                    )
+                    try container.encodeIfPresent(
+                        self.revision,
+                        forKey: .revision
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/document`.
+            public var document: Components.Schemas.ProjectSceneResponse.documentPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/metadata`.
+            public struct metadataPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/metadata/path`.
+                public var path: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/metadata/content`.
+                public var content: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/metadata/revision`.
+                public var revision: Swift.String?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `metadataPayload`.
+                ///
+                /// - Parameters:
+                ///   - path:
+                ///   - content:
+                ///   - revision:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    path: Swift.String? = nil,
+                    content: Swift.String? = nil,
+                    revision: Swift.String? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.path = path
+                    self.content = content
+                    self.revision = revision
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case path
+                    case content
+                    case revision
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.path = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .path
+                    )
+                    self.content = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .content
+                    )
+                    self.revision = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .revision
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "path",
+                        "content",
+                        "revision"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.path,
+                        forKey: .path
+                    )
+                    try container.encodeIfPresent(
+                        self.content,
+                        forKey: .content
+                    )
+                    try container.encodeIfPresent(
+                        self.revision,
+                        forKey: .revision
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSceneResponse/metadata`.
+            public var metadata: Components.Schemas.ProjectSceneResponse.metadataPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectSceneResponse`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - scene:
+            ///   - document:
+            ///   - metadata:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectSceneResponse.snapshotPayload? = nil,
+                scene: Components.Schemas.ProjectSceneBody? = nil,
+                document: Components.Schemas.ProjectSceneResponse.documentPayload? = nil,
+                metadata: Components.Schemas.ProjectSceneResponse.metadataPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.scene = scene
+                self.document = document
+                self.metadata = metadata
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case scene
+                case document
+                case metadata
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSceneResponse.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.scene = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSceneBody.self,
+                    forKey: .scene
+                )
+                self.document = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSceneResponse.documentPayload.self,
+                    forKey: .document
+                )
+                self.metadata = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSceneResponse.metadataPayload.self,
+                    forKey: .metadata
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "scene",
+                    "document",
+                    "metadata"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.scene,
+                    forKey: .scene
+                )
+                try container.encodeIfPresent(
+                    self.document,
+                    forKey: .document
+                )
+                try container.encodeIfPresent(
+                    self.metadata,
+                    forKey: .metadata
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectSearchBody`.
+        public struct ProjectSearchBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectSearchBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSearchBody/snapshot`.
+            public var snapshot: Components.Schemas.ProjectSearchBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectSearchBody/query`.
+            public var query: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectSearchBody/results`.
+            public var results: [Components.Schemas.SearchResultBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectSearchBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - query:
+            ///   - results:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectSearchBody.snapshotPayload? = nil,
+                query: Swift.String? = nil,
+                results: [Components.Schemas.SearchResultBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.query = query
+                self.results = results
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case query
+                case results
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSearchBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.query = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .query
+                )
+                self.results = try container.decodeIfPresent(
+                    [Components.Schemas.SearchResultBody].self,
+                    forKey: .results
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "query",
+                    "results"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.query,
+                    forKey: .query
+                )
+                try container.encodeIfPresent(
+                    self.results,
+                    forKey: .results
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse`.
+        public struct ProjectSnapshotResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/snapshot`.
+            public var snapshot: Components.Schemas.ProjectSnapshotResponse.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document`.
+            public struct documentPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document/path`.
+                public var path: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document/revision`.
+                public var revision: Swift.String?
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `documentPayload`.
+                ///
+                /// - Parameters:
+                ///   - path:
+                ///   - revision:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    path: Swift.String? = nil,
+                    revision: Swift.String? = nil,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.path = path
+                    self.revision = revision
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case path
+                    case revision
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.path = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .path
+                    )
+                    self.revision = try container.decodeIfPresent(
+                        Swift.String.self,
+                        forKey: .revision
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "path",
+                        "revision"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(
+                        self.path,
+                        forKey: .path
+                    )
+                    try container.encodeIfPresent(
+                        self.revision,
+                        forKey: .revision
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document`.
+            public var document: Components.Schemas.ProjectSnapshotResponse.documentPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectSnapshotResponse`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - document:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectSnapshotResponse.snapshotPayload? = nil,
+                document: Components.Schemas.ProjectSnapshotResponse.documentPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.document = document
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case document
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSnapshotResponse.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.document = try container.decodeIfPresent(
+                    Components.Schemas.ProjectSnapshotResponse.documentPayload.self,
+                    forKey: .document
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "document"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.document,
+                    forKey: .document
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectStatusBody`.
+        public struct ProjectStatusBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectStatusBody/projectId`.
+            public var projectId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectStatusBody/projectVersion`.
+            public var projectVersion: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/ProjectStatusBody/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case durable = "durable"
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectStatusBody/state`.
+            public var state: Components.Schemas.ProjectStatusBody.statePayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectStatusBody`.
+            ///
+            /// - Parameters:
+            ///   - projectId:
+            ///   - projectVersion:
+            ///   - state:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                projectId: Swift.String? = nil,
+                projectVersion: Swift.Int32? = nil,
+                state: Components.Schemas.ProjectStatusBody.statePayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.projectId = projectId
+                self.projectVersion = projectVersion
+                self.state = state
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case projectId
+                case projectVersion
+                case state
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.projectId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.projectVersion = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                self.state = try container.decodeIfPresent(
+                    Components.Schemas.ProjectStatusBody.statePayload.self,
+                    forKey: .state
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "projectId",
+                    "projectVersion",
+                    "state"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encodeIfPresent(
+                    self.projectVersion,
+                    forKey: .projectVersion
+                )
+                try container.encodeIfPresent(
+                    self.state,
+                    forKey: .state
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectTreeBody`.
+        public struct ProjectTreeBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeBody/title`.
+            public var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeBody/volumes`.
+            public var volumes: [Components.Schemas.ProjectTreeVolumeBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectTreeBody`.
+            ///
+            /// - Parameters:
+            ///   - title:
+            ///   - volumes:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                title: Swift.String? = nil,
+                volumes: [Components.Schemas.ProjectTreeVolumeBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.title = title
+                self.volumes = volumes
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case title
+                case volumes
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.volumes = try container.decodeIfPresent(
+                    [Components.Schemas.ProjectTreeVolumeBody].self,
+                    forKey: .volumes
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "title",
+                    "volumes"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encodeIfPresent(
+                    self.volumes,
+                    forKey: .volumes
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectTreeChapterBody`.
+        public struct ProjectTreeChapterBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeChapterBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeChapterBody/title`.
+            public var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeChapterBody/scenes`.
+            public var scenes: [Components.Schemas.ProjectTreeSceneBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectTreeChapterBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - title:
+            ///   - scenes:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                title: Swift.String? = nil,
+                scenes: [Components.Schemas.ProjectTreeSceneBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.title = title
+                self.scenes = scenes
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case title
+                case scenes
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.scenes = try container.decodeIfPresent(
+                    [Components.Schemas.ProjectTreeSceneBody].self,
+                    forKey: .scenes
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "title",
+                    "scenes"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encodeIfPresent(
+                    self.scenes,
+                    forKey: .scenes
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectTreeResponse`.
+        public struct ProjectTreeResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeResponse/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeResponse/snapshot`.
+            public var snapshot: Components.Schemas.ProjectTreeResponse.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeResponse/tree`.
+            public var tree: Components.Schemas.ProjectTreeBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectTreeResponse`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - tree:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.ProjectTreeResponse.snapshotPayload? = nil,
+                tree: Components.Schemas.ProjectTreeBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.tree = tree
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case tree
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.ProjectTreeResponse.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.tree = try container.decodeIfPresent(
+                    Components.Schemas.ProjectTreeBody.self,
+                    forKey: .tree
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "tree"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.tree,
+                    forKey: .tree
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectTreeSceneBody`.
+        public struct ProjectTreeSceneBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeSceneBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeSceneBody/title`.
+            public var title: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectTreeSceneBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - title:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                title: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.title = title
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case title
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "title"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProjectTreeVolumeBody`.
+        public struct ProjectTreeVolumeBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeVolumeBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeVolumeBody/title`.
+            public var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProjectTreeVolumeBody/chapters`.
+            public var chapters: [Components.Schemas.ProjectTreeChapterBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProjectTreeVolumeBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - title:
+            ///   - chapters:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                title: Swift.String? = nil,
+                chapters: [Components.Schemas.ProjectTreeChapterBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.title = title
+                self.chapters = chapters
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case title
+                case chapters
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.title = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.chapters = try container.decodeIfPresent(
+                    [Components.Schemas.ProjectTreeChapterBody].self,
+                    forKey: .chapters
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "title",
+                    "chapters"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encodeIfPresent(
+                    self.chapters,
+                    forKey: .chapters
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody`.
+        public struct ProposalApplyReceiptBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/operationId`.
+            public var operationId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/generation`.
+            public var generation: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/projectVersion`.
+            public var projectVersion: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisionsPayload`.
+            public struct revisionsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `revisionsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisions`.
+            public typealias revisionsPayload = [Components.Schemas.ProposalApplyReceiptBody.revisionsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisions`.
+            public var revisions: Components.Schemas.ProposalApplyReceiptBody.revisionsPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProposalApplyReceiptBody`.
+            ///
+            /// - Parameters:
+            ///   - operationId:
+            ///   - generation:
+            ///   - projectVersion:
+            ///   - revisions:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                operationId: Swift.String? = nil,
+                generation: Swift.Int32? = nil,
+                projectVersion: Swift.Int32? = nil,
+                revisions: Components.Schemas.ProposalApplyReceiptBody.revisionsPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.operationId = operationId
+                self.generation = generation
+                self.projectVersion = projectVersion
+                self.revisions = revisions
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case operationId
+                case generation
+                case projectVersion
+                case revisions
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.operationId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .operationId
+                )
+                self.generation = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .generation
+                )
+                self.projectVersion = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                self.revisions = try container.decodeIfPresent(
+                    Components.Schemas.ProposalApplyReceiptBody.revisionsPayload.self,
+                    forKey: .revisions
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "operationId",
+                    "generation",
+                    "projectVersion",
+                    "revisions"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.operationId,
+                    forKey: .operationId
+                )
+                try container.encodeIfPresent(
+                    self.generation,
+                    forKey: .generation
+                )
+                try container.encodeIfPresent(
+                    self.projectVersion,
+                    forKey: .projectVersion
+                )
+                try container.encodeIfPresent(
+                    self.revisions,
+                    forKey: .revisions
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ProposalListBody`.
+        public struct ProposalListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ProposalListBody/proposals`.
+            public var proposals: [Components.Schemas.CoreProposalStatusBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ProposalListBody`.
+            ///
+            /// - Parameters:
+            ///   - proposals:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                proposals: [Components.Schemas.CoreProposalStatusBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.proposals = proposals
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case proposals
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.proposals = try container.decodeIfPresent(
+                    [Components.Schemas.CoreProposalStatusBody].self,
+                    forKey: .proposals
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "proposals"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.proposals,
+                    forKey: .proposals
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/ProposeChangeSetRequest`.
@@ -3563,6 +10333,203 @@ extension Components {
             public enum CodingKeys: String, CodingKey {
                 case projectVersion
                 case operations
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PublicJobBody`.
+        public struct PublicJobBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/type`.
+            public var _type: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case queued = "queued"
+                case running = "running"
+                case done = "done"
+                case error = "error"
+            }
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/status`.
+            public var status: Components.Schemas.PublicJobBody.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/progress`.
+            public var progress: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/result`.
+            public var result: OpenAPIRuntime.OpenAPIValueContainer?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/error`.
+            public var error: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/errorCode`.
+            public var errorCode: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/retryable`.
+            public var retryable: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PublicJobBody/finishedAt`.
+            public var finishedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PublicJobBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - _type:
+            ///   - status:
+            ///   - progress:
+            ///   - result:
+            ///   - error:
+            ///   - errorCode:
+            ///   - retryable:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - finishedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                _type: Swift.String? = nil,
+                status: Components.Schemas.PublicJobBody.statusPayload? = nil,
+                progress: Swift.Double? = nil,
+                result: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                error: Swift.String? = nil,
+                errorCode: Swift.String? = nil,
+                retryable: Swift.Bool? = nil,
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                finishedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self._type = _type
+                self.status = status
+                self.progress = progress
+                self.result = result
+                self.error = error
+                self.errorCode = errorCode
+                self.retryable = retryable
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.finishedAt = finishedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case _type = "type"
+                case status
+                case progress
+                case result
+                case error
+                case errorCode
+                case retryable
+                case createdAt
+                case updatedAt
+                case finishedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self._type = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: ._type
+                )
+                self.status = try container.decodeIfPresent(
+                    Components.Schemas.PublicJobBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.progress = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .progress
+                )
+                self.result = try container.decodeIfPresent(
+                    OpenAPIRuntime.OpenAPIValueContainer.self,
+                    forKey: .result
+                )
+                self.error = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .error
+                )
+                self.errorCode = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .errorCode
+                )
+                self.retryable = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .retryable
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                self.finishedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .finishedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "type",
+                    "status",
+                    "progress",
+                    "result",
+                    "error",
+                    "errorCode",
+                    "retryable",
+                    "createdAt",
+                    "updatedAt",
+                    "finishedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self._type,
+                    forKey: ._type
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encodeIfPresent(
+                    self.progress,
+                    forKey: .progress
+                )
+                try container.encodeIfPresent(
+                    self.result,
+                    forKey: .result
+                )
+                try container.encodeIfPresent(
+                    self.error,
+                    forKey: .error
+                )
+                try container.encodeIfPresent(
+                    self.errorCode,
+                    forKey: .errorCode
+                )
+                try container.encodeIfPresent(
+                    self.retryable,
+                    forKey: .retryable
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try container.encodeIfPresent(
+                    self.finishedAt,
+                    forKey: .finishedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/PublicShareIndexBody`.
@@ -3808,6 +10775,151 @@ extension Components {
                 case pendingRequests
                 case persistenceReady
                 case started
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/RecentActivityBody`.
+        public struct RecentActivityBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/RecentActivityBody/items`.
+            public var items: [Components.Schemas.RecentActivityItemBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `RecentActivityBody`.
+            ///
+            /// - Parameters:
+            ///   - items:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                items: [Components.Schemas.RecentActivityItemBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.items = items
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case items
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.items = try container.decodeIfPresent(
+                    [Components.Schemas.RecentActivityItemBody].self,
+                    forKey: .items
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "items"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.items,
+                    forKey: .items
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody`.
+        public struct RecentActivityItemBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/sceneId`.
+            public var sceneId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/sentenceOffset`.
+            public var sentenceOffset: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/pageIndex`.
+            public var pageIndex: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/deviceType`.
+            @frozen public enum deviceTypePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case desktop = "desktop"
+                case mobile = "mobile"
+            }
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/deviceType`.
+            public var deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload?
+            /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `RecentActivityItemBody`.
+            ///
+            /// - Parameters:
+            ///   - sceneId:
+            ///   - sentenceOffset:
+            ///   - pageIndex:
+            ///   - deviceType:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                sceneId: Swift.String? = nil,
+                sentenceOffset: Swift.Int32? = nil,
+                pageIndex: Swift.Int32? = nil,
+                deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.sceneId = sceneId
+                self.sentenceOffset = sentenceOffset
+                self.pageIndex = pageIndex
+                self.deviceType = deviceType
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case sceneId
+                case sentenceOffset
+                case pageIndex
+                case deviceType
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.sceneId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .sceneId
+                )
+                self.sentenceOffset = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .sentenceOffset
+                )
+                self.pageIndex = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .pageIndex
+                )
+                self.deviceType = try container.decodeIfPresent(
+                    Components.Schemas.RecentActivityItemBody.deviceTypePayload.self,
+                    forKey: .deviceType
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "sceneId",
+                    "sentenceOffset",
+                    "pageIndex",
+                    "deviceType",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.sceneId,
+                    forKey: .sceneId
+                )
+                try container.encodeIfPresent(
+                    self.sentenceOffset,
+                    forKey: .sentenceOffset
+                )
+                try container.encodeIfPresent(
+                    self.pageIndex,
+                    forKey: .pageIndex
+                )
+                try container.encodeIfPresent(
+                    self.deviceType,
+                    forKey: .deviceType
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/SaveConflictResponse`.
@@ -4135,6 +11247,502 @@ extension Components {
                 case replayed
             }
         }
+        /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody`.
+        public struct SceneWritingStatsBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody/sceneId`.
+            public var sceneId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody/charCount`.
+            public var charCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody/pages400`.
+            public var pages400: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody/status`.
+            public var status: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `SceneWritingStatsBody`.
+            ///
+            /// - Parameters:
+            ///   - sceneId:
+            ///   - charCount:
+            ///   - pages400:
+            ///   - status:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                sceneId: Swift.String? = nil,
+                charCount: Swift.Int32? = nil,
+                pages400: Swift.Double? = nil,
+                status: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.sceneId = sceneId
+                self.charCount = charCount
+                self.pages400 = pages400
+                self.status = status
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case sceneId
+                case charCount
+                case pages400
+                case status
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.sceneId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .sceneId
+                )
+                self.charCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .charCount
+                )
+                self.pages400 = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .pages400
+                )
+                self.status = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .status
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "sceneId",
+                    "charCount",
+                    "pages400",
+                    "status"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.sceneId,
+                    forKey: .sceneId
+                )
+                try container.encodeIfPresent(
+                    self.charCount,
+                    forKey: .charCount
+                )
+                try container.encodeIfPresent(
+                    self.pages400,
+                    forKey: .pages400
+                )
+                try container.encodeIfPresent(
+                    self.status,
+                    forKey: .status
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ScratchAttachmentBody`.
+        public struct ScratchAttachmentBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ScratchAttachmentBody/filename`.
+            public var filename: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ScratchAttachmentBody/path`.
+            public var path: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ScratchAttachmentBody/mimeType`.
+            public var mimeType: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ScratchAttachmentBody`.
+            ///
+            /// - Parameters:
+            ///   - filename:
+            ///   - path:
+            ///   - mimeType:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                filename: Swift.String? = nil,
+                path: Swift.String? = nil,
+                mimeType: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.filename = filename
+                self.path = path
+                self.mimeType = mimeType
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case filename
+                case path
+                case mimeType
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.filename = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .filename
+                )
+                self.path = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .path
+                )
+                self.mimeType = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .mimeType
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "filename",
+                    "path",
+                    "mimeType"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.filename,
+                    forKey: .filename
+                )
+                try container.encodeIfPresent(
+                    self.path,
+                    forKey: .path
+                )
+                try container.encodeIfPresent(
+                    self.mimeType,
+                    forKey: .mimeType
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ScratchCreateBody`.
+        public struct ScratchCreateBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/path`.
+            public var path: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/source`.
+            @frozen public enum sourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case voice = "voice"
+                case camera = "camera"
+                case text = "text"
+            }
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/source`.
+            public var source: Components.Schemas.ScratchCreateBody.sourcePayload?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/sceneId`.
+            public var sceneId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/attachments`.
+            public var attachments: [Components.Schemas.ScratchAttachmentBody]?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/proposal`.
+            public struct proposalPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `proposalPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/proposal`.
+            public var proposal: Components.Schemas.ScratchCreateBody.proposalPayload?
+            /// - Remark: Generated from `#/components/schemas/ScratchCreateBody/receipt`.
+            public var receipt: Components.Schemas.ProposalApplyReceiptBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `ScratchCreateBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - path:
+            ///   - createdAt:
+            ///   - source:
+            ///   - sceneId:
+            ///   - attachments:
+            ///   - proposal:
+            ///   - receipt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                path: Swift.String? = nil,
+                createdAt: Foundation.Date? = nil,
+                source: Components.Schemas.ScratchCreateBody.sourcePayload? = nil,
+                sceneId: Swift.String? = nil,
+                attachments: [Components.Schemas.ScratchAttachmentBody]? = nil,
+                proposal: Components.Schemas.ScratchCreateBody.proposalPayload? = nil,
+                receipt: Components.Schemas.ProposalApplyReceiptBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.path = path
+                self.createdAt = createdAt
+                self.source = source
+                self.sceneId = sceneId
+                self.attachments = attachments
+                self.proposal = proposal
+                self.receipt = receipt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case path
+                case createdAt
+                case source
+                case sceneId
+                case attachments
+                case proposal
+                case receipt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.path = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .path
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.source = try container.decodeIfPresent(
+                    Components.Schemas.ScratchCreateBody.sourcePayload.self,
+                    forKey: .source
+                )
+                self.sceneId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .sceneId
+                )
+                self.attachments = try container.decodeIfPresent(
+                    [Components.Schemas.ScratchAttachmentBody].self,
+                    forKey: .attachments
+                )
+                self.proposal = try container.decodeIfPresent(
+                    Components.Schemas.ScratchCreateBody.proposalPayload.self,
+                    forKey: .proposal
+                )
+                self.receipt = try container.decodeIfPresent(
+                    Components.Schemas.ProposalApplyReceiptBody.self,
+                    forKey: .receipt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "path",
+                    "createdAt",
+                    "source",
+                    "sceneId",
+                    "attachments",
+                    "proposal",
+                    "receipt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self.path,
+                    forKey: .path
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.source,
+                    forKey: .source
+                )
+                try container.encodeIfPresent(
+                    self.sceneId,
+                    forKey: .sceneId
+                )
+                try container.encodeIfPresent(
+                    self.attachments,
+                    forKey: .attachments
+                )
+                try container.encodeIfPresent(
+                    self.proposal,
+                    forKey: .proposal
+                )
+                try container.encodeIfPresent(
+                    self.receipt,
+                    forKey: .receipt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/SearchResultBody`.
+        public struct SearchResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/id`.
+            public var id: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case scene = "scene"
+                case chapter = "chapter"
+                case volume = "volume"
+                case manuscript = "manuscript"
+            }
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/type`.
+            public var _type: Components.Schemas.SearchResultBody._typePayload?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/name`.
+            public var name: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/snippet`.
+            public var snippet: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/filePath`.
+            public var filePath: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/score`.
+            public var score: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/field`.
+            @frozen public enum fieldPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case body = "body"
+                case name = "name"
+            }
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/field`.
+            public var field: Components.Schemas.SearchResultBody.fieldPayload?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/offset`.
+            public var offset: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/SearchResultBody/length`.
+            public var length: Swift.Int32?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `SearchResultBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - _type:
+            ///   - name:
+            ///   - snippet:
+            ///   - filePath:
+            ///   - score:
+            ///   - field:
+            ///   - offset:
+            ///   - length:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String? = nil,
+                _type: Components.Schemas.SearchResultBody._typePayload? = nil,
+                name: Swift.String? = nil,
+                snippet: Swift.String? = nil,
+                filePath: Swift.String? = nil,
+                score: Swift.Double? = nil,
+                field: Components.Schemas.SearchResultBody.fieldPayload? = nil,
+                offset: Swift.Int32? = nil,
+                length: Swift.Int32? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self._type = _type
+                self.name = name
+                self.snippet = snippet
+                self.filePath = filePath
+                self.score = score
+                self.field = field
+                self.offset = offset
+                self.length = length
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case _type = "type"
+                case name
+                case snippet
+                case filePath
+                case score
+                case field
+                case offset
+                case length
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self._type = try container.decodeIfPresent(
+                    Components.Schemas.SearchResultBody._typePayload.self,
+                    forKey: ._type
+                )
+                self.name = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .name
+                )
+                self.snippet = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .snippet
+                )
+                self.filePath = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .filePath
+                )
+                self.score = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .score
+                )
+                self.field = try container.decodeIfPresent(
+                    Components.Schemas.SearchResultBody.fieldPayload.self,
+                    forKey: .field
+                )
+                self.offset = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .offset
+                )
+                self.length = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .length
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "type",
+                    "name",
+                    "snippet",
+                    "filePath",
+                    "score",
+                    "field",
+                    "offset",
+                    "length"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encodeIfPresent(
+                    self._type,
+                    forKey: ._type
+                )
+                try container.encodeIfPresent(
+                    self.name,
+                    forKey: .name
+                )
+                try container.encodeIfPresent(
+                    self.snippet,
+                    forKey: .snippet
+                )
+                try container.encodeIfPresent(
+                    self.filePath,
+                    forKey: .filePath
+                )
+                try container.encodeIfPresent(
+                    self.score,
+                    forKey: .score
+                )
+                try container.encodeIfPresent(
+                    self.field,
+                    forKey: .field
+                )
+                try container.encodeIfPresent(
+                    self.offset,
+                    forKey: .offset
+                )
+                try container.encodeIfPresent(
+                    self.length,
+                    forKey: .length
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/VersionResponse`.
         public struct VersionResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/VersionResponse/name`.
@@ -4239,6 +11847,91 @@ extension Components {
                 case auth
                 case runtime
                 case modules
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/VolumeWritingStatsBody`.
+        public struct VolumeWritingStatsBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/VolumeWritingStatsBody/volumeId`.
+            public var volumeId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/VolumeWritingStatsBody/charCount`.
+            public var charCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/VolumeWritingStatsBody/pages400`.
+            public var pages400: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/VolumeWritingStatsBody/chapters`.
+            public var chapters: [Components.Schemas.ChapterWritingStatsBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `VolumeWritingStatsBody`.
+            ///
+            /// - Parameters:
+            ///   - volumeId:
+            ///   - charCount:
+            ///   - pages400:
+            ///   - chapters:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                volumeId: Swift.String? = nil,
+                charCount: Swift.Int32? = nil,
+                pages400: Swift.Double? = nil,
+                chapters: [Components.Schemas.ChapterWritingStatsBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.volumeId = volumeId
+                self.charCount = charCount
+                self.pages400 = pages400
+                self.chapters = chapters
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case volumeId
+                case charCount
+                case pages400
+                case chapters
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.volumeId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .volumeId
+                )
+                self.charCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .charCount
+                )
+                self.pages400 = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .pages400
+                )
+                self.chapters = try container.decodeIfPresent(
+                    [Components.Schemas.ChapterWritingStatsBody].self,
+                    forKey: .chapters
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "volumeId",
+                    "charCount",
+                    "pages400",
+                    "chapters"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.volumeId,
+                    forKey: .volumeId
+                )
+                try container.encodeIfPresent(
+                    self.charCount,
+                    forKey: .charCount
+                )
+                try container.encodeIfPresent(
+                    self.pages400,
+                    forKey: .pages400
+                )
+                try container.encodeIfPresent(
+                    self.chapters,
+                    forKey: .chapters
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
         /// - Remark: Generated from `#/components/schemas/WorkArchive`.
@@ -5867,6 +13560,182 @@ extension Components {
                 case replayed
                 case unresolvedAnchors
                 case omittedRecords
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WritingStatsBody`.
+        public struct WritingStatsBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WritingStatsBody/totalCharCount`.
+            public var totalCharCount: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/WritingStatsBody/totalPages400`.
+            public var totalPages400: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/WritingStatsBody/volumes`.
+            public var volumes: [Components.Schemas.VolumeWritingStatsBody]?
+            /// - Remark: Generated from `#/components/schemas/WritingStatsBody/sceneById`.
+            public struct sceneByIdPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: Components.Schemas.SceneWritingStatsBody]
+                /// Creates a new `sceneByIdPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: Components.Schemas.SceneWritingStatsBody] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/WritingStatsBody/sceneById`.
+            public var sceneById: Components.Schemas.WritingStatsBody.sceneByIdPayload?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `WritingStatsBody`.
+            ///
+            /// - Parameters:
+            ///   - totalCharCount:
+            ///   - totalPages400:
+            ///   - volumes:
+            ///   - sceneById:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                totalCharCount: Swift.Int32? = nil,
+                totalPages400: Swift.Double? = nil,
+                volumes: [Components.Schemas.VolumeWritingStatsBody]? = nil,
+                sceneById: Components.Schemas.WritingStatsBody.sceneByIdPayload? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.totalCharCount = totalCharCount
+                self.totalPages400 = totalPages400
+                self.volumes = volumes
+                self.sceneById = sceneById
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case totalCharCount
+                case totalPages400
+                case volumes
+                case sceneById
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.totalCharCount = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .totalCharCount
+                )
+                self.totalPages400 = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .totalPages400
+                )
+                self.volumes = try container.decodeIfPresent(
+                    [Components.Schemas.VolumeWritingStatsBody].self,
+                    forKey: .volumes
+                )
+                self.sceneById = try container.decodeIfPresent(
+                    Components.Schemas.WritingStatsBody.sceneByIdPayload.self,
+                    forKey: .sceneById
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "totalCharCount",
+                    "totalPages400",
+                    "volumes",
+                    "sceneById"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.totalCharCount,
+                    forKey: .totalCharCount
+                )
+                try container.encodeIfPresent(
+                    self.totalPages400,
+                    forKey: .totalPages400
+                )
+                try container.encodeIfPresent(
+                    self.volumes,
+                    forKey: .volumes
+                )
+                try container.encodeIfPresent(
+                    self.sceneById,
+                    forKey: .sceneById
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WritingStatsResponseBody`.
+        public struct WritingStatsResponseBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WritingStatsResponseBody/snapshot`.
+            public struct snapshotPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `snapshotPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/WritingStatsResponseBody/snapshot`.
+            public var snapshot: Components.Schemas.WritingStatsResponseBody.snapshotPayload?
+            /// - Remark: Generated from `#/components/schemas/WritingStatsResponseBody/stats`.
+            public var stats: Components.Schemas.WritingStatsBody?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `WritingStatsResponseBody`.
+            ///
+            /// - Parameters:
+            ///   - snapshot:
+            ///   - stats:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                snapshot: Components.Schemas.WritingStatsResponseBody.snapshotPayload? = nil,
+                stats: Components.Schemas.WritingStatsBody? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.snapshot = snapshot
+                self.stats = stats
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case snapshot
+                case stats
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.snapshot = try container.decodeIfPresent(
+                    Components.Schemas.WritingStatsResponseBody.snapshotPayload.self,
+                    forKey: .snapshot
+                )
+                self.stats = try container.decodeIfPresent(
+                    Components.Schemas.WritingStatsBody.self,
+                    forKey: .stats
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "snapshot",
+                    "stats"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encodeIfPresent(
+                    self.stats,
+                    forKey: .stats
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
     }
