@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @main
@@ -40,13 +41,13 @@ private struct FixtureProjectView: View {
 }
 
 private struct FixtureListView: View {
-    @State private var editor: EditorState?
+    @State private var editor: FixtureEditingSession?
 
     var body: some View {
         List {
             ForEach([10_000, 100_000, 500_000], id: \.self) { count in
                 Button("\(count.formatted()) 文字のサンプル") {
-                    editor = EditorState(documentID: "fixture-\(count)", text: manuscriptFixture(characterCount: count))
+                    editor = FixtureEditingSession(characterCount: count)
                 }
                 .accessibilityIdentifier("fixture.\(count)")
             }
@@ -55,15 +56,33 @@ private struct FixtureListView: View {
         .navigationTitle("構成と原稿")
         .navigationDestination(isPresented: Binding(
             get: { editor != nil },
-            set: { if !$0, editor?.canLeave == true { editor = nil } }
+            set: { if !$0, editor?.state.canLeave == true { editor = nil } }
         )) {
-            if editor != nil {
-                AuthoringView(state: Binding(
-                    get: { editor! },
-                    set: { editor = $0 }
-                ), onLeave: { editor = nil })
+            if let session = editor {
+                FixtureEditorDestination(session: session) {
+                    if editor === session { editor = nil }
+                }
             }
         }
     }
+}
 
+private final class FixtureEditingSession: ObservableObject {
+    @Published var state: EditorState
+
+    init(characterCount: Int) {
+        state = EditorState(
+            documentID: "fixture-\(characterCount)",
+            text: manuscriptFixture(characterCount: characterCount)
+        )
+    }
+}
+
+private struct FixtureEditorDestination: View {
+    @ObservedObject var session: FixtureEditingSession
+    let onLeave: () -> Void
+
+    var body: some View {
+        AuthoringView(state: $session.state, onLeave: onLeave)
+    }
 }
