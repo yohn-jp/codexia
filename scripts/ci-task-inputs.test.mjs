@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
-import { captureTaskInputSource, taskInvocation } from './ci-task-inputs.mjs';
+import { captureTaskInputSource, taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
   return captureTaskInputSource({ root, sha, runtime })(task);
@@ -26,6 +27,7 @@ async function fixture(t) {
   await mkdir(path.join(root, '.github/workflows'), { recursive: true });
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci-group.mjs',
     'scripts/ci-contract.mjs', 'scripts/ci-workspace.mjs', '.github/workflows/verify.yml',
+    'scripts/architecture/package.json', 'scripts/architecture/package-lock.json', 'scripts/architecture/verify.mjs',
     'packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/index.test.mjs', 'docs/README.md']) {
     const target = path.join(root, file);
     await mkdir(path.dirname(target), { recursive: true });
@@ -62,6 +64,7 @@ test('task input closure binds source, test, dependency, environment, toolchain,
     ['packages/core/src/index.ts', 'source change\n', 'source'],
     ['packages/core/index.test.mjs', 'test change\n', 'tests'],
     ['packages/core/package.json', 'dependency change\n', 'dependencies'],
+    ['scripts/architecture/package-lock.json', 'isolated architecture dependency change\n', 'dependencies'],
   ]) {
     await writeFile(path.join(root, file), nextSha);
     await git(root, 'add', '.');
@@ -163,6 +166,8 @@ test('browser input proofs bind the lane image for both browsers in the shared W
   const digestsFile = path.join(mutatedScripts, 'ci-browser-image-digests.mjs');
   const digests = await readFile(digestsFile, 'utf8');
   await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
+  await mkdir(path.join(mutatedScripts, 'architecture'), { recursive: true });
+  await cp(new URL('architecture/constants.mjs', import.meta.url), path.join(mutatedScripts, 'architecture/constants.mjs'));
   const { captureTaskInputSource: captureWithChangedWebKitImage } = await import(
     pathToFileURL(path.join(mutatedScripts, 'ci-task-inputs.mjs')).href
   );
@@ -187,4 +192,37 @@ test('Passkey browser shard binds the dedicated acceptance environment', () => {
       'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
       'CODEXIA_PASSKEY_ACCEPTANCE'],
   });
+});
+
+test('architecture G5 proof binds its isolated tool lock, immutable image, invocation, and nested report location', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const closure = capture('architecture-g5');
+  assert.equal(taskWorkflowJob('architecture-g5'), 'unit');
+  assert.deepEqual(taskInvocation('architecture-g5', runtime.execPath), [
+    { executable: 'npm', arguments: ['ci', '--prefix', 'scripts/architecture', '--ignore-scripts', '--no-audit', '--no-fund'], environmentKeys: [] },
+    { executable: 'docker', arguments: ['pull', 'docker.io/threagile/threagile@sha256:abb9eccb111a2059c4876759a24245db02ad295b1608d3a4634ec250f38d9640'], environmentKeys: [] },
+    { executable: runtime.execPath, arguments: ['scripts/architecture/verify.mjs'], environmentKeys: ['CODEXIA_ARCHITECTURE_EVIDENCE_DIR'] },
+  ]);
+  assert.notEqual(closure.recipe, capture('unit-core').recipe);
+  assert.notEqual(closure.producers, capture('unit-core').producers);
+  const expectedEnvironment = {
+    CI: 'true', NODE_ENV: 'workflow-default', TZ: 'workflow-default', LANG: 'runner-default', LC_ALL: 'runner-default',
+    CODEXIA_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_test',
+    CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
+    CODEXIA_AUTH_TEST_DISPOSABLE: '1',
+    CODEXIA_ARCHITECTURE_EVIDENCE_DIR: '<CODEXIA_CI_REPORT_DIR>/architecture',
+  };
+  const expectedEnvironmentIdentity = {
+    runtime: { platform: runtime.platform, arch: runtime.arch, imageOS: runtime.imageOS, imageVersion: runtime.imageVersion },
+    env: expectedEnvironment,
+  };
+  assert.equal(closure.environment, createHash('sha256').update(JSON.stringify(expectedEnvironmentIdentity)).digest('hex'));
+
+  await writeFile(path.join(root, 'scripts/architecture/package-lock.json'), 'updated lock identity\n');
+  await git(root, 'add', 'scripts/architecture/package-lock.json');
+  await git(root, 'commit', '-qm', 'change architecture tool lock');
+  const changed = captureTaskInputSource({ root, sha: await git(root, 'rev-parse', 'HEAD'), runtime })('architecture-g5');
+  assert.notEqual(changed.dependencies, closure.dependencies);
 });

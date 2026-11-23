@@ -11,14 +11,14 @@ import {
   LIKEC4_GENERATOR,
   LIKEC4_SOURCE_PATH,
   LIKEC4_VERSION,
+  REQUIRED_RISK_CHECK_IDS,
   REQUIRED_RISK_IDS,
   validateLikeC4Export,
+  validateThreatModelCheckIds,
   validateThreatRisks,
   verifyGeneratedMermaid,
 } from './contract.mjs';
-
-export const THREAGILE_IMAGE =
-  'docker.io/threagile/threagile@sha256:abb9eccb111a2059c4876759a24245db02ad295b1608d3a4634ec250f38d9640';
+import { THREAGILE_IMAGE } from './constants.mjs';
 export const THREAT_MODEL_PATH = 'docs/architecture/threagile/model.yaml';
 export const THREAT_MODEL_DOC_PATH = 'docs/architecture/THREAT-MODEL.md';
 export const MERMAID_DERIVATIVE_PATH = 'docs/architecture/likec4/generated/system-overview.mmd';
@@ -107,6 +107,7 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
   const publicDesign = await readFile(designFile, 'utf8');
   const threatDoc = await readFile(threatDocFile, 'utf8');
   assertNoPublicSecrets([modelSource, derivative, threatModel, publicDesign, threatDoc]);
+  validateThreatModelCheckIds(threatModel);
 
   const likec4Version = run(likec4Bin, ['--version']).trim();
   assert.equal(likec4Version, LIKEC4_VERSION, 'LikeC4 binary does not match the isolated lock');
@@ -145,6 +146,25 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
     const boundaryControl = expectRejection('invalid-trust-boundary', () =>
       validateLikeC4Export(invalidBoundaryExport),
     /trust boundary application/u);
+
+    const invalidOperationsDir = join(temp, 'invalid-operations-route');
+    await mkdir(invalidOperationsDir);
+    const operationsRouteAnchor = "  author -> web 'Writes through the authoring UI'";
+    const injectedOperationsRoute = modelSource.replace(operationsRouteAnchor,
+      `${operationsRouteAnchor}\n  web -> codexia.ssh 'Unapproved direct host shell'`);
+    assert.notEqual(injectedOperationsRoute, modelSource,
+      'Protected operations route failure injection target was not found');
+    await writeFile(join(invalidOperationsDir, 'model.likec4'), injectedOperationsRoute);
+    run(likec4Bin, ['validate', '--max-warnings', '0', invalidOperationsDir]);
+    const injectedOperationsExportFile = join(temp, 'invalid-operations-route.json');
+    run(likec4Bin, [
+      'export', 'json', '--pretty', '--skip-layout', '-o', injectedOperationsExportFile,
+      invalidOperationsDir,
+    ]);
+    const invalidOperationsExport = JSON.parse(await readFile(injectedOperationsExportFile, 'utf8'));
+    const operationsRouteControl = expectRejection('public-to-protected-operations-route', () =>
+      validateLikeC4Export(invalidOperationsExport),
+    /client.*host-operations.*web -> codexia\.ssh/u);
 
     const imageDigest = execFileSync(dockerBin, [
       'image', 'inspect', '--format', '{{index .RepoDigests 0}}', THREAGILE_IMAGE,
@@ -224,9 +244,10 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
       threagile: {
         riskInstanceCount: risks.length,
         requiredRiskIds: REQUIRED_RISK_IDS,
+        requiredVerificationReferences: REQUIRED_RISK_CHECK_IDS,
         suppressedRequiredRisks: 0,
       },
-      failureInjection: [boundaryControl, riskControl, secretControl],
+      failureInjection: [boundaryControl, operationsRouteControl, riskControl, secretControl],
       outputs: outputDigests,
       note: 'This report is model/tooling evidence for the exact source SHA; it does not certify live API, OAuth, deployment, backup or restore behavior.',
     };
@@ -238,11 +259,12 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 3) {
-    console.error('Usage: node scripts/architecture/verify.mjs <evidence-directory-outside-repository>');
+  const evidenceDirectory = process.argv[2] ?? process.env.CODEXIA_ARCHITECTURE_EVIDENCE_DIR;
+  if (process.argv.length > 3 || !evidenceDirectory) {
+    console.error('Usage: node scripts/architecture/verify.mjs <evidence-directory-outside-repository> (or CODEXIA_ARCHITECTURE_EVIDENCE_DIR)');
     process.exitCode = 2;
   } else {
-    verifyArchitecture(process.argv[2])
+    verifyArchitecture(evidenceDirectory)
       .then(report => console.log(JSON.stringify(report)))
       .catch(error => { console.error(error); process.exitCode = 1; });
   }

@@ -14,8 +14,10 @@ export const REQUIRED_TRUST_BOUNDARIES = Object.freeze({
   ios: 'client',
   iosJournal: 'client',
   externalAi: 'client',
+  edge: 'edge',
   'edge.workers': 'edge',
   'edge.tunnel': 'edge',
+  codexia: 'application-host',
   'codexia.fastify': 'application',
   'codexia.fastify.betterAuth': 'application',
   'codexia.fastify.mcp': 'application',
@@ -26,9 +28,11 @@ export const REQUIRED_TRUST_BOUNDARIES = Object.freeze({
   'codexia.history': 'data',
   'codexia.backupExecutor': 'host-operations',
   'codexia.ssh': 'host-operations',
+  operations: 'operations',
   'operations.workflow': 'operations',
   'operations.ansible': 'operations',
   tailscale: 'operations',
+  offsite: 'offsite-storage',
   'offsite.s3': 'offsite-storage',
 });
 
@@ -60,16 +64,23 @@ export const REQUIRED_BIDIRECTIONAL_RELATIONSHIPS = Object.freeze([
 ]);
 
 export const FORBIDDEN_RELATIONSHIPS = Object.freeze([
-  ['author', 'codexia.backupExecutor'],
-  ['web', 'codexia.backupExecutor'],
-  ['ios', 'codexia.backupExecutor'],
-  ['externalAi', 'codexia.backupExecutor'],
-  ['edge.tunnel', 'codexia.backupExecutor'],
-  ['codexia.fastify.mcp', 'codexia.backupExecutor'],
+  ['author', 'codexia.ssh'],
+  ['web', 'codexia.ssh'],
+  ['ios', 'codexia.ssh'],
+  ['externalAi', 'codexia.ssh'],
+  ['edge.tunnel', 'codexia.ssh'],
+  ['codexia.fastify.mcp', 'codexia.ssh'],
   ['web', 'operations.ansible'],
   ['ios', 'operations.ansible'],
   ['externalAi', 'operations.ansible'],
 ]);
+
+const APPROVED_TRUST_BOUNDARIES = new Set([
+  'client', 'edge', 'application-host', 'application', 'data',
+  'host-operations', 'operations', 'offsite-storage',
+]);
+const PRODUCT_REQUEST_BOUNDARIES = new Set(['client', 'edge', 'application-host', 'application']);
+const PROTECTED_OPERATIONS_BOUNDARIES = new Set(['operations', 'host-operations']);
 
 export const REQUIRED_RISK_IDS = Object.freeze([
   'codexia-bola-project-isolation',
@@ -101,6 +112,20 @@ export const REQUIRED_RISK_ASSETS = Object.freeze({
   'codexia-public-pages-disclosure': 'public-pages',
 });
 
+export const REQUIRED_RISK_CHECK_IDS = Object.freeze({
+  'codexia-bola-project-isolation': ['REQ-AUTH-002', 'REQ-DATA-003', 'AUTH-06', 'MCPV-004'],
+  'codexia-mcp-issuer-resource': ['EXT-MCP-001', 'AUTH-05', 'AUTH-06', 'MCPV-002', 'MCPV-004'],
+  'codexia-session-scope-confusion': ['EXT-AUTH-001', 'EXT-SHARE-001', 'AUTH-04', 'AUTH-05', 'AUTH-06', 'REQ-AUTH-005'],
+  'codexia-false-db-receipt': ['REQ-DATA-002:O01', 'REQ-API-002:O01', 'MCPV-005'],
+  'codexia-edge-operations-plane': ['EXT-EDGE-001', 'EXT-EDGE-002', 'EXT-OPS-001', 'AUTH-07'],
+  'codexia-backup-key-restore': [
+    'EXT-OPS-003', 'BACKUP-S3-001', 'BACKUP-S3-002', 'BACKUP-S3-003', 'BACKUP-S3-004',
+    'BACKUP-S3-005', 'BACKUP-S3-006', 'BACKUP-S3-007', 'BKC-T04', 'BKC-T05', 'BKC-T06',
+    'BKC-T07', 'BKC-T08', 'BKC-T10',
+  ],
+  'codexia-public-pages-disclosure': ['REQ-QUAL-002', 'AUTH-08', 'G5'],
+});
+
 const SUPPRESSED_STATUSES = new Set(['mitigated', 'false-positive']);
 const SECRET_PATTERNS = Object.freeze([
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u,
@@ -122,6 +147,10 @@ export function validateLikeC4Export(model) {
     assert.equal(element.metadata?.trustBoundary, boundary,
       `LikeC4 element ${id} must remain in trust boundary ${boundary}`);
   }
+  for (const element of Object.values(model.elements)) {
+    assert.ok(APPROVED_TRUST_BOUNDARIES.has(element.metadata?.trustBoundary),
+      `LikeC4 element ${element.id ?? '<unknown>'} must use an approved trust boundary`);
+  }
 
   const pairs = new Set();
   const relations = Object.values(model.relations);
@@ -142,7 +171,18 @@ export function validateLikeC4Export(model) {
   }
   for (const [source, target] of FORBIDDEN_RELATIONSHIPS) {
     assert.ok(!pairs.has(`${source}->${target}`),
-      `LikeC4 model must not cross the application and operations boundary: ${source} -> ${target}`);
+      `LikeC4 model must not cross the product and protected operations boundary: ${source} -> ${target}`);
+  }
+  for (const relation of relations) {
+    const source = relation.source?.model;
+    const target = relation.target?.model;
+    const sourceBoundary = model.elements[source]?.metadata?.trustBoundary;
+    const targetBoundary = model.elements[target]?.metadata?.trustBoundary;
+    const crossesProtectedOperations =
+      (PRODUCT_REQUEST_BOUNDARIES.has(sourceBoundary) && PROTECTED_OPERATIONS_BOUNDARIES.has(targetBoundary)) ||
+      (PROTECTED_OPERATIONS_BOUNDARIES.has(sourceBoundary) && PRODUCT_REQUEST_BOUNDARIES.has(targetBoundary));
+    assert.ok(!crossesProtectedOperations,
+      `LikeC4 model must not cross from ${sourceBoundary} to ${targetBoundary}: ${source} -> ${target}`);
   }
 
   const modelText = Object.values(model.elements).map(element =>
@@ -171,6 +211,25 @@ export function validateThreatRisks(risks) {
         `Threagile risk ${id} must remain in trust boundary ${REQUIRED_RISK_BOUNDARIES[id]}`);
       assert.equal(risk.most_relevant_technical_asset, REQUIRED_RISK_ASSETS[id],
         `Threagile risk ${id} must remain attached to asset ${REQUIRED_RISK_ASSETS[id]}`);
+    }
+  }
+  return true;
+}
+
+/** @param {string} threatModelSource */
+export function validateThreatModelCheckIds(threatModelSource) {
+  assert.equal(typeof threatModelSource, 'string', 'Threagile source must be text');
+  for (const [id, requiredChecks] of Object.entries(REQUIRED_RISK_CHECK_IDS)) {
+    const header = new RegExp(`^  [^\\n]+:\\n    id: ${id}\\n`, 'mu').exec(threatModelSource);
+    assert.ok(header, `Threagile source is missing required risk ${id}`);
+    const start = header.index + header[0].length;
+    const remainder = threatModelSource.slice(start);
+    const nextRisk = /^  [^\n]+:\n    id: |^risk_tracking:/mu.exec(remainder);
+    const body = remainder.slice(0, nextRisk?.index ?? remainder.length);
+    const check = /^    check:\s*(.+)$/mu.exec(body)?.[1] ?? '';
+    for (const checkId of requiredChecks) {
+      assert.ok(check.includes(checkId),
+        `Threagile risk ${id} is missing verification reference ${checkId}`);
     }
   }
   return true;

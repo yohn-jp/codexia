@@ -28,6 +28,7 @@ export const VERIFICATION_TASKS = [
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
   'coverage',
+  'architecture-g5',
 ];
 // Execution groups batch work without removing any validation obligation.
 // Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
@@ -36,6 +37,7 @@ export const VERIFICATION_TASKS = [
 export const VERIFICATION_GROUPS = {
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
+  'unit-architecture': ['architecture-g5'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
   'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
   'build-core': ['build-core', 'audit-core'],
@@ -59,3 +61,9 @@ export function requiredBuildProfile(group) {
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
 export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'unit', 'types', 'build', 'oci', 'browser']);
+
+/** @param {string[]} tasks */
+export function requiresWorkspacePreparation(tasks) {
+  return tasks.some(task => task.startsWith('unit-') || task.startsWith('typecheck-') ||
+    task.startsWith('test-types-') || task === 'safety');
+}

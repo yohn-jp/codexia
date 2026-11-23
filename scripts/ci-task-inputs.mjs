@@ -4,10 +4,11 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { browserRuntimeRequirements } from './ci-browser-image-digests.mjs';
+import { THREAGILE_IMAGE } from './architecture/constants.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
-const dependencyPath = file => /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
+const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
 export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
   'docs/deployment/BACKUP.md',
   'docs/deployment/IAC.md',
@@ -53,6 +54,7 @@ function taskOverrides(task) {
       CODEXIA_E2E_STATE_DIR: '<isolated-state-dir>', CODEXIA_E2E_OUTPUT_DIR: path.resolve('tests/e2e/test-results', task),
       CODEXIA_E2E_PROJECT_TITLE: '<disposable-fixture-title>', CODEXIA_CI_REPORT_DIR: '<task-report-dir>' };
   }
+  if (task === 'architecture-g5') return { CODEXIA_ARCHITECTURE_EVIDENCE_DIR: '<CODEXIA_CI_REPORT_DIR>/architecture' };
   return {};
 }
 
@@ -72,13 +74,18 @@ export function taskInvocation(task, executable = process.execPath) {
     const [, profile, ...suite] = task.split('-');
     return { executable, arguments: ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'], environmentKeys };
   }
+  if (task === 'architecture-g5') return [
+    { executable: 'npm', arguments: ['ci', '--prefix', 'scripts/architecture', '--ignore-scripts', '--no-audit', '--no-fund'], environmentKeys: [] },
+    { executable: 'docker', arguments: ['pull', THREAGILE_IMAGE], environmentKeys: [] },
+    { executable, arguments: ['scripts/architecture/verify.mjs'], environmentKeys },
+  ];
   throw new Error(`No canonical invocation for ${task}`);
 }
 
 function taskEnvironment(task, group, runtime) {
   const env = { CI: 'true', NODE_ENV: 'workflow-default', TZ: 'workflow-default',
     LANG: 'runner-default', LC_ALL: 'runner-default' };
-  if (task.startsWith('unit-')) Object.assign(env, {
+  if (group.startsWith('unit-')) Object.assign(env, {
     CODEXIA_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_test',
     CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
@@ -107,6 +114,7 @@ function taskProducerRecipe(task) {
   const external = [];
   if (task.startsWith('unit-') || task.startsWith('browser-')) external.push(POSTGRES_CI_IMAGE);
   if (task.startsWith('oci-')) external.push('docker:ubuntu-24.04-host');
+  if (task === 'architecture-g5') external.push(THREAGILE_IMAGE);
   return { group, task, prerequisites: [...new Set(prerequisites)].sort(), external,
     runnerClass: group.startsWith('browser-') ? 'pinned-playwright-container' : 'ubuntu-24.04' };
 }

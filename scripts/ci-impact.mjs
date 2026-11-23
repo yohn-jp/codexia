@@ -160,6 +160,10 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (file.startsWith('docs/architecture/') || file.startsWith('docs/deployment/') || file.startsWith('docs/security/') ||
+        file === 'docs/verification/ARCHITECTURE-ATLAS.md' ||
+        file.startsWith('scripts/architecture/') || file === 'scripts/architecture-diagrams/pack.mjs' ||
+        file === 'scripts/architecture-diagrams/pack.test.mjs') add('architecture-g5');
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
       continue;
@@ -276,7 +280,7 @@ export function verificationPlanOutputs(plan) {
   validateVerificationPlan(plan);
   return {
     plan: JSON.stringify(plan),
-    unit: JSON.stringify(['core', 'modules'].filter(id => plan.groups.includes(`unit-${id}`))),
+    unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
     types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),

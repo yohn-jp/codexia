@@ -6,15 +6,17 @@ Threagile owns threat scenarios, assets, trust boundaries, risk identifiers and 
 
 ## Tracked risks
 
-| Threagile risk ID | Required design references | Threat focus | Tracking state |
-| --- | --- | --- | --- |
-| `codexia-bola-project-isolation` | REQ-AUTH-002, REQ-DATA-003 | Object or project identifier crosses an authorization boundary | `unchecked` |
-| `codexia-mcp-issuer-resource` | REQ-AUTH-001, REQ-AUTH-003, REQ-EXT-002, REQ-MCP-001 | OAuth issuer, resource, client assignment or MCP scope is confused | `unchecked` |
-| `codexia-session-scope-confusion` | REQ-AUTH-002, REQ-AUTH-003, REQ-AUTH-005 | Owner, browser session, external MCP client and reader disclosure scopes are confused | `unchecked` |
-| `codexia-false-db-receipt` | REQ-DATA-002, REQ-API-002 | A mutation is reported as committed without a durable PostgreSQL revision receipt | `unchecked` |
-| `codexia-edge-operations-plane` | REQ-EXT-001, REQ-OPS-001, REQ-OPS-002 | Public Cloudflare routing is mistaken for project authorization or host administration | `unchecked` |
-| `codexia-backup-key-restore` | REQ-OPS-003, REQ-OPS-004, REQ-OPS-005 | Age key separation, ciphertext identity, independent receipt or isolated restore fails | `unchecked` |
-| `codexia-public-pages-disclosure` | REQ-EXT-002, REQ-QUAL-002 | A public static architecture artifact contains credentials or private source data | `unchecked` |
+| Threagile risk ID | Design references | Existing verification references | Threat focus | Tracking state |
+| --- | --- | --- | --- | --- |
+| `codexia-bola-project-isolation` | REQ-AUTH-002, REQ-DATA-003 | AUTH-06, MCPV-004; [traceability register](../verification/TRACEABILITY-REGISTER.md) | Object or project identifier crosses an authorization boundary | `unchecked` |
+| `codexia-mcp-issuer-resource` | REQ-AUTH-001, REQ-AUTH-003, REQ-MCP-001 | EXT-MCP-001, AUTH-05/06, MCPV-002/004 | OAuth issuer, resource, client assignment or MCP scope is confused | `unchecked` |
+| `codexia-session-scope-confusion` | REQ-AUTH-002, REQ-AUTH-003, REQ-AUTH-005 | EXT-AUTH-001, EXT-SHARE-001, AUTH-04/05/06; REQ-AUTH-005 remains unmapped | Owner, browser session, external MCP client and reader disclosure scopes are confused | `unchecked` |
+| `codexia-false-db-receipt` | REQ-DATA-002, REQ-API-002 | REQ-DATA-002:O01, REQ-API-002:O01, MCPV-005; [existing E2E candidate](../verification/TRACEABILITY-REGISTER.md) | A mutation is reported as committed without a durable PostgreSQL revision receipt | `unchecked` |
+| `codexia-edge-operations-plane` | REQ-EXT-001, REQ-OPS-001, REQ-OPS-002 | EXT-EDGE-001/002, EXT-OPS-001, AUTH-07, G5 | Public Cloudflare routing is mistaken for project authorization or host administration | `unchecked` |
+| `codexia-backup-key-restore` | REQ-OPS-003, REQ-OPS-004, REQ-OPS-005 | EXT-OPS-003, BACKUP-S3-001–007, BKC-T04–08 and BKC-T10 | Age key separation, ciphertext identity, independent receipt or isolated restore fails | `unchecked` |
+| `codexia-public-pages-disclosure` | REQ-EXT-002, REQ-QUAL-002 | AUTH-08, G5; `scripts/audit/portal.test.mjs` | A public static architecture artifact contains credentials or private source data | `unchecked` |
+
+These are references to the repository's requirement, interface, and acceptance identifiers, not claims that the referenced runtime tests passed. Their current mapped/unverified, unmapped, or unimplemented status remains authoritative in the [traceability register](../verification/TRACEABILITY-REGISTER.md). The `check` field for every risk carries the exact references and is validated by G5.
 
 The `risk_tracking` entries use wildcard patterns to bind each category to its generated Threagile risk instances. Every risk remains `unchecked`; the listed mitigations are design controls that require separate implementation and runtime evidence. No risk is marked `mitigated` or `false-positive` by this model.
 
@@ -33,7 +35,7 @@ These groupings describe trust relationships in the design. Actual Cloudflare, T
 
 The scoped verifier runs LikeC4 syntax/semantic validation and structural boundary checks, regenerates the checked Mermaid derivative byte-for-byte, analyzes the Threagile model with the pinned image, checks required risk instances and suppression state, and scans public architecture inputs for secret-like values.
 
-It injects a wrong LikeC4 trust boundary, marks a required risk as mitigated, and inserts a synthetic bearer value. Each injection must be rejected by its corresponding check. This proves that the static gate detects those model faults; it does not prove the live API, OAuth, UI, host, backup or restore implementation.
+It injects a wrong LikeC4 trust boundary and a Desktop Web-to-host-SSH relation into separate fixtures. LikeC4 parses and exports both fixtures before the structural checks must reject them. It also marks a required risk as mitigated and inserts a synthetic bearer value. Missing verification identifiers, both boundary violations, risk suppression and secret exposure must be rejected. This proves that the static gate detects those model faults; it does not prove the live API, OAuth, UI, host, backup or restore implementation.
 
 Run from a clean source checkout:
 

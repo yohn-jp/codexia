@@ -879,7 +879,7 @@ individual_risk_categories:
     cheat_sheet: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
     action: Reject object access unless principal, project, object, revision and effect all match.
     mitigation: Central Fastify admission and the PostgreSQL project scope remain authoritative.
-    check: REQ-AUTH-002; REQ-DATA-003; negative cross-project API tests against a disposable PostgreSQL database.
+    check: REQ-AUTH-002; REQ-DATA-003; AUTH-06; MCPV-004; TRACEABILITY-REGISTER tests remain mapped-unverified until exact API and PostgreSQL checks run.
     function: architecture
     stride: elevation-of-privilege
     detection_logic: Review request object identifiers and project-scoped SQL reads/writes for fail-closed authorization.
@@ -910,7 +910,7 @@ individual_risk_categories:
     cheat_sheet: https://www.rfc-editor.org/rfc/rfc9068
     action: Validate trusted issuer, exact resource audience, principal, project assignment and MCP scope.
     mitigation: Better Auth and centralized Fastify admission enforce OAuth, project and read/compute/propose scope.
-    check: REQ-AUTH-001; REQ-AUTH-003; REQ-EXT-002; MCP OAuth negative issuer/resource/scope scenarios.
+    check: EXT-MCP-001; REQ-AUTH-001; REQ-AUTH-003; AUTH-05; AUTH-06; MCPV-002; MCPV-004; issuer/resource/scope scenarios remain unchecked pending runtime acceptance.
     function: architecture
     stride: spoofing
     detection_logic: Compare token issuer, resource metadata, registered client assignments and requested MCP effect.
@@ -940,7 +940,7 @@ individual_risk_categories:
     cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
     action: Bind every request to its authenticated actor and explicit project/data disclosure scope.
     mitigation: Better Auth session identity and route authorization remain independent from UI and edge state.
-    check: REQ-AUTH-002; REQ-AUTH-003; REQ-AUTH-005; cross-principal, share-reader and reauthentication tests.
+    check: EXT-AUTH-001; EXT-SHARE-001; REQ-AUTH-002; REQ-AUTH-003; REQ-AUTH-005; AUTH-04; AUTH-05; AUTH-06; REQ-AUTH-005 remains unmapped and unimplemented.
     function: architecture
     stride: elevation-of-privilege
     detection_logic: Inspect session-to-principal resolution, project assignments, reader disclosure and owner-only route effects.
@@ -970,7 +970,7 @@ individual_risk_categories:
     cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
     action: Confirm the transaction commit and durable revision receipt before reporting success.
     mitigation: PostgreSQL owns the revision and receipt transaction; response loss remains reconcilable by operation identity.
-    check: REQ-DATA-002; REQ-API-002; injected database failure and response-loss receipt tests.
+    check: REQ-DATA-002:O01; REQ-API-002:O01; MCPV-005; tests/e2e/core.acceptance.spec.ts response-loss receipt scenario remains mapped-unverified.
     function: architecture
     stride: repudiation
     detection_logic: Trace receipt creation to the same PostgreSQL transaction and reject success on rollback or unknown commit.
@@ -1001,7 +1001,7 @@ individual_risk_categories:
     cheat_sheet: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
     action: Keep Workers/Tunnel routing, Fastify project authorization and Tailscale/SSH/Ansible administration separate.
     mitigation: Cloudflare carries UI/API traffic only; host state changes use the protected GitHub Actions to Ansible path.
-    check: REQ-EXT-001; REQ-OPS-001; REQ-OPS-002; verify deny of web, MCP and Cloudflare access to operator actions.
+    check: EXT-EDGE-001; EXT-EDGE-002; EXT-OPS-001; REQ-EXT-001; REQ-OPS-001; REQ-OPS-002; AUTH-07; G5 rejects public client or API relations into protected operations; production policy remains unchecked.
     function: architecture
     stride: elevation-of-privilege
     detection_logic: Check for any route from public UI/MCP to SSH, Ansible, backup executor or Tailscale administration.
@@ -1032,7 +1032,7 @@ individual_risk_categories:
     cheat_sheet: https://age-encryption.org/
     action: Keep age recovery keys and S3 credentials outside public artifacts; compare downloaded bytes and protected receipt before isolated drill.
     mitigation: Reuse backup.sh, host lock, age-encrypted v2 artifact and isolated restore drill; Web and MCP cannot restore production.
-    check: REQ-OPS-003; REQ-OPS-004; REQ-OPS-005; BACKUP-S3-001 through BACKUP-S3-005 remain runtime acceptance.
+    check: EXT-OPS-003; REQ-OPS-003; REQ-OPS-004; REQ-OPS-005; BACKUP-S3-001; BACKUP-S3-002; BACKUP-S3-003; BACKUP-S3-004; BACKUP-S3-005; BACKUP-S3-006; BACKUP-S3-007; BKC-T04; BKC-T05; BKC-T06; BKC-T07; BKC-T08; BKC-T10; all S3 and restore checks remain unimplemented or unchecked.
     function: operations
     stride: tampering
     detection_logic: Compare backup ID, source identity, ciphertext digest, manifest and independent receipt; exercise key loss and altered objects.
@@ -1063,7 +1063,7 @@ individual_risk_categories:
     cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
     action: Publish only allowlisted static design and scan source inputs and generated public files for secrets.
     mitigation: Keep one Repository Audit Pages publisher, public static diagrams and no API, MCP, VM or repository credentials.
-    check: REQ-EXT-002; REQ-QUAL-002; injected secret-like artifact must fail the G5 public-artifact scanner.
+    check: REQ-EXT-002; REQ-QUAL-002; AUTH-08; G5; scripts/audit/portal.test.mjs; injected secret-like input must fail the public-artifact scanner.
     function: development
     stride: information-disclosure
     detection_logic: Scan the threat model, LikeC4 source, generated Mermaid and architecture docs before publishing.

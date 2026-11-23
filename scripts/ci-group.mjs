@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
+import { VERIFICATION_GROUPS, requiredBuildProfile, requiresWorkspacePreparation } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { runBounded } from './ci-parallel.mjs';
@@ -55,7 +55,7 @@ try {
   if (group.startsWith('browser-')) await node('scripts/verify-browser-runtime.mjs');
 } catch (error) { preparationError = String(error); }
 const preparationStarted = Date.now();
-if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationError) {
+if (requiresWorkspacePreparation(tasks) && !preparationError) {
   try {
     const filename = path.resolve(reportDirectory, 'workspace-preparation.json');
     await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'selected-group', filename], { CODEXIA_CI_GROUP_TASKS: JSON.stringify(tasks) });
@@ -130,6 +130,13 @@ async function executeTaskInContext(task, index, scope) {
         // These supplemental contract tests remain mandatory for affected plans even when the
         // static coverage check itself is safely reused.
         if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/ci-task-input-proof.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
+      } else if (task === 'architecture-g5') {
+        await run('npm', ['ci', '--prefix', 'scripts/architecture', '--ignore-scripts', '--no-audit', '--no-fund']);
+        const { THREAGILE_IMAGE } = await import('./architecture/constants.mjs');
+        await run('docker', ['pull', THREAGILE_IMAGE]);
+        await run(process.execPath, ['scripts/architecture/verify.mjs'], {
+          CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path.join(reportDirectory, 'architecture'),
+        });
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }

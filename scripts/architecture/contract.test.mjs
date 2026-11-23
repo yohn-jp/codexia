@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   assertNoPublicSecrets,
   createGeneratedMermaid,
   parseGeneratedMermaid,
   REQUIRED_RISK_ASSETS,
   REQUIRED_RISK_BOUNDARIES,
+  REQUIRED_RISK_CHECK_IDS,
   REQUIRED_RELATIONSHIPS,
   REQUIRED_BIDIRECTIONAL_RELATIONSHIPS,
   REQUIRED_TRUST_BOUNDARIES,
   validateLikeC4Export,
+  validateThreatModelCheckIds,
   validateThreatRisks,
   verifyGeneratedMermaid,
 } from './contract.mjs';
@@ -59,6 +62,12 @@ test('LikeC4 export keeps approved element boundaries and trust relationships', 
     id: 'untrusted', source: { model: 'web' }, target: { model: 'codexia.backupExecutor' },
   };
   assert.throws(() => validateLikeC4Export(crossedPlane), /web -> codexia\.backupExecutor/u);
+
+  const directShell = likeC4Export();
+  directShell.relations.webToSsh = {
+    id: 'webToSsh', source: { model: 'web' }, target: { model: 'codexia.ssh' },
+  };
+  assert.throws(() => validateLikeC4Export(directShell), /client.*host-operations|web -> codexia\.ssh/u);
 });
 
 test('Threagile risks cover each required scenario and cannot be silently suppressed', () => {
@@ -76,6 +85,16 @@ test('Threagile risks cover each required scenario and cannot be silently suppre
   const misassignedAsset = threatRisks();
   misassignedAsset[0].most_relevant_technical_asset = 'public-pages';
   assert.throws(() => validateThreatRisks(misassignedAsset), /must remain attached to asset codexia-api/u);
+});
+
+test('each Threagile risk retains its existing verification references', () => {
+  const source = readFileSync(new URL('../../docs/architecture/threagile/model.yaml', import.meta.url), 'utf8');
+  assert.equal(validateThreatModelCheckIds(source), true);
+  assert.deepEqual(Object.keys(REQUIRED_RISK_CHECK_IDS).sort(), Object.keys(REQUIRED_RISK_BOUNDARIES).sort());
+
+  const missingReference = source.replace('AUTH-06', 'AUTH-X6');
+  assert.throws(() => validateThreatModelCheckIds(missingReference),
+    /codexia-bola-project-isolation.*verification reference AUTH-06/u);
 });
 
 test('public architecture inputs reject credential exposure', () => {

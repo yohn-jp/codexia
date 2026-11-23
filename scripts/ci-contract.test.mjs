@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS, requiresWorkspacePreparation } from './ci-contract.mjs';
 import { browserRuntimeRequirements, PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
 import { createVerificationPlan } from './ci-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
@@ -19,6 +19,11 @@ test('the certified graph covers every declared obligation within the twenty-job
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
+  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5']);
+  assert.equal(requiresWorkspacePreparation(['architecture-g5']), false);
+  assert.equal(requiresWorkspacePreparation(['unit-root']), true);
+  const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
+  assert.match(runner, /CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path\.join\(reportDirectory, 'architecture'\)/u);
   assert.deepEqual(REQUIRED_VERIFICATION_JOBS, ['plan', ...Object.keys(VERIFICATION_GROUPS), 'certification']);
   for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile']]) {
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');
