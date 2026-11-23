@@ -132,7 +132,17 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
     await page.getByLabel("新しい名前").fill("Renamed console passkey");
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Renamed console passkey", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Renamed console passkeyを削除" })).toBeDisabled();
+    await page.getByRole("button", { name: "Renamed console passkeyの名前を変更" }).click();
+    await page.getByLabel("新しい名前").fill("Reconciled console passkey");
+    await page.route(`${origin}/api/auth/passkey/update-passkey`, async (route) => {
+      // Commit the rename on the fixture server, then lose its response in the browser.
+      expect((await route.fetch()).status()).toBe(200);
+      await route.abort("failed");
+    }, { times: 1 });
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Reconciled console passkey", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("操作の応答を確認できませんでした。再取得した一覧で状態を確認してください。");
+    await expect(page.getByRole("button", { name: "Reconciled console passkeyを削除" })).toBeDisabled();
     const deniedDeletion = await page.evaluate(async () => {
       const rows = await (await fetch("/api/auth/passkey/list-user-passkeys")).json() as { id: string }[];
       const response = await fetch("/api/auth/passkey/delete-passkey", {
@@ -217,13 +227,16 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   }
 
   const ownerSessionWithBearer = `${origin}/api/auth/codexia/owner-session`;
-  const sendBearerToOwnerSession = (route: Route) => route.continue({
-    headers: { ...route.request().headers(), authorization: "Bearer not-an-owner-session" },
-  });
+  const sendBearerToOwnerSession = async (route: Route) => {
+    const response = await route.fetch({
+      headers: { ...route.request().headers(), authorization: "Bearer not-an-owner-session" },
+    });
+    expect(response.status()).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "OWNER_SESSION_COOKIE_REQUIRED" });
+    await route.fulfill({ response });
+  };
   await page.route(ownerSessionWithBearer, sendBearerToOwnerSession);
-  const forbiddenCheck = page.waitForResponse(response => response.url() === ownerSessionWithBearer);
   await page.reload();
-  expect((await forbiddenCheck).status()).toBe(403);
   await expect(page.getByRole("heading", { name: "管理権限がありません", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理コンソール" })).toHaveCount(0);
   await page.unroute(ownerSessionWithBearer, sendBearerToOwnerSession);
