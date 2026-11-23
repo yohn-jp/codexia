@@ -4,7 +4,7 @@ import { signInAuthorBrowser, startAuthorBrowserFixture, type AuthorNavigation, 
 
 export type AuthorApiFetch = APIRequestContext["fetch"];
 export interface AuthorSession { origin: string; fetch: AuthorApiFetch }
-export type AuthorizeAuthor = (shell: Shell, targetPage?: Page, navigation?: AuthorNavigation) => Promise<AuthorSession>;
+export type AuthorizeAuthor = (shell: Shell, targetPage?: Page, navigation?: AuthorNavigation & { apiSetupOnly?: true }) => Promise<AuthorSession>;
 
 export const test = base.extend<{
   authorizeAuthor: AuthorizeAuthor;
@@ -21,24 +21,32 @@ export const test = base.extend<{
     const origin = authorServer.apiOrigin;
     const request = await playwright.request.newContext();
     const sessions = new WeakMap<Page, AuthorSession>();
+    const sessionFor = (accessToken: string): AuthorSession => ({ origin, fetch: (path, options) => {
+      if (typeof path !== "string") throw new Error("Author API requests require an explicit URL or path");
+      const url = new URL(path, origin);
+      if (url.origin !== origin || !url.pathname.startsWith("/api/") || url.pathname.startsWith("/api/auth/")) {
+        throw new Error("The test author bearer is scoped to data requests on the fixture origin");
+      }
+      return request.fetch(url.href, {
+        ...options,
+        maxRedirects: 0,
+        headers: { ...options?.headers, Authorization: `Bearer ${accessToken}` },
+      });
+    } });
     try {
       await use(async (shell, targetPage = page, navigation = {}) => {
+        if (navigation.apiSetupOnly) {
+          if (navigation.path || navigation.expectedView || navigation.continueCurrentPage) {
+            throw new Error("API-only fixture setup cannot request browser navigation");
+          }
+          // Still obtain a real Better Auth OAuth code-flow token, without rendering
+          // the login/consent UI twice for every unrelated authoring scenario.
+          return sessionFor(await authorServer.issueOwnerAccessToken());
+        }
         const previous = navigation.continueCurrentPage && sessions.get(targetPage);
         const view = navigation.expectedView ?? targetPage.getByRole("heading", { name: "Database workspace" });
         if (previous && new URL(targetPage.url()).origin === origin && await view.isVisible()) return previous;
-        const accessToken = await signInAuthorBrowser(targetPage, origin, shell, navigation);
-        const session: AuthorSession = { origin, fetch: (path, options) => {
-          if (typeof path !== "string") throw new Error("Author API requests require an explicit URL or path");
-          const url = new URL(path, origin);
-          if (url.origin !== origin || !url.pathname.startsWith("/api/") || url.pathname.startsWith("/api/auth/")) {
-            throw new Error("The test author bearer is scoped to data requests on the fixture origin");
-          }
-          return request.fetch(url.href, {
-            ...options,
-            maxRedirects: 0,
-            headers: { ...options?.headers, Authorization: `Bearer ${accessToken}` },
-          });
-        } };
+        const session = sessionFor(await signInAuthorBrowser(targetPage, origin, shell, navigation));
         sessions.set(targetPage, session);
         return session;
       });
