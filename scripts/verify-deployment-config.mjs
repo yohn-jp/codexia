@@ -86,8 +86,13 @@ assert.doesNotMatch(apiQuadlet, /^PublishPort=/mu, 'the API must not publish a h
 const databaseImage = /^Image=(\S+)$/mu.exec(databaseQuadlet)?.[1];
 assert.match(databaseImage ?? '', /^docker\.io\/library\/postgres:17-bookworm@sha256:[0-9a-f]{64}$/u,
   'the live database must use an immutable official PostgreSQL 17 image');
-const smokeImage = /^ARG POSTGRES_IMAGE=(\S+)$/mu.exec(await read('Dockerfile'))?.[1];
-assert.equal(smokeImage, databaseImage, 'the PostgreSQL smoke-test and database Quadlet must pin the same image');
+const backendSmoke = await read('scripts/verify-backend-image.sh');
+const backendSmokeImage = /^database_image="([^"\r\n]+)"$/mu.exec(backendSmoke)?.[1];
+assert.equal(backendSmokeImage, databaseImage, 'the backend image smoke test and database Quadlet must pin the same image');
+assert.match(backendSmoke, /^[\t ]+"\$database_image" >\/dev\/null$/mu,
+  'the backend image smoke test must run its pinned database image');
+const ociSmokeImage = /^[\t ]+(docker\.io\/library\/postgres:\S+)$/mu.exec(await read('scripts/verify-oci.sh'))?.[1];
+assert.equal(ociSmokeImage, databaseImage, 'the OCI smoke test and database Quadlet must pin the same image');
 assert.match(databaseQuadlet, /Network=codexia-data\.network/u);
 assert.match(databaseQuadlet, /Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data/u);
 assert.match(databaseQuadlet, /POSTGRES_USER=codexia_admin/u);
