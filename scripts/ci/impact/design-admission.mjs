@@ -7,7 +7,7 @@ import { exactPullRequestFiles } from './security-admission.mjs';
 
 export function isDesignFixture(file) {
   if (!/^(?:app\/|modules\/[^/]+\/src\/)/u.test(file)) return false;
-  return /(?:^|\/)(?:test|tests)\/|(?:\.test|\.spec)\.[^/]+$/iu.test(file);
+  return /^(?:(?:.*\/)?(?:test|tests)\/.*|.*(?:\.test|\.spec)\.[^/]+)$/iu.test(file);
 }
 
 export function selectDesignAdmission(files, event = 'pull_request') {
