@@ -111,7 +111,7 @@
 | AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
 | Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
-| GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v6.1.0` | **更新対象**: v7.1.0 PRあり。配布元・ランナー互換性と該当ジョブの実行を検証 |
+| GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 
 ## アップデートの審査・記録
