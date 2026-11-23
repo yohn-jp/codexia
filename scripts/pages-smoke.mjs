@@ -77,28 +77,34 @@ async function assertVisibleCopyableSha(page, selector, expected, label) {
   assert.ok(await locator.isVisible(), `${label}: SHA is not visible`);
   assert.equal(await locator.innerText(), expected, `${label}: incorrect SHA text`);
   const result = await locator.evaluate(element => {
-    const text = element.firstChild;
-    if (!text || text.nodeType !== Node.TEXT_NODE || element.childNodes.length !== 1) return { error: 'SHA is not selectable text' };
-    const clips = [];
-    for (let parent = element; parent; parent = parent.parentElement) {
-      const style = getComputedStyle(parent);
-      const x = ['hidden', 'clip'].includes(style.overflowX);
-      const y = ['hidden', 'clip'].includes(style.overflowY);
-      if (x || y) clips.push({ rect: parent.getBoundingClientRect(), x, y });
-    }
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
-    for (let index = 0; index < text.length; index++) {
-      range.setStart(text, index); range.setEnd(text, index + 1);
-      const rects = [...range.getClientRects()];
-      if (rects.length === 0) return { error: `SHA character ${index} has no rendered geometry` };
-      for (const rect of rects) {
-        if (rect.width <= 0 || rect.left < -1 || rect.right > innerWidth + 1 ||
-            clips.some(clip => (clip.x && (rect.left < clip.rect.left - 1 || rect.right > clip.rect.right + 1)) ||
-              (clip.y && (rect.top < clip.rect.top - 1 || rect.bottom > clip.rect.bottom + 1)))) {
-          return { error: `SHA character ${index} is clipped or outside the viewport` };
+    let text, index = 0;
+    while ((text = walker.nextNode())) {
+      const clips = [];
+      for (let parent = text.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) {
+          return { error: `SHA character ${index} is hidden` };
+        }
+        const x = ['hidden', 'clip'].includes(style.overflowX);
+        const y = ['hidden', 'clip'].includes(style.overflowY);
+        if (x || y) clips.push({ rect: parent.getBoundingClientRect(), x, y });
+      }
+      for (let offset = 0; offset < text.length; offset++, index++) {
+        range.setStart(text, offset); range.setEnd(text, offset + 1);
+        const rects = [...range.getClientRects()];
+        if (rects.length === 0) return { error: `SHA character ${index} has no rendered geometry` };
+        for (const rect of rects) {
+          if (rect.width <= 0 || rect.left < -1 || rect.right > innerWidth + 1 ||
+              clips.some(clip => (clip.x && (rect.left < clip.rect.left - 1 || rect.right > clip.rect.right + 1)) ||
+                (clip.y && (rect.top < clip.rect.top - 1 || rect.bottom > clip.rect.bottom + 1)))) {
+            return { error: `SHA character ${index} is clipped or outside the viewport` };
+          }
         }
       }
     }
+    if (index === 0) return { error: 'SHA has no selectable text' };
     range.selectNodeContents(element);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
     return { selected: selection.toString(), copied: document.execCommand('copy') };
@@ -133,7 +139,9 @@ try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce', hasTouch: viewport.width <= 390 });
     page.setDefaultTimeout(8000);
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    if (viewport.width === 320) {
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(base).origin });
+    }
     const capture = async name => {
       if (!screenshots) return;
       await page.evaluate(() => document.fonts.ready);
