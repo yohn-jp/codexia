@@ -2,6 +2,8 @@
 
 Start with the [documentation index](docs/README.md), [design authority](docs/architecture/DOCUMENTATION-AUTHORITY.md), [system design](docs/architecture/SYSTEM-DESIGN.md) and the owning domain contract. Code and tests must conform to accepted designs; their current contents are not normative specifications.
 
+For third-party dependencies, follow the [normative library selection policy](docs/architecture/DEPENDENCY-POLICY.md): prefer maintained libraries for security-sensitive general-purpose behavior, select the latest stable release, record compatibility constraints, and verify the exact lockfile-resolved version and affected contracts. A selected dependency is not evidence that its implementation or CI validation is complete.
+
 - Agree on a scoped problem and acceptance criteria before implementation.
 - Work on an isolated branch and submit a pull request; do not write directly to `main`.
 - Preserve Core's dependency boundary and shared authorization, mutation and recovery contracts.
