@@ -1,5 +1,5 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type NativeChangeSetReference, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
+import type { EditorSnapshotRead, FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 import type { AuthorReviewFeedItem } from "./api";
@@ -131,7 +131,6 @@ export const responseContracts = {
   inboxItem: (v: unknown): v is { item: InboxItem } => record(v) && inbox(v.item),
   marked: (v: unknown): v is { marked: number } => record(v) && integer(v.marked),
   modules: array(moduleStatus), contributions: array(contribution),
-  persistenceStatus: (v: unknown): v is PersistenceStatus => record(v) && bool(v.available) && (v.provider === null || v.provider === "postgres"),
   portableWorkArchive: (v: unknown): v is PortableWorkArchive => record(v) && v.format === "codexia-work/v1" &&
     record(v.project) && text(v.project.title) && jsonObject(v.project.settings) &&
     Array.isArray(v.documents) && v.documents.every(d => record(d) && text(d.id) && text(d.title) && text(d.markdown)) &&

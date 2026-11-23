@@ -33,6 +33,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 | `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
+| `orval` | `8.48.0` | app・OpenAPI 3.1からDesktop Web用fetch clientとZod DTOを生成 | **開発専用**: pnpmの公開経過時間ポリシーを満たす版を固定。更新時は選択したoperationのmethod/path照合、再生成差分、Zod検証、appの型検査とテストを確認 |
 | `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
 | `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
 | `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
@@ -51,7 +52,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
 | `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
 | `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
-| `zod` | `4.6.7` | API/MCP/Assistant/Speaker・境界入力 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
+| `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
 ### Web UI・ルーター・エディター
@@ -95,7 +96,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `yaml` | `^2.9.1` / HTTP contract `2.9.1` | Core・Contracts・modules等、HTTP contract OpenAPI parser | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
+| `yaml` | `^2.9.1` / HTTP contract `2.9.1` | Core・Contracts・modules等、HTTP contractとDesktop Web生成時のOpenAPI解析 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
 | `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |
 | `@huggingface/transformers` | `4.3.2`（直接指定、Catalog対象外） | NLP/Semantic・推論 | **制約**: NLPエンジンの実行時バージョン識別がmanifestの直接依存文字列を使用するため、`catalog:`への変更で実際のバージョン識別が壊れる。実行時メタデータを正本にする修正が受入されるまで直接指定を保持。Optional Full profile専用でCore-onlyを汚染せず、`sharp`の修正版overrideを維持 |
