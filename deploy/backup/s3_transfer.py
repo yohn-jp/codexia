@@ -469,9 +469,17 @@ def _read_stream(body: BinaryIO, *, output: BinaryIO | None = None) -> tuple[str
 
 
 class S3BackupTransfer:
-    def __init__(self, profile: dict[str, Any], *, client: Any | None = None):
+    def __init__(
+        self,
+        profile: dict[str, Any],
+        *,
+        client: Any | None = None,
+        _allow_private_test_addresses: bool = False,
+    ):
         self.profile = validate_profile(profile)
-        self.client = client if client is not None else _make_client(self.profile)
+        self.client = client if client is not None else _make_client(
+            self.profile, _allow_private_test_addresses=_allow_private_test_addresses
+        )
 
     def _load_pending_uploads(
         self, journal_path: Path, backup_id: str, source_identity: str
@@ -877,7 +885,7 @@ class S3BackupTransfer:
             raise
 
 
-def _make_client(profile: dict[str, Any]) -> Any:
+def _make_client(profile: dict[str, Any], *, _allow_private_test_addresses: bool = False) -> Any:
     try:
         import boto3
         from botocore.config import Config
@@ -894,7 +902,11 @@ def _make_client(profile: dict[str, Any]) -> Any:
         "s3", region_name=profile["region"], endpoint_url=profile.get("endpointUrl"),
         config=config, verify=profile.get("caBundle") or True,
     )
-    guard = EndpointGuard(profile, client.meta.endpoint_url)
+    guard = EndpointGuard(
+        profile,
+        client.meta.endpoint_url,
+        _allow_private_test_addresses=_allow_private_test_addresses,
+    )
     client.meta.events.register_first("before-send.s3", guard.before_send)
     client.meta.events.register_first("needs-retry.s3", guard.needs_retry)
     return client
@@ -903,10 +915,16 @@ def _make_client(profile: dict[str, Any]) -> Any:
 class EndpointGuard:
     """Keep AWS SDK requests on the selected HTTPS endpoint, including retries."""
 
-    def __init__(self, profile: dict[str, Any], endpoint_url: str):
+    def __init__(
+        self,
+        profile: dict[str, Any],
+        endpoint_url: str,
+        *,
+        _allow_private_test_addresses: bool = False,
+    ):
         self.profile = profile
         self.endpoint_url = endpoint_url
-        self.fixture_mode = os.environ.get("CODEXIA_S3_FIXTURE_MODE") == "1"
+        self._allow_private_test_addresses = _allow_private_test_addresses
         self.expected = _origin(endpoint_url)
 
     def _approved_host(self, url: str) -> tuple[str, int]:
@@ -937,7 +955,7 @@ class EndpointGuard:
                 parsed = ipaddress.ip_address(address)
             except ValueError as error:
                 raise TransferError("S3 endpoint returned an invalid IP address") from error
-            if not parsed.is_global and not self.fixture_mode:
+            if not parsed.is_global and not self._allow_private_test_addresses:
                 _fail("S3 endpoint resolved to a private, local, or reserved address")
 
     def before_send(self, request: Any, **_: Any) -> None:

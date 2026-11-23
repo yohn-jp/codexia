@@ -46,6 +46,8 @@ class FakeS3Client:
         self.deny_list_multipart_uploads = False
         self.fail_commit_marker_once = False
         self.corrupt_readback_for: str | None = None
+        self.race_conditional_create = False
+        self.race_key: str | None = None
 
     @staticmethod
     def _body(value: object) -> bytes:
@@ -74,10 +76,20 @@ class FakeS3Client:
         if Key.endswith("/COMMIT.json") and self.fail_commit_marker_once:
             self.fail_commit_marker_once = False
             raise OSError("simulated marker write interruption")
+        body = self._body(Body)
+        if self.race_conditional_create and IfNoneMatch == "*":
+            self.race_conditional_create = False
+            self.race_key = Key
+            self.objects[(Bucket, Key)] = {
+                "Body": body,
+                "ContentLength": len(body),
+                "Metadata": {"race-winner": "preserved"},
+                "VersionId": "winner-version",
+                "ETag": '"winner-etag"',
+            }
         existing = self.objects.get((Bucket, Key))
         if existing and IfNoneMatch == "*":
             raise FakeClientError("412")
-        body = self._body(Body)
         self.objects[(Bucket, Key)] = {
             "Body": body,
             "ContentLength": len(body),
@@ -216,6 +228,14 @@ class S3TransferTests(unittest.TestCase):
         with self.assertRaises(s3_transfer.TransferError):
             guard.before_send(type("Request", (), {"url": "https://metadata.example.test/latest/meta-data"})())
 
+    def test_environment_variable_cannot_enable_private_s3_endpoints(self) -> None:
+        private_answer = [(None, None, None, None, ("127.0.0.1", 443))]
+        with patch.dict(os.environ, {"CODEXIA_S3_FIXTURE_MODE": "1"}):
+            guard = s3_transfer.EndpointGuard(profile(), "https://objects.example.test")
+            with patch("s3_transfer.socket.getaddrinfo", return_value=private_answer):
+                with self.assertRaises(s3_transfer.TransferError):
+                    guard.before_send(type("Request", (), {"url": "https://objects.example.test/bucket/key"})())
+
     def test_upload_reads_back_each_object_before_publishing_commit_marker(self) -> None:
         files = self.write_artifact()
         client = FakeS3Client()
@@ -238,6 +258,27 @@ class S3TransferTests(unittest.TestCase):
             self.assertEqual(bytes(client.objects[("codexia-fixture", object_key)]["Body"]), files[name])
         self.assertNotIn("delete", [operation for operation, _ in client.events])
         self.assertEqual((self.receipts / "backup.json").stat().st_mode & 0o777, 0o600)
+
+    def test_conditional_create_wins_race_after_missing_object_probe(self) -> None:
+        files = self.write_artifact()
+        client = FakeS3Client()
+        client.race_conditional_create = True
+
+        receipt = self.make_transfer(client).upload_artifact(
+            self.artifact,
+            backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+            source_identity="a" * 40,
+            receipt_path=self.receipts / "backup.json",
+        )
+
+        raced_key = client.race_key
+        self.assertIsNotNone(raced_key)
+        self.assertEqual(raced_key, receipt["objects"]["database.dump.age"]["key"])
+        winner = client.objects[("codexia-fixture", raced_key)]
+        self.assertEqual(bytes(winner["Body"]), (self.artifact / "database.dump.age").read_bytes())
+        self.assertEqual(winner["Metadata"], {"race-winner": "preserved"})
+        self.assertEqual(winner["VersionId"], "winner-version")
+        self.assertEqual(set(receipt["objects"]), set(files) | {"SHA256SUMS"})
 
     def test_corrupt_readback_never_publishes_a_commit_marker_or_receipt(self) -> None:
         self.write_artifact()
