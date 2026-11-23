@@ -169,6 +169,18 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add('unit-root');
       continue;
     }
+    if (
+      file.startsWith('packages/http-contract/src/') ||
+      file.startsWith('packages/http-contract/test/') ||
+      file.startsWith('packages/http-contract/scripts/') ||
+      file.startsWith('packages/http-contract/openapi/') ||
+      file.startsWith('packages/http-contract/baselines/') ||
+      file === 'packages/http-contract/tspconfig.yaml' ||
+      file === 'packages/http-contract/redocly.yaml'
+    ) {
+      add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
+      continue;
+    }
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
     if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||

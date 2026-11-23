@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
 import { browserRuntimeRequirements, PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
-import { createVerificationPlan } from './ci-impact.mjs';
+import { createVerificationPlan, matchesFullModelOciPath } from './ci-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
@@ -77,6 +77,24 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.equal(save.with.key, restore.with.key);
   assert.match(modelJobConfig.steps.find(item => item.name === 'Fail on missing or altered model cache files').run, /sha256sum --check --strict/u);
   assert.equal(modelJobConfig.steps.find(item => item.uses?.startsWith('actions/checkout@')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
+});
+test('HTTP contract sources select the dedicated unit and typecheck tasks', () => {
+  const plan = createVerificationPlan({
+    files: ['packages/http-contract/src/main.tsp'],
+    event: 'pull_request',
+    sha: 'a'.repeat(40),
+    base: 'b'.repeat(40),
+  });
+  assert.equal(plan.mode, 'affected');
+  assert.equal(plan.full_model_oci, true);
+  assert.ok(plan.tasks.includes('unit-http-contract'));
+  assert.ok(plan.tasks.includes('typecheck-http-contract'));
+  assert.ok(plan.tasks.includes('test-types-packages'));
+  assert.ok(plan.groups.includes('unit-core'));
+  assert.ok(plan.groups.includes('types-sources'));
+  assert.ok(!plan.tasks.includes('oci-full'));
+  assert.ok(matchesFullModelOciPath('packages/api/src/server.ts'));
+  assert.ok(matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {

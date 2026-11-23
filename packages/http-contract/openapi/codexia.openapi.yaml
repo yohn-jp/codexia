@@ -1,0 +1,4402 @@
+openapi: 3.1.0
+info:
+  title: Codexia API
+  version: 2.0.0
+  summary: HTTP wire operations for Codexia. Authorization and product semantics remain owned by the accepted design contracts.
+tags:
+  - name: health
+  - name: owner
+  - name: events
+  - name: jobs
+  - name: projects
+  - name: reviews
+  - name: proposals
+  - name: actions
+  - name: snapshots
+  - name: search
+  - name: mcp
+  - name: public-reader
+  - name: persistence
+  - name: auth-adapter
+  - name: backup-console
+paths:
+  /api/auth/oauth2/consent-context:
+    post:
+      operationId: auth_consent_context_post
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - auth-adapter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthConsentContextRequest'
+      x-codexia-principal: OWNER-SESSION; same-origin request
+      x-codexia-contract-status: incomplete
+  /api/auth/oauth2/get-consents:
+    get:
+      operationId: auth_list_consents_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - auth-adapter
+      x-codexia-principal: OWNER-SESSION; same-origin request
+      x-codexia-contract-status: incomplete
+  /api/browser/version:
+    get:
+      operationId: api_browser_version_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_browser_version_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /api/console/backups/config:
+    get:
+      operationId: backup_console_config_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupConfigView'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/config/activate:
+    post:
+      operationId: backup_console_config_activate_post
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupOperationReceipt'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '412':
+          description: Precondition failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/config/disable:
+    post:
+      operationId: backup_console_config_disable_post
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupOperationReceipt'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '412':
+          description: Precondition failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/config/draft:
+    put:
+      operationId: backup_console_config_draft_put
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupConfigView'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '412':
+          description: Precondition failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupConfigDraftRequest'
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/config/probes:
+    post:
+      operationId: backup_console_config_probes_post
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupProbeReceipt'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '412':
+          description: Precondition failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/config/probes/{probeId}:
+    get:
+      operationId: backup_console_config_probe_get
+      parameters:
+        - name: probeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/recovery:
+    get:
+      operationId: backup_console_recovery_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/runs:
+    post:
+      operationId: backup_console_runs_post
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRunReceipt'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+    get:
+      operationId: backup_console_runs_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/runs/{runId}:
+    get:
+      operationId: backup_console_run_get
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/console/backups/status:
+    get:
+      operationId: backup_console_status_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - backup-console
+      x-codexia-principal: OWNER-SESSION
+      x-codexia-contract-status: target
+  /api/health:
+    get:
+      operationId: api_health_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_health_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /api/inbox:
+    get:
+      operationId: inbox_list_get
+      parameters:
+        - name: unread
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - '1'
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - jobs
+      x-codexia-principal: OWNER-SESSION
+  /api/inbox/read-all:
+    post:
+      operationId: inbox_read_all_post
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - jobs
+      x-codexia-principal: OWNER-SESSION
+  /api/inbox/{inboxId}/read:
+    post:
+      operationId: inbox_item_read_post
+      parameters:
+        - name: inboxId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - jobs
+      x-codexia-principal: OWNER-SESSION
+  /api/jobs:
+    get:
+      operationId: jobs_list_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - jobs
+      x-codexia-principal: OWNER-SESSION
+  /api/jobs/events:
+    get:
+      operationId: job_events_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - events
+      x-codexia-principal: OWNER-SESSION
+  /api/jobs/{jobId}:
+    get:
+      operationId: job_get
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - jobs
+      x-codexia-principal: OWNER-SESSION
+  /api/projects:
+    get:
+      operationId: projects_list_get
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPageResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | MCP-CLIENT(mcp:read)
+    post:
+      operationId: projects_create_post
+      parameters: []
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoreProjectCreateRequest'
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/events:
+    get:
+      operationId: project_events_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - events
+      x-codexia-principal: OWNER-API
+  /api/projects/{projectId}:
+    get:
+      operationId: project_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/actions:
+    get:
+      operationId: project_actions_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - actions
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/actions/{actionId}:
+    post:
+      operationId: project_action_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - actions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:compute|propose)
+  /api/projects/{projectId}/apply:
+    post:
+      operationId: project_apply_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - proposals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/{projectId}/approvals:
+    post:
+      operationId: project_approvals_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - proposals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/{projectId}/contributions:
+    get:
+      operationId: project_contributions_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/history:
+    get:
+      operationId: project_history_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots:
+    get:
+      operationId: manuscript_snapshots_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: manuscriptId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - snapshots
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}:
+    get:
+      operationId: manuscript_snapshot_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: manuscriptId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: snapshotId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - snapshots
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/modules:
+    get:
+      operationId: project_modules_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/modules/mcp/streamable:
+    get:
+      operationId: project_mcp_stream_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+    post:
+      operationId: project_mcp_stream_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+    delete:
+      operationId: project_mcp_stream_delete
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+  /api/projects/{projectId}/observation:
+    get:
+      operationId: project_observation_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/proposals:
+    post:
+      operationId: project_proposals_create_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - proposals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:propose)
+    get:
+      operationId: project_proposals_list_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - proposals
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/proposals/{proposalId}:
+    get:
+      operationId: project_proposal_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - proposals
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/recent-activity:
+    get:
+      operationId: project_recent_activity_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      x-codexia-principal: OWNER-SESSION
+    put:
+      operationId: project_recent_activity_put
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Codexia-Recent-Activity-Order
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/{projectId}/review-queue:
+    get:
+      operationId: project_review_queue_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - reviews
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/{projectId}/scenes/{sceneId}:
+    get:
+      operationId: project_scene_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sceneId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/scratch:
+    post:
+      operationId: project_scratch_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - projects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-SESSION
+  /api/projects/{projectId}/search:
+    get:
+      operationId: project_search_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - search
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/snapshot:
+    get:
+      operationId: project_snapshot_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/status:
+    get:
+      operationId: project_status_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/tree:
+    get:
+      operationId: project_tree_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - projects
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/projects/{projectId}/writing-stats:
+    get:
+      operationId: project_writing_stats_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - search
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/public/projects/{projectId}/modules/publishing/share/{token}:
+    get:
+      operationId: public_share_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - public-reader
+      security:
+        - {}
+      x-codexia-principal: SHARE-READER capability
+  /api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}:
+    get:
+      operationId: public_share_scene_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sceneId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - public-reader
+      security:
+        - {}
+      x-codexia-principal: SHARE-READER capability
+  /api/ready:
+    get:
+      operationId: api_ready_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_ready_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /api/review-queue:
+    get:
+      operationId: review_queue_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - reviews
+      x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
+  /api/session:
+    get:
+      operationId: api_session_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+      tags:
+        - owner
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/import:
+    post:
+      operationId: persistence_import_post
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects:
+    get:
+      operationId: persistence_projects_get
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPageResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    post:
+      operationId: persistence_projects_post
+      parameters: []
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersistenceProjectCreateRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}:
+    get:
+      operationId: persistence_project_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    patch:
+      operationId: persistence_project_patch
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersistenceProjectUpdateRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/archive:
+    get:
+      operationId: persistence_project_archive_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/assertions/{assertionId}:
+    get:
+      operationId: persistence_assertion_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assertionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    put:
+      operationId: persistence_assertion_put
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assertionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence:
+    get:
+      operationId: persistence_assertion_evidence_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assertionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    post:
+      operationId: persistence_assertion_evidence_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assertionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/changesets:
+    get:
+      operationId: persistence_changesets_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    post:
+      operationId: persistence_changesets_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeChangeSetRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}:
+    get:
+      operationId: persistence_changeset_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply:
+    post:
+      operationId: persistence_changeset_apply_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve:
+    post:
+      operationId: persistence_changeset_approve_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject:
+    post:
+      operationId: persistence_changeset_reject_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents:
+    get:
+      operationId: persistence_documents_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: parentId
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    post:
+      operationId: persistence_documents_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}:
+    get:
+      operationId: persistence_document_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: revision
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    patch:
+      operationId: persistence_document_patch
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Client-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveDocumentResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveConflictResponse'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveDocumentRequest'
+      x-codexia-principal: OWNER-API
+    delete:
+      operationId: persistence_document_delete
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors:
+    get:
+      operationId: persistence_document_anchors_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: revision
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    post:
+      operationId: persistence_document_anchors_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}:
+    patch:
+      operationId: persistence_document_anchor_patch
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: anchorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions:
+    post:
+      operationId: persistence_anchor_assertions_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: anchorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions:
+    post:
+      operationId: persistence_anchor_mentions_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: anchorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata:
+    patch:
+      operationId: persistence_document_metadata_patch
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/restore:
+    post:
+      operationId: persistence_document_restore_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/documents/{documentId}/revisions:
+    get:
+      operationId: persistence_document_revisions_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes:
+    get:
+      operationId: persistence_nodes_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}:
+    get:
+      operationId: persistence_node_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+    put:
+      operationId: persistence_node_put
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases:
+    post:
+      operationId: persistence_node_aliases_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence:
+    get:
+      operationId: persistence_node_evidence_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge:
+    post:
+      operationId: persistence_node_merge_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeMergeRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview:
+    post:
+      operationId: persistence_node_merge_preview_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeMergePreviewRequest'
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations:
+    post:
+      operationId: persistence_node_relations_post
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/projects/{projectId}/review-feed:
+    get:
+      operationId: persistence_review_feed_get
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/v1/persistence/status:
+    get:
+      operationId: persistence_status_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersistenceStatusResponse'
+        '503':
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - persistence
+      x-codexia-principal: OWNER-API
+  /api/version:
+    get:
+      operationId: api_version_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_version_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /health/live:
+    get:
+      operationId: health_live_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: health_live_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /health/ready:
+    get:
+      operationId: health_ready_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: health_ready_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /health/startup:
+    get:
+      operationId: health_startup_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: health_startup_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
+  /mcp:
+    get:
+      operationId: mcp_root_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+    post:
+      operationId: mcp_root_post
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+    delete:
+      operationId: mcp_root_delete
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Mcp-Session-Id:
+              required: false
+              schema:
+                type: string
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - mcp
+      x-codexia-principal: MCP-CLIENT + project assignment + scope
+security:
+  - BearerAuth: []
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    AwsS3BackupConfigDraft:
+      type: object
+      required:
+        - provider
+        - region
+        - bucket
+        - prefix
+        - credentialMode
+        - offVmPolicy
+      properties:
+        provider:
+          type: string
+          enum:
+            - aws-s3
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        credentialMode:
+          type: string
+          enum:
+            - operator-role
+            - sealed-access-key
+        accessKeyId:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        secretAccessKey:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        offVmPolicy:
+          type: string
+          enum:
+            - required
+            - secondary
+        retentionRequest:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    BackupConfigDraftRequest:
+      oneOf:
+        - $ref: '#/components/schemas/AwsS3BackupConfigDraft'
+        - $ref: '#/components/schemas/CompatibleS3BackupConfigDraft'
+    BackupConfigView:
+      type: object
+      required:
+        - provider
+        - endpoint
+        - region
+        - bucket
+        - prefix
+        - credentialConfigured
+        - revision
+      properties:
+        provider:
+          anyOf:
+            - type: string
+              enum:
+                - aws-s3
+                - s3-compatible
+            - type: 'null'
+        endpoint:
+          anyOf:
+            - type: string
+            - type: 'null'
+        region:
+          anyOf:
+            - type: string
+            - type: 'null'
+        bucket:
+          anyOf:
+            - type: string
+            - type: 'null'
+        prefix:
+          anyOf:
+            - type: string
+            - type: 'null'
+        credentialConfigured:
+          type: boolean
+        revision:
+          type: integer
+          format: int32
+      unevaluatedProperties:
+        not: {}
+    BackupOperationReceipt:
+      type: object
+      required:
+        - operationId
+        - state
+        - createdAt
+      properties:
+        operationId:
+          type: string
+        state:
+          type: string
+          enum:
+            - queued
+        createdAt:
+          type: string
+          format: date-time
+      unevaluatedProperties:
+        not: {}
+    BackupProbeReceipt:
+      type: object
+      required:
+        - probeId
+        - state
+        - createdAt
+      properties:
+        probeId:
+          type: string
+        state:
+          type: string
+          enum:
+            - queued
+        createdAt:
+          type: string
+          format: date-time
+      unevaluatedProperties:
+        not: {}
+    BackupRunReceipt:
+      type: object
+      required:
+        - runId
+        - state
+        - createdAt
+      properties:
+        runId:
+          type: string
+        state:
+          type: string
+          enum:
+            - queued
+        createdAt:
+          type: string
+          format: date-time
+      unevaluatedProperties:
+        not: {}
+    ChangeSetActionRequest:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int32
+          minimum: 1
+      unevaluatedProperties:
+        not: {}
+    CompatibleS3BackupConfigDraft:
+      type: object
+      required:
+        - provider
+        - endpoint
+        - bucket
+        - prefix
+        - credentialMode
+        - offVmPolicy
+      properties:
+        provider:
+          type: string
+          enum:
+            - s3-compatible
+        endpoint:
+          type: string
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        credentialMode:
+          type: string
+          enum:
+            - operator-role
+            - sealed-access-key
+        accessKeyId:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        secretAccessKey:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        offVmPolicy:
+          type: string
+          enum:
+            - required
+            - secondary
+        retentionRequest:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    CoreProjectCreateRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: .*\S.*
+      unevaluatedProperties:
+        not: {}
+    DocumentChange:
+      type: object
+      required:
+        - fromUtf16
+        - toUtf16
+        - insert
+      properties:
+        fromUtf16:
+          type: integer
+          format: int32
+        toUtf16:
+          type: integer
+          format: int32
+        insert:
+          type: string
+      unevaluatedProperties:
+        not: {}
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+      unevaluatedProperties:
+        not: {}
+    KnowledgeMergePreviewRequest:
+      type: object
+      required:
+        - targetId
+      properties:
+        targetId:
+          type: string
+          minLength: 1
+          maxLength: 512
+      unevaluatedProperties:
+        not: {}
+    KnowledgeMergeRequest:
+      type: object
+      required:
+        - targetId
+        - confirm
+        - projectVersion
+        - previewDigest
+      properties:
+        targetId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        confirm:
+          type: boolean
+          enum:
+            - true
+        projectVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        previewDigest:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: ^[0-9a-f]{64}$
+      unevaluatedProperties:
+        not: {}
+    OAuthConsentContextRequest:
+      type: object
+      required:
+        - oauth_query
+      properties:
+        oauth_query:
+          type: string
+      unevaluatedProperties:
+        not: {}
+    PersistenceProjectCreateRequest:
+      type: object
+      required:
+        - title
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: .*\S.*
+        settings:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    PersistenceProjectUpdateRequest:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int32
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: .*\S.*
+        settings:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    PersistenceStatusResponse:
+      type: object
+      required:
+        - available
+        - provider
+      properties:
+        available:
+          type: boolean
+        provider:
+          anyOf:
+            - type: string
+              enum:
+                - postgres
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    Project:
+      type: object
+      required:
+        - id
+        - title
+        - settings
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        settings:
+          type: object
+          additionalProperties: {}
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      unevaluatedProperties:
+        not: {}
+    ProjectPageResponse:
+      type: object
+      required:
+        - projects
+        - nextCursor
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    ProjectResponse:
+      type: object
+      required:
+        - project
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+      unevaluatedProperties:
+        not: {}
+    ProposeChangeSetRequest:
+      type: object
+      required:
+        - projectVersion
+        - operations
+      properties:
+        projectVersion:
+          type: integer
+          format: int32
+          minimum: 1
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          minItems: 1
+          maxItems: 50
+      unevaluatedProperties:
+        not: {}
+    ReadinessResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+        pendingRequests:
+          type: integer
+          format: int32
+        persistenceReady:
+          type: boolean
+        started:
+          type: boolean
+      unevaluatedProperties:
+        not: {}
+    SaveConflictResponse:
+      type: object
+      required:
+        - code
+        - error
+        - current
+      properties:
+        code:
+          type: string
+          enum:
+            - PERSISTENCE_CONFLICT
+        error:
+          type: string
+        details:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
+        current:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    SaveDocumentRequest:
+      type: object
+      required:
+        - baseRevisionId
+        - changes
+        - resultingSha256
+      properties:
+        baseRevisionId:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentChange'
+        resultingSha256:
+          type: string
+        clientId:
+          type: string
+      unevaluatedProperties:
+        not: {}
+    SaveDocumentResponse:
+      type: object
+      required:
+        - document
+        - revision
+        - replayed
+      properties:
+        document:
+          type: object
+          additionalProperties: {}
+        revision:
+          type: object
+          additionalProperties: {}
+        replayed:
+          type: boolean
+      unevaluatedProperties:
+        not: {}
+    VersionResponse:
+      type: object
+      required:
+        - name
+        - version
+        - contractVersion
+        - profile
+        - auth
+        - runtime
+        - modules
+      properties:
+        name:
+          type: string
+          enum:
+            - codexia
+        version:
+          type: string
+        contractVersion:
+          type: string
+        apiEpoch:
+          type: integer
+          format: int32
+        profile:
+          type: string
+          enum:
+            - core
+            - full
+        auth:
+          type: array
+          items:
+            type: string
+        runtime:
+          type: object
+          additionalProperties: {}
+        modules:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: Bearer
+servers:
+  - url: https://api.codexia.example
+    description: Codexia API
+    variables: {}
+x-codexia-external-contracts:
+  betterAuth:
+    source: Better Auth official runtime OpenAPI generation
+    pathPrefix: /api/auth/
+    libraryOperationsIncludedHere: false
+    applicationAdaptersHere:
+      - POST /api/auth/oauth2/consent-context
+      - GET /api/auth/oauth2/get-consents
+  betterAuthMetadataPaths:
+    - /.well-known/oauth-authorization-server/api/auth
+    - /.well-known/openid-configuration/api/auth
+  reason: Library-managed authentication operations and discovery metadata come from the official Better Auth generator; only Codexia-owned adapters are defined here.
+x-codexia-cors:
+  originPolicy: same-origin or exact configured HTTPS origin; wildcard origins are forbidden
+  credentials: false
+  vary:
+    - Origin
+    - Access-Control-Request-Method
+    - Access-Control-Request-Headers
+  methods:
+    - GET
+    - HEAD
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+  requestHeaders:
+    - Authorization
+    - Content-Type
+    - Idempotency-Key
+    - X-Client-Id
+    - X-Codexia-Recent-Activity-Order
+    - Prefer
+  mcpRequestHeaders:
+    - Mcp-Session-Id
+    - MCP-Protocol-Version
+    - Last-Event-ID
+  mcpExposeHeaders:
+    - Mcp-Session-Id
+    - WWW-Authenticate
+  preflight:
+    route: generic OPTIONS catch-all at / and /*; not a per-resource operation
+    successStatus: 204
+    deniedStatus: 403
+    allowMethods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+x-codexia-api-epoch: 2
+x-codexia-contract-status: incomplete
