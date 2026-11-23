@@ -260,7 +260,9 @@ test('known operational inputs retain root proof without unrelated browser or OC
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
-    assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage'] : ['unit-root', 'coverage'];
+    assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
   for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
@@ -379,7 +381,9 @@ test('push backup changes retain root and independent exact-head verification', 
     '.github/workflows/push-backup.yml',
   ];
   for (const file of source) {
-    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage'] : ['unit-root', 'coverage'];
+    assert.deepEqual((await plan([file])).tasks, expected, file);
     assert.equal((await plan([file])).full_model_oci, false, file);
     for (const event of ['pull_request', 'push']) {
       const paths = backup.on[event].paths;
