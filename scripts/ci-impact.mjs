@@ -159,6 +159,12 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||
+        file === 'scripts/strictdoc/strictdoc_config.py' ||
+        file.startsWith('scripts/strictdoc/')) {
+      add('requirements-trace');
+      continue;
+    }
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
       continue;

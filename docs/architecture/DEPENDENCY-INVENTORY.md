@@ -72,6 +72,8 @@
 | `@ionic/react` | `9.0.12` | app・モバイルUI | **連動**: Ionic Coreと一緒に検証 |
 | `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
 | `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
+| `@xstate/react` | `6.1.0` | app・WRT-01/REC-01 machineとReact 19のactor接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。machine統合と保存／復旧受入で併せて検証 |
+| `xstate` | `5.33.4` | app・保存／復旧の状態機械とasync actor | **連動**: 実装時点のv5 latest stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
 | `vite` | 現行 `^8.3.8` → **Vite 8継続採用** | app・フロントビルド | **採用確定**: 最新8系への追従、Reactプラグイン・CSS生成・Workers配信・OAuth分離を検証。バンドラー変更は本契約の対象外 |
 
@@ -116,9 +118,12 @@
 | AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
 | Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
+| StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 | oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
+| AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
+| S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 
 ## アップデートの審査・記録
 
