@@ -33,9 +33,9 @@
     "@codexia/module-runtime": "workspace:*",
     "@codexia/module-story": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
-    "yaml": "^2.9.1",
+    "yaml": "catalog:production",
     "@codexia/module-diagnostics": "workspace:*",
-    "zod": "4.6.7"
+    "zod": "catalog:production"
   },
   "codexiaModule": {
     "id": "speaker",

@@ -33,6 +33,7 @@ test('brand and overview links point to the site root at every page depth', () =
     ['index.html', './'],
     ['audit/index.html', '../'],
     ['ci/index.html', '../'],
+    ['security/index.html', '../'],
     ['graph/index.html', '../'],
     ['architecture/index.html', '../'],
     [`reviews/${'a'.repeat(40)}/index.html`, '../../'],
