@@ -433,7 +433,7 @@ async function appendInventoryPage() {
     const timestamps = result.runs.map(run => Date.parse(run.created_at ?? ''))
       .filter(Number.isFinite);
     const oldest = timestamps.length ? new Date(Math.min(...timestamps))
-      .toISOString().replace('.000Z', 'Z') : null;
+      .toISOString() : null;
     if (!oldest || (windowBefore !== null && Date.parse(oldest) >= Date.parse(windowBefore))) {
       inventoryLimitReason = '日時カーソルを進められません。未取得履歴があります。';
       hasMore = false;
