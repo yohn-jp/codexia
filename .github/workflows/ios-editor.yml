@@ -31,6 +31,7 @@ jobs:
       - name: Build fixture app for Simulator
         run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaApp -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
       - name: Select and boot Simulator
+        id: simulator_boot
         timeout-minutes: 10
         run: |
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
@@ -44,8 +45,9 @@ jobs:
           xcrun simctl install "$EDITOR_SIMULATOR_ID" "$RUNNER_TEMP/codexia-editor/Build/Products/Debug-iphonesimulator/CodexiaApp.app"
           xcrun simctl launch "$EDITOR_SIMULATOR_ID" jp.yohn.codexia.editorfixture
       - name: Test UIKit adapter on Simulator
+        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
         timeout-minutes: 15
         working-directory: ios/CodexiaEditor
         run: |
           xcodebuild -list
-          xcodebuild -scheme CodexiaEditor-Package -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" test
+          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
