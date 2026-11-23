@@ -38,7 +38,10 @@ test('indexes source files, symbols and directed cross-file references without c
   const core = result.files.find(f => f.path === 'packages/core/db.ts');
   assert.deepEqual(api.symbols, ['startServer']);
   assert.deepEqual(api.incoming.map(x => x.path), ['modules/story/scene.ts']);
-  assert.deepEqual(api.outgoing, [{ path: 'packages/core/db.ts', count: 2, relations: ['calls', 'imports'] }]);
+  assert.deepEqual(api.outgoing, [{
+    path: 'packages/core/db.ts', count: 2, relations: ['calls', 'imports'],
+    relationCounts: { calls: 1, imports: 1 }, evidence: [],
+  }]);
   assert.deepEqual(core.incoming.map(x => x.path), ['packages/api/server.ts']);
   assert.ok(!result.files.some(f => f.path.includes('private') || f.path.includes('/dist/') || f.path.startsWith('node:')));
 });
@@ -63,8 +66,12 @@ test('publishes a searchable file explorer and keeps native community graph inta
   assert.ok(explorer.includes('https://github.com/yohn-jp/codexia/blob/' + sha + '/packages/api/server.ts'));
   assert.doesNotMatch(explorer, /<script>alert\(1\)<\/script>/);
   assert.match(explorer, /\\u003c\/script>/);
-  assert.deepEqual(JSON.parse(await readFile(join(published, 'source.json'), 'utf8')), {
-    sourceSha: sha, generator: 'graphifyy', mode: 'code-only', stats: result.stats,
+  const sourceRecord = JSON.parse(await readFile(join(published, 'source.json'), 'utf8'));
+  const expected = summarizeGraph(graph, sha, trackedFiles);
+  assert.deepEqual(sourceRecord, {
+    schemaVersion: 1, sourceSha: sha, generator: 'graphifyy', mode: 'code-only', stats: result.stats,
+    coverage: expected.coverage, relations: expected.relations,
+    files: expected.files.map(file => ({ path: file.path })),
   });
 });
 
@@ -78,5 +85,7 @@ test('rejects invalid or incomplete inputs without publishing output', async t =
   await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /ENOENT/);
   await writeFile(join(root, 'graph.json'), '{}');
   await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /nodes and links arrays/);
+  await writeFile(join(root, 'graph.json'), JSON.stringify({ ...graph, built_at_commit: 'c'.repeat(40) }));
+  await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /expected/);
   assert.deepEqual(await readdir(root), ['graph.html', 'graph.json']);
 });
