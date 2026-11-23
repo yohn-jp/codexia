@@ -18,9 +18,10 @@ export function buildAuthorBrowserAssets(
   profile: string,
   assets: string,
   frontendSource?: string,
+  options: { reuseCiTemplate?: boolean } = {},
 ): void {
   const template = process.env.CODEXIA_E2E_AUTH_ASSET_TEMPLATE;
-  if (template && !frontendSource) {
+  if (template && !frontendSource && options.reuseCiTemplate !== false) {
     materializeAuthorBrowserAssets(template, assets, profile, server);
     return;
   }
