@@ -53,7 +53,7 @@ function ordinaryArtifacts() {
   return artifacts;
 }
 
-test('single-artifact certification downloads retain the selected group directory', t => {
+test('certification selector emits exact IDs for single and multiple selections', t => {
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-evidence-selection-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const planPath = path.join(directory, 'plan.json');
@@ -63,17 +63,18 @@ test('single-artifact certification downloads retain the selected group director
     files: ['scripts/strictdoc/surface-inventory.json'], event: 'pull_request', sha: sourceSha, base: 'b'.repeat(40),
   });
   assert.deepEqual(affected.groups, ['types-tests']);
-  writeFileSync(inventoryPath, JSON.stringify({ artifacts: ordinaryArtifacts(), jobs: successfulJobs, identity }));
-  for (const [selectedPlan, expectedSubdirectory] of [[affected, 'ci-evidence-types-tests'], [plan, '']]) {
+  const artifacts = ordinaryArtifacts();
+  writeFileSync(inventoryPath, JSON.stringify({ artifacts, jobs: successfulJobs, identity }));
+  const single = artifacts.find(item => item.name === 'ci-evidence-types-tests').id;
+  const multiple = artifacts.slice(1).map(item => item.id).join(',');
+  for (const [selectedPlan, expectedIds] of [[affected, single], [plan, multiple]]) {
     writeFileSync(planPath, JSON.stringify(selectedPlan));
     writeFileSync(outputPath, '');
     execFileSync(process.execPath, [fileURLToPath(new URL('./select-ci-evidence.mjs', import.meta.url))], {
       env: { ...process.env, GITHUB_OUTPUT: outputPath, GITHUB_RUN_ID: runId, CODEXIA_EXPECTED_SHA: sourceSha,
         CODEXIA_CI_PLAN_PATH: planPath, CODEXIA_CI_INVENTORY_PATH: inventoryPath },
     });
-    const ids = selectLatestEvidenceArtifacts(selectedPlan, ordinaryArtifacts(), successfulJobs, identity)
-      .map(item => item.id).join(',');
-    assert.equal(readFileSync(outputPath, 'utf8'), `artifact-ids=${ids}\nartifact-subdirectory=${expectedSubdirectory}\n`);
+    assert.equal(readFileSync(outputPath, 'utf8'), `artifact-ids=${expectedIds}\n`);
   }
 });
 
