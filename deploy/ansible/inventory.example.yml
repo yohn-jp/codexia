@@ -32,7 +32,14 @@ all:
         codexia_oidc_issuer: https://idp.example.invalid/oidc
         codexia_oidc_client_id: codexia-web
         codexia_oauth_introspection_client_id: codexia-resource-server
-        # For first enrollment, stage these three private files on the controller:
+        # For setup-only browser enrollment, omit all OIDC settings and set
+        # legacy registration pending false. These approvals default to false.
+        # codexia_owner_setup_approved: true
+        # codexia_owner_setup_edge_approved: true
+        # codexia_owner_setup_age_recipient: age1<reviewed-owner-public-recipient>
+        # codexia_owner_setup_web_redirect_uris:
+        #   - https://codexia.example.invalid/desktop/
+        # For legacy first enrollment, stage these three private files on the controller:
         # bootstrap.env, tls.crt and tls.key. Keep the directory configured on
         # finalization so Ansible removes the enrollment copies from the VM.
         # codexia_auth_enrollment_files_dir: /private/codexia-enrollment

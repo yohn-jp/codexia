@@ -4,30 +4,15 @@ import { readFileSync, realpathSync } from "node:fs";
 import type { RequestListener } from "node:http";
 import { createServer } from "node:https";
 import { fileURLToPath } from "node:url";
-import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, OIDC_PROVIDER_ID, type BetterAuthRuntimeConfig } from "./better-auth.js";
+import { createBetterAuthRuntime, OIDC_PROVIDER_ID, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateBetterAuth, readBetterAuthMigrationConfig } from "./migrate-auth.js";
 
-const IOS_REDIRECT_URI = "jp.yohn.codexia:/oauth2redirect";
+import { provisionSetupOAuthClients } from "./setup-oauth-clients.js";
 
 interface BootstrapOptions {
   readonly ownerOidcSubject?: string;
   readonly passkeyRecoveryOwnerId?: string;
   readonly webRedirectUris: readonly string[];
-}
-
-interface RegisteredClient {
-  readonly userId: string;
-  readonly redirectUris: readonly string[];
-  readonly name: string;
-  readonly scopes: readonly string[];
-  readonly skipConsent: boolean;
-  readonly grantTypes: readonly string[];
-  readonly tokenEndpointAuthMethod: string;
-  readonly applicationType: string;
-}
-
-function sameValues(actual: readonly string[], expected: readonly string[]): boolean {
-  return actual.length === expected.length && expected.every((value) => actual.includes(value));
 }
 
 export function resolvePasskeyBootstrapRpId(
@@ -70,7 +55,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
   const audience = new URL(config.apiAudience!);
   const [webClientId, iosClientId] = config.ownerClientIds;
   const introspectionClientId = config.oauthIntrospectionClientId;
-  const disposableLoopback = config.allowInsecureLoopbackForTests && process.env.NODE_ENV === "test" && audience.protocol === "http:";
+  const disposableLoopback = config.allowInsecureLoopbackForTests === true && process.env.NODE_ENV === "test" && audience.protocol === "http:";
   if (origin.origin === audience.origin || (!disposableLoopback && origin.hostname === audience.hostname) ||
       config.ownerClientIds.length !== 2 ||
       new Set([webClientId, iosClientId, introspectionClientId]).size !== 3 ||
@@ -125,41 +110,8 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
 
     registering = true;
     try {
-      const ownerScopes = ["openid", CODEXIA_OWNER_SCOPE, "offline_access"];
-      async function ensureClient(id: string, name: string, redirectUris: readonly string[], applicationType: "web" | "native", confidential = false) {
-        const scopes = confidential ? ["openid"] : ownerScopes;
-        const grantTypes = confidential ? ["authorization_code"] as const : ["authorization_code", "refresh_token"] as const;
-        const tokenEndpointAuthMethod = confidential ? "client_secret_post" : "none";
-        const current = await context.adapter.findOne<RegisteredClient>({
-          model: "oauthClient", where: [{ field: "clientId", value: id }],
-        });
-        if (current) {
-          if (current.userId !== ownerSubject || current.name !== name ||
-              !sameValues(current.redirectUris, redirectUris) || !sameValues(current.scopes, scopes) ||
-              !sameValues(current.grantTypes, grantTypes) || current.skipConsent !== confidential ||
-              current.tokenEndpointAuthMethod !== tokenEndpointAuthMethod || current.applicationType !== applicationType) {
-            throw new Error("An existing client differs from the approved registration");
-          }
-          return;
-        }
-        await registrationId.run(id, () => runtime.auth.api.adminCreateOAuthClient({
-          headers,
-          body: {
-            client_name: name, redirect_uris: [...redirectUris], application_type: applicationType,
-            scope: scopes.join(" "), resources: [audience.href], token_endpoint_auth_method: tokenEndpointAuthMethod,
-            grant_types: [...grantTypes], response_types: ["code"], require_pkce: true, skip_consent: confidential,
-          },
-        }));
-      }
-
-      // The existing disposable HTTP loopback fixture uses the provider's native loopback allowance.
-      const webType = disposableLoopback ? "native" : "web";
-      await ensureClient(webClientId!, "Codexia Web", options.webRedirectUris, webType);
-      await ensureClient(iosClientId!, "Codexia iOS", [IOS_REDIRECT_URI], "native");
-      await ensureClient(introspectionClientId, "Codexia API introspection", [audience.origin + "/oauth/introspection"], webType, true);
-      await runtime.assertRegisteredClients(ownerSubject);
-      // Verify the stored secret through Better Auth's own authenticated client boundary.
-      await runtime.verifyIntrospectionCredentials();
+      await provisionSetupOAuthClients(runtime, registrationId, headers, ownerSubject,
+        { web: webClientId!, ios: iosClientId!, introspection: introspectionClientId }, options.webRedirectUris, disposableLoopback);
       return Response.json({ ownerSubject, webClientId, iosClientId, introspectionClientId });
     } finally {
       registering = false;

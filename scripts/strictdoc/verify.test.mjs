@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
   deterministicMid,
+  discoverSourceInventory,
   normalizeHtml,
   normalizeSearchIndexJavascript,
   resolveRunIdentity,
@@ -40,6 +41,36 @@ test('rejects missing files and ranges beyond the referenced source', async (t) 
 
   assert.match(violations.join('\n'), /missing\.ts/i);
   assert.match(violations.join('\n'), /tiny\.ts.*line range/i);
+});
+
+test('accepts ranged relations through repository-local links and rejects other file targets', async (t) => {
+  const scratch = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-relation-targets-'));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const root = path.join(scratch, 'repo');
+  await mkdir(path.join(root, 'directory'), { recursive: true });
+  await writeFile(path.join(root, 'source.ts'), 'line one\nline two\n');
+  await writeFile(path.join(scratch, 'outside.ts'), 'outside\n');
+  await symlink('source.ts', path.join(root, 'inside-link.ts'));
+  await symlink('../outside.ts', path.join(root, 'outside-link.ts'));
+
+  const violations = await validateRelations([
+    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'inside-link.ts', LINE_RANGE: '1, 2' }] },
+    { UID: 'REQ-DATA-002', RELATIONS: [{ TYPE: 'File', VALUE: 'outside-link.ts', LINE_RANGE: '1, 1' }] },
+    { UID: 'REQ-DATA-003', RELATIONS: [{ TYPE: 'File', VALUE: 'directory', LINE_RANGE: '1, 1' }] },
+  ], root);
+
+  assert.deepEqual(violations, [
+    'REQ-DATA-002: File relation resolves outside repository: outside-link.ts',
+    'REQ-DATA-003: File relation target is not a file: directory',
+  ]);
+});
+
+test('identifies invalid reverse-inventory source paths by their inventory kind', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-inventory-targets-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'directory'));
+  await assert.rejects(discoverSourceInventory(root, { routes: ['missing.ts'] }), /Inventory route source.*missing\.ts/u);
+  await assert.rejects(discoverSourceInventory(root, { routes: ['directory'] }), /Inventory route source.*directory/u);
 });
 
 test('reports discovered runtime surfaces that lack an explicit classification', () => {

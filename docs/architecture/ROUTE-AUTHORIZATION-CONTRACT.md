@@ -7,7 +7,7 @@
 | Principal | credential と成立条件 | 許可される能力 | 明示的な禁止 |
 | --- | --- | --- | --- |
 | ANON | 未認証。browser/robot | 静的アセット、最小health/metadata、正規share reader入口 | 作品一覧、原稿、管理、MCP、write |
-| SETUP | **目標・未実装**。新規DB・owner未登録・承認済み初期構築で発行した256-bit一回限りのgrantと短命setup transaction | 初回本人Passkey ceremonyとowner登録のみ | 通常owner login、原稿、IdP設定、MCP、VM管理 |
+| SETUP | **setup-only runtime**。新規DB・owner未登録・承認済み初期構築で発行した256-bit一回限りのgrantと短命setup transaction | 初回本人Passkey ceremonyとowner登録のみ | 通常owner login、原稿、IdP設定、MCP、VM管理 |
 | OWNER-SESSION | Better AuthのSame-origin安全なsession。危険操作はfresh reauthentication | Passkey、session、本人のIdP/同意設定、OAuth認可 | cookieを原稿API bearerとして流用しない |
 | OWNER-API | Better Auth発行のOAuth access token。issuer/audience/署名/expiry/jti/client/owner subject/`codexia:api`を検証 | PostgreSQL作品の参照・編集・レビュー承認/適用 | MCP登録clientや任意IdP subjectの昇格 |
 | MCP-CLIENT | OAuth access token、登録client allowlist、server側project assignment、`mcp:read/compute/propose` | 指定作品の許可effect、提案まで | 直接Persistence、承認・適用、owner-wide通知・認証設定 |
@@ -27,7 +27,7 @@
 | `/oauth/login` | 有効なsigned OAuth requestを持つ利用者の認証入口 | OWNER-SESSION、Passkeyかリンク済みOIDC | 実装済み |
 | `/oauth/consent` | 登録済みclient/scopeの許可または拒否 | OWNER-SESSION、same-origin、認可要求の検証 | 実装済み |
 | `/r/:module/:project/:slug` | 公開linkを受け取ったSHARE-READER。公開する場合のみAccess例外を明示 | share capabilityをAPIが確認し公開版のGETに限定 | 公開reader実装あり／実Edge受入は別 |
-| `/console` | ownerの管理home | OWNER-SESSION＋API側owner確認 | **合意済み目標・未実装** |
+| `/console` | ownerの管理home | OWNER-SESSION＋API側owner確認 | セットアップ実装あり。Cloudflare・VM 受入は別 |
 | `/console/setup` | 初回だけの本人登録ウィザード | SETUP＋DBが新規構築承認済みかつowner未登録 | **合意済み目標・未実装** |
 | `/console/security` | Passkey/sessionの本人管理 | OWNER-SESSION＋危険操作のfresh再認証 | **合意済み目標・未実装** |
 | `/console/identity` | 連携OIDC、OAuth clients/grantsの管理 | OWNER-SESSION＋owner確認＋対象別権限 | **合意済み目標・未実装** |
@@ -49,9 +49,9 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `/api/auth/oauth2/{authorize,token,revoke}` | Better Auth protocol、登録済みclient、PKCE、exact redirect、audience、grant/token状態 | 未登録client、他IdP token、静的API bearer |
 | `POST /api/auth/oauth2/consent-context`、同意決定 | OWNER-SESSION、same-origin、signed request、CSRF | cross-origin、scope逸脱、黙ったauto-consent |
 | `/api/auth/*` Passkey/session/consent管理 | OWNER-SESSION。追加削除・ポリシー変更はfresh再認証 | MCP/OWNER-API bearer/SETUPキーを管理セッション化 |
-| `GET /api/auth/codexia/setup/status`（目標） | ANONへ機密のない登録可否状態のみ | ownerの存在詳細、grant値の漏えい・cache |
-| `POST /api/auth/codexia/setup/authorize`（目標） | owner不在＋NEW_APPROVED、期限内grant、CSRF/Origin、rate limit。短命setup transactionのみ生成 | 普通のAPI bearerやowner session発行、キーreplay、復旧DBでの新規owner |
-| `/api/auth/passkey/{generate-register-options,verify-registration}`（setup時・目標） | 短命setup transactionに拘束されたWebAuthn ceremony、RP/origin/UV/challenge、原子的なowner登録＋grant消費 | 部分owner作成、同時登録二重成功、既存ownerの上書き |
+| `GET /api/auth/codexia/setup/status` | ANONへ機密のない登録可否状態のみ | ownerの存在詳細、grant値の漏えい・cache |
+| `POST /api/auth/codexia/setup/authorize` | owner不在＋NEW_APPROVED、期限内grant、CSRF/Origin、rate limit。短命setup transactionのみ生成 | 普通のAPI bearerやowner session発行、キーreplay、復旧DBでの新規owner |
+| `/api/auth/passkey/{generate-register-options,verify-registration}`（setup時） | 短命setup transactionに拘束されたWebAuthn ceremony、RP/origin/UV/challenge、原子的なowner登録＋grant消費 | 部分owner作成、同時登録二重成功、既存ownerの上書き |
 | `GET /api/session`、`GET /api/v1/persistence/status` | OWNER-API。workspace認証とDBの独立観測 | 画面stateをowner資格とみなす |
 | `GET /api/v1/persistence/projects*` | OWNER-API、毎回project/object scopeを検証 | MCP直アクセス、project列挙 |
 | `POST/PATCH/PUT/DELETE /api/v1/persistence/*` | OWNER-API、対象・version/revision・冪等キー・transaction前提 | stale write、他作品、提案による承認迂回 |
@@ -68,7 +68,7 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `POST /api/console/backups/runs` | OWNER-SESSION＋fresh・writer停止の影響確認。202はdurable request受付のみ | MCP/外部OAuth bearerからのbackup要求、実行未確認の成功、任意コマンドや本番restore |
 | `OPTIONS /api/*` | 明示したCORS origin/method/headerのみ | preflight 204を認証成功と解釈。cross-origin Cookie |
 
-**重要:** `/api/auth/codexia/setup/*` は合意済みの**目標endpoint名**であり、現行mainで動作していない。公開APIのSchema/operation/状態は実装PRで固定し、Better Authを迂回する別の認証サーバーを作らない。MCPのallowlistとproject assignmentは現状の保護されたサーバー設定が正本であり、認証clientの表示・登録だけを更新しても有効権限を変更したことにしてはならない。
+`POST /api/auth/codexia/setup/profile` は正当な短命setup transactionをプロフィールに拘束する。`POST /api/auth/codexia/setup/complete` は確定したownerと一致する登録transactionだけで、事前承認済みOAuth clientの確認を再試行する。いずれも通常のBetter Auth認可には使わない。MCPのallowlistとproject assignmentは現状の保護されたサーバー設定が正本であり、認証clientの表示・登録だけを更新しても有効権限を変更したことにしてはならない。
 
 ## 個別APIルートの認可表（wildcardではなく最終一致規則）
 

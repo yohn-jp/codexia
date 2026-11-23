@@ -1,0 +1,27 @@
+[Unit]
+Description=Codexia first-owner setup
+Requires=codexia-db.service
+After=network-online.target codexia-db.service
+
+[Container]
+Image={{ codexia_auth_bootstrap_image }}
+ContainerName=codexia-api
+Network=codexia.network
+Network=codexia-data.network
+Secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL
+Secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET
+Secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET
+EnvironmentFile={{ home }}/.config/codexia-auth/runtime.env
+EnvironmentFile={{ home }}/.config/codexia-auth/owner-setup.env
+Environment=CODEXIA_AUTH_MODE=setup-only
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m
+NoNewPrivileges=true
+DropCapability=all
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120

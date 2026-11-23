@@ -55,7 +55,8 @@ function fixture() {
   put(join(site,'architecture','atlas.css'),'');
   put(join(site,'architecture','atlas.js'),'');
   put(join(site,'architecture','svg','user-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
-  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',image:'svg/user-1.svg'}]}));
+  put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',image:'svg/user-1.svg'},{id:'system-1',image:'svg/system-1.svg',sourceModel:'docs/architecture/likec4/model.likec4',sourceModelSha256:digest(readFileSync('docs/architecture/likec4/model.likec4'))}]}));
   put(join(site,'graph','source.json'),JSON.stringify({sourceSha:sha}));
   put(join(site,'graph','analysis.mjs'),'export const analyze = true;\n');
   put(join(site,'graph','communities.html'),'<html><body><a href="./">Graph</a></body></html>');
@@ -68,7 +69,7 @@ test('generates and verifies sitemap, SHA landing pages and review integrity aft
   try {
     const auditManifest=readFileSync(join(site,'manifest.json'),'utf8');
     const registry=generate(site,sha,origin);
-    assert.equal(registry.routes.length,9);
+    assert.equal(registry.routes.length,10);
     assert.equal(registry.routes.find(route=>route.route==='/ci/').sourceSha,undefined);
     assert.equal(registry.routes.find(route=>route.route==='/audit/').sourceSha,undefined);
     assert.equal(registry.routes.find(route=>route.route==='/architecture/').sourceSha,sha);
@@ -82,11 +83,11 @@ test('generates and verifies sitemap, SHA landing pages and review integrity aft
     assert.match(home,new RegExp(`reviews/${sha}/index.html`,'u'));
     assert.match(readFileSync(join(site,'snapshots',sha,'index.html'),'utf8'),/download="codexia-[a-f0-9]{40}-repomix\.json"/u);
     assert.equal(readFileSync(join(site,'manifest.json'),'utf8'),auditManifest);
-    assert.deepEqual(verify(site,origin).routes,9);
+    assert.deepEqual(verify(site,origin).routes,10);
     put(join(site,'reviews',sha,'index.html'),readFileSync(join(site,'reviews',sha,'index.html'),'utf8')+'<nav>Shared navigation</nav>');
     assert.throws(()=>verify(site,origin),/Output (?:size|digest) mismatch/u);
     assert.deepEqual(finalize(site,origin),{finalizedReviews:1});
-    assert.equal(verify(site,origin).routes,9);
+    assert.equal(verify(site,origin).routes,10);
   } finally { cleanup(site); }
 });
 
@@ -172,6 +173,31 @@ test('review finalization rejects symlinked files before updating integrity meta
       renameSync(original, path);
     }
     assert.deepEqual(finalize(site, origin), { finalizedReviews: 1 });
-    assert.equal(verify(site, origin).routes, 9);
+    assert.equal(verify(site, origin).routes, 10);
   } finally { cleanup(site); }
+});
+
+test('records and validates LikeC4 source, lock and published SVG provenance',()=>{
+  const site=fixture();
+  try {
+    const atlasPath=join(site,'architecture','manifest.json');
+    const atlas=JSON.parse(readFileSync(atlasPath,'utf8'));
+    const model=readFileSync('docs/architecture/likec4/model.likec4');
+    assert.ok(atlas.diagrams.some(item => item.id === 'system-1'));
+    put(atlasPath,JSON.stringify(atlas));
+    put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    const registry=generate(site,sha,origin);
+    assert.equal(registry.likec4.sourceSha,sha);
+    assert.equal(registry.likec4.model.sha256,digest(model));
+    assert.equal(registry.likec4.generator.version,'1.61.0');
+    assert.equal(registry.likec4.generator.lockSha256,digest(readFileSync('scripts/architecture/package-lock.json')));
+    verify(site,origin);
+    put(join(site,'architecture','svg','system-1.svg'),'<svg>changed</svg>');
+    assert.throws(()=>verify(site,origin),/LikeC4.*digest/u);
+  } finally {cleanup(site);}
+});
+
+test('rejects an Atlas without its required LikeC4 system view',()=>{
+ const site=fixture();
+ try {const atlasPath=join(site,'architecture','manifest.json'); const atlas=JSON.parse(readFileSync(atlasPath,'utf8')); atlas.diagrams=atlas.diagrams.filter(item=>item.id!=='system-1'); put(atlasPath,JSON.stringify(atlas)); assert.throws(()=>generate(site,sha,origin),/LikeC4.*system-1/u);} finally {cleanup(site);}
 });

@@ -149,3 +149,37 @@ test("generated Fastify document response schema preserves PostgreSQL DTOs and a
   assert.deepEqual(response.json().document.projectionMetadata, { generation: 1 });
   assert.deepEqual(response.json().revision.projectionMetadata, { source: "postgres" });
 });
+
+test("generated document listing validates limit and passes the persistence default and boundaries", async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  for (const schema of schemas) app.addSchema(schema);
+
+  const documentList = routes.find(({ method, url }) => method === "GET" && url === "/api/v1/persistence/projects/:projectId/documents");
+  assert.ok(documentList);
+  assert.deepEqual(documentList.contentTypes["400"], ["application/json"]);
+
+  const acceptedLimits: number[] = [];
+  app.route<{ Querystring: { limit: number } }>({
+    method: documentList.method,
+    url: documentList.url,
+    schema: documentList.schema as FastifySchema,
+    handler: async (request) => {
+      acceptedLimits.push(request.query.limit);
+      return { documents: [] };
+    },
+  });
+
+  const url = "/api/v1/persistence/projects/project-1/documents";
+  for (const query of ["", "?limit=1", "?limit=1000"]) {
+    const response = await app.inject({ method: "GET", url: url + query });
+    assert.equal(response.statusCode, 200, response.payload);
+  }
+  assert.deepEqual(acceptedLimits, [500, 1, 1000]);
+
+  for (const limit of ["0", "1001", "1.5", "invalid"]) {
+    const response = await app.inject({ method: "GET", url: `${url}?limit=${limit}` });
+    assert.equal(response.statusCode, 400, response.payload);
+  }
+  assert.deepEqual(acceptedLimits, [500, 1, 1000]);
+});

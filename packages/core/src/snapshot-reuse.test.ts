@@ -18,7 +18,6 @@ import type {
 } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { CoreStore, SNAPSHOT_PROJECTION_EPOCH } from "./index.js";
-import { makeKnowledgeProjection } from "./knowledge-context.js";
 import YAML from "yaml";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -514,14 +513,19 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
     const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
     const emptyKnowledge = { documentMappings: [], entries: [], nodeLimitReached: false };
     const legacyKnowledge = JSON.stringify({ version: 1, projectId: project.id, ...emptyKnowledge });
+    // Freeze the historical identity bytes independently of today's projection builder.
+    const legacyIdentity = `{"data":{"documentMappings":[],"entries":[],"nodeLimitReached":false},"projectId":${JSON.stringify(project.id)}}`;
+    const knowledge = {
+      ...emptyKnowledge,
+      source: { kind: "knowledge-projection", snapshot, revision: createHash("sha256").update(legacyIdentity).digest("hex") },
+    };
     const files: Record<string, ReturnType<typeof file>> = compatible ? {} : {
       "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
       [knowledgePath]: file(legacyKnowledge),
     };
-    const currentFacets = compatible ? { publishingRecords: {}, nlpFeatureSettings: null,
-      knowledge: makeKnowledgeProjection(snapshot, emptyKnowledge) } : {};
+    const currentFacets = compatible ? { publishingRecords: {}, nlpFeatureSettings: null, knowledge } : {};
     await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files,...currentFacets} as unknown as JsonObject,expectedVersion:null}));
-    return {project,snapshot,knowledgePath,legacyKnowledge};
+    return {project,snapshot,knowledgePath,legacyKnowledge,knowledge};
   }
   const compatible = await seedLegacy(true);
   const incompatible = await seedLegacy(false);
@@ -554,8 +558,10 @@ test("explicit maintenance certifies equivalent legacy snapshots and transitions
   assert.equal(oldPinned.knowledge, undefined);
   assert.equal((await oldPinned.read(incompatible.knowledgePath))?.content, incompatible.legacyKnowledge);
   await store.prepareSnapshotReuse(compatible.project.id);
-  assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
-  assert.deepEqual(await exactFiles(await store.reader(compatible.project.id)), compatibleFiles);
+  const certified = await store.reader(compatible.project.id);
+  assert.deepEqual(certified.snapshot, compatible.snapshot);
+  assert.deepEqual(certified.knowledge, compatible.knowledge);
+  assert.deepEqual(await exactFiles(certified), compatibleFiles);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
   let release!: () => void;
   const both = new Promise<void>(resolve => { release = resolve; });

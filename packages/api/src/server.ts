@@ -1284,6 +1284,15 @@ export function createServer(options: ApiServerOptions): Server {
       }
       return;
     }
+    if (options.betterAuth && routePath === "/api/auth/codexia/setup/status" && method === "GET") {
+      response.setHeader("Cache-Control", "no-store");
+      if (crossOrigin || request.headers.authorization !== undefined) {
+        sendJson(response, 403, { code: "SETUP_SAME_ORIGIN_REQUIRED" });
+        return;
+      }
+      sendJson(response, 200, { state: "active" });
+      return;
+    }
     if (options.betterAuth && routePath === "/api/auth/codexia/owner-session" && method === "POST") {
       if (!sameOrigin(request, trustProxy)) {
         fail(response, 403, "CROSS_ORIGIN_REQUEST", "Owner session confirmation requires the exact same origin");
@@ -2072,16 +2081,30 @@ function parsePositivePort(value: string | undefined): number {
 
 export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
-  const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
   const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
   const deprecatedSettings = ["AUTH_TOKEN", "AUTH_TOKEN_FILE", "BROWSER_AUTH", "ACCESS_ISSUER", "ACCESS_AUDIENCE", "ACCESS_ORIGIN", "ACCESS_OWNER_EMAIL", "OAUTH_ISSUER", "OAUTH_AUDIENCE", "OAUTH_JWKS_URL"];
   if (deprecatedSettings.some(setting => readCodexiaEnvironment(setting) !== undefined)) {
     throw new Error("Standalone authentication supports only Better Auth settings");
   }
   const configuredAuthMode = readCodexiaEnvironment("AUTH_MODE");
-  if (configuredAuthMode !== undefined && configuredAuthMode !== "better-auth") {
-    throw new Error("CODEXIA_AUTH_MODE must be better-auth");
+  if (configuredAuthMode === "setup-only") {
+    const { createOwnerSetupApp, readOwnerSetupConfig } = await import("./owner-setup.js");
+    const { config, redirects } = readOwnerSetupConfig();
+    const app = createOwnerSetupApp(config, redirects);
+    try {
+      await app.verifySchema();
+      await app.listen({ host: process.env.HOST ?? "127.0.0.1", port: parsePositivePort(process.env.PORT) });
+      app.server.once("close", () => { void app.close(); });
+      return app.server;
+    } catch (error) {
+      await app.close();
+      throw error;
+    }
   }
+  if (configuredAuthMode !== undefined && configuredAuthMode !== "better-auth") {
+    throw new Error("CODEXIA_AUTH_MODE must be better-auth or setup-only");
+  }
+  const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
   const betterAuthValues = {
     databaseUrl: readCodexiaEnvironment("AUTH_DATABASE_URL"),
     publicOrigin: readCodexiaEnvironment("PUBLIC_ORIGIN"),
@@ -2129,6 +2152,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   let persistenceOptions: Awaited<ReturnType<typeof postgresPersistenceOptions>> | undefined;
   try {
     await verifyAuthSchema(betterAuth.pool);
+    const { installedSetupOwner } = await import("./owner-setup-store.js");
+    await installedSetupOwner(betterAuth.pool, betterAuthValues.ownerSubject);
     await betterAuth.assertRegisteredClients();
     await betterAuth.verifyIntrospectionCredentials();
     const oauthOwner: OAuthOwnerOptions = {

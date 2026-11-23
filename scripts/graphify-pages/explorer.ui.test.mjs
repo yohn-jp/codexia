@@ -90,6 +90,17 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
     : { channel: 'chrome', headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => {
+      const media = original(query);
+      if (query === '(max-width: 850px)') {
+        const add = media.addEventListener.bind(media);
+        media.addEventListener = (type, callback) => add(type, event => setTimeout(() => callback(event), 200));
+      }
+      return media;
+    };
+  });
   await page.goto((await serveFixture(fixture, t))+'?file=packages/a.ts', { waitUntil: 'domcontentloaded' });
   assert.equal(await page.locator('#selected-path').textContent(), 'packages/a.ts');
   assert.equal(await page.locator('#stat-symbol-links').textContent(), '6');
@@ -151,7 +162,10 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
   assert.match(await page.locator('#expansion-list').innerText(), /beta/);
   await page.setViewportSize({ width: 320, height: 800 });
+  assert.equal(await page.evaluate(() => window.innerWidth), 320, 'the mobile disclosure assertion uses a real 320px viewport');
+  await page.waitForSelector('#file-explorer:not([open])');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'long source evidence should wrap within 320px shell');
+  await page.waitForFunction(() => !document.querySelector('#file-explorer').open, null, { timeout: 3000 });
   assert.equal(await page.locator('#file-explorer').evaluate(element => element.open), false, 'mobile file explorer starts collapsed so the selected graph remains primary');
   await page.locator('.file-explorer-summary').click();
   assert.equal(await page.locator('#search').isVisible(), true);
@@ -246,4 +260,26 @@ test('Graphify explorer pins selected files beyond the result cap and explains u
   assert.equal(await page.locator('#selected-path').textContent(), '.github/dependabot.yml');
   await page.goto((await serveFixture(fixture,t))+'?file=packages%2Fa.ts&symbol=missing-symbol');
   assert.match(await page.locator('#page-status').innerText(), /指定シンボル ID/);
+});
+
+
+test('mobile collapse check rejects a missing media-query event', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR, timeout: 30_000 }, async t => {
+  const require = createRequire(join(process.env.CODEXIA_AUDIT_TOOL_DIR, 'package.json'));
+  const { chromium } = require('playwright-core');
+  const browser = await chromium.launch(process.env.CODEXIA_E2E_CHROMIUM
+    ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM, headless: true }
+    : { channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => {
+      const media = original(query);
+      if (query === '(max-width: 850px)') media.addEventListener = () => {};
+      return media;
+    };
+  });
+  await page.goto((await serveFixture(fixture, t)) + '?file=packages/a.ts');
+  await page.setViewportSize({ width: 320, height: 800 });
+  await assert.rejects(page.waitForFunction(() => !document.querySelector('#file-explorer').open, null, { timeout: 300 }), /Timeout/u);
 });
