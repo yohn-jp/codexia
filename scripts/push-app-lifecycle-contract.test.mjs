@@ -139,6 +139,15 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
     /docker info|docker build/u, 'lifecycle consumers must not rebuild the key-free fixture');
 });
 
+test('both lifecycle shells and the prebuild shell parse as executable Bash', () => {
+  for (const filename of ['../deploy/ansible/test-push-app-lifecycle.sh',
+    '../deploy/ansible/test-push-auth-lifecycle.sh', '../deploy/fixtures/sshfs-server/build.sh']) {
+    const source = new URL(filename, import.meta.url);
+    const result = spawnSync('bash', ['-n', source.pathname], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
 test('real app and Better Auth transitions execute independently and missing states cannot pass', () => {
   const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   const image = readFileSync(new URL('../deploy/fixtures/sshfs-server/Dockerfile', import.meta.url), 'utf8');
