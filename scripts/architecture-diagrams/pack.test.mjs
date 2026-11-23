@@ -40,6 +40,6 @@ test('source line and heading resolve to the correct Mermaid block', () => {
   const diagrams = parseMermaidDiagrams('# Doc\n## First\n```mermaid\nflowchart LR\nA --> B\n```\n## Second\n```mermaid\nstateDiagram-v2\n[*] --> Ready\n```\n', section);
   assert.deepEqual(diagrams.map(d => [d.id, d.title, d.line, d.kind]), [
     ['system-1', 'First', 4, 'flowchart'],
-    ['system-2', 'Second', 8, 'stateDiagram-v2'],
+    ['system-2', 'Second', 9, 'stateDiagram-v2'],
   ]);
 });

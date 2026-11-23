@@ -29,7 +29,7 @@ export function parseMermaidDiagrams(markdown, section) {
     const h = /^#{1,4}\s+(.+)$/u.exec(lines[i]);
     if (h) heading = h[1].replace(/[#\s]+$/gu, '').trim();
     if (lines[i].trim() !== '```mermaid') continue;
-    const start = i + 1;
+    const start = i + 2;
     const code = [];
     while (++i < lines.length && lines[i].trim() !== '```') code.push(lines[i]);
     assert.ok(i < lines.length, `Missing Mermaid closing fence in ` + section.path);
