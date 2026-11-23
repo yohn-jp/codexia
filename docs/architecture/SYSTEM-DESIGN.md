@@ -45,13 +45,14 @@ flowchart TB
         P["PostgreSQL persistence adapter"]
     end
     DB[("PostgreSQL<br/>canonical author data + auth schema")]
-    J[("Local draft journals<br/>Web IndexedDB / native protected files")]
+    JW[("Web IndexedDB<br/>recoverable draft only")]
+    JI[("iOS protected local files<br/>recoverable draft only")]
     D --> A
     D --> T
     I --> T
     M --> T
-    D <--> J
-    I <--> J
+    D <--> JW
+    I <--> JI
     T --> H
     H --> C
     C <--> R
