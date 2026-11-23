@@ -1,0 +1,395 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
+import { ROOT_VERIFICATION_DOCUMENTS, isNonExecutableDocumentation, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
+
+export const FULL_MODEL_OCI_PATHS = Object.freeze([
+  '.dockerignore',
+  '.github/workflows/full-model-oci-acceptance.yml',
+  'Dockerfile',
+  'Dockerfile.backend',
+  'app/**',
+  // Exclude native packaging only. The web build typechecks the shared bridge declarations.
+  '!app/native/README.md',
+  '!app/native/capacitor.config.ts',
+  '!app/native/package.json',
+  '!app/native/package-lock.json',
+  '!app/native/scripts/**',
+  '!app/native/plugins/codexia-auth/Package.swift',
+  '!app/native/plugins/codexia-auth/ios/**',
+  'modules/**',
+  'package.json',
+  'packages/**',
+  // Model OCI uses packaged runtime sources, not local unit/contract test fixtures.
+  // Ordered negations must match the standalone main-push workflow exactly.
+  '!app/**/test/**',
+  '!app/**/tests/**',
+  '!app/**/*.test.*',
+  '!modules/**/test/**',
+  '!modules/**/tests/**',
+  '!modules/**/*.test.*',
+  '!packages/**/test/**',
+  '!packages/**/tests/**',
+  '!packages/**/*.test.*',
+  'app/src/**/test/**',
+  'app/src/**/tests/**',
+  'modules/**/src/**/test/**',
+  'modules/**/src/**/tests/**',
+  'packages/**/src/**/test/**',
+  'packages/**/src/**/tests/**',
+  // api and persistence-contracts package their entire compiled source trees, including tests/specs.
+  'packages/api/src/**',
+  'packages/persistence-contracts/src/**',
+  'profiles/**',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'scripts/ci/impact/plan.mjs',
+  'scripts/ci/execution/workspace.mjs',
+  'scripts/ci/execution/parallel.mjs',
+  'scripts/build/packaging/profile-build.mjs',
+  'scripts/shared/read-regular-file.mjs',
+  'scripts/build/packaging/profile-package.mjs',
+  'scripts/verify-oci.sh',
+  'scripts/verify-oci-http.mjs',
+  'scripts/oci-better-auth-fixture.sh',
+  'scripts/push-auth-lifecycle-oidc.mjs',
+  'tests/integration/model-oci-lifecycle.acceptance.mjs',
+  'tests/integration/model-oci-lifecycle-arguments.mjs',
+  'tests/integration/model-oci-lifecycle-arguments.test.mjs',
+  'tests/integration/model-oci-lifecycle.container.mjs',
+  'tests/integration/model-postgres-fixture.mjs',
+  '.github/workflows/verify.yml',
+]);
+
+/** @param {string} file */
+export function matchesFullModelOciPath(file) {
+  if (typeof file !== 'string') return false;
+  let included = false;
+  for (const expression of FULL_MODEL_OCI_PATHS) {
+    const exclude = expression.startsWith('!');
+    const pattern = exclude ? expression.slice(1) : expression;
+    if (path.matchesGlob(file, pattern)) included = !exclude;
+  }
+  return included;
+}
+
+// Reviewed independent inputs: root unit owns script/route/Worker proof;
+// dedicated Ansible, Terraform, audit and static-delivery workflows own
+// their corresponding executable integration proofs. New paths fail closed.
+export const OPERATIONAL_ROOT_PATHS = Object.freeze([
+  '.github/workflows/ansible-base-secrets.yml',
+  '.github/workflows/ios-unsigned-ipa.yml',
+  '.github/workflows/ansible-host.yml',
+  '.github/workflows/backend-deployment-handoff.yml',
+  '.github/workflows/deployment-config.yml',
+  '.github/workflows/ios-unsigned-ipa.yml',
+  '.github/workflows/push-backup.yml',
+  '.github/workflows/push-host.yml',
+  '.github/workflows/repository-audit.yml',
+  '.github/workflows/tailscale-connectivity.yml',
+  'deploy/ansible/base-runtime.yml',
+  'deploy/ansible/base-secrets.yml',
+  'deploy/ansible/check_postgres_volume.py',
+  'deploy/ansible/ci-mitogen-playbook.sh',
+  'deploy/ansible/deploy.yml',
+  'deploy/ansible/deploy-transaction.yml',
+  'deploy/ansible/host-contract.py',
+  'deploy/ansible/host-validate.yml',
+  'deploy/ansible/host.yml',
+  'deploy/ansible/inspect.yml',
+  'deploy/ansible/inventory.example.yml',
+  'deploy/ansible/push-deployment-recover.sh',
+  'deploy/ansible/requirements.txt',
+  'deploy/ansible/restore-drill.yml',
+  'deploy/ansible/site.yml',
+  'deploy/ansible/test-base-runtime-integration.sh',
+  'deploy/ansible/test-base-secrets-integration.sh',
+  'deploy/ansible/test-base-secrets.sh',
+  'deploy/ansible/test-host-integration.sh',
+  'deploy/ansible/test-host-validation.sh',
+  'deploy/ansible/test-inspect.sh',
+  'deploy/ansible/test-push-host.sh',
+  'deploy/ansible/test_host_contract.py',
+  'deploy/ansible/test_postgres_volume_layout.py',
+  'deploy/ansible/verify-base-db-container.yml',
+  'deploy/ansible/verify-base-tunnel-container.yml',
+  'deploy/backup/backup.sh',
+  'deploy/cloudflare/identity-probes.json',
+  'deploy/cloudflare/public-protocol-paths.json',
+  'deploy/cloudflare/terraform/.terraform.lock.hcl',
+  'deploy/cloudflare/terraform/.gitignore',
+  'deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md',
+  'deploy/cloudflare/terraform/main.tf',
+  'deploy/cloudflare/terraform/terraform.tfvars.example',
+  'deploy/cloudflare/terraform/variables.tf',
+  'deploy/cloudflare/terraform/versions.tf',
+  'deploy/cloudflare/ui-routes.json',
+  'deploy/postgres/010-create-app-role.sh',
+  'deploy/quadlet/codexia-api.container',
+  'deploy/quadlet/codexia-data.network',
+  'deploy/quadlet/codexia-data.volume',
+  'deploy/quadlet/codexia-db.container',
+  'deploy/quadlet/codexia-history.volume',
+  'deploy/quadlet/codexia-postgres.volume',
+  'deploy/quadlet/codexia-tunnel.container',
+  'deploy/quadlet/codexia.network',
+  ...ROOT_VERIFICATION_DOCUMENTS,
+  'edge/frontend/package-lock.json',
+  'edge/frontend/package.json',
+  'edge/frontend/static/_headers',
+  'edge/frontend/static/_redirects',
+  'edge/frontend/test/static-smoke.mjs',
+  'edge/frontend/test/worker.test.ts',
+  'edge/frontend/tsconfig.json',
+  'edge/frontend/wrangler.jsonc',
+  'scripts/audit/export.mjs',
+  'scripts/audit/export.test.mjs',
+  'scripts/audit/repomix.config.json',
+  'scripts/backend-deployment-handoff-contract.test.mjs',
+  'scripts/create-backend-deployment-certificates.mjs',
+  'scripts/push-deployment-admission.mjs',
+  'scripts/push-deployment-admission.test.mjs',
+  'scripts/push-deployment-backup.test.mjs',
+  'scripts/push-deployment-certificate.mjs',
+  'scripts/push-deployment-contract.test.mjs',
+  'scripts/push-deployment-recovery.test.mjs',
+  'scripts/push-host.test.mjs',
+  'scripts/verify-backend-push-handoff.mjs',
+  'scripts/verify-backend-push-handoff.test.mjs',
+  'scripts/verify-deployment-config.mjs',
+  'scripts/verify-public-oauth-edge.mjs',
+  'scripts/verify-public-oauth-edge.test.mjs',
+  'scripts/verify-frontend-compatibility.mjs',
+  'scripts/verify-frontend-compatibility.test.mjs',
+]);
+const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/ios/', 'app/native/']);
+const DB_CONTRACT_SOURCE_PATHS = new Set([
+  'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
+  'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
+  'docs/architecture/DATA-MODEL.md',
+  'docs/requirements/REQUIREMENT-REGISTER.md',
+  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+  'deploy/ansible/verify-postgres-roles.sql',
+  'packages/api/src/auth-schema.ts',
+  'packages/api/src/migrate-auth.ts',
+  'packages/persistence-postgres/src/migrate.ts',
+  'packages/persistence-postgres/src/migration-set.ts',
+]);
+
+export function createVerificationPlan({ files, event, sha, base = null }) {
+  if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
+  const selected = new Set(['coverage']);
+  let full = event !== 'pull_request' || !Array.isArray(files);
+  // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
+  let fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
+    files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
+      file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
+  const add = (...tasks) => tasks.forEach(task => selected.add(task));
+  const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
+  for (const file of files ?? []) {
+    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
+    if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
+      add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
+      continue;
+    }
+    if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
+    if (file === 'deploy/backup/backup.sh') add('db-contract');
+    if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||
+        file === 'scripts/strictdoc/strictdoc_config.py' ||
+        file.startsWith('scripts/strictdoc/')) {
+      add('requirements-trace');
+      continue;
+    }
+    if (file.startsWith('docs/architecture/') || file.startsWith('docs/deployment/') || file.startsWith('docs/security/') ||
+        file === 'docs/verification/ARCHITECTURE-ATLAS.md' ||
+        file.startsWith('scripts/architecture/') || file === 'scripts/architecture-diagrams/pack.mjs' ||
+        file === 'scripts/architecture-diagrams/pack.test.mjs') add('architecture-g5');
+    if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
+      add('unit-root');
+      continue;
+    }
+    if (
+      file.startsWith('packages/http-contract/src/') ||
+      file.startsWith('packages/http-contract/test/') ||
+      file.startsWith('packages/http-contract/scripts/') ||
+      file.startsWith('packages/http-contract/openapi/') ||
+      file.startsWith('packages/http-contract/baselines/') ||
+      file === 'packages/http-contract/tspconfig.yaml' ||
+      file === 'packages/http-contract/redocly.yaml'
+    ) {
+      add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
+      if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
+      continue;
+    }
+    // API client source is read by the canonical deployment route assertion.
+    if (file === 'app/src/api.ts') add('unit-root');
+    if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
+        file === 'packages/api/scripts/run-passkey-acceptance.mjs') {
+      add('unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap');
+      continue;
+    }
+    if (isNonExecutableDocumentation(file)) continue;
+    // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
+    const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
+    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].includes(owner.id)) {
+      const spec = BROWSER_SHARDS.find(item => file === `tests/e2e/${item.file}`);
+      if (spec) {
+        add('test-types-app-e2e');
+        for (const profile of PROFILES) {
+          add(`build-${profile}`, `browser-${profile}-${spec.id}`);
+          if (spec.id === 'ui-v1') add(`browser-${profile}-webkit`);
+        }
+        continue;
+      }
+      // The declared workspace root test/ and tests/ directories are outside
+      // the runtime package source tree. Unknown owners remain fail-closed.
+      const knownWorkspaceFixture = WORKSPACES.some(item =>
+        file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
+      // The Swift native client is built by its independent iOS lifecycle, not model OCI.
+      const knownNativeClientSource = file.startsWith('ios/CodexiaTransport/Sources/') && file.endsWith('.swift');
+      if (!owner && !knownWorkspaceFixture && !knownNativeClientSource && event === 'pull_request') fullModelOci = true;
+      full = true;
+      continue;
+    }
+    const testOnly = /\.(?:test|spec)\.tsx?$/u.test(file);
+    add(`unit-${owner.id}`, `typecheck-${TYPECHECK_TARGETS.find(item => item.workspaces.includes(owner.id)).id}`,
+      owner.id === 'app' ? 'test-types-app-e2e' : 'test-types-modules');
+    if (testOnly) continue;
+    if (owner.id === 'app') {
+      add('build-core', 'audit-core', 'build-full', 'safety');
+      browser(PROFILES);
+    } else if (/\/browser(?:\/|\.|$)/u.test(file)) {
+      add('build-full');
+      browser(['full']);
+    } else {
+      // Server modules can participate in runtime composition and other module capabilities.
+      full = true;
+    }
+  }
+  // A selected browser suite always consumes the same-profile build result.
+  for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
+  const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
+  return {
+    version: 3, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
+    full_model_oci: fullModelOci,
+    tasks,
+    groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
+    excluded: VERIFICATION_TASKS.filter(task => !tasks.includes(task)).map(task => ({ task, reason: 'Outside the affected source/profile boundaries of this PR' })),
+  };
+}
+
+export function validateVerificationPlan(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Verification plan is invalid');
+  const { coverageReuse, ...canonical } = plan;
+  if (JSON.stringify(canonical) !== JSON.stringify(createVerificationPlan(canonical))) throw new Error('Verification plan does not match canonical impact rules');
+  if (coverageReuse !== undefined) assertCoverageReuse(plan, coverageReuse);
+  return plan;
+}
+
+const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
+function assertCoverageReuse(plan, receipt) {
+  const fields = ['task', 'sourceSha', 'proofSourceSha', 'planDigest', 'workflowRunId',
+    'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'workflowJob', 'artifactId',
+    'artifactName', 'artifactDigest', 'inputClosure', 'runtime', 'certification'];
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+      JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(fields.sort())) {
+    throw new Error('Invalid coverage reuse receipt schema');
+  }
+  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Coverage proof reuse is only valid for a selected PR coverage task');
+  const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
+      throw new Error(`Invalid exact-base ${task} proof identity`);
+    }
+    if (!/^[a-f0-9]{40}$/u.test(proof.sourceSha ?? '') || !/^[a-f0-9]{40}$/u.test(proof.proofSourceSha ?? '')) throw new Error('Invalid task proof source');
+    if (!/^[a-f0-9]{64}$/u.test(proof.planDigest ?? '')) throw new Error('Invalid task proof plan digest');
+    for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'artifactId']) {
+      if (!Number.isSafeInteger(proof[key]) || proof[key] < 1) throw new Error(`Invalid task proof ${key}`);
+    }
+    const group = taskExecution ? taskGroup(task) : 'types-tests';
+    const workflowJob = taskExecution ? taskWorkflowJob(task) : 'types';
+    if (proof.workflowJob !== workflowJob || proof.artifactName !== `ci-evidence-${group}`) throw new Error('Invalid task proof producer identity');
+    if (!/^sha256:[a-f0-9]{64}$/u.test(proof.artifactDigest ?? '')) throw new Error('Invalid task proof artifact digest');
+    if (!proof.inputClosure || typeof proof.inputClosure !== 'object' || Array.isArray(proof.inputClosure) ||
+        JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
+        Object.values(proof.inputClosure).some(value => !/^[a-f0-9]{64}$/u.test(value))) throw new Error('Incomplete task proof input closure');
+    const runtime = proof.runtime;
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) throw new Error('Missing task proof runtime');
+    for (const key of ['platform', 'arch', 'nodeVersion', 'execPath', 'cwd']) if (typeof runtime[key] !== 'string' || !runtime[key]) throw new Error(`Invalid task proof runtime ${key}`);
+    if (!/^(?:\/|[A-Za-z]:\\)/u.test(runtime.execPath) || !/^(?:\/|[A-Za-z]:\\)/u.test(runtime.cwd)) throw new Error('Task proof runtime paths must be absolute');
+    for (const key of ['imageOS', 'imageVersion']) if (runtime[key] !== null && typeof runtime[key] !== 'string') throw new Error(`Invalid task proof runtime ${key}`);
+    const certification = proof.certification;
+    if (!certification || typeof certification !== 'object' || certification.sourceSha !== plan.base ||
+        !['Certify every required exact-source matrix element', 'Certify reused merged PR proof'].includes(certification.step)) {
+      throw new Error('Invalid main task proof certification');
+    }
+    for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId']) {
+      if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
+    }
+  };
+  assertReceipt(receipt, 'coverage');
+}
+
+
+/** Independently bind an affected PR plan to the actual event base and Git diff. */
+export function assertExactPrImpact(plan, expectedBase, changedFiles) {
+  validateVerificationPlan(plan);
+  if (plan.event !== 'pull_request') throw new Error('Exact PR impact verification requires a PR plan');
+  if (!/^[a-f0-9]{40}$/u.test(expectedBase ?? '') || plan.base !== expectedBase) {
+    throw new Error('Impact plan PR base does not match the event');
+  }
+  if (plan.mode === 'affected' &&
+      (!Array.isArray(changedFiles) || JSON.stringify(plan.files) !== JSON.stringify(changedFiles))) {
+    throw new Error('Impact plan does not match the exact PR diff');
+  }
+}
+
+export function planDigest(plan) {
+  const { coverageReuse: _coverageReuse, ...canonical } = validateVerificationPlan(plan);
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+export function verificationPlanOutputs(plan) {
+  validateVerificationPlan(plan);
+  return {
+    plan: JSON.stringify(plan),
+    unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
+    types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
+    build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
+    oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
+    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
+      .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
+    full_model_oci: String(plan.full_model_oci),
+  };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const sha = process.env.CODEXIA_EXPECTED_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const event = process.env.GITHUB_EVENT_NAME ?? 'workflow_dispatch';
+  const payload = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
+  const pushBase = event === 'push' && payload.after === sha && /^[a-f0-9]{40}$/u.test(payload.before ?? '') &&
+    !/^0{40}$/u.test(payload.before) ? payload.before : null;
+  const base = payload.pull_request?.base?.sha ?? pushBase;
+  let files = null;
+  if (event === 'pull_request' && /^[a-f0-9]{40}$/.test(base ?? '')) {
+    try {
+      files = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', `${base}...${sha}`, '--'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
+    } catch { /* Missing history must run full verification, never an empty selection. */ }
+  }
+  const plan = createVerificationPlan({ files, event, sha, base });
+  const planPath = process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json';
+  mkdirSync(path.dirname(planPath), { recursive: true });
+  writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(verificationPlanOutputs(plan)).map(([key, value]) => `${key}=${value}\n`).join(''));
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+    `Verification plan: **${plan.mode}**, ${plan.tasks.length}/${VERIFICATION_TASKS.length} validations in ${plan.groups.length} execution groups at ${sha}.\n\n` +
+    `Full model OCI acceptance: **${plan.full_model_oci ? 'SELECTED' : 'NOT_SELECTED'}**.\n\n` +
+    plan.excluded.map(item => `- NOT_SELECTED: ${item.task}: ${item.reason}\n`).join(''));
+  console.log(JSON.stringify(plan));
+}

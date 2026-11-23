@@ -83,7 +83,7 @@ jobs:
         env:
           CODEXIA_PROFILE: ${{ matrix.profile }}
         run: |
-          node scripts/ci-workspace.mjs build-workspace
+          node scripts/ci/execution/workspace.mjs build-workspace
           node scripts/build/packaging/profile-build.mjs --profile "$CODEXIA_PROFILE"
           pnpm --filter @codexia/app build
 

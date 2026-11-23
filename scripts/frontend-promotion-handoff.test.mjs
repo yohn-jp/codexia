@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { buildComponentReleaseRecord } from './component-release-record.mjs';
 import { assertFrontendPromotionArtifactEvidence } from './verify-frontend-artifact.mjs';
 

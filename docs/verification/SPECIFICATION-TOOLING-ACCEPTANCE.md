@@ -1,6 +1,6 @@
 # 仕様ツールのCI・設計可視化・公開に関する受入設計
 
-**種別: 採用済み品質ゲート設計・CI未変更。** 本書は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md) のツールを、[CI/CD](CI-CD.md)、[Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md)、[Traceability](TRACEABILITY-REGISTER.md) に従って**どの証拠で採用可否を判断するか**を所有する。CIの既存 `scripts/ci-contract.mjs` と `.github/workflows/verify.yml` は依然唯一のverification task/plan authority。新しい単独ワークフローを乱立させたり、未実行の検証をpassしたことにしたりしない。
+**種別: 採用済み品質ゲート設計・CI未変更。** 本書は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md) のツールを、[CI/CD](CI-CD.md)、[Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md)、[Traceability](TRACEABILITY-REGISTER.md) に従って**どの証拠で採用可否を判断するか**を所有する。CIの既存 `scripts/ci/impact/contract.mjs` と `.github/workflows/verify.yml` は依然唯一のverification task/plan authority。新しい単独ワークフローを乱立させたり、未実行の検証をpassしたことにしたりしない。
 
 ## ツールと責務（対抗案）
 
@@ -30,7 +30,7 @@
 | G6 性能 | k6 threshold、現行比較baseline、起動/stream/DB負荷 | 承認済みp95/p99、RPS、RSS、SSE維持等のbudget違反 | cheap smokeはPR、長時間は明示したisolated run |
 | G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装 | 部分的にはPR、全量認定はrelease前 |
 
-**この表のG0〜G7は要求される受入モデルであり、現状存在するCI task名ではない。** 実装時は `scripts/ci-contract.mjs` / `ci-impact.mjs` / `verify.yml` / release certifierへ一貫して組み込み、既存の20 job目安などのCI予算とindependent task parallelismを保つ。新しい検証を追加しただけで旧検証を消さない。差し替え時は旧テストの検出能力と新テストの合致を示す。
+**この表のG0〜G7は要求される受入モデルであり、現状存在するCI task名ではない。** 実装時は `scripts/ci/impact/contract.mjs` / `ci-impact.mjs` / `verify.yml` / release certifierへ一貫して組み込み、既存の20 job目安などのCI予算とindependent task parallelismを保つ。新しい検証を追加しただけで旧検証を消さない。差し替え時は旧テストの検出能力と新テストの合致を示す。
 
 ## 既存REQ-IDから検証義務への接続
 

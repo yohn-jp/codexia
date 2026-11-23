@@ -22,7 +22,7 @@ export default defineConfig({
   reporter: coverageFile
     ? [
         ["list"],
-        [resolve("scripts/browser-coverage-reporter.mjs"), { outputFile: coverageFile }],
+        [resolve("scripts/ci/browser/coverage-reporter.mjs"), { outputFile: coverageFile }],
       ]
     : "list",
   use: {

@@ -9,7 +9,7 @@ import {
   TYPECHECK_TARGETS,
   UNIT_TARGETS,
   WORKSPACES,
-} from './ci-contract.mjs';
+} from './ci/impact/contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modulePackagePrefix = '@codexia/module-';

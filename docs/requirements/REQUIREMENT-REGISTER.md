@@ -801,7 +801,7 @@ ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別し�
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
 **Design owner**: [CI/CD](../verification/CI-CD.md)
-**Implementation identifiers**: .github/workflows/verify.yml; scripts/ci-impact.mjs
+**Implementation identifiers**: .github/workflows/verify.yml; scripts/ci/impact/plan.mjs
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
@@ -816,7 +816,7 @@ CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未
 - **Type**: File
   **Path**: .github/workflows/verify.yml
 - **Type**: File
-  **Path**: scripts/ci-impact.mjs
+  **Path**: scripts/ci/impact/plan.mjs
 
 ## REQ-QUAL-003
 

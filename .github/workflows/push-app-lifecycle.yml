@@ -62,10 +62,10 @@ on:
       - scripts/push-deployment-contract.test.mjs
       - scripts/push-deployment-documentation.test.mjs
       - scripts/verify-backend-artifacts.mjs
-      - scripts/ci-artifact-selection.mjs
-      - scripts/download-ci-artifacts*.mjs
+      - scripts/ci/evidence/artifact-selection.mjs
+      - scripts/ci/evidence/download-artifacts*.mjs
       - scripts/release-policy.mjs
-      - scripts/ci-contract.mjs
+      - scripts/ci/impact/contract.mjs
       - scripts/backend-image-inspection.mjs
       - scripts/push-deployment-admission.mjs
       - scripts/push-deployment-certificate.mjs

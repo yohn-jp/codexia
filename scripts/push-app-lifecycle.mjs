@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { collectGitHubArrayPages, collectGitHubPages } from './release-policy.mjs';
 import { expectedBackendMigrationFingerprint, assertBackendImageIdentity } from './backend-image-inspection.mjs';
 import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
