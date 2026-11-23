@@ -144,17 +144,19 @@ test('real app and Better Auth transitions execute independently and missing sta
   const image = readFileSync(new URL('../deploy/fixtures/sshfs-server/Dockerfile', import.meta.url), 'utf8');
   const entry = readFileSync(new URL('../deploy/fixtures/sshfs-server/entrypoint.sh', import.meta.url), 'utf8');
   const producer = readFileSync(new URL('../deploy/fixtures/sshfs-server/build.sh', import.meta.url), 'utf8');
-  assert.match(fixture, /case "\\$\\{CODEXIA_LIFECYCLE_SCENARIO:\?\\}" in[\\s\\S]*?app\\)[\\s\\S]*?run_application_lifecycle[\\s\\S]*?auth\\)[\\s\\S]*?run_better_auth_lifecycle/u);
-  assert.match(fixture, /r\\.status=required\\.length>0&&\\[\\.\\.\\.required,'fixture_cleanup'\\]\\.every/u);
-  assert.match(fixture, /Lifecycle report has unverified required transitions/u);
-  assert.match(fixture, /run_deploy "\\$initial_key" false "\\$fault_dir"/u);
-  assert.match(fixture, /verify-sshfs-fixture-artifact.mjs/u);
-  assert.match(fixture, /authorized_keys:\\ro/u);
+  assert.ok(fixture.includes('case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in'));
+  assert.ok(fixture.includes('run_application_lifecycle'));
+  assert.ok(fixture.includes('run_better_auth_lifecycle'));
+  assert.ok(fixture.includes("r.status=required.length>0&&[...required,'fixture_cleanup'].every"));
+  assert.ok(fixture.includes('Lifecycle report has unverified required transitions'));
+  assert.ok(fixture.includes('run_deploy "$initial_key" false "$fault_dir"'));
+  assert.ok(fixture.includes('verify-sshfs-fixture-artifact.mjs'));
+  assert.ok(fixture.includes('authorized_keys:ro'));
   assert.doesNotMatch(fixture, /docker build|docker save|docker pull/u);
-  assert.match(producer, /docker build --platform linux\\/amd64/u);
-  assert.match(producer, /ssh .*codexia-backup@127\\.0\\.0\\.1 true/u);
+  assert.match(producer, /docker build --platform linux\/amd64/u);
+  assert.ok(producer.includes('codexia-backup@127.0.0.1 true'));
   assert.doesNotMatch(image, /COPY.*authorized_keys/u, 'per-run keys must never be packaged into the image');
-  assert.match(entry, /test -s \\/home\\/codexia-backup\\/\\.ssh\\/authorized_keys/u);
+  assert.ok(entry.includes('test -s /home/codexia-backup/.ssh/authorized_keys'));
 });
 
 test('every lifecycle PR path also produces an exact-source backend artifact', () => {
