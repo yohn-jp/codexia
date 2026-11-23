@@ -352,7 +352,7 @@ Decisions that require evidence before selecting a concrete implementation: whet
 
 ## 参考ソース
 
-- [Internal Contract](../../packages/contracts/src/index.ts)、[Module Runtime](../../packages/module-runtime/src/module-runtime.ts)、[Worker Supervisor](../../packages/module-runtime/src/worker-supervisor.ts)、[Profile Build](../../scripts/profile-build.mjs)、[Browser Contributions](../../app/src/contributions/ContributionHost.tsx)
+- [Internal Contract](../../packages/contracts/src/index.ts)、[Module Runtime](../../packages/module-runtime/src/module-runtime.ts)、[Worker Supervisor](../../packages/module-runtime/src/worker-supervisor.ts)、[Profile Build](../../scripts/build/packaging/profile-build.mjs)、[Browser Contributions](../../app/src/contributions/ContributionHost.tsx)
 - [Modular Workspace](MODULAR-WORKSPACE.md)、[Core](CORE.md)、[Modules](MODULES.md)
 - [Wasmtime Security](https://docs.wasmtime.dev/security.html)、[Wasmtime Introduction](https://docs.wasmtime.dev/introduction.html)、[WIT Component Model](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
 - [MDN iframe Sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe)、[MDN CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox)

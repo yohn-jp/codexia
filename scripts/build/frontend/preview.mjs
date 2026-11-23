@@ -9,9 +9,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = fileURLToPath(new URL('../../../', import.meta.url));
 const artifactDir = path.join(root, 'artifacts', 'ui-preview');
-const requirePostgres = createRequire(new URL('../packages/persistence-postgres/package.json', import.meta.url));
+const requirePostgres = createRequire(new URL('../../../packages/persistence-postgres/package.json', import.meta.url));
 
 export function parsePreviewArgs(argv) {
   const options = { profile: 'core', port: 4173, engine: 'auto', skipBuild: false, capture: true };
@@ -79,7 +79,7 @@ async function engineFor(preference) {
 }
 
 async function build(profile) {
-  const { createBuildCommands } = await import('./profile-package.mjs');
+  const { createBuildCommands } = await import('../packaging/profile-package.mjs');
   const manifest = JSON.parse(await readFile(path.join(root, 'profiles', `${profile}.json`), 'utf8'));
   for (const step of createBuildCommands(profile, manifest, { includeUi: false })) {
     console.log(`Building: ${step.command} ${step.args.join(' ')}`);
@@ -266,7 +266,7 @@ async function main() {
     await waitForDatabase(connectionString);
     process.env.CODEXIA_AUTH_TEST_DISPOSABLE = '1';
     const { tsImport } = await import('tsx/esm/api');
-    const { startAuthorBrowserFixture, signInAuthorBrowser } = await tsImport('../tests/e2e/author-oauth-server.ts', import.meta.url);
+    const { startAuthorBrowserFixture, signInAuthorBrowser } = await tsImport('../../../tests/e2e/author-oauth-server.ts', import.meta.url);
     fixture = await startAuthorBrowserFixture({ databaseUrl: connectionString, profile: options.profile, apiPort: options.port });
     const baseURL = fixture.apiOrigin;
     await checkPreviewReady(baseURL);

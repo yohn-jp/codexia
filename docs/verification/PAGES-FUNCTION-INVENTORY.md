@@ -13,7 +13,7 @@
 | `/` | Development Portal | サイトマップとデータ出典。サイト全体の台帳は `site-manifest.json` |
 | `/architecture/` | Architecture Atlas | ビルド対象 SHA の正本 Markdown。図の URL ハッシュと原文行を保持 |
 | `/graph/` | Code Map | 同じビルド対象 SHA から Graphify が抽出した静的参照。既存の `?file=` と集約概観の URL を保持 |
-| `/ci/` | CI Observatory | 閲覧時に公開 API から取得した run、job、step の標本。個別タスクの時間は未計測 |
+| `/ci/` | CI Observatory | 閲覧時に公開APIからPRリビジョン一覧をページ単位で取得。選択したリビジョンだけjob/stepを取得。API履歴制約・未解決runを明示し、個別タスク時間は未計測 |
 | `/security/` | Code scanning export | 利用者ブラウザーの読み取り専用認証で `main` の全状態アラートを GitHub API から取得、JSON/CSV に出力。公開ファイルに検出情報なし |
 | `/audit/` | Source Audit | 公開リポジトリで観測したブランチ HEAD。root の `manifest.json` と SHA 別の snapshot、review の URL を保持 |
 

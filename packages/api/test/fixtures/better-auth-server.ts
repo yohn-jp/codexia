@@ -17,8 +17,8 @@ export interface BetterAuthFixtureOptions {
   readonly databaseUrl: string;
   readonly staticDirectory?: string;
   readonly apiPort?: number;
-  /** Only the WebAuthn browser fixture uses localhost as a valid RP ID. */
-  readonly apiHostname?: "127.0.0.1" | "localhost";
+  /** Use localhost for browser acceptance that performs real WebAuthn. */
+  readonly apiHostname?: "localhost" | "127.0.0.1";
   readonly usePostgresPersistence?: boolean;
   /** A caller-owned store and pool that the fixture does not replace or close. */
   readonly domain?: Pick<ApiServerOptions, "store" | "persistence">;
@@ -164,6 +164,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   let idpIssuer = "";
   let ownerSubject = "";
   let apiServer: Server | undefined;
+  let apiPortReservation: Server | undefined;
   let bootstrapServer: Server | undefined;
   let idpServer: Server | undefined;
   let runtime: ReturnType<typeof createBetterAuthRuntime> | undefined;
@@ -234,10 +235,11 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     const idpPort = await listen(idpServer);
     idpIssuer = `http://127.0.0.1:${idpPort}`;
     const apiPort = options.apiPort ?? await (async () => {
+      // Reserve the port while Better Auth and PostgreSQL initialize: an early
+      // probe-and-close races with other browser workers on shared runners.
       const probe = createHttpServer();
-      const port = await listen(probe);
-      await close(probe);
-      return port;
+      apiPortReservation = probe;
+      return listen(probe);
     })();
     const apiOrigin = `http://${options.apiHostname ?? "127.0.0.1"}:${apiPort}`;
     const issuer = `${apiOrigin}/api/auth`;
@@ -391,6 +393,10 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     bootstrapServer = undefined;
     await bootstrap.close();
     bootstrap = undefined;
+    if (apiPortReservation) {
+      await close(apiPortReservation);
+      apiPortReservation = undefined;
+    }
     apiServer = makeApi();
     await listen(apiServer, apiPort);
 
@@ -508,6 +514,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       },
     };
   } catch (error) {
+    if (apiPortReservation) await close(apiPortReservation).catch(() => undefined);
     if (apiServer) await close(apiServer).catch(() => undefined);
     if (bootstrapServer) await close(bootstrapServer).catch(() => undefined);
     await bootstrap?.close().catch(() => undefined);

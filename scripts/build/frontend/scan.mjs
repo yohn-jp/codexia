@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = fileURLToPath(new URL('../../../', import.meta.url));
 const outputDir = path.join(root, 'artifacts', 'ui-preview');
 const version = '4.10.0';
 

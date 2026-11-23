@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readRegularFile } from '../read-regular-file.mjs';
+import { readRegularFile } from '../shared/read-regular-file.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');

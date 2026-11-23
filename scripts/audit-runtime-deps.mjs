@@ -4,7 +4,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { productionClosure } from './runtime-package-closure.mjs';
-import { readRegularFile } from './read-regular-file.mjs';
+import { readRegularFile } from './shared/read-regular-file.mjs';
 
 const deniedCorePackage = /(?:^|[/.+@_-])(?:onnx(?:runtime(?:-(?:node|web))?)?|transformers?|tokenizers?|gpt-tokenizer|tiktoken|sentencepiece|fastembed|embedding|reranker|nlp|wink-nlp|natural|compromise|speaker(?:-attribution)?|diarization|pyannote|speechbrain|whisper|openai|anthropic|langchain|ollama)(?:$|[/.+@_-])/i;
 const deniedBuildPackage = /(?:^|[/.+@_-])(?:typescript|tsx|@types|playwright|vitest|jest|eslint|prettier|turbo|vite|esbuild)(?:$|[/.+@_-])/i;

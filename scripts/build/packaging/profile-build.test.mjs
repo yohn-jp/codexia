@@ -6,8 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const generator = path.join(root, 'scripts', 'profile-build.mjs');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const generator = fileURLToPath(new URL('./profile-build.mjs', import.meta.url));
 
 test('Core profile generation and deployed-closure verification exclude optional module packages', async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-profile-core-'));
