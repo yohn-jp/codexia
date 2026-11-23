@@ -30,8 +30,12 @@ const panelIds = ["editor", "outline", "inspector", "history", "review"];
 function assertWritingFallback(loaded: WorkspaceLoad, state: Exclude<WorkspaceLoad["state"], "valid">): void {
   assert.equal(loaded.state, state);
   assert.equal(loaded.layout.preset, "writing");
-  // Desktop Authoring's Writing layout puts the outline and manuscript in the dock.
-  assert.deepEqual(visiblePanelIds(loaded.layout.root).sort(), ["editor", "outline"]);
+  // Desktop Authoring specifies the Writing dock as outline 20%, editor 80%.
+  const { root } = loaded.layout;
+  assert.ok(root.type === "split");
+  assert.equal(root.direction, "horizontal");
+  assert.deepEqual(visiblePanelIds(root), ["outline", "editor"]);
+  assert.deepEqual(root.sizes, [20, 80]);
   assert.ok(loaded.layout.hiddenPanelIds.includes("inspector"));
   assert.deepEqual(loaded.floating, []);
 }
