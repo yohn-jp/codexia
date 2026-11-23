@@ -90,7 +90,7 @@ function requestOptions(issuer: URL, fetcher: typeof fetch) {
     // validateConfig has already restricted HTTP to loopback.
     [oauth.allowInsecureRequests]: issuer.protocol === 'http:',
     [oauth.customFetch]: (url: string, init: oauth.CustomFetchOptions<'GET' | 'POST', URLSearchParams | undefined>) =>
-      fetcher(url, { ...init, credentials: 'omit', cache: 'no-store', redirect: 'error' }),
+      fetcher(url, { ...init, body: init.body ?? null, credentials: 'omit', cache: 'no-store', redirect: 'error' }),
   };
 }
 
