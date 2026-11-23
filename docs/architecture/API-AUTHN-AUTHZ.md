@@ -1,5 +1,7 @@
 # API authentication and authorization
 
+**Normative authentication contract.** The owner UI's entrypoints and current-vs-target states are defined by [Admin screen flows](../design/ADMIN-SCREEN-FLOW.md); external authentication interfaces conform to [System design](SYSTEM-DESIGN.md). Target requirements in this document are not claims of deployed acceptance.
+
 > This document describes standalone OAuth admission and the accepted Passkey-first requirements. Production rollout evidence is tracked separately.
 > This contract specializes [Core architecture](CORE.md) and [Internal boundaries](INTERNAL-BOUNDARIES.md). Better Auth runs inside the Fastify API and supports Passkey sign-in with optional upstream OIDC federation. Cloudflare Access can protect static UI entry as described in [Deployment](../deployment/README.md). Better Auth issues the API credentials for authors and registered MCP clients.
 

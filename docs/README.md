@@ -1,9 +1,16 @@
 # Codexia documentation
 
-Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optional trusted modules. Git repository persistence and publishing are not part of the runtime.
+Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optional trusted modules. Git repository persistence and publishing are not part of the runtime. **Approved design documents, not the current code, are the architectural source of truth.** Start with [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) and [System design](architecture/SYSTEM-DESIGN.md); runtime and CI are compliance evidence, not substitute specifications.
 
 | Topic | Reference |
 | --- | --- |
+| Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
+| Overall architecture and trust boundaries | [System design](architecture/SYSTEM-DESIGN.md) — canonical system design |
+| PostgreSQL domain and schema invariants | [Data model](architecture/DATA-MODEL.md) — canonical domain design |
+| User screen navigation and recovery | [User screen flows](design/USER-SCREEN-FLOW.md) — canonical state transitions |
+| Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — canonical state transitions; future IdP controls identified |
+| Pristine VM and first owner enrollment | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — canonical state transitions |
+| Compatible backend updates and rollback | [Update flows](deployment/UPDATE-FLOW.md) — canonical state transitions |
 | Visual design system | [App design system](../app/DESIGN.md) — canonical visual direction and owner-confirmed decisions |
 | Design, information architecture and UX acceptance | [Design and UX contract](design/UX-CONTRACT.md) — normative target, not a runtime certification |
 | Creative workspace information architecture | [Information architecture](design/INFORMATION-ARCHITECTURE.md) — design proposal |

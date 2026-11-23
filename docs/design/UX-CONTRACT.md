@@ -1,5 +1,7 @@
 # Codexia — Design and UX contract
 
+**規範的な画面遷移の正本:** [利用画面](USER-SCREEN-FLOW.md) と [管理画面](ADMIN-SCREEN-FLOW.md) を参照する。画面コードの現在状態は受入証拠であり、本書と遷移設計の要求を上書きしない。
+
 ## 1. この文書の位置付け
 
 本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。ビジュアルデザインの方向と合意事項は [app design system](../../app/DESIGN.md) を参照する。具体的な過去の再設計案・比較は [視覚設計の履歴](VISUAL-SYSTEM.md)、情報設計、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)、[操作・状態・復旧](INTERACTION-CONTRACT.md) を参照する。本書のUX・操作・アクセシビリティ契約が優先される。

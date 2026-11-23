@@ -1,5 +1,7 @@
 # Codexia
 
+**Architecture authority:** The [canonical system design](docs/architecture/SYSTEM-DESIGN.md) and [documentation governance](docs/architecture/DOCUMENTATION-AUTHORITY.md) govern changes; the [PostgreSQL data model](docs/architecture/DATA-MODEL.md) defines persistent domain ownership. Code and CI provide conformance evidence, not a competing specification. The [documentation index](docs/README.md) includes user, owner-security, first-deployment and update state diagrams.
+
 A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. Desktop and Mobile share authoring and browser recovery while retaining their own shells. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
 Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One server serves one trusted owner. Registered MCP clients operate within their assigned projects and OAuth scopes.

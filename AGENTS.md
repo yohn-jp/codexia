@@ -1,12 +1,14 @@
 # Codexia — Agent instructions
 
-Codexia is independently governed. Use this repository's accepted Issues, canonical code, architecture, tests, and documentation as task authority. Do not assume instructions or skills from another repository are available or applicable.
+Codexia is independently governed. **Approved design documents, not implementation code, are the architecture's source of truth.** Use accepted product decisions, Issues and the owning normative designs for requirements; code, tests and CI are implementation and verification evidence, not design authorities. Treat conflicts as implementation deviations or explicit design changes, never silently conform the specification to legacy code. Do not assume instructions or skills from another repository are available or applicable.
 
 ## Architecture and authority
 
 PostgreSQL is the sole manuscript authority. Git persistence, synchronization, history, and compatibility fallbacks are retired.
 
 Read only the contracts relevant to the task:
+- Design authority and system boundaries: [Documentation authority](docs/architecture/DOCUMENTATION-AUTHORITY.md), [System design](docs/architecture/SYSTEM-DESIGN.md), [Data model](docs/architecture/DATA-MODEL.md).
+- Mandatory flows: [User screens](docs/design/USER-SCREEN-FLOW.md), [Owner security](docs/design/ADMIN-SCREEN-FLOW.md), [Initial deployment](docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [Compatible updates](docs/deployment/UPDATE-FLOW.md).
 - Shared ownership and refactoring: [Internal boundaries](docs/architecture/INTERNAL-BOUNDARIES.md).
 - AI integration and frozen internal LLM calls: [MCP-first architecture](docs/architecture/MCP-FIRST.md).
 - Application boundaries: [Core](docs/architecture/CORE.md), [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md), and [Modules](docs/architecture/MODULES.md).

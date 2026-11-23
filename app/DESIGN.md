@@ -39,6 +39,8 @@ spacing:
 
 # Codexia — Design system
 
+The [normative UX contract](../docs/design/UX-CONTRACT.md), [user screen flows](../docs/design/USER-SCREEN-FLOW.md) and [owner security flows](../docs/design/ADMIN-SCREEN-FLOW.md) define behavior and transitions; visual styling does not override them.
+
 <!-- impeccable:design-map -->
 Map: PRODUCT.md
 Full: .impeccable/design-full.md (expanded rationale and requirements; read sections as needed)
