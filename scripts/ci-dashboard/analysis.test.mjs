@@ -414,6 +414,8 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.locator('#pr').selectOption('0');
   assert.equal(await page.locator('#timeline-foot').textContent(), '未計測');
   await timeline.getByText('表示可能なジョブ時刻がありません。').waitFor();
+  // Error/retry fixtures intentionally return only #42; keep a valid deep link.
+  await page.evaluate(() => history.replaceState(null, '', '?pr=42&sha=' + 'a'.repeat(40)));
 
   for (const status of ['403', '429']) {
     mode = status;
