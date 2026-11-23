@@ -2,7 +2,7 @@ import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CDPSession, Page, Route } from "@playwright/test";
 import { expect, test } from "./author-oauth-fixture";
-import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fillDraft, seedWritingProject, writingFixturePath } from "./postgres-fixture";
+import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fillDraft, replaceManuscript, seedWritingProject, writingFixturePath } from "./postgres-fixture";
 
 const mockShellOrigin = "http://127.0.0.1:4173";
 const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
@@ -295,7 +295,7 @@ test("recovery-session failure cannot discard an unjournaled manuscript through 
   // and an independently failing session refresh on a real PostgreSQL document.
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   // Wait for the persisted manuscript to be hydrated before injecting an
-  // IndexedDB failure; otherwise the initial document can arrive after fill().
+  // IndexedDB failure; otherwise the initial document can arrive after replacement.
   await expect(manuscriptEditor(page)).toHaveText("最初の本文。次の文章です。");
   let unavailable = false;
   let logoutRequests = 0;
@@ -324,7 +324,7 @@ test("recovery-session failure cannot discard an unjournaled manuscript through 
   });
 
   const currentInput = "復帰中も喪失させない未保護の入力。";
-  await manuscriptEditor(page).fill(currentInput);
+  await replaceManuscript(page, currentInput);
   await expect(manuscriptEditor(page)).toHaveText(currentInput);
   await expect(page.locator(".pg-save-state summary")).toHaveText("この入力はまだ保護されていません");
   expect((await readPersistenceDrafts(page)).some(draft => draft.documentId === scene.id && draft.markdown === currentInput)).toBe(false);

@@ -1,12 +1,12 @@
 import { lstat } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 export function validateOciEngine(value) {
-  const engine = value ?? "podman";
-  if (basename(engine) !== "podman" || /[\0\r\n]/u.test(engine)) {
-    throw new Error("OCI_ENGINE must name an installed Podman executable");
+  // Reject executable paths from the environment rather than executing them.
+  if (value !== undefined && value !== "podman") {
+    throw new Error("OCI_ENGINE must be the trusted Podman executable");
   }
-  return engine;
+  return "podman";
 }
 
 export function validateModelCachePath(value, fallback) {

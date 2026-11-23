@@ -5,10 +5,45 @@
  * OpenAPI spec version: 2.0.0
  */
 import {
+  PersistenceDocumentListResponse,
   PersistenceStatusResponse
+} from './schemas';
+import type {
+  PersistenceDocumentsGetParams
 } from './schemas';
 
 import { generatedHttpFetch } from '../../generated-http-fetch';
+export const getPersistenceDocumentsGetUrl = (projectId: string,
+    params?: PersistenceDocumentsGetParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/persistence/projects/${encodeURIComponent(String(projectId))}/documents?${stringifiedParams}` : `/api/v1/persistence/projects/${encodeURIComponent(String(projectId))}/documents`
+}
+
+export const persistenceDocumentsGet = async (projectId: string,
+    params?: PersistenceDocumentsGetParams, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<PersistenceDocumentListResponse> => {
+
+  return generatedHttpFetch<PersistenceDocumentListResponse>(getPersistenceDocumentsGetUrl(projectId,params),
+  {
+    ...options,
+    method: 'GET'
+
+    ,
+    schema: PersistenceDocumentListResponse
+  }
+);}
+
+
+
 export const getPersistenceStatusGetUrl = () => {
 
 

@@ -5,6 +5,38 @@
  * OpenAPI spec version: 2.0.0
  */
 export const operations = {
+  "persistenceDocumentsGet": {
+    "operationId": "persistence_documents_get",
+    "operationName": "persistenceDocumentsGet",
+    "method": "GET",
+    "path": "/api/v1/persistence/projects/{projectId}/documents",
+    "url": "/api/v1/persistence/projects/{projectId}/documents",
+    "route": "GET /api/v1/persistence/projects/:projectId/documents",
+    "tag": "persistence",
+    "tags": [
+      "persistence"
+    ],
+    "pathParams": [
+      {
+        "name": "projectId",
+        "key": "projectId"
+      }
+    ],
+    "queryParams": [
+      "parentId",
+      "projectVersion",
+      "limit"
+    ],
+    "serialization": {
+      "explode": [],
+      "arrayFormat": [],
+      "deepObject": [],
+      "explodeOnly": false
+    },
+    "body": null,
+    "mock": null,
+    "deprecated": false
+  },
   "persistenceStatusGet": {
     "operationId": "persistence_status_get",
     "operationName": "persistenceStatusGet",
