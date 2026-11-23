@@ -551,8 +551,8 @@ fi
 # a non-local peer. Name the actual isolated container address, while SSH
 # continues to reach that same container over its mapped 127.0.0.1:2222 port.
 fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
-[[ "$fixture_ip" =~ ^([0-9]{1,3}\\.){3}[0-9]{1,3}$ ]] || { echo 'SSHFS container has no verifiable network address' >&2; exit 1; }
-printf '%s codexia-backup-fixture\\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
+[[ "$fixture_ip" =~ ^([0-9]{1,3}[.]){3}[0-9]{1,3}$ ]] || { echo 'SSHFS container has no verifiable network address' >&2; exit 1; }
+printf '%s codexia-backup-fixture\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
 getent ahosts codexia-backup-fixture | awk '{print $1}' | grep -Fxq "$fixture_ip" || {
   echo 'SSHFS fixture hostname did not resolve to its isolated container address' >&2
   exit 1
