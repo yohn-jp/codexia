@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { authClient } from "../auth-client";
 import { fetchAuthMethodAvailability, type AuthMethodAvailability } from "../oauth-login";
 import { checkOwnerSession, type OwnerSessionState } from "./console-session";
-import { consumeConsoleReturnLocation } from "./console-return";
+import { consumeConsoleReturnLocation, resolveConsoleReturnLocation } from "./console-return";
 import "./console.css";
 
 const SECTIONS = [
@@ -48,6 +48,16 @@ function sectionDescription(route: ConsoleRoute): string {
   if (route === "identity") return "連携IDとアプリのアクセス管理画面は、後続のIdentity実装で提供します。認証状態はサーバーで確認済みです。";
   if (route === "backups") return "バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。";
   return "このURLは初回所有者向けです。登録状態を検証するAPIと登録手順が利用可能になるまで、登録を開始しません。";
+}
+
+/** Keep the validated same-tab handoff while navigating among console pages. */
+function consoleHref(path: string): string {
+  try {
+    const { id } = resolveConsoleReturnLocation(window.location.search, window.sessionStorage);
+    return id ? `${path}?return=${encodeURIComponent(id)}` : path;
+  } catch {
+    return path;
+  }
 }
 
 export function ConsoleEntry() {
@@ -141,7 +151,7 @@ export function ConsoleEntry() {
         <p className="codexia-console__eyebrow">初回登録</p>
         <h1 id="console-title">{routeTitle(route)}</h1>
         <p role="status">{sectionDescription(route)}</p>
-        <button type="button" className="quiet-button" onClick={() => { window.location.assign("/console"); }}>コンソールへ戻る</button>
+        <button type="button" className="quiet-button" onClick={() => { window.location.assign(consoleHref("/console")); }}>コンソールへ戻る</button>
       </section>
     </div>
   </main>;
@@ -150,7 +160,7 @@ export function ConsoleEntry() {
     <div className="codexia-console__wrap">
       <header className="codexia-console__masthead"><a className="codexia-console__brand" href="/desktop/">Codexia<span aria-hidden="true">.</span></a></header>
       <section className="codexia-console__panel"><p className="codexia-console__eyebrow">404</p><h1 id="console-title">{routeTitle(route)}</h1>
-        <p role="status">指定された管理画面はありません。</p><a className="codexia-console__link" href="/console">コンソールへ戻る</a></section>
+        <p role="status">指定された管理画面はありません。</p><a className="codexia-console__link" href={consoleHref("/console")}>コンソールへ戻る</a></section>
     </div>
   </main>;
 
@@ -207,8 +217,8 @@ export function ConsoleEntry() {
         <aside className="codexia-console__sidebar" aria-label="管理メニュー">
           <p className="codexia-console__eyebrow">OWNER CONSOLE</p>
           <nav aria-label="管理コンソール">
-            <a href="/console" aria-current={route === "home" ? "page" : undefined}>ホーム</a>
-            {SECTIONS.map((section) => <a key={section.path} href={section.path} aria-current={route === section.path.slice("/console/".length) ? "page" : undefined}>{section.title}</a>)}
+            <a href={consoleHref("/console")} aria-current={route === "home" ? "page" : undefined}>ホーム</a>
+            {SECTIONS.map((section) => <a key={section.path} href={consoleHref(section.path)} aria-current={route === section.path.slice("/console/".length) ? "page" : undefined}>{section.title}</a>)}
           </nav>
           <p className="codexia-console__sidebar-note">本人の認証と設定を行います。VMや本番環境の操作は提供しません。</p>
         </aside>
@@ -219,12 +229,12 @@ export function ConsoleEntry() {
           {route === "home" ? <>
             <p className="codexia-console__intro">本人の認証・連携先・バックアップの設定を管理します。</p>
             <div className="codexia-console__cards" aria-label="設定項目">
-              {SECTIONS.map((section) => <a className="codexia-console__card" key={section.path} href={section.path}>
+              {SECTIONS.map((section) => <a className="codexia-console__card" key={section.path} href={consoleHref(section.path)}>
                 <span className="codexia-console__card-title">{section.title}</span><span>{section.description}</span><span className="codexia-console__card-action" aria-hidden="true">開く →</span>
               </a>)}
             </div>
           </> : <div className="codexia-console__notice"><p role="status">{sectionDescription(route)}</p>
-            <a className="codexia-console__link" href="/console">ホームへ戻る</a></div>}
+            <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
           <div className="codexia-console__auth-actions">
             <button type="button" disabled={busy} onClick={() => void inspect()}>セッションを再確認</button>
             <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
