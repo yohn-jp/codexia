@@ -1,6 +1,6 @@
 # Codexia — optical icon system
 
-The Codexia literary brand icon is an open, leather-bound manuscript with a rising writing quill. `codexia-icon.cjs` is its single dependency-free JavaScript/SVG authority.
+The Codexia literary brand icon is an open, leather-bound manuscript with a rising writing quill. The [normative visual design](../../app/DESIGN.md) owns its intended appearance, accessibility and optical requirements; `codexia-icon.cjs` is the single dependency-free JavaScript/SVG rendering implementation, not a competing design specification.
 
 ## Build and test
 

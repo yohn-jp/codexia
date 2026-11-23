@@ -1,5 +1,7 @@
 # Graphify code map on Repository Audit Pages
 
+> **設計上の拡張候補:** [Pages現状機能・不足台帳](PAGES-FUNCTION-INVENTORY.md#5-不足機能台帳設計候補)と[統合ポータル/Graph UX設計案](../design/DEVELOPMENT-PAGES-UX.md#4-graphifyの分析ux重点改善案)に多段参照、解析カバレッジ、relation filter、source位置、変更差分の期待動作を分離して記載する。現行`/graph/`にこれらが実装済みとの主張ではない。
+
 `repository-audit.yml` is the sole Pages publisher. `/graph/` is now the **file explorer**, built from the same Graphify AST graph as the upstream viewer. The native, aggregated Graphify graph remains available at `/graph/communities.html`. No additional publisher, Cloud account, secret, browser library, or external LLM backend is required.
 
 ## Generation and scope
@@ -16,7 +18,7 @@ On `main` and manual runs, the publisher checks out the exact source SHA and run
 
 Cross-file source-reference rows are formed only from Graphify's directional `imports`, `imports_from`, `re_exports`, `calls`, `references`, `depends_on`, `instantiates`, `inherits`, `implements`, `extends`, and `uses` edges whose endpoints have different valid repository-relative source paths. Other edge types, same-file edges, untracked output, and external symbols are excluded from **file-reference** counts. Multiple symbol edges between the same two files are grouped, with the observed edge count and relation types preserved. Individual source-symbol names remain searchable.
 
-**No incoming reference in Graphify does not mean unused or safe to delete.** The graph is static analysis and its extraction coverage is deliberately bounded; it does not prove actual runtime calls, route/MCP registrations, dynamic imports, SQL access, production reachability, or the presence of excluded tests. Likewise, a static reference does not prove a feature belongs in the agreed current architecture. Architecture and deletion decisions need separate verification.
+**No incoming reference in Graphify does not mean unused or safe to delete.** The graph is static analysis and its extraction coverage is deliberately bounded; it does not prove actual runtime calls, route/MCP registrations, dynamic imports, SQL access, production reachability, or the presence of excluded tests. Likewise, a static reference does not prove a feature belongs in the agreed current architecture. Architecture and deletion decisions require comparison with the [canonical system design](../architecture/SYSTEM-DESIGN.md) and [documentation authority](../architecture/DOCUMENTATION-AUTHORITY.md), plus independent reachability verification. A graph edge cannot overrule a design constraint.
 
 ## Verification
 

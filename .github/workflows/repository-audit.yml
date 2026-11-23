@@ -5,6 +5,17 @@ on:
       - 'scripts/audit/**'
       - 'scripts/ci-dashboard/**'
       - 'scripts/graphify-pages/**'
+      - 'scripts/architecture-diagrams/**'
+      - 'docs/architecture/SYSTEM-DESIGN.md'
+      - 'docs/architecture/DATA-MODEL.md'
+      - 'docs/design/USER-SCREEN-FLOW.md'
+      - 'docs/design/ADMIN-SCREEN-FLOW.md'
+      - 'docs/design/SCREEN-STATE-ATLAS.md'
+      - 'docs/design/SCREEN-CONTROL-CATALOG.md'
+      - 'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md'
+      - 'docs/verification/ARCHITECTURE-ATLAS.md'
+      - 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md'
+      - 'docs/deployment/UPDATE-FLOW.md'
       - 'docs/verification/GRAPHIFY-PAGES.md'
       - 'scripts/ci-timing.mjs'
       - 'scripts/ci-contract.mjs'
@@ -50,7 +61,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/audit-ocr" --ignore-scripts --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
           echo "CODEXIA_AUDIT_OCR_BIN=$RUNNER_TEMP/audit-ocr/node_modules/.bin/ocr" >> "$GITHUB_ENV"
       - name: Test audit exporter, delegation and browser portal
-        run: node --test scripts/audit/*.test.mjs scripts/ci-dashboard/*.test.mjs scripts/graphify-pages/pack.test.mjs
+        run: node --test scripts/audit/*.test.mjs scripts/ci-dashboard/*.test.mjs scripts/graphify-pages/pack.test.mjs scripts/architecture-diagrams/pack.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6.1.0
@@ -72,6 +83,22 @@ jobs:
           else
             node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
           fi
+      - name: Install pinned static Mermaid renderer
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/architecture-renderer" --ignore-scripts --no-audit --no-fund @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.17.0
+          CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)"
+          test -x "$CHROME"
+          echo "PUPPETEER_EXECUTABLE_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Render all canonical architecture diagrams and verify actual browser interaction
+        run: |
+          node scripts/architecture-diagrams/pack.mjs \
+            "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)" \
+            "$RUNNER_TEMP/architecture-renderer/node_modules/.bin/mmdc"
+          node scripts/architecture-diagrams/smoke.mjs \
+            "$RUNNER_TEMP/audit-site/architecture" \
+            "$RUNNER_TEMP/audit-tool/node_modules/playwright-core"
       - name: Generate main source graph for Pages
         env:
           GRAPHIFY_BACKEND: none

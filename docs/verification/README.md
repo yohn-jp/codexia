@@ -1,5 +1,11 @@
 # Verification
 
+[Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は現在の単一publisher、Audit/Graphify/CI/Architectureの出力・限界・不足を観測としてまとめる。[Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は未実装の提案であり、公開済みページの振る舞いを保証しない。Pagesの設計と本番Workersの画面（`/console`）を混同しない。
+
+[Architecture Atlas](ARCHITECTURE-ATLAS.md) specifies static SVG generation and actual browser acceptance for the canonical architecture and UI/deployment transitions.
+
+Verification demonstrates conformance to the [canonical design](../architecture/SYSTEM-DESIGN.md), [user/owner navigation](../design/USER-SCREEN-FLOW.md), [owner security](../design/ADMIN-SCREEN-FLOW.md), [initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md), and [updates](../deployment/UPDATE-FLOW.md); a passing unit or browser suite does not establish live-VM or independent recovery acceptance.
+
 Run from the repository root with Node.js and pnpm versions satisfying `package.json`.
 
 ```sh

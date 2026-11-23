@@ -2,6 +2,8 @@
 
 > This is a normative architecture contract, not an audit log or implementation-status report. It defines the desired responsibility boundaries regardless of branch, release or verification date. Execution evidence belongs in tests, Issues, PRs and verification records.
 
+System-level ownership and authority are defined by [System design](SYSTEM-DESIGN.md) and [Documentation authority](DOCUMENTATION-AUTHORITY.md); implementation is checked against those contracts, not treated as their source.
+
 ## 1. Authority and architectural decision
 
 This contract refines the internal implementation boundaries of [Core](CORE.md), [Codexia reboot](CODEXIA-REBOOT-RFC.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical persistence, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.

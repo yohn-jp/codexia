@@ -1,5 +1,7 @@
 # Security Policy
 
+The [system design](docs/architecture/SYSTEM-DESIGN.md), [API authentication and authorization](docs/architecture/API-AUTHN-AUTHZ.md), and [owner security management transitions](docs/design/ADMIN-SCREEN-FLOW.md) define security responsibilities. The [deployment state machines](docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [update state machines](docs/deployment/UPDATE-FLOW.md) define operational safeguards.
+
 Codexia is a single-owner writing application.
 
 ## Reporting

@@ -2,7 +2,7 @@
 
 ## 位置付け
 
-創作画面の再設計提案。受入済みの [UX contract](UX-CONTRACT.md) を具体化し、[Core](../architecture/CORE.md) と [MCP-first](../architecture/MCP-FIRST.md) の正本、認可、保存、変更提案の意味を変更しない。以下は実装済み機能の説明ではない。
+創作画面の再設計提案。画面遷移・保護状態・既存機能と設計目標の区別については、規範的な [利用画面の遷移設計](USER-SCREEN-FLOW.md) を正本とする。受入済みの [UX contract](UX-CONTRACT.md) を具体化し、[Core](../architecture/CORE.md) と [MCP-first](../architecture/MCP-FIRST.md) の正本、認可、保存、変更提案の意味を変更しない。以下は実装済み機能の説明ではない。
 
 ## 製品モデル
 

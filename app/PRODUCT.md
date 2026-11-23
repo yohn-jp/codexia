@@ -34,10 +34,12 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Brand Commitments
 
-The product name is Codexia. No additional voice, logo treatment, or identity asset has been confirmed as binding.
+The product name is Codexia. The accepted brand icon is an **open leather-bound manuscript with a rising quill**. Its design must remain recognizable at browser-favicon sizes, use deliberately simplified optical masters at small sizes, and remain available in light/dark and single-color variants. The [visual design system](DESIGN.md) owns the icon's intended appearance and accessibility constraints; the [icon generator](../scripts/branding/README.md) is an implementation, not a competing design authority. Unapproved brand voice, native icons and other identity assets are not implied by this decision.
 
 ## Evidence on Hand
 
+- [Canonical system design](../docs/architecture/SYSTEM-DESIGN.md) and [documentation authority](../docs/architecture/DOCUMENTATION-AUTHORITY.md) define the system's design-first source of truth, distinct from implementation.
+- [User screen transitions](../docs/design/USER-SCREEN-FLOW.md) and [owner security transitions](../docs/design/ADMIN-SCREEN-FLOW.md) define screen flow contracts.
 - [Design and UX contract](../docs/design/UX-CONTRACT.md) defines the author experience and acceptance targets; it is not a report that every target is implemented or accepted in production.
 - [Codexia design system](DESIGN.md) records owner-confirmed visual direction and separates unresolved details from adopted decisions.
 - [Visual system history](../docs/design/VISUAL-SYSTEM.md) preserves existing proposals and comparisons; its earlier choices are not automatically current specifications.

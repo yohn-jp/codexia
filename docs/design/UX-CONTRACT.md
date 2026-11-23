@@ -1,5 +1,7 @@
 # Codexia — Design and UX contract
 
+**規範的な画面遷移の正本:** [利用画面](USER-SCREEN-FLOW.md) と [管理画面](ADMIN-SCREEN-FLOW.md) を参照する。画面コードの現在状態は受入証拠であり、本書と遷移設計の要求を上書きしない。
+
 ## 1. この文書の位置付け
 
 本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。ビジュアルデザインの方向と合意事項は [app design system](../../app/DESIGN.md) を参照する。具体的な過去の再設計案・比較は [視覚設計の履歴](VISUAL-SYSTEM.md)、情報設計、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)、[操作・状態・復旧](INTERACTION-CONTRACT.md) を参照する。本書のUX・操作・アクセシビリティ契約が優先される。
@@ -128,6 +130,8 @@ panelを閉じても原稿は破棄されない。未導入／無効moduleのpan
 
 
 ### 認証・セキュリティ設定
+
+**採用済みの管理UX目標:** 管理者の入口はWorkersで提供する`/console`、初回セットアップは`/console/setup`、Passkey・セッションは`/console/security`、OIDC・OAuth管理は`/console/identity`。初回キーは256-bitの一回限りの導入資格情報であり、Ansibleはownerを作成しない。初回の本人登録はBetter AuthのPasskey ceremonyを伴い、SSHで一時登録サーバーを手動起動しない。登録中断・期限切れ・API応答不明・既存owner復旧の画面を区別し、既存ownerを再作成しない。実装前の設計目標は[管理画面遷移](ADMIN-SCREEN-FLOW.md)と[初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)に従い、現行UIとは区別する。
 
 認証の仕様正本は [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md#accepted-target-passkey-first-authentication-and-identity-management) に従う。Desktop／Mobile共通の操作語彙として、Passkeyの登録・確認・名称変更・削除、連携OIDC、セッション・OAuth同意、管理者のOIDC設定を明確に分ける。Passkeyログインを基本とし、外部OIDC未設定でも利用できる。追加認証のために原稿のローカル下書きを消してはならない。
 

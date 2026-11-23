@@ -1,5 +1,7 @@
 # Core architecture
 
+**Normative Core contract.** [System design](SYSTEM-DESIGN.md) is the overall architecture authority, [Data model](DATA-MODEL.md) owns canonical entity relationships, and [Documentation authority](DOCUMENTATION-AUTHORITY.md) governs design changes. Current code is implementation evidence, not a replacement for these decisions.
+
 PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodies, immutable revisions, Knowledge, Evidence, Text Anchors and module-owned records. Core authoring works without optional modules or model credentials. A missing or unavailable database fails closed; no Git workspace or filesystem manuscript fallback is available.
 
 ## Ownership and dependency direction

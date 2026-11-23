@@ -1,5 +1,7 @@
 # iOS client and personal-device distribution
 
+Client sign-in, manuscript navigation and session management must follow [user screen transitions](../design/USER-SCREEN-FLOW.md), [owner security transitions](../design/ADMIN-SCREEN-FLOW.md) and the [API OAuth contract](../architecture/API-AUTHN-AUTHZ.md). iOS delivery does not grant a separate data authority.
+
 > **Accepted architecture with native client and unsigned IPA CI under development. The Xcode 27 build, signed installation and physical-device acceptance require independent execution evidence.**
 > Authentication and resource permissions are defined by [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md). Presentation remains governed by the [Design and UX contract](../design/UX-CONTRACT.md), [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) and [Core architecture](../architecture/CORE.md).
 
