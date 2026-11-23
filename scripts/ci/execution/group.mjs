@@ -82,7 +82,7 @@ async function executeTaskInContext(task, index, scope) {
   let inputProof;
   if (!blocked) {
     try {
-      if (task === 'biome-ci') await node('scripts/ci/biome/check.mjs', { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+      if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
       else if (task.startsWith('unit-')) await node('scripts/ci/execution/workspace.mjs', 'unit', task.slice(5));
       else if (task === 'db-contract') {
         await run('pnpm', ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], {
