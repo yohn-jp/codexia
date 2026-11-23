@@ -59,7 +59,7 @@ flowchart TB
     H --> DB
 ```
 
-通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
+通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`、**バックアップ保管先管理の`/console/backups`**）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
 
 UI 配信と API の外部認可は分離して管理する。Access の通過は Codexia の project/object 認可を代替しない。公開 reader は別の読み取り専用経路とする。HTTP MCP と stdio は同じ認可済みドメイン操作へ到達するアダプターであり、第二の writer を実装しない。
 
