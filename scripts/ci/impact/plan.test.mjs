@@ -667,7 +667,7 @@ test('Impeccable retains its existing workflow triggers and guards only unneeded
   const steps = workflow.jobs.scan.steps;
   const scopeIndex = steps.findIndex(step => step.name === 'Select exact-source design scope');
   assert.ok(scopeIndex > 0);
-  assert.match(steps[scopeIndex].run, /design-admission\\.mjs/u);
+  assert.match(steps[scopeIndex].run, /design-admission\.mjs/u);
   for (const name of ['Scan application and module source', 'Upload design findings']) {
     assert.equal(steps.find(step => step.name === name).if, "steps.scope.outputs.design == 'true'");
   }
