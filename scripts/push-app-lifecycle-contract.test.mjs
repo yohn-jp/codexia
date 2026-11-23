@@ -116,6 +116,8 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
   assert.ok(Array.isArray(workflow.on.pull_request.paths));
   assert.ok(workflow.on.pull_request.paths.includes('packages/**'));
   assert.ok(workflow.on.pull_request.paths.includes('deploy/ansible/site.yml'));
+  assert.ok(!workflow.on.pull_request.paths.includes('scripts/ci/impact/contract.mjs'),
+    'generic CI planner edits must not launch the real-host lifecycle');
   assert.ok(backendWorkflow.on.pull_request.paths.includes('deploy/ansible/**'));
   assert.ok(backendWorkflow.on.pull_request.paths.includes('deploy/postgres/**'));
   assert.equal(workflow.jobs.lifecycle['runs-on'], 'ubuntu-26.04');
@@ -156,6 +158,13 @@ test('real app and Better Auth transitions execute independently and missing sta
   assert.ok(fixture.includes('case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in'));
   assert.ok(fixture.includes('run_application_lifecycle'));
   assert.ok(fixture.includes('run_better_auth_lifecycle'));
+  const authShell = readFileSync(new URL('../deploy/ansible/test-push-auth-lifecycle.sh', import.meta.url), 'utf8');
+  assert.match(authShell, /if \[\[ "\$\{1:-auth\}" == app \]\]; then\n    run_application_lifecycle/u,
+    'only the app scenario should run generic application transitions');
+  assert.match(authShell, /run_deploy auth-primary true '' auth-verified-activation/u,
+    'the auth lane must activate its own initially empty database');
+  assert.match(authShell, /seed_database_sentinel/u,
+    'auth must independently prove PostgreSQL continuity');
   assert.ok(fixture.includes("r.status=required.length>0&&[...required,'fixture_cleanup'].every"));
   assert.ok(fixture.includes('Lifecycle report has unverified required transitions'));
   assert.ok(fixture.includes('run_deploy "$initial_key" false "$fault_dir"'));
@@ -166,6 +175,26 @@ test('real app and Better Auth transitions execute independently and missing sta
   assert.ok(producer.includes('codexia-backup@127.0.0.1 true'));
   assert.doesNotMatch(image, /COPY.*authorized_keys/u, 'per-run keys must never be packaged into the image');
   assert.ok(entry.includes('test -s /home/codexia-backup/.ssh/authorized_keys'));
+});
+
+test('lifecycle readiness uses real conditions without time-based sleep loops', () => {
+  for (const name of [
+    '../deploy/ansible/test-push-app-lifecycle.sh',
+    '../deploy/ansible/test-push-auth-lifecycle.sh',
+    '../deploy/ansible/deploy-transaction.yml',
+    '../deploy/ansible/push-deployment-recover.sh',
+    '../deploy/fixtures/sshfs-server/build.sh',
+  ]) {
+    const source = readFileSync(new URL(name, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /\bsleep\s+[0-9]+/u, name);
+  }
+  const api = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
+  const db = readFileSync(new URL('../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
+  assert.match(api, /^Notify=healthy$/mu);
+  assert.match(api, /^HealthStartupInterval=2s$/mu);
+  assert.match(api, /^StartLimitBurst=3$/mu);
+  assert.match(db, /^Tmpfs=\/run\/postgresql:rw,nosuid,nodev,noexec,size=16m$/mu);
+  assert.doesNotMatch(db, /^Tmpfs=\/var\/run\/postgresql:/mu);
 });
 
 test('every lifecycle PR path also produces an exact-source backend artifact', () => {

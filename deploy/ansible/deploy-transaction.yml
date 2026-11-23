@@ -591,12 +591,12 @@
         if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
           install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
           systemctl --user daemon-reload || restore_status=1
+          # Notify=healthy makes this unit start block until the prior API is ready.
           systemctl --user start codexia-api.service || restore_status=1
-          for attempt in $(seq 1 30); do
-            if podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then break; fi
-            sleep 2
-          done
-          podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy || restore_status=1
+          if [[ "$restore_status" == 0 ]] &&
+             ! podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then
+            restore_status=1
+          fi
           restored_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || restore_status=1
           [[ "$restored_image" == "$rollback_image" ]] || restore_status=1
           if [[ "$tunnel_was_active" == true && "$restore_status" == 0 ]]; then systemctl --user start codexia-tunnel.service || restore_status=1; fi
@@ -659,12 +659,9 @@
         echo 'Candidate API failed to start; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
-      healthy=false
-      for attempt in $(seq 1 30); do
-        if podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then healthy=true; break; fi
-        sleep 2
-      done
-      if [[ "$healthy" != true ]]; then
+      # The canonical Quadlet's Notify=healthy makes systemctl start a readiness gate.
+      candidate_health="$(podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null)" || candidate_health=''
+      if [[ "$candidate_health" != healthy ]]; then
         restore_previous || echo 'Previous API recovery failed after readiness failure' >&2
         echo 'Candidate API readiness failed; deployment transaction remains pending if rollback is unverified' >&2
         exit 1

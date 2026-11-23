@@ -38,13 +38,18 @@ cleanup() {
   rm -f "$work/key" "$work/key.pub" "$work/authorized_keys" "$work/known_hosts"
 }
 trap cleanup EXIT
+smoke_since=$(date -u +%s)
 docker run -d --name codexia-sshfs-smoke \
   --mount "type=bind,source=$work/authorized_keys,target=/home/codexia-backup/.ssh/authorized_keys,readonly" \
+  --health-interval=1s --health-start-period=5s \
   -p 127.0.0.1:2223:2222 "$image"
-for attempt in $(seq 1 30); do
-  if docker exec codexia-sshfs-smoke test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub; then break; fi
-  sleep 1
-done
+smoke_id=$(docker inspect --format '{{.Id}}' codexia-sshfs-smoke)
+# Docker emits a real health transition; replay from container creation to avoid races.
+if [[ "$(docker inspect --format '{{.State.Health.Status}}' "$smoke_id")" != healthy ]]; then
+  health_event=$(timeout 30s bash -c '(docker events --since "$2" --filter "container=$1" --format "{{.Status}}" || true) | grep -Em1 "health_status: (healthy|unhealthy)"' bash "$smoke_id" "$smoke_since")
+  [[ "$health_event" == 'health_status: healthy' ]] || { echo "SSHFS smoke health failed: $health_event" >&2; exit 1; }
+fi
+docker exec codexia-sshfs-smoke test -s /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub
 server_key="$(docker exec codexia-sshfs-smoke cat /etc/ssh/fixture-host-keys/ssh_host_ed25519_key.pub)"
 printf '[127.0.0.1]:2223 %s\n' "$server_key" >"$work/known_hosts"
 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
