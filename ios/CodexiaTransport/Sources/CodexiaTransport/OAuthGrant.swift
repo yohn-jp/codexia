@@ -56,8 +56,13 @@ struct OAuthGrant: Sendable {
               response.expires_in.isFinite, scopes.contains("codexia:api"),
               OAuthConfiguration.scopes.isSuperset(of: scopes) else { throw OAuthError.invalidToken }
         let access = try Self.verifiedClaims(response.access_token, keys: keys)
-        guard access.header.typ == "at+jwt",
-              access.claims.audiences == [config.resource.absoluteString],
+        let resource = config.resource.absoluteString
+        let userInfo = config.issuer.appending(path: "oauth2/userinfo").absoluteString
+        let audiences = Set(access.claims.audiences)
+        // Better Auth adds its own UserInfo audience when the original
+        // authorization request includes openid, even if API scopes are narrowed.
+        guard access.header.typ == "at+jwt", audiences.count == access.claims.audiences.count,
+              audiences.contains(resource), audiences.isSubset(of: [resource, userInfo]),
               access.claims.client_id == config.clientID, access.claims.jti?.isEmpty == false,
               Set(access.claims.scope?.split(separator: " ").map(String.init) ?? []) == scopes,
               access.claims.valid(for: config, now: now) else { throw OAuthError.invalidToken }

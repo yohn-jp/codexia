@@ -17,8 +17,12 @@ public actor NativeOAuthSession {
     private var refreshTask: Task<OAuthGrant, any Error>?
 
     public init(configuration: OAuthConfiguration) {
+        self.init(configuration: configuration, session: isolatedSession())
+    }
+
+    init(configuration: OAuthConfiguration, session: URLSession) {
         self.configuration = configuration
-        self.session = isolatedSession()
+        self.session = session
         self.keychain = RefreshKeychain(configuration: configuration)
     }
 
@@ -32,6 +36,10 @@ public actor NativeOAuthSession {
     /// active scene window via the presentation context.
     @discardableResult
     public func signIn(presentation: OAuthPresentation) async throws -> String {
+        try await signIn(authorize: { try await presentation.authorize($0) })
+    }
+
+    func signIn(authorize: @MainActor @Sendable (URL) async throws -> URL) async throws -> String {
         guard !authorizing, !revoking, refreshTask == nil else { throw OAuthError.sessionBusy }
         // Explicit sign-out is required before changing the authenticated account.
         guard grant == nil, try keychain.read() == nil else { throw OAuthError.sessionBusy }
@@ -44,7 +52,7 @@ public actor NativeOAuthSession {
         let nonce = try randomValue()
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         let url = try configuration.authorizationURL(state: state, nonce: nonce, challenge: challenge)
-        let callback = try await presentation.authorize(url)
+        let callback = try await authorize(url)
         try Task.checkCancellation()
         let code = try configuration.code(from: callback, expectedState: state)
         let response = try await exchange([
@@ -55,6 +63,7 @@ public actor NativeOAuthSession {
         ])
         let verified = try await verify(response, nonce: nonce)
         guard let refresh = response.refresh_token, validBearer(refresh) else { throw OAuthError.invalidToken }
+        try Task.checkCancellation()
         try keychain.write(refresh)
         grant = verified
         return verified.subject

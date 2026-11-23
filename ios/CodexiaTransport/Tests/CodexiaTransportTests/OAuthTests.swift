@@ -70,6 +70,19 @@ import CryptoKit
         return try OAuthGrant(response: token, keys: keys, config: config, nonce: "nonce", now: now)
     }
     #expect(try check(signedJWT(type: "at+jwt", claims: claims, key: key)).subject == "author")
+
+    let userInfo = config.issuer.appending(path: "oauth2/userinfo").absoluteString
+    var withUserInfo = claims
+    withUserInfo["aud"] = [userInfo, config.resource.absoluteString]
+    #expect(try check(signedJWT(type: "at+jwt", claims: withUserInfo, key: key)).subject == "author")
+    for audiences in [[userInfo], [config.resource.absoluteString, "https://foreign.example.test"],
+                      [config.resource.absoluteString, config.resource.absoluteString]] {
+        var altered = claims
+        altered["aud"] = audiences
+        #expect(throws: OAuthError.invalidToken) {
+            try check(signedJWT(type: "at+jwt", claims: altered, key: key))
+        }
+    }
     for (name, value) in [("aud", "untrusted"), ("client_id", "other"), ("scope", "mcp:read"), ("iss", "wrong")] {
         var altered = claims
         altered[name] = value
