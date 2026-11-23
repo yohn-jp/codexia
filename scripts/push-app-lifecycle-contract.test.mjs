@@ -175,6 +175,8 @@ test('lifecycle CI activates pinned Mitogen and profiles stage-specific Ansible 
   assert.match(fixture, /grant_mitogen_traversal/u);
   assert.match(fixture, /setfacl -m "u:\$fixture_uid:--x"/u);
   assert.match(fixture, /setfacl -x "u:\$fixture_uid"/u);
+  assert.match(fixture, /\[\[ -n "\$dir" \]\] \|\| dir=\//u,
+    'Mitogen fixture directory traversal must terminate at the filesystem root');
   assert.match(fixture, /LIFECYCLE_ANSIBLE_TIMING stage=/u);
   const profile = readFileSync(new URL('../deploy/ansible/callback_plugins/codexia_profile.py', import.meta.url), 'utf8');
   assert.match(profile, /CODEXIA_ANSIBLE_TASK_TIME/u);
