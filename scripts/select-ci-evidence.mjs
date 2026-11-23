@@ -17,7 +17,5 @@ assert.equal(inventory.identity.sourceSha, CODEXIA_EXPECTED_SHA, 'Artifact inven
 const selected = selectLatestEvidenceArtifacts(plan, inventory.artifacts, inventory.jobs, inventory.identity);
 const artifactIds = selected.map(artifact => artifact.id).join(',');
 assert.ok(artifactIds.length > 0, 'No selected CI evidence artifact IDs');
-// download-artifact extracts a single selection directly into the requested path.
-const artifactSubdirectory = selected.length === 1 ? selected[0].name : '';
-await appendFile(GITHUB_OUTPUT, `artifact-ids=${artifactIds}\nartifact-subdirectory=${artifactSubdirectory}\n`);
+await appendFile(GITHUB_OUTPUT, `artifact-ids=${artifactIds}\n`);
 console.log(`Selected latest exact-run CI evidence for ${selected.map(artifact => artifact.name.slice('ci-evidence-'.length)).join(', ')} at ${CODEXIA_EXPECTED_SHA}.`);
