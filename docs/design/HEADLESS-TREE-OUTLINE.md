@@ -1,6 +1,6 @@
 # Headless Tree adoption — Outline integration contract
 
-Status: implementation in progress. This document records the agreed scope; it is not evidence of a working integration.
+Status: accepted feature design / implementation to be verified. This document records the agreed scope, not evidence of working integration. The [user screen transitions](USER-SCREEN-FLOW.md) and [system design](../architecture/SYSTEM-DESIGN.md) govern outline navigation, manuscript protection and scope.
 
 ## Decision
 

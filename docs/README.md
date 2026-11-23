@@ -49,3 +49,25 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 For architecture proposals, see [Integrated creative design](architecture/NEXT-DEVELOPMENT-PLAN.md). The [historical reboot rationale](architecture/CODEXIA-REBOOT-RFC.md) points to the archived source evidence. Neither overrides accepted contracts. The topic owners above are the canonical references; update the owning document rather than adding a competing specification.
 
 Documentation describes supported behavior, contracts, procedures and explicitly identified design proposals. Execution results belong to test reports and build artifacts; contribution rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Supporting and operational document register
+
+These maintained documents supplement the topic owners above. The classification prevents an implementation note, work-in-progress design or generated visual audit from silently becoming an architectural source of truth.
+
+| Scope | Document | Authority |
+| --- | --- | --- |
+| Governance | [Agent governance](../AGENTS.md) · [Security reporting](../SECURITY.md) | Contributing and disclosure policy; not a second architecture |
+| Product brief | [Product purpose](../app/PRODUCT.md) | Product intent and accepted UX context |
+| Native packaging | [Capacitor client notes](../app/native/README.md) | Implementation and build guidance |
+| Authentication provisioning | [Better Auth runbook](../deploy/ansible/AUTH-RUNTIME.md) | Operational procedure |
+| Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
+| Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |
+| Release and handoff | [Push deployment runbook](deployment/PUSH-DEPLOYMENT.md) · [Handoff revalidation](deployment/BACKEND-HANDOFF-REVALIDATION.md) | Operational procedures, subordinate to update design |
+| Recovery | [Encrypted backup and restore](deployment/BACKUP.md) · [Disposable host acceptance](deployment/PUSH-HOST-CI.md) | Operational / verification procedures |
+| Architecture decisions | [Optimization boundaries](architecture/decisions/OPTIMIZATION-BOUNDARIES.md) | Adopted bounded decisions; no legacy runtime authority |
+| Feature expansion | [Development inventory](architecture/NEXT-DEVELOPMENT-INVENTORY.md) · [Headless Tree outline](design/HEADLESS-TREE-OUTLINE.md) | Proposal and acceptance targets |
+| CI observability | [CI dashboard](verification/CI-DASHBOARD.md) · [Graphify Pages](verification/GRAPHIFY-PAGES.md) | Verification / visualization guidance, not runtime authority |
+| Module runtime | [Module runtime](../packages/module-runtime/README.md) · [Diagnostics lexicon provenance](../modules/diagnostics/src/data/README.md) | Library guidance and provenance |
+| Assets and performance fixtures | [Icon design](../scripts/branding/README.md) · [Performance harness](../scripts/performance/README.md) | Implementation and verification guidance |
+
+Tool-generated design records under `app/.impeccable/`, historical dated plans under `docs/superpowers/`, archived migration evidence under `evidence/`, third-party bundled skills under `.agents/` and Assistant `*.prompt.md` templates are **not normative Codexia architecture documents**. Keep required provenance and licensing, and avoid editing bundled upstream reference material merely to make it look like current product policy.

@@ -10,8 +10,8 @@
 | Search | modules/search の既存Term Registryと辞書 | Knowledge AliasはPostgreSQL正本、同名一致は確定としない。Searchとの明示参照・一方向投影の接続は明示的な参照を必要とする | 既存Searchテスト、実UIで曖昧性を検証 |
 | Context/MCP | modules/story/src/actions.ts、modules/mcp/src/tools.ts、既存Module Action registry、Assistantのローカル文脈 | 共通Context、プレビュー、外部AIの提出、内部LLM実行の凍結（[MCP-first](MCP-FIRST.md)） | Story fixture、MCP権限・Provider非実行・Snapshot受入 |
 | Scenario | 既存Story ChangeSet / ModuleRecord | 比較、保存、stale再比較、採用提案 | 既存Storyテストと追加fixture、統合受入 |
-| Release | scripts/ci-contract.mjs、既存OCI/Worker CI | | exact-head/統合main CI、署名検証、DB fingerprint |
-| 更新 | deploy/quadlet、Tunnel、API lifecycle | | コントローラ単体、実Podman/VM、保存中切替 |
+| Release | scripts/ci-contract.mjs、既存OCI/Worker CI | | exact-head/統合main CI、証明書・不変digest照合、DB fingerprint |
+| 更新 | deploy/quadlet、Tunnel、API lifecycle | | [更新遷移](../deployment/UPDATE-FLOW.md) のコントローラ・実Podman/VM・保存中切替 |
 | 保全 | 既存PostgreSQL/履歴、codexia-work/v1 | | 暗号化バックアップ、隔離復元、実データ一致 |
 
 ## ID・状態の対応

@@ -38,6 +38,8 @@ The product name is Codexia. No additional voice, logo treatment, or identity as
 
 ## Evidence on Hand
 
+- [Canonical system design](../docs/architecture/SYSTEM-DESIGN.md) and [documentation authority](../docs/architecture/DOCUMENTATION-AUTHORITY.md) define the system's design-first source of truth, distinct from implementation.
+- [User screen transitions](../docs/design/USER-SCREEN-FLOW.md) and [owner security transitions](../docs/design/ADMIN-SCREEN-FLOW.md) define screen flow contracts.
 - [Design and UX contract](../docs/design/UX-CONTRACT.md) defines the author experience and acceptance targets; it is not a report that every target is implemented or accepted in production.
 - [Codexia design system](DESIGN.md) records owner-confirmed visual direction and separates unresolved details from adopted decisions.
 - [Visual system history](../docs/design/VISUAL-SYSTEM.md) preserves existing proposals and comparisons; its earlier choices are not automatically current specifications.
