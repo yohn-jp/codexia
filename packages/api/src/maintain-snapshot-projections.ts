@@ -15,19 +15,25 @@ function maintenanceArguments(args: string[]): { mode: "--check" | "--apply"; pr
   return projectId === undefined ? { mode } : { mode, projectId: projectId as ProjectId };
 }
 
+type PendingProjects = (page: { after?: ProjectId; limit?: number }) => Promise<readonly ProjectId[]>;
+
+async function* pendingProjects(findPendingProjects: PendingProjects): AsyncGenerator<ProjectId> {
+  let after: ProjectId | undefined;
+  for (;;) {
+    const pending = await findPendingProjects(after === undefined ? {} : { after });
+    if (pending.length === 0) return;
+    yield* pending;
+    after = pending.at(-1);
+  }
+}
+
 async function promoteRecords(
-  findPendingProjects: (page: { after?: ProjectId; limit?: number }) => Promise<readonly ProjectId[]>,
+  findPendingProjects: PendingProjects,
   maintain: (projectId: ProjectId) => Promise<{ migrated: number }>,
   label: string,
 ): Promise<number> {
-  let after: ProjectId | undefined;
   let rowsMigrated = 0;
-  for (;;) {
-    const pending = await findPendingProjects(after === undefined ? {} : { after });
-    if (pending.length === 0) break;
-    for (const id of pending) rowsMigrated += (await maintain(id)).migrated;
-    after = pending.at(-1);
-  }
+  for await (const id of pendingProjects(findPendingProjects)) rowsMigrated += (await maintain(id)).migrated;
   if ((await findPendingProjects({ limit: 1 })).length) throw new Error(`${label} maintenance still has pending projects`);
   return rowsMigrated;
 }
@@ -44,10 +50,20 @@ async function main(): Promise<void> {
     if (projectId && !await persistence.read(reader => reader.getProject(projectId))) {
       throw new Error("Snapshot projection maintenance project was not found");
     }
+    if (mode === "--apply" && databaseMode !== "transition") {
+      throw new Error("Snapshot projection maintenance requires the writable PostgreSQL role");
+    }
+    const findPublishingProjects: PendingProjects = page => persistence.findUnmigratedPublishingProjectIds({ ...scope, ...page });
+    const findNlpProjects: PendingProjects = page => persistence.findUnmigratedNlpFeatureSettingsProjectIds({ ...scope, ...page });
+    // Check both source inventories before the operator commits any project.
+    // Application still rechecks each source under the project lock.
+    for await (const id of pendingProjects(findPublishingProjects)) await maintainPublishingRecords(persistence, id, "check");
+    for await (const id of pendingProjects(findNlpProjects)) await maintainNlpFeatureSettings(persistence, id, "check");
+
     if (mode === "--check") {
       const pendingProjectIds = await persistence.findUnprovenCurrentSnapshotProjectIds(SNAPSHOT_PROJECTION_EPOCH, { ...scope, limit: 10 });
-      const pendingPublishingProjectIds = await persistence.findUnmigratedPublishingProjectIds({ ...scope, limit: 10 });
-      const pendingNlpFeatureSettingsProjectIds = await persistence.findUnmigratedNlpFeatureSettingsProjectIds({ ...scope, limit: 10 });
+      const pendingPublishingProjectIds = await findPublishingProjects({ limit: 10 });
+      const pendingNlpFeatureSettingsProjectIds = await findNlpProjects({ limit: 10 });
       const pending = pendingProjectIds.length > 0 || pendingPublishingProjectIds.length > 0 || pendingNlpFeatureSettingsProjectIds.length > 0;
       console.log(JSON.stringify({ status: pending ? "maintenance_required" : "ready", pendingProjectIds, pendingPublishingProjectIds,
         ...(pendingNlpFeatureSettingsProjectIds.length ? { pendingNlpFeatureSettingsProjectIds } : {}),
@@ -55,14 +71,13 @@ async function main(): Promise<void> {
       if (pending) process.exitCode = 2;
       return;
     }
-    if (databaseMode !== "transition") throw new Error("Snapshot projection maintenance requires the writable PostgreSQL role");
 
     const publishingRowsMigrated = await promoteRecords(
-      page => persistence.findUnmigratedPublishingProjectIds({ ...scope, ...page }),
+      findPublishingProjects,
       id => maintainPublishingRecords(persistence, id, "apply"), "Publishing record",
     );
     const nlpFeatureSettingsRowsMigrated = await promoteRecords(
-      page => persistence.findUnmigratedNlpFeatureSettingsProjectIds({ ...scope, ...page }),
+      findNlpProjects,
       id => maintainNlpFeatureSettings(persistence, id, "apply"), "NLP feature settings",
     );
 
