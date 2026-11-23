@@ -13,7 +13,14 @@ export const test = base.extend<{
     const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
     if (!databaseUrl) throw new Error("The browser acceptance shard needs a disposable PostgreSQL database");
     const frontendSource = process.env.CODEXIA_E2E_COMPAT_FRONTEND_SOURCE;
-    const server = await startAuthorBrowserFixture({ databaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", frontendSource });
+    const server = await startAuthorBrowserFixture({
+      databaseUrl,
+      profile: process.env.CODEXIA_PROFILE ?? "core",
+      frontendSource,
+      // WebAuthn RP IDs may be DNS names, not an IP literal. Retain the usual
+      // 127.0.0.1 fixture for every other acceptance shard.
+      ...(process.env.CODEXIA_E2E_SHARD === "auth-recovery" ? { apiHostname: "localhost" as const } : {}),
+    });
     try { await use(server); }
     finally { await server.close(); }
   }, { scope: "worker", timeout: 90_000 }],

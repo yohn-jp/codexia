@@ -88,7 +88,7 @@ capture_failure_runtime() {
     done
     printf '\nRootless container state\n'
     rootless_podman ps --all --format '{{.Names}} {{.Status}} {{.Image}}' 2>&1 || true
-    for name in codexia-api codexia-db; do
+    for name in codexia-api codexia-db codexia-backup-sshfs codexia-lifecycle-registry; do
       if rootless_podman container exists "$name" >/dev/null 2>&1; then
         printf '\nContainer log tail: %s\n' "$name"
         rootless_podman logs --tail 60 "$name" 2>&1 || true
