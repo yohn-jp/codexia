@@ -22,9 +22,11 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
     assert.ok(plan.tasks.includes('biome-ci'), file);
     assert.ok(plan.groups.includes('biome'), file);
   }
-  for (const file of ['scripts/ci/execution/group.mjs', 'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift']) {
-    assert.ok(!check(file).tasks.includes('biome-ci'), file);
-  }
+  assert.ok(!check('ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift').tasks.includes('biome-ci'));
+  // Unclassified CI scripts intentionally fail closed to the full plan; the Biome CLI itself scopes to application trees.
+  const unknown = check('scripts/ci/execution/group.mjs');
+  assert.equal(unknown.mode, 'full');
+  assert.ok(unknown.tasks.includes('biome-ci'));
   assert.ok(check('scripts/ci/execution/group.mjs', 'push').tasks.includes('biome-ci'));
   const biomeJob = workflow.jobs.biome;
   assert.equal(biomeJob.permissions['security-events'], 'write');
