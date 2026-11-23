@@ -64,7 +64,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish immutable Chromium image and measure uncompressed size
-        env:
         shell: bash
         run: |
           set -euo pipefail
