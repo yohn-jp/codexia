@@ -65,7 +65,7 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 
 | ID | 試験 | 完了条件 |
 | --- | --- | --- |
-| TRC-01 | 既存30 REQ-IDの変換 | 元のID・意味・設計参照がすべて維持。重複/欠落・勝手な採用なし |
+| TRC-01 | 登録済み**全REQ-ID**の変換 | 初期30件と追加採用要求を含む全ID・意味・設計参照が維持。重複/欠落・勝手な採用なし |
 | TRC-02 | Markdown parse→HTML/JSON生成→同一ソースから再生成 | Unicode/日本語、Markdownリンク、要件metadata、relationを検証。同一入力・同一versionで出力が決定的であることを比較する。HTML/JSONからMarkdownへ逆変換できるとは仮定しない |
 | TRC-03 | REQ→TS/TSX/SQL source | file/range relationで実装へ到達し、ファイル変更・削除・参照切れを検知 |
 | TRC-04 | 逆引き | 既知の余分なroute、DB object、MCP toolを列挙し、未リンクを誤ってVERIFIEDにしない |
