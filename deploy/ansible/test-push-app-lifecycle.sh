@@ -645,7 +645,7 @@ if (candidates[from].image === candidates[to].image) throw new Error('The update
 console.log(from, to, candidates[to].image);
 TRANSITION
   )
-  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:auth-update ]]
+  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:app-update ]]
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
