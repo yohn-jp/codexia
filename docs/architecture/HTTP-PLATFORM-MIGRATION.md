@@ -73,7 +73,7 @@ Orvalの公式Hono generatorは `handlerGenerationStrategy: smart|skip|full` を
 
 1. **HTTP入力:** JSON body上限12MiB（server.tsの現行 `MAX_JSON_BYTES`）、415 media type、400 malformed JSON、request header、method、query、同名query、URL encoding、pagination、body無し、HEAD/OPTIONS/CORSが意図どおり。
 2. **HTTP出力:** 401/403/404/405/409/413/415/503、既存のmachine code、safe error body、Allow/header、`application/json`とSSEの正しいcontent-type、Streaming Responseの途中エラーが保護される。
-3. **Web security:** CSP nonce/headersとVary、Origin、CSRF、JWT verification、owner session separation、Cloudflare AccessをAPI承認と取り違えない、encoded pathのmiddleware bypassなし。
+3. **Web security:** CSP nonce/headersとVary、**Host/Origin検証とDNS rebinding対策（MCP公式handlerはHost/Originを検査しない）**、CSRF、JWT verification、owner session separation、Cloudflare AccessをAPI承認と取り違えない、encoded pathのmiddleware bypassなし。
 4. **Stream/lifecycle:** SSEの実応答、abort/close/timeout、late write防止、owner notificationとjob stream、module HTTP streaming、MCP GET/POST、5秒のAPI drain/既存shutdown動作を再現する。HonoのWeb標準 Response→Node adapterへの変換でbody全量bufferを強制しない。
 5. **DB semantics:** editor保存のIdempotency-Key、X-Client-Id、baseRevisionId、sha256、409 conflict response、PostgreSQL receipt、同じoperationの再送、別projectや別ownerの拒否。
 6. **Auth:** Better AuthのOpenAPI 3.1.1はライブラリ管理のschemaとして別生成。TypeSpec OpenAPI 3.1.0とは**プロトコル上別versionの2ソース**として扱い、互換性テスト無しのblind mergeは禁止。公式openAPI pluginはearly stageであり、本番に `/api/auth/reference` を公開しない。
