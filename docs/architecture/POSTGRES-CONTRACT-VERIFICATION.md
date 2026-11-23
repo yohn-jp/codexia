@@ -1,8 +1,8 @@
 # PostgreSQL物理契約を検証するためのツール・CI設計
 
-**種別: 採用済み目標・実装未変更。** データの意味・正本・整合性は [Data model](DATA-MODEL.md)、SQLオブジェクト別の契約は [DB detail](DATABASE-DETAIL-CONTRACT.md)、schemaを更新してよい条件は [Update flow](../deployment/UPDATE-FLOW.md) / [Backup](../deployment/BACKUP.md) / [CI/CD](../verification/CI-CD.md) が所有する。SQL-first + pgTAP + `pg_catalog` + tblsを**仕様と実DBを照合する方式**として採用する。PostgreSQL正本がGit/ORMへ移るわけではない。
+**種別: 採用済み・物理契約検証を実装済み。** データの意味・正本・整合性は [Data model](DATA-MODEL.md)、SQLオブジェクト別の契約は [DB detail](DATABASE-DETAIL-CONTRACT.md)、schemaを更新してよい条件は [Update flow](../deployment/UPDATE-FLOW.md) / [Backup](../deployment/BACKUP.md) / [CI/CD](../verification/CI-CD.md) が所有する。SQL-first + pgTAP + `pg_catalog` + tblsを**仕様と実DBを照合する方式**として採用する。PostgreSQL正本がGit/ORMへ移るわけではない。
 
-観測ソース: main@e02933aead466b14cbcd336905b9c2a2a2b39f06、packages/persistence-postgres/migrations/0001-initial.sql、0002-orphaned-evidence-ranges.sql、0003-project-workspace.sql、src/migrate.ts、src/migration-set.ts、packages/api/src/auth-schema.ts、migrate-auth.ts。
+実装は `packages/persistence-postgres/tests/db-contract/` と `scripts/postgres-contract/` に置く。各実行は検証対象文書、API auth schema、migration、lockfile、runner、期待catalogのexact-source identityを記録し、migration fingerprintと実DB catalogを照合する。
 
 ## 二択の理由
 
@@ -85,6 +85,16 @@ SQL migrationを「設計書より上位」にしない。SQLは**承認済み�
 
 ## 完了基準と未検証
 
-物理schemaの**全**table/column/index/PK/FK/CHECK/trigger/function/roleと、各API操作のDB影響を正本へ結び付け、独立した実DBのtest evidenceを記録した時に限り完了とする。
+物理schemaの**全**table/column/index/PK/FK/CHECK/trigger/function/roleを正本へ結び付け、独立した実DBのtest evidenceを記録する。#655 は PostgreSQL 17 の使い捨てDBで既存migrationとBetter Auth schemaを適用し、92 pgTAP assertions、全物理catalog fixture、drift拒否、read-only tbls生成、および暗号化backupの隔離復元を実装する。tbls生成物は検証taskのreport directoryに保存し、migrationやrepositoryへ書き戻さない。
 
-本書は選定を決めたが、pgTAPのインストール、tbls生成結果、実pg_catalog差分、現行CIへの所要時間、復元test、PostgreSQL 17での実挙動は**このPRでは未実行**。
+既存API/maintenanceテストもDBVの証拠として維持する。これらはpgTAPの代替ではなく、transaction、再送、メンテナンス承認、OCI起動時の挙動をそれぞれの責務で検証する。
+
+| DBV | 物理契約の証拠 | 既存 transaction / deploy 証拠 |
+| --- | --- | --- |
+| DBV-001 | `tests/db-contract/application-contract.sql` のrevision UPDATE/DELETE拒否 | `src/postgres-store.test.ts`: `migrations are repeatable and document revisions stay immutable`、`UTF-16 edits, idempotency, revision restoration and stale-head conflicts` |
+| DBV-004 | `tests/db-contract/application-contract.sql` の重複receipt key拒否 | `src/postgres-store.test.ts`: `concurrent exact retries replay one document creation and one edit`、`transaction failures roll back document, revision and idempotency rows` |
+| DBV-005 | `tests/db-contract/run.mjs` のcatalog・ledger・auth-schema drift拒否 | `src/postgres-store.test.ts`: `fresh schema initialization is transactional, repeatable and rejects untracked or partial schemas`、`read-only schema verification rejects missing, altered and newer migration ledgers`、`src/schema-maintenance.test.ts`: certified prefix・retry・rollback。API auth driftは `packages/api/src/better-auth.persistence.test.ts` の `Better Auth PostgreSQL restart preserves JWKS signing key, session and refresh continuity` テスト内で未適用schema、型・column・index・constraint driftを検知する各 `verifyAuthSchema` assertionで検証する |
+| DBV-007 | `tests/db-contract/run.mjs` はsynthetic owner・project・original manuscript/revisionを使い捨てsource DBへ作成し、暗号化age v2 artifactを作る。復元はcanonical `deploy/backup/backup.sh drill` を通し、別のnetwork-none PostgreSQLへ復元してledger、auth fingerprint、ownerと原稿/Revision identityを照合する。fixture構築は合成データの準備であり、drillの代替ではない。production backupやcredentialは使わない。 |
+| DBV-008 | pgTAP/pg_catalog taskとは分け、既存の明示maintenance contractを参照 | `scripts/push-deployment-contract.test.mjs`: `first activation verifies the initialized database after backup under both explicit approvals` はbackup後のone-shot verificationとrecurring startup migrationの不在を確認。`src/schema-maintenance.test.ts`: `certified additive migration applies only a forward prefix and retries the target` はcertified forward prefixとtransactional rollbackを確認する |
+
+CIの実結果とsource/run identityはPR #688の `db-contract` task reportに結び付ける。ここに列挙した既存テストが全API routeのDB影響を網羅する意味ではなく、その横断的traceabilityは別途管理する。

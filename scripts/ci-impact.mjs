@@ -149,6 +149,18 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
+const DB_CONTRACT_SOURCE_PATHS = new Set([
+  'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
+  'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
+  'docs/architecture/DATA-MODEL.md',
+  'docs/requirements/REQUIREMENT-REGISTER.md',
+  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+  'deploy/ansible/verify-postgres-roles.sql',
+  'packages/api/src/auth-schema.ts',
+  'packages/api/src/migrate-auth.ts',
+  'packages/persistence-postgres/src/migrate.ts',
+  'packages/persistence-postgres/src/migration-set.ts',
+]);
 
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
@@ -159,6 +171,12 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
+      add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
+      continue;
+    }
+    if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
+    if (file === 'deploy/backup/backup.sh') add('db-contract');
     if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||
         file === 'scripts/strictdoc/strictdoc_config.py' ||
         file.startsWith('scripts/strictdoc/')) {

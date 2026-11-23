@@ -84,7 +84,7 @@ test('iOS deployment documentation selects the root tests that assert its conten
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
 });
 
-test('StrictDoc authority and source files select only the trace task and its existing CI group', async () => {
+test('StrictDoc authority selects trace proof and the requirement register also selects its DB contract', async () => {
   for (const file of [
     'docs/requirements/README.md',
     'docs/requirements/REQUIREMENT-REGISTER.md',
@@ -95,8 +95,10 @@ test('StrictDoc authority and source files select only the trace task and its ex
     'scripts/strictdoc/requirements.lock.txt',
   ]) {
     const selected = await plan([file]);
-    assert.deepEqual(selected.tasks, ['coverage', 'requirements-trace'], file);
-    assert.deepEqual(selected.groups, ['types-tests'], file);
+    const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
+    assert.deepEqual(selected.tasks, requirementRegister
+      ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
+    assert.deepEqual(selected.groups, requirementRegister ? ['unit-core', 'types-tests'] : ['types-tests'], file);
   }
 });
 
@@ -176,6 +178,7 @@ test('main, manual, shared contracts, lockfiles, manifests and unknown files fai
     [['packages/contracts/src/index.ts'], 'pull_request'],
     [['packages/persistence-contracts/src/index.ts'], 'pull_request'],
     [['packages/persistence-postgres/src/postgres-store.ts'], 'pull_request'],
+    [['packages/persistence-postgres/migrations/0002-anchor-ranges.sql'], 'pull_request'],
     [['pnpm-lock.yaml'], 'pull_request'],
     [['modules/search/package.json'], 'pull_request'], [['new-root-file'], 'pull_request'],
     [null, 'pull_request'],
@@ -190,6 +193,53 @@ test('test-only changes select their owner while non-executable documentation se
   assert.ok(selected.tasks.includes('test-types-modules'));
   assert.ok(!selected.tasks.includes('build-full'));
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+});
+
+test('PostgreSQL contract fixture changes select the real database contract lane', async () => {
+  for (const file of [
+    'packages/persistence-postgres/tests/db-contract/application-contract.sql',
+    'packages/persistence-postgres/tests/db-contract/toolchain.json',
+    'scripts/postgres-contract/contract-runner.mjs',
+  ]) {
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('db-contract'), file);
+    assert.ok(selected.tasks.includes('unit-persistence-postgres'), file);
+    assert.ok(selected.tasks.includes('typecheck-foundations'), file);
+    assert.equal(selected.mode, 'affected', file);
+  }
+});
+
+test('DB contract source authorities select DB proof while retaining trace and architecture owners', async () => {
+  for (const file of [
+    'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
+    'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
+    'docs/architecture/DATA-MODEL.md',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'deploy/ansible/verify-postgres-roles.sql',
+    'packages/api/src/auth-schema.ts',
+    'packages/api/src/migrate-auth.ts',
+    'packages/persistence-postgres/src/migrate.ts',
+    'packages/persistence-postgres/src/migration-set.ts',
+  ]) {
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('db-contract'), file);
+  }
+  assert.ok((await plan(['docs/requirements/REQUIREMENT-REGISTER.md'])).tasks.includes('requirements-trace'));
+  assert.ok((await plan(['docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md'])).tasks.includes('architecture-g5'));
+});
+
+test('the canonical age backup script selects both DBV-007 and existing root backup verification', async () => {
+  const selected = await plan(['deploy/backup/backup.sh']);
+  assert.equal(selected.mode, 'affected');
+  assert.deepEqual(selected.tasks, ['unit-root', 'db-contract', 'coverage']);
+});
+
+test('existing PostgreSQL migration changes retain full verification', async () => {
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  const selected = await plan(['packages/persistence-postgres/migrations/0002-orphaned-evidence-ranges.sql']);
+  assert.equal(selected.mode, 'full');
+  assert.deepEqual(selected.tasks, VERIFICATION_TASKS);
 });
 
 test('architecture design documents select G5 in the existing Verify unit matrix', async () => {
@@ -277,8 +327,12 @@ test('known operational inputs retain root proof without unrelated browser or OC
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
-    assert.deepEqual(selected.tasks, file.startsWith('docs/deployment/')
-      ? ['unit-root', 'coverage', 'architecture-g5'] : ['unit-root', 'coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage']
+      : file.startsWith('docs/deployment/')
+        ? ['unit-root', 'coverage', 'architecture-g5']
+        : ['unit-root','coverage'];
+    assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
   for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
@@ -397,7 +451,10 @@ test('push backup changes retain root and independent exact-head verification', 
     '.github/workflows/push-backup.yml',
   ];
   for (const file of source) {
-    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage']
+      : ['unit-root', 'coverage'];
+    assert.deepEqual((await plan([file])).tasks, expected, file);
     assert.equal((await plan([file])).full_model_oci, false, file);
     for (const event of ['pull_request', 'push']) {
       const paths = backup.on[event].paths;

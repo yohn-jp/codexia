@@ -228,6 +228,7 @@ function typecheckWorkspace() {
 
 function prerequisiteIds(task) {
   if (task === 'coverage') return [];
+  if (task === 'db-contract') return [...buildDependencies(['api']), 'api'];
   if (task.startsWith('unit-')) {
     const id = getUnitTarget(task.slice(5)).id;
     return id === 'root' ? [...buildDependencies(['api']), 'api'] : buildDependencies([id]);

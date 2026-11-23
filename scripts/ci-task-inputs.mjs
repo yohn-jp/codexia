@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { browserRuntimeRequirements } from './ci-browser-image-digests.mjs';
@@ -31,7 +32,8 @@ export function isNonExecutableDocumentation(file) {
   return file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' ||
     /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
 }
-const POSTGRES_CI_IMAGE = 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536';
+const DB_CONTRACT_TOOLCHAIN = JSON.parse(readFileSync(new URL('../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url), 'utf8'));
+const POSTGRES_CI_IMAGE = DB_CONTRACT_TOOLCHAIN.postgresImage;
 
 export function taskGroup(task) {
   const groups = Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].includes(task));
@@ -69,6 +71,7 @@ export function taskInvocation(task, executable = process.execPath) {
   assert.ok(typeof task === 'string' && task.length > 0, 'Task name is required');
   const overrides = taskOverrides(task);
   const environmentKeys = Object.keys(overrides).sort();
+  if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (task === 'requirements-trace') return {
     executable,
     arguments: ['scripts/strictdoc/verify.mjs'],
@@ -108,6 +111,7 @@ function taskEnvironment(task, group, runtime) {
     CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
   });
+  if (task === 'db-contract') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
   if (task.startsWith('browser-')) {
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: browserRuntimeRequirements(group).imageDigest });
@@ -126,11 +130,20 @@ function taskProducerRecipe(task) {
   const profile = requiredBuildProfile(group);
   if (profile) prerequisites.push(`build-${profile}`);
   if (task === 'audit-core') prerequisites.push('build-core');
+  if (task === 'db-contract') prerequisites.push('workspace-build-prerequisites');
   if (task.startsWith('unit-') || task.startsWith('typecheck-') || task.startsWith('test-types-') || task === 'safety') {
     prerequisites.push('workspace-build-prerequisites');
   }
   const external = [];
   if (task.startsWith('unit-') || task.startsWith('browser-')) external.push(POSTGRES_CI_IMAGE);
+  if (task === 'db-contract') {
+    const toolchain = DB_CONTRACT_TOOLCHAIN;
+    const archive = entry => `${entry.url}#sha256=${entry.sha256}`;
+    external.push(toolchain.postgresImage, toolchain.restoreDrill.podmanImage,
+      `${toolchain.pgtap.archiveUrl}#sha256=${toolchain.pgtap.archiveSha256}`,
+      ...Object.values(toolchain.tbls.archives).map(archive),
+      ...Object.values(toolchain.restoreDrill.age.archives).map(archive));
+  }
   if (task.startsWith('oci-')) external.push('docker:ubuntu-24.04-host');
   if (task === 'architecture-g5') external.push(THREAGILE_IMAGE);
   return { group, task, prerequisites: [...new Set(prerequisites)].sort(), external,

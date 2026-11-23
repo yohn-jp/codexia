@@ -109,13 +109,6 @@
 | `plist` | `^3.1.1` | app/native・Info.plist | **要検証** |
 | `wrangler` | `4.162.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
 
-### Architecture G5 isolated tooling
-
-| 対象 | 宣言・実装の基準 | 所有・用途 | 判定／更新条件 |
-| --- | --- | --- | --- |
-| `likec4` | `scripts/architecture/package.json`で`1.61.0` exact、推移依存は同じディレクトリの`package-lock.json`で固定 | G5・C4構造検査とMermaid派生生成 | **既存採用**: 実装時にnpm `latest`も`1.61.0`と確認。CIは`npm ci --ignore-scripts`で隔離インストールし、lock closureと生成差分を検証 |
-| Threagile | `docker.io/threagile/threagile@sha256:abb9eccb111a2059c4876759a24245db02ad295b1608d3a4634ec250f38d9640` | G5・脅威モデル検査 | **既存採用**: CIは不変OCI digestをpullし、ネットワークなし・read-onlyで実行。更新時は新しい公式digestと全リスク出力・失敗注入を再検証 |
-
 ## JavaScript以外／ツールチェーン
 
 | 対象 | 宣言・実装の基準 | 分類／更新条件 |
@@ -131,6 +124,8 @@
 | oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
 | AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
 | S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
+| PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
+| Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
 
 ## アップデートの審査・記録
 

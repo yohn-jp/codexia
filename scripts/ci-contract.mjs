@@ -24,6 +24,7 @@ export const BROWSER_SHARDS = [
 ];
 export const VERIFICATION_TASKS = [
   ...UNIT_TARGETS.map(({ id }) => `unit-${id}`),
+  'db-contract',
   ...TYPECHECK_TARGETS.map(({ id }) => `typecheck-${id}`),
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
@@ -35,7 +36,7 @@ export const VERIFICATION_TASKS = [
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
-  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`),
+  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`).concat('db-contract'),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
