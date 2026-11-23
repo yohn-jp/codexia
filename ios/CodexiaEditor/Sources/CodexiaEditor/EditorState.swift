@@ -32,6 +32,8 @@ public struct EditorState {
     public mutating func applyRemote(_ text: String, for request: Snapshot) -> Bool {
         guard request == snapshot, canLeave else { return false }
         self.text = text
+        version += 1
+        protectedVersion = version
         return true
     }
 

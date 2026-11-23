@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'ios/CodexiaEditor/**'
+      - 'ios/CodexiaApp/**'
       - '.github/workflows/ios-editor.yml'
 permissions:
   contents: read
@@ -23,3 +24,13 @@ jobs:
       - name: Test state model
         working-directory: ios/CodexiaEditor
         run: swift test
+      - name: Build fixture app for Simulator
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaApp -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
+      - name: Boot Simulator and launch fixture app
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
+          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl install "$DEVICE_ID" "$RUNNER_TEMP/codexia-editor/Build/Products/Debug-iphonesimulator/CodexiaApp.app"
+          xcrun simctl launch "$DEVICE_ID" jp.yohn.codexia.editorfixture

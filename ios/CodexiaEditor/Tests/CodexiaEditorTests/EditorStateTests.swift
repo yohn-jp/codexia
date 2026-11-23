@@ -11,6 +11,15 @@ final class EditorStateTests: XCTestCase {
         XCTAssertFalse(state.canLeave)
     }
 
+    func testOlderResponseCannotOverwriteNewerResponse() {
+        var state = EditorState(documentID: "a", text: "initial")
+        let first = state.snapshot
+        let second = state.snapshot
+        XCTAssertTrue(state.applyRemote("newer response", for: second))
+        XCTAssertFalse(state.applyRemote("older response", for: first))
+        XCTAssertEqual(state.text, "newer response")
+    }
+
     func testResponseCannotOverwriteAnotherDocument() {
         var state = EditorState(documentID: "a", text: "first")
         let request = state.snapshot
