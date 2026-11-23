@@ -34,6 +34,14 @@ test('test-only changes do not request runtime component release builds', () => 
   assert.equal(componentReleaseAffected('frontend', ['packages/persistence-contracts/src/index.spec.ts']), true);
   assert.equal(componentReleaseAffected('frontend', ['packages/persistence-contracts/src/test/helpers.ts']), true);
   for (const [component, file] of [
+    ['backend', 'packages/core/src/workflow.spec.ts'],
+    ['backend', 'modules/mcp/src/transport.spec.ts'],
+    ['backend', 'packages/persistence-postgres/src/test/fixture.ts'],
+    ['frontend', 'app/src/save.spec.ts'],
+    ['frontend', 'modules/story/src/editor.spec.ts'],
+    ['frontend', 'packages/persistence-postgres/src/tests/fixture.ts'],
+  ]) assert.equal(componentReleaseAffected(component, [file]), true, `${component}: ${file}`);
+  for (const [component, file] of [
     ['backend', 'packages/api/src/server.ts'],
     ['backend', 'modules/mcp/src/tools.ts'],
     ['backend', 'Dockerfile.backend'],
