@@ -18,6 +18,11 @@
 
 | 対象 | 設計上の所有先 |
 | --- | --- |
+| 要求ID・採用済み要件登録 | [Requirements governance](../requirements/README.md)・[Requirement register](../requirements/REQUIREMENT-REGISTER.md) |
+| 要件から実装・テスト・証拠への双方向追跡 | [Traceability](../verification/TRACEABILITY-REGISTER.md) |
+| HTTP APIのrequest/response/error・operation | [API contract](API-CONTRACT.md)（認可は Route authorization が正本） |
+| DBの表・列・制約・索引・schema lifecycle | [DB detail contract](DATABASE-DETAIL-CONTRACT.md)（概念データは Data model が正本） |
+| 外部IF・trust/障害/復旧 | [External interfaces](EXTERNAL-INTERFACES.md)（OAuth/MCP/配備の詳細は既存所有文書が正本） |
 | システム構成と責務 | [システム基本設計](SYSTEM-DESIGN.md)・[Internal boundaries](INTERNAL-BOUNDARIES.md) |
 | PostgreSQL とドメイン ID | [データモデル](DATA-MODEL.md)・[Core](CORE.md) |
 | URL/HTTP method・principal別のアクセス境界 | [Route authorization contract](ROUTE-AUTHORIZATION-CONTRACT.md)・[API authentication](API-AUTHN-AUTHZ.md) |
