@@ -1,11 +1,46 @@
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { CDPSession, Page } from "@playwright/test";
 import { expect, test } from "./author-oauth-fixture";
 import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fillDraft, seedWritingProject, writingFixturePath } from "./postgres-fixture";
 
 const mockShellOrigin = "http://127.0.0.1:4173";
 const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
 test.use({ baseURL: mockShellOrigin });
+
+async function registerCurrentSessionPasskey(page: Page): Promise<CDPSession> {
+  const session = await page.context().newCDPSession(page);
+  await session.send("WebAuthn.enable");
+  await session.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  const result = await page.evaluate(async () => {
+    const optionsResponse = await fetch("/api/auth/passkey/generate-register-options", { credentials: "same-origin" });
+    if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status, verifyStatus: 0 };
+    const options: unknown = await optionsResponse.json();
+    const credential = await navigator.credentials.create({
+      publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options as never),
+    });
+    if (!(credential instanceof PublicKeyCredential)) return { optionsStatus: optionsResponse.status, verifyStatus: 0 };
+    const verifyResponse = await fetch("/api/auth/passkey/verify-registration", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ response: credential.toJSON(), name: "Console acceptance" }),
+    });
+    return { optionsStatus: optionsResponse.status, verifyStatus: verifyResponse.status };
+  });
+  expect(result.optionsStatus, "Better Auth must issue passkey registration options for the current owner session").toBe(200);
+  expect(result.verifyStatus, "Better Auth must persist the passkey registration for the current owner").toBe(200);
+  return session;
+}
 
 test.beforeEach(async ({ context }) => {
   await context.route(`${mockShellOrigin}/**`, async (route) => {
@@ -51,7 +86,7 @@ test("an unauthenticated standalone browser without Web OAuth configuration cann
   await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
 });
 
-test("Desktop console requires the Better Auth owner cookie and returns to a protected draft", async ({ page, authorizeAuthor }) => {
+test("Desktop console requires the Better Auth owner cookie and returns to a protected draft", async ({ page, authorizeAuthor, browserName }) => {
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Console return draft", "Original manuscript.");
   const draft = "コンソールへ移動しても保護される原稿。";
   await fillDraft(page, draft);
@@ -92,8 +127,22 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   await expect(backupsLink).toHaveAttribute("href", /^\/console\/backups\?return=[0-9a-f-]{36}$/u);
   await backupsLink.click();
   await expect(page.getByRole("heading", { name: "バックアップ", exact: true })).toBeVisible();
+  const reloadedOwnerCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
+  await page.reload();
+  expect((await reloadedOwnerCheck).status()).toBe(200);
+  await expect(page.getByRole("heading", { name: "バックアップ", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 320, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  const virtualAuthenticator = browserName === "chromium" ? await registerCurrentSessionPasskey(page) : undefined;
+  const ownerCookie = (await page.context().cookies(origin)).map(({ name, value }) => `${name}=${value}`).join("; ");
+  expect(ownerCookie).not.toBe("");
+  const csrf = await page.request.post(`${origin}/api/auth/codexia/owner-session`, {
+    headers: { Origin: "https://attacker.example", Cookie: ownerCookie },
+    data: {},
+  });
+  expect(csrf.status()).toBe(403);
+  expect(csrf.headers()["cache-control"]).toBe("no-store");
 
   await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).first().click();
   await expect.poll(() => page.url()).toBe(authoringUrl);
@@ -102,20 +151,36 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   await expect(manuscriptEditor(page)).toContainText(draft);
   await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
 
-  let ownerStatus = 401;
-  await page.context().clearCookies();
-  await page.route("**/api/auth/codexia/owner-session", route => route.fulfill({
-    status: ownerStatus,
-    contentType: "application/json",
-    body: JSON.stringify({ error: ownerStatus === 401 ? "Authentication required" : "Forbidden" }),
-  }));
+  const signedOutStatus = await page.evaluate(async () => (await fetch("/api/auth/sign-out", {
+    method: "POST", credentials: "same-origin",
+  })).status);
+  expect(signedOutStatus).toBe(200);
+  const unauthorizedCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
   await page.goto(`${origin}/console/security`);
+  expect((await unauthorizedCheck).status()).toBe(401);
   await expect(page.getByRole("heading", { name: "所有者としてサインイン", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Passkeyでサインイン", exact: true })).toBeVisible();
-  ownerStatus = 403;
+
+  const reauthenticatedCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
+  if (virtualAuthenticator) {
+    await expect(page.getByRole("button", { name: "Passkeyでサインイン", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Passkeyでサインイン", exact: true }).click();
+  } else {
+    await expect(page.getByRole("button", { name: "IDプロバイダーでサインイン", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "IDプロバイダーでサインイン", exact: true }).click();
+  }
+  const reauthenticated = await reauthenticatedCheck;
+  expect(reauthenticated.status()).toBe(200);
+  expect(await reauthenticated.json()).toEqual({ authenticated: true });
+  await expect(page.getByRole("heading", { name: "セキュリティ", exact: true })).toBeVisible();
+
+  await page.context().setExtraHTTPHeaders({ Authorization: "Bearer not-an-owner-session" });
+  const forbiddenCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
   await page.reload();
+  expect((await forbiddenCheck).status()).toBe(403);
   await expect(page.getByRole("heading", { name: "管理権限がありません", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理コンソール" })).toHaveCount(0);
+  await page.context().setExtraHTTPHeaders({});
+  await virtualAuthenticator?.detach();
 });
 
 test("a failed OAuth logout keeps the editor protected and lets the author retry", async ({ page, authorizeAuthor }) => {
