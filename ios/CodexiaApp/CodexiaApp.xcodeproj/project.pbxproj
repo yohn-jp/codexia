@@ -1,0 +1,43 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  A00000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600; TargetAttributes = {A00000000000000000000040 = {TestTargetID = A00000000000000000000005;};};}; buildConfigurationList = A00000000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, Base,); mainGroup = A00000000000000000000003; productRefGroup = A00000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000005,A00000000000000000000040,);};
+  A00000000000000000000003 = {isa = PBXGroup; children = (A00000000000000000000010,A00000000000000000000011,A00000000000000000000012,A00000000000000000000013,A00000000000000000000015,A00000000000000000000045,A00000000000000000000004,); sourceTree = "<group>";};
+  A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000014,A00000000000000000000046,); name = Products; sourceTree = "<group>";};
+  A00000000000000000000005 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000006; buildPhases = (A00000000000000000000007,A00000000000000000000008,); buildRules = (); dependencies = (); name = CodexiaApp; productName = CodexiaApp; productReference = A00000000000000000000014; productType = "com.apple.product-type.application";};
+  A00000000000000000000007 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000020,A00000000000000000000021,A00000000000000000000022,A00000000000000000000023,A00000000000000000000024,); runOnlyForDeploymentPostprocessing = 0;};
+  A00000000000000000000008 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+  A00000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CodexiaApp.swift; sourceTree = "<group>";};
+  A00000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../CodexiaEditor/Sources/CodexiaEditor/EditorState.swift; sourceTree = "<group>";};
+  A00000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift; sourceTree = "<group>";};
+  A00000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../CodexiaEditor/Sources/CodexiaEditor/AuthoringView.swift; sourceTree = "<group>";};
+  A00000000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../CodexiaEditor/Sources/CodexiaEditor/ManuscriptFixture.swift; sourceTree = "<group>";};
+  A00000000000000000000014 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodexiaApp.app; sourceTree = BUILT_PRODUCTS_DIR;};
+  A00000000000000000000020 = {isa = PBXBuildFile; fileRef = A00000000000000000000010;};
+  A00000000000000000000021 = {isa = PBXBuildFile; fileRef = A00000000000000000000011;};
+  A00000000000000000000022 = {isa = PBXBuildFile; fileRef = A00000000000000000000012;};
+  A00000000000000000000023 = {isa = PBXBuildFile; fileRef = A00000000000000000000013;};
+  A00000000000000000000024 = {isa = PBXBuildFile; fileRef = A00000000000000000000015;};
+  A00000000000000000000040 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000041; buildPhases = (A00000000000000000000042,A00000000000000000000043,); buildRules = (); dependencies = (A00000000000000000000048,); name = CodexiaAppUITests; productName = CodexiaAppUITests; productReference = A00000000000000000000046; productType = "com.apple.product-type.bundle.ui-testing";};
+  A00000000000000000000041 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000049,A0000000000000000000004A,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  A00000000000000000000042 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000047,); runOnlyForDeploymentPostprocessing = 0;};
+  A00000000000000000000043 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+  A00000000000000000000044 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000001; proxyType = 1; remoteGlobalIDString = A00000000000000000000005; remoteInfo = CodexiaApp;};
+  A00000000000000000000045 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITests/AuthoringFlowUITests.swift; sourceTree = "<group>";};
+  A00000000000000000000046 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodexiaAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
+  A00000000000000000000047 = {isa = PBXBuildFile; fileRef = A00000000000000000000045;};
+  A00000000000000000000048 = {isa = PBXTargetDependency; target = A00000000000000000000005; targetProxy = A00000000000000000000044;};
+  A00000000000000000000049 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia.editorfixture.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CodexiaApp;}; name = Debug;};
+  A0000000000000000000004A = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia.editorfixture.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CodexiaApp;}; name = Release;};
+  A00000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000030,A00000000000000000000031,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  A00000000000000000000006 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000032,A00000000000000000000033,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  A00000000000000000000030 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; SWIFT_VERSION = 5.0;}; name = Debug;};
+  A00000000000000000000031 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; SWIFT_VERSION = 5.0;}; name = Release;};
+  A00000000000000000000032 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia.editorfixture; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = "1,2";}; name = Debug;};
+  A00000000000000000000033 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia.editorfixture; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = "1,2";}; name = Release;};
+ };
+ rootObject = A00000000000000000000001;
+}

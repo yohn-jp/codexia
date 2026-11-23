@@ -1,0 +1,57 @@
+name: iOS editor
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'ios/CodexiaEditor/**'
+      - 'ios/CodexiaApp/**'
+      - '.github/workflows/ios-editor.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ios-editor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  editor:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify Xcode
+        run: xcodebuild -version | grep -E '^Xcode 27\.'
+      - name: Build for iOS Simulator
+        working-directory: ios/CodexiaEditor
+        run: xcodebuild -scheme CodexiaEditor -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Test state model
+        working-directory: ios/CodexiaEditor
+        run: swift test
+      - name: Build fixture app for Simulator
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
+      - name: Select and boot Simulator
+        id: simulator_boot
+        timeout-minutes: 10
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
+          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
+          echo "EDITOR_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+      - name: Install and launch fixture app
+        timeout-minutes: 10
+        run: |
+          xcrun simctl install "$EDITOR_SIMULATOR_ID" "$RUNNER_TEMP/codexia-editor/Build/Products/Debug-iphonesimulator/CodexiaApp.app"
+          xcrun simctl launch "$EDITOR_SIMULATOR_ID" jp.yohn.codexia.editorfixture
+      - name: Test UIKit adapter on Simulator
+        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
+        timeout-minutes: 15
+        working-directory: ios/CodexiaEditor
+        run: |
+          xcodebuild -list
+          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
+      - name: Test app navigation and scene on Simulator
+        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
+        timeout-minutes: 15
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
