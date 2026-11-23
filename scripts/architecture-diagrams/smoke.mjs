@@ -122,14 +122,19 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       el.scrollLeft = el.scrollWidth;
       el.scrollTop = el.scrollHeight;
     });
+    // A late zoom-position restoration must not undo a subsequent user scroll.
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const scrollAfterZoom = await page.locator('#canvas').evaluate(el => ({
       left: el.scrollLeft,
       top: el.scrollTop,
       maxLeft: el.scrollWidth - el.clientWidth,
       maxTop: el.scrollHeight - el.clientHeight,
     }));
-    assert.ok(scrollAfterZoom.maxLeft > 0 && scrollAfterZoom.left > 0, 'Zoomed diagrams must scroll horizontally');
-    assert.ok(scrollAfterZoom.maxTop > 0 && scrollAfterZoom.top > 0, 'Zoomed diagrams must scroll vertically');
+    assert.ok(scrollAfterZoom.maxLeft > 0 && scrollAfterZoom.left > 0,
+      'Zoomed diagrams must scroll horizontally: ' + JSON.stringify(scrollAfterZoom));
+    assert.ok(scrollAfterZoom.maxTop > 0 && scrollAfterZoom.top > 0,
+      'Zoomed diagrams must scroll vertically: ' + JSON.stringify(scrollAfterZoom));
 
     await page.locator('#diagram-category').selectOption('screen');
     await page.locator('#diagram-query').fill('AUTH-01');
