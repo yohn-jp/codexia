@@ -98,8 +98,14 @@ export async function consumeOwnerSetupGrant(adapter: DBTransactionAdapter, regi
     ],
     update: { consumedAt: now, ownerId: registration.ownerId },
   });
-  if (updated !== 1 || await adapter.count({ model: "user" }) !== 0 ||
-      await adapter.count({ model: "passkey" }) !== 0 || await adapter.count({ model: "account" }) !== 0) {
+  const claimed = updated === 1 ? await adapter.findOne<{ expiresAt: Date }>({
+    model: MODEL, where: [{ field: "id", value: SETUP_ID }],
+  }) : null;
+  // A predicate evaluated before a concurrent transaction releases the row lock
+  // must not permit a grant that has expired by the time it is claimed.
+  if (!claimed || claimed.expiresAt.getTime() <= Date.now() ||
+      await adapter.count({ model: "user" }) !== 0 || await adapter.count({ model: "passkey" }) !== 0 ||
+      await adapter.count({ model: "account" }) !== 0) {
     throw new Error("Setup was closed, expired, or no longer has an empty identity database");
   }
 }

@@ -293,7 +293,7 @@ function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, o
   return environment;
 }
 
-function runPackageCli(command: "migrate-auth" | "grant-passkey-owner" | "grant-passkey-owner-recovery" | "verify-auth-clients", args: readonly string[], env: NodeJS.ProcessEnv): {
+function runPackageCli(command: "migrate-auth" | "grant-passkey-owner" | "grant-passkey-owner-recovery" | "verify-auth-clients" | "owner-setup-operator", args: readonly string[], env: NodeJS.ProcessEnv): {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
@@ -804,12 +804,13 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
     let app: ReturnType<typeof createOwnerSetupApp> | undefined;
     let authPool: Pool | undefined;
     let browser: Browser | undefined;
-    let normalAuth: ReturnType<typeof createBetterAuthRuntime> | undefined;
+    let active: Awaited<ReturnType<typeof startRuntimeHttpFixture>> | undefined;
     t.after(async () => {
       await browser?.close();
       await app?.close();
       await authPool?.end();
-      await normalAuth?.pool.end();
+      await active?.fixture.close();
+      await active?.runtime.pool.end();
       if (createdRole) {
         await database.query("DROP SCHEMA codexia_auth CASCADE");
         await database.query("DROP ROLE codexia_auth_runtime");
@@ -1034,12 +1035,23 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
     assert.notEqual(rejectedIssuance.status, 0, "a protected first-issue request fails when no grant can be issued");
     assert.equal(rejectedIssuance.stdout, "", "a failed issuance has no handoff document");
     await assert.rejects(installedSetupOwner(authPool, randomUUID()), /single approved owner/u);
-    normalAuth = createBetterAuthRuntime({ ...config, ownerSubject: enrolledId });
     assert.ok((await finish(winningPage, winnerToken, [firstAttempt, secondAttempt][winner]?.response)) >= 400);
-    const browserCookies = await winningPage.context().cookies();
-    const cookie = browserCookies.map(({ name, value }) => name + "=" + value).join("; ");
-    assert.equal(await normalAuth.auth.api.getSession({ headers: new Headers({ cookie }) }), null);
-    await normalAuth.assertRegisteredClients();
-    await normalAuth.verifyIntrospectionCredentials();
+    const credential = await authPool.query<{ credentialID: string }>('SELECT "credentialID" FROM "passkey" WHERE "userId" = $1', [enrolledId]);
+    await app.close();
+    app = undefined;
+    active = await startRuntimeHttpFixture({ ...config, ownerSubject: enrolledId });
+    const sessionHeaders = async () => {
+      const browserCookies = await winningPage.context().cookies();
+      const cookie = browserCookies.map(({ name, value }) => name + "=" + value).join("; ");
+      return new Headers({ cookie, origin: config.publicOrigin });
+    };
+    assert.equal(await active.runtime.auth.api.getSession({ headers: await sessionHeaders() }), null);
+    await active.runtime.assertRegisteredClients();
+    await active.runtime.verifyIntrospectionCredentials();
+    await winningPage.bringToFront();
+    const signedIn = await authenticatePasskey(winningPage, credential.rows[0]!.credentialID);
+    assert.equal(signedIn.verifyStatus, 200, signedIn.verifyCode);
+    assert.equal(signedIn.credentialId, credential.rows[0]?.credentialID);
+    assert.deepEqual(await active.runtime.checkOwnerSession(await sessionHeaders()), { status: 200 });
   },
 );
