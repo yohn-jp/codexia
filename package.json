@@ -32,7 +32,7 @@
     "@types/node": "^24.19.2",
     "parse5": "8.1.1",
     "tsx": "^4.23.15",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@codexia/module-story": "workspace:*",
