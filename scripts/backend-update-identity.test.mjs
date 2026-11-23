@@ -6,8 +6,12 @@ const identity = {format:'codexia-backend-identity/v1', version:'0.1.0', sourceS
   profile:'core', platform:'linux/amd64', migrationFingerprint:'sha256:'+'b'.repeat(64), apiEpoch:1, persistenceFormat:1};
 const observation = {platform:identity.platform, sourceSha:identity.sourceSha,
   migrationFingerprint:identity.migrationFingerprint, api:{name:'codexia', version:'0.1.0', profile:'core', auth:['oauth-owner','oauth-mcp'], apiEpoch:1}};
-test('exact identity and runtime observation pass', () => {
+test('exact identity matches the standalone runtime observation without a Hosted mode declaration', () => {
   assertBackendIdentity(identity, {...identity}, observation);
+  for (const hosted of [false, true]) {
+    const api = { ...observation.api, hosted };
+    assert.throws(() => assertBackendIdentity(identity, identity, { ...observation, api }), /retired Hosted mode/u);
+  }
 });
 test('invalid and unexpected identity fields fail', () => {
   for (const patch of [{version:'latest'},{sourceSha:'main'},{profile:'unknown'},{platform:'linux/arm64'},

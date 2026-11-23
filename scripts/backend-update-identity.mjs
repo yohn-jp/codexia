@@ -37,6 +37,9 @@ export function assertBackendIdentity(identity, expected, observation) {
   for (const key of keys) {
     if (identity[key] !== expected[key]) throw new Error('Backend identity mismatch: ' + key);
   }
+  if (Object.hasOwn(observation.api ?? {}, 'hosted')) {
+    throw new Error('Backend runtime advertises a retired Hosted mode');
+  }
   if (observation.platform !== identity.platform || observation.sourceSha !== identity.sourceSha ||
       observation.migrationFingerprint !== identity.migrationFingerprint ||
       observation.api?.name !== 'codexia' || observation.api?.version !== identity.version ||
