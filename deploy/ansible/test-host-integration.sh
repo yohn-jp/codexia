@@ -176,6 +176,9 @@ printf 'HOST_ANSIBLE_TIMING phase=idempotent duration_ms=%s\n' "$(( $(date +%s%3
 grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
 test "$(id -g "$user")" = "$gid"
+test "$(stat -c %a "$home")" = 700
+test "$(stat -c %u "$home")" = "$uid"
+test "$(stat -c %g "$home")" = "$gid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
 # Check the actual inherited paths; an unset/empty XDG_CONFIG_HOME means
 # the standard HOME/.config default, not a missing configuration.

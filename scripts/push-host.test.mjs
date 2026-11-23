@@ -66,6 +66,28 @@ test('disposable host CI selects pinned Mitogen without changing production SSH'
   assert.match(fixture, /\$proof_mode" == actions-fixture/u);
 });
 
+test('new service account does not copy /etc/skel and gets an owned private empty home', async () => {
+  const host = await readFile(path.join(root, 'deploy/ansible/host.yml'), 'utf8');
+  const createAccount = host.split('    - name: Create explicitly authorized service account when absent')[1]
+    ?.split('    - name: Create an empty private home only for a newly authorized service account')[0];
+  assert.ok(createAccount, 'authorized service account creation task must exist');
+  assert.match(createAccount, /create_home: false/u, 'a new account must not copy the runner skeleton');
+  assert.match(createAccount, /when: host_identity\.results\[0\]\.rc == 2/u);
+  const createHome = host.split('    - name: Create an empty private home only for a newly authorized service account')[1]
+    ?.split('    - name: Verify system-allocated subordinate ID mappings')[0];
+  assert.ok(createHome, 'new private home creation task must exist');
+  for (const expected of [
+    'ansible.builtin.file:', 'path: "{{ codexia_service_home }}"', 'state: directory',
+    'owner: "{{ codexia_service_user }}"', 'group: "{{ codexia_service_group }}"',
+    "mode: '0700'", 'when: host_identity.results[0].rc == 2',
+  ]) assert.ok(createHome.includes(expected), `missing new-home invariant: ${expected}`);
+  const fixture = await readFile(path.join(root, 'deploy/ansible/test-host-integration.sh'), 'utf8');
+  for (const property of ['%a', '%u', '%g']) {
+    assert.ok(fixture.includes(`stat -c ${property} "$home"`),
+      `disposable integration must verify actual home ${property}`);
+  }
+});
+
 test('push-host refuses an unmarked runner before inspecting or changing the host', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-host-gate-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
