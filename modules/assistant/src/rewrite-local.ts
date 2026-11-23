@@ -14,7 +14,7 @@ export interface RewriteLocalSuggestions {
   tellToShow?: RewriteTellToShowSuggestion;
 }
 
-export interface RewriteFallbackCandidate {
+export interface RewriteSuggestion {
   text: string;
   strategy: "concise" | "contextual" | "voice";
   rationale: string;
@@ -60,7 +60,7 @@ function stripTerminalPunctuation(sentence: string): { body: string; punctuation
   return { body: match?.[1]?.trim() ?? sentence.trim(), punctuation: match?.[2] || "。" };
 }
 
-function contextualFallback(sentence: string, intendedTone?: string): string {
+function contextualRewrite(sentence: string, intendedTone?: string): string {
   let candidate = applyReplacements(sentence, PARAPHRASE_REPLACEMENTS);
   const tone = intendedTone?.toLowerCase();
   if (tone && /suspense|緊張|不穏|恐怖/.test(tone)) {
@@ -75,7 +75,7 @@ function contextualFallback(sentence: string, intendedTone?: string): string {
   return candidate;
 }
 
-function voiceFallback(sentence: string, preferredFirstPerson?: string): string {
+function voiceRewrite(sentence: string, preferredFirstPerson?: string): string {
   if (preferredFirstPerson && /私|僕|俺|わたし/.test(sentence) && !sentence.includes(preferredFirstPerson)) {
     return sentence.replace(/私|僕|俺|わたし/, preferredFirstPerson);
   }
@@ -83,26 +83,26 @@ function voiceFallback(sentence: string, preferredFirstPerson?: string): string 
   return /た$/.test(body) ? `${body}のだった${punctuation}` : `${body}のだ${punctuation}`;
 }
 
-/** Pinned source heuristic provider used to fill missing/duplicate LLM candidates. */
-export function buildRewriteFallbackSuggestions(input: {
+/** Deterministic local rewrite suggestions. */
+export function buildRewriteSuggestions(input: {
   sentence: string;
   intendedTone?: string;
   preferredFirstPerson?: string;
-}): RewriteFallbackCandidate[] {
+}): RewriteSuggestion[] {
   const concise = applyReplacements(input.sentence, CONCISE_REPLACEMENTS);
-  const candidates: RewriteFallbackCandidate[] = [
+  const candidates: RewriteSuggestion[] = [
     {
       text: concise === input.sentence ? applyReplacements(input.sentence, PARAPHRASE_REPLACEMENTS) : concise,
       strategy: "concise",
       rationale: "冗長な語句を抑え、意味を保ったまま文を引き締めます。",
     },
     {
-      text: contextualFallback(input.sentence, input.intendedTone),
+      text: contextualRewrite(input.sentence, input.intendedTone),
       strategy: "contextual",
       rationale: input.intendedTone ? `シーンの意図されたトーン「${input.intendedTone}」に寄せた表現です。` : "動作や視線を具体化して、文の焦点を明確にします。",
     },
     {
-      text: voiceFallback(input.sentence, input.preferredFirstPerson),
+      text: voiceRewrite(input.sentence, input.preferredFirstPerson),
       strategy: "voice",
       rationale: input.preferredFirstPerson ? "POV キャラクターの登録済み口調プロファイルを反映します。" : "語尾のリズムを変え、地の文に余韻を加えます。",
     },

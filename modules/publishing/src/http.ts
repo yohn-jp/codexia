@@ -1,6 +1,6 @@
 import type { HttpContribution, ModuleActionContext } from "@codexia/contracts";
-import { grantIsActive, hashShareToken, constantTimeHashMatches, normalizeShareScope, readShareGrants } from "./grants.js";
-import { readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
+import { grantIsActive, hashShareToken, constantTimeHashMatches, readShareGrants } from "./grants.js";
+import { loadPublishingSceneBodies, readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
 
 const NOT_FOUND = { error: "Share link is unavailable" };
 
@@ -56,20 +56,17 @@ function safeTree(project: Awaited<ReturnType<typeof readPublishingProject>>, sc
 }
 
 async function readPublicShare(request: Request, context: ModuleActionContext): Promise<Response> {
-  // The host binds public contributions to a freshly fetched remote snapshot. Never
-  // serve checkpoint-only proposals if a host accidentally supplies one here.
   const parts = routeParts(request);
   if (!parts) return json(NOT_FOUND, 404);
-  const { grants } = await readShareGrants(context.reader);
+  const { grants } = await readShareGrants(context);
   const grant = activeGrant(grants, parts.token);
   if (!grant) return json(NOT_FOUND, 404);
-  const scope = normalizeShareScope(grant.scope);
-  if (!scope) return json(NOT_FOUND, 404);
+  const scope = { kind: grant.scope.kind, id: grant.scope.id };
 
   let project;
   let scopedScenes: PublishingScene[];
   try {
-    project = await readPublishingProject(context.reader);
+    project = await readPublishingProject(context.reader, { includeManuscripts: false });
     scopedScenes = resolveShareScope(project, scope);
   } catch {
     return json(NOT_FOUND, 404);
@@ -78,6 +75,11 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   if (parts.sceneId) {
     const scene = scopedScenes.find((item) => item.id === parts.sceneId);
     if (!scene) return json(NOT_FOUND, 404);
+    try {
+      await loadPublishingSceneBodies(context.reader, [scene]);
+    } catch {
+      return json(NOT_FOUND, 404);
+    }
     return json({
       snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
       id: scene.id,

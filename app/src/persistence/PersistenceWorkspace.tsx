@@ -12,7 +12,7 @@ import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, 
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
-import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
+import type { ChangeSet, Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
 import { api, type EditorSnapshotRead, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
@@ -281,27 +281,25 @@ function persistSelectionSafely(authorScope: string, selection: { projectId: str
   try { writeWorkspaceSelection(window.localStorage, authorScope, selection); } catch { /* Route and journal state do not depend on preferences. */ }
 }
 
-export function PersistenceWorkspace({ mode, authorScope, hosted = false, onSignOut, registerProtection, sessionBlocked = false }: {
+export function PersistenceWorkspace({ mode, authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
   authorScope: string;
-  hosted?: boolean;
   onSignOut: () => void;
   registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
   sessionBlocked?: boolean;
 }) {
-  if (mode === "mobile") return <MobilePersistenceWorkspace hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-  return <PersistenceWorkspaceController mode="desktop" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function MobilePersistenceWorkspace({ hosted, authorScope, onSignOut, registerProtection, sessionBlocked }: { hosted: boolean; authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
+function MobilePersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked }: { authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
   const navigate = useNavigate();
   const navigateUrl = useCallback((url: string, replace: boolean) => { navigate(url, { replace }); }, [navigate]);
-  return <PersistenceWorkspaceController mode="mobile" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
+function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
-  hosted: boolean;
   authorScope: string;
   onSignOut: () => void;
   navigateUrl?: (url: string, replace: boolean) => void;
@@ -344,6 +342,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [projectNextCursor, setProjectNextCursor] = useState<string | null>(null);
   const projectPageSequenceRef = useRef(0);
   const [nativeReviewEpoch, setNativeReviewEpoch] = useState(0);
+  const [nativeOutlineEpoch, setNativeOutlineEpoch] = useState(0);
+  const [nativeReviewRequest, setNativeReviewRequest] = useState<{ projectId: string; changeSetId: string }>();
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
@@ -363,7 +363,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [knowledgeStatusFilter, setKnowledgeStatusFilter] = useState("");
   const [knowledgeNextCursor, setKnowledgeNextCursor] = useState<string | null>(null);
   const [knowledgeComplete, setKnowledgeComplete] = useState(false);
-  const [knowledgeLegacyMode, setKnowledgeLegacyMode] = useState(false);
   const [knowledgePageLoading, setKnowledgePageLoading] = useState(false);
   const knowledgeBrowseSequenceRef = useRef(0);
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch((current) => current + 1), []);
@@ -500,7 +499,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
-    if (!creationIntent || (hosted && creationIntent === "project")) return;
+    if (!creationIntent) return;
     let cancelled = false;
     let attempts = 0;
     const focusCreation = () => {
@@ -520,15 +519,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     };
     window.setTimeout(focusCreation, 0);
     return () => { cancelled = true; };
-  }, [creationIntent, hosted, requestedPanel?.sequence]);
+  }, [creationIntent, requestedPanel?.sequence]);
   const openCreation = useCallback((kind: "project" | "document") => {
-    if (hosted && kind === "project") return;
     setCreationIntent(kind);
     if (mode === "mobile") {
       const sequence = ++panelRequestSequenceRef.current;
       setRequestedPanel({ id: "outline", sequence });
     }
-  }, [hosted, mode]);
+  }, [mode]);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -559,10 +557,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
   const selectedNodeError = knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId
     ? knowledgeSelectionError.message : "";
-  const visibleKnowledgeNodes = knowledgeLegacyMode ? nodes.filter((node) =>
-    node.name.toLocaleLowerCase().includes(knowledgeQuery.trim().toLocaleLowerCase()) &&
-    (!knowledgeTypeFilter || node.type === knowledgeTypeFilter) &&
-    (!knowledgeStatusFilter || node.status === knowledgeStatusFilter)) : nodes;
   const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
   const publishEditor = useCallback((next: ActiveDocument | null) => {
@@ -733,7 +727,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [explicitRouteDocumentId, projectId, publishEditor, resumeEpoch, sessionBlocked]);
+  }, [explicitRouteDocumentId, projectId, publishEditor, resumeEpoch, nativeOutlineEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -752,28 +746,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setKnowledgePageLoading(false);
     setKnowledgeNextCursor(null);
     setKnowledgeComplete(false);
-    setKnowledgeLegacyMode(false);
     setNodes([]);
     const delay = window.setTimeout(() => void api.persistenceKnowledgePage(projectId, {
       q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter,
-    }, controller.signal).then(async (result) => {
+    }, controller.signal).then((result) => {
       if (controller.signal.aborted || sequence !== knowledgeBrowseSequenceRef.current || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setNodes(result.nodes);
-      if ("nextCursor" in result) {
-        setKnowledgeLegacyMode(false);
-        setKnowledgeNextCursor(result.nextCursor);
-        setKnowledgeComplete(result.nextCursor === null);
-      } else {
-        setKnowledgeLegacyMode(true);
-        setKnowledgeNextCursor(null);
-        setKnowledgeComplete(true);
-        // Older API builds ignore the new filter parameters. Recover the
-        // previous bounded inventory (up to 500) so local fallback filtering
-        // retains the old browse reach, while keeping coverage explicitly unknown.
-        const legacy = await api.persistenceNodes(projectId, 500, controller.signal);
-        if (controller.signal.aborted || sequence !== knowledgeBrowseSequenceRef.current || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
-        setNodes(legacy.nodes);
-      }
+      setKnowledgeNextCursor(result.nextCursor);
+      setKnowledgeComplete(result.nextCursor === null);
       setKnowledgeListError("");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === projectId) {
@@ -796,15 +776,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter, cursor,
       });
       if (sequence !== knowledgeBrowseSequenceRef.current || projectIdRef.current !== selectedProjectId || sessionBlockedRef.current) return;
-      if (!("nextCursor" in result)) {
-        const legacy = await api.persistenceNodes(selectedProjectId, 500);
-        if (sequence !== knowledgeBrowseSequenceRef.current || projectIdRef.current !== selectedProjectId || sessionBlockedRef.current) return;
-        setNodes(legacy.nodes);
-        setKnowledgeLegacyMode(true);
-        setKnowledgeNextCursor(null);
-        setKnowledgeComplete(true);
-        return;
-      }
       setNodes(current => [...current, ...result.nodes]);
       setKnowledgeNextCursor(result.nextCursor);
       setKnowledgeComplete(result.nextCursor === null);
@@ -930,10 +901,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }
   }, [publishEditor]);
 
-  const refreshAfterNativeApply = useCallback(() => {
+  const refreshAfterNativeApply = useCallback((changeSet: ChangeSet) => {
     const appliedProjectId = projectId;
     if (projectIdRef.current !== appliedProjectId) return;
     setNativeReviewEpoch(current => current + 1);
+    if (changeSet.operations.some(({ type }) => type === "document.update" || type === "document.create" || type === "document.delete")) {
+      setNativeOutlineEpoch(current => current + 1);
+    }
     refreshKnowledgeBrowse();
     void refreshModules();
     const captured = activeRef.current;
@@ -2339,13 +2313,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     // Snapshot file revisions are content hashes; PostgreSQL headRevisionId is a
     // revision UUID. Never equate them when resolving a module's document link.
     const canonicalPath = /^documents\/([^/]+)\.md$/u.exec(path);
-    let target = canonicalPath ? documents.find((item) => item.id === canonicalPath[1]) : undefined;
-    if (!target) {
-      const resolution = await api.action(projectId, "core.document.resolve", { path }, undefined, moduleSnapshot ?? undefined);
-      if (!resolution.ok) throw new Error(resolution.error.message);
-      const sceneId = (resolution.data as { sceneId?: unknown }).sceneId;
-      target = documents.find((item) => item.id === sceneId);
-    }
+    const findDocument = (id: string | null | undefined) => documents.find((item) => item.projectId === projectId && item.id === id);
+    let target = findDocument(canonicalPath?.[1]);
+    if (!target) target = findDocument(await api.resolveDocumentReference(projectId, path, moduleSnapshot ?? undefined));
+    if (projectIdRef.current !== projectId || sessionBlockedRef.current) return;
     if (!target) throw new Error("この作品の文書が見つかりません。");
     if (!await selectDocument(target.id)) throw new Error("回復JournalまたはIMEを確認できないため、参照先を開けませんでした。");
     // Search and terminology may be shown in another workspace tab. Reveal the
@@ -2421,25 +2392,23 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {projectPageLoading ? "作品一覧を読み込み中" : projectPageReady ? "さらに作品を読み込む" : "作品一覧を読み込む"}
           </button>}
           {projectPageReady && <p>読み込み済みの作品: {projects.length}</p>}
-          {!hosted && <details className="pg-library-create">
+          <details className="pg-library-create">
             <summary>作品を作成</summary>
             <form onSubmit={(event) => void createProject(event)}>
               <label htmlFor="pg-project-title">作品名</label>
               <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
               <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
             </form>
-          </details>}
+          </details>
           <details>
-            <summary>{hosted ? "作品のエクスポート" : "作品のエクスポート・インポート"}</summary>
+            <summary>作品のエクスポート・インポート</summary>
             <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
             {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
               選択中の作品をJSONでエクスポート
             </button>}
-            {!hosted && <>
-              <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
-              <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
-                onChange={(event) => void importPortableWork(event)} />
-            </>}
+            <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
+            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+              onChange={(event) => void importPortableWork(event)} />
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
             {workTransferStatus && <p role="status">{workTransferStatus}</p>}
           </details>
@@ -2562,14 +2531,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty">
-          {hosted ? <>
-            <h2>{loading ? "割り当てられた作品を確認しています" : pageError ? "割当作品を確認できません" : "割り当てられた作品がありません"}</h2>
-            <p>Hosted環境では割り当てられた作品だけを利用できます。</p>
-          </> : <>
-            <h2>最初の作品を作成してください</h2>
-            <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
-            <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
-          </>}
+          <h2>最初の作品を作成してください</h2>
+          <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
+          <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
         </section>}
         {missingExplicitRouteDocument && <section className="pg-empty" role="status"><h2>指定された文書が見つかりません</h2><p>この作品に指定された文書はありません。目次から開く文書を選択してください。</p></section>}
         {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
@@ -2768,8 +2732,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           <p role="status" aria-live="polite">
             {knowledgeListLoading ? "Knowledgeを検索しています。" : knowledgeListError
               ? `${nodes.length}件取得済み。Knowledgeの取得に失敗しました。`
-              : knowledgeLegacyMode
-              ? `旧サーバーから取得した${nodes.length}件の名前・種類・状態だけを表示しています。別名検索と続きの取得は利用できず、全体の網羅状況は不明です。${visibleKnowledgeNodes.length}件が現在の条件に一致。`
               : nodes.length === 0 && knowledgeComplete
               ? "該当するKnowledgeはありません。"
               : knowledgeComplete ? `すべての絞り込み結果を取得済み（${nodes.length}件）。`
@@ -2777,7 +2739,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </p>
           <ul className="pg-knowledge-list">
             {knowledgeListLoading && nodes.length === 0 && <li role="status">Knowledge一覧を読み込んでいます。</li>}
-            {visibleKnowledgeNodes.map((node) => <li key={node.id}>
+            {nodes.map((node) => <li key={node.id}>
               <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => { setNodeId(node.id); setSelectedKnowledgeNode(node); }}>
                 <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
               </button>
@@ -2852,9 +2814,21 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   };
   const modulePanels = availableModulePanels({ items: workspaceContributions(contributions, modules), contributions, modules, projectId, authorScope,
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
+    onNativeChangeSetProposed: (proposedProjectId, changeSetId) => {
+      if (projectIdRef.current === proposedProjectId && !sessionBlockedRef.current) {
+        setNativeReviewRequest({ projectId: proposedProjectId, changeSetId });
+      }
+    },
     navigateDocument: navigateReference,
   });
-  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} showCoreReviews={Boolean(journalError)} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>
+    {moduleError && <p role="alert">{moduleError}</p>}
+    <NativeChangeSetReview key={projectId} projectId={projectId} showCoreReviews={Boolean(journalError)}
+      requestedChangeSetId={nativeReviewRequest?.projectId === projectId ? nativeReviewRequest.changeSetId : undefined}
+      onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />
+    {journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals}
+      onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}
+  </> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
@@ -2867,7 +2841,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </article>,
       document.body,
     )}
-    <Shell mode={mode} hosted={hosted}
+    <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={writingContext}

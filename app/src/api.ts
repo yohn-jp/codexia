@@ -1,7 +1,7 @@
 import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
-import { responseContracts as dto, readApiResponse, decodeResponse, type ResponseGuard } from "./api-response";
+import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
 import type {
   ActionResult,
   Approval,
@@ -193,8 +193,6 @@ export interface PersistenceKnowledgePage {
   projectVersion: number;
 }
 
-export type PersistenceKnowledgeResult = PersistenceKnowledgePage | { nodes: KnowledgeNode[] };
-
 export interface PersistenceAssertionRead {
   assertion: Assertion;
   evidence: AssertionEvidence[];
@@ -235,27 +233,17 @@ export interface EditorSnapshotRead {
   document: { path: string; revision: string } | null;
 }
 
-/** Bulk snapshot response from earlier compatible backends. */
-export interface SnapshotRead {
-  snapshot: SnapshotId;
-  files: FileDocument[];
-}
-
 export interface Session {
   authenticated: true;
   authorScope: string;
-  permissions?: Array<"read" | "write" | "maintain" | "admin">;
 }
 
 export interface RuntimeVersion {
   name: string;
   version: string;
-  hosted: boolean;
   profile: string;
-  browserAuth?: "cloudflare-access";
 }
 
-let hostedMode: boolean | undefined;
 let oauthAccessToken: string | undefined;
 export interface NativeApiSession {
   apiOrigin: string | null;
@@ -264,11 +252,8 @@ export interface NativeApiSession {
 }
 let nativeApiSession: NativeApiSession | undefined;
 const configuredApiOrigin = (import.meta as ImportMeta & { env?: { VITE_CODEXIA_API_ORIGIN?: string } }).env?.VITE_CODEXIA_API_ORIGIN;
-type HostedRefreshResult = { status: number; ok: boolean; error?: string; code?: string };
-let hostedRefresh: Promise<HostedRefreshResult> | undefined;
 let documentDeparting = false;
 let documentLifecycle = 0;
-let reauthRedirectedLifecycle: number | undefined;
 
 function markDocumentDeparting(): void {
   if (documentDeparting) return;
@@ -321,82 +306,11 @@ async function withDocumentDepartureClassification<T>(
   }
 }
 
-function returnOrAbortAfterDeparture(response: Response, lifecycle: number, init: RequestInit): Response {
-  if (!hasLeftDocumentLifecycle(lifecycle)) return response;
-  if (init.keepalive === true) return response;
-  throw new DocumentDepartureError();
-}
-
-function csrfToken(): string | undefined {
-  if (typeof document === "undefined") return undefined;
-  const prefix = "__Host-praetorium_csrf=";
-  const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
-  if (!item) return undefined;
-  try { return decodeURIComponent(item.slice(prefix.length)); }
-  catch { return undefined; }
-}
-
-function refreshHostedGrant(): Promise<HostedRefreshResult> {
-  // The Gateway rotates the refresh secret atomically. Parallel API requests
-  // must share one exchange so a losing refresh cannot trigger reauthentication.
-  hostedRefresh ??= performHostedRefresh().finally(() => { hostedRefresh = undefined; });
-  return hostedRefresh;
-}
-
-async function isHostedGrantRejection(response: Response): Promise<boolean> {
-  if (response.status !== 401) return false;
-  const body: unknown = await response.clone().json().catch(() => null);
-  return body !== null && typeof body === "object" && (body as Record<string, unknown>).code === "UNAUTHORIZED";
-}
-
-async function performHostedRefresh(): Promise<HostedRefreshResult> {
-  assertDocumentCanStartRequest();
-  const headers = new Headers();
-  const csrf = csrfToken();
-  if (csrf) headers.set("X-CSRF-Token", csrf);
-  const response = await fetch("/_platform/refresh", { method: "POST", headers, credentials: "same-origin" });
-  if (response.ok || response.status === 401) return { status: response.status, ok: response.ok };
-  const body: unknown = await response.json().catch(() => null);
-  const details = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  return {
-    status: response.status,
-    ok: false,
-    error: typeof details.error === "string" ? details.error : `Session refresh failed (${response.status})`,
-    code: typeof details.code === "string" ? details.code : "SESSION_REFRESH_FAILED",
-  };
-}
-
-async function refreshHostedGrantForLifecycle(lifecycle: number): Promise<boolean> {
-  let result: HostedRefreshResult;
-  try {
-    result = await refreshHostedGrant();
-  } catch (error) {
-    if (hasLeftDocumentLifecycle(lifecycle)) throw new DocumentDepartureError();
-    throw error;
-  }
-  if (hasLeftDocumentLifecycle(lifecycle)) throw new DocumentDepartureError();
-  if (result.status === 401) {
-    if (reauthRedirectedLifecycle !== lifecycle) {
-      reauthRedirectedLifecycle = lifecycle;
-      window.location.assign("/_platform/reauth");
-    }
-    return false;
-  }
-  if (!result.ok) {
-    throw new ApiError(result.error ?? `Session refresh failed (${result.status})`, result.status,
-      result.code ?? "SESSION_REFRESH_FAILED");
-  }
-  return true;
-}
-
-async function fetchHostedRequest(path: string, init: RequestInit): Promise<Response> {
+async function fetchApiRequest(path: string, init: RequestInit): Promise<Response> {
   assertDocumentCanStartRequest(init);
   const headers = new Headers(init.headers);
   if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const csrf = nativeApiSession ? null : csrfToken();
-  const method = (init.method ?? "GET").toUpperCase();
-  const apiRequest = path.startsWith("/api/");
-  if (apiRequest && nativeApiSession) {
+  if (nativeApiSession) {
     const configuredOrigin = nativeApiSession.apiOrigin;
     if (!configuredOrigin) throw new ApiError("Native API origin is not configured.", 503, "NATIVE_API_ORIGIN_MISSING");
     const originUrl = new URL(configuredOrigin);
@@ -413,7 +327,6 @@ async function fetchHostedRequest(path: string, init: RequestInit): Promise<Resp
       throw new ApiError("Native authentication returned an invalid API token.", 503, "NATIVE_API_TOKEN_INVALID");
     }
     headers.delete("Authorization");
-    headers.delete("X-CSRF-Token");
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     return nativeApiSession.fetchRequest(requestUrl.toString(), {
       ...init,
@@ -421,14 +334,13 @@ async function fetchHostedRequest(path: string, init: RequestInit): Promise<Resp
       credentials: "omit",
     });
   }
-  if (csrf && !oauthAccessToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", csrf);
-  if (apiRequest && oauthAccessToken) headers.set("Authorization", `Bearer ${oauthAccessToken}`);
-  return fetch(apiRequest ? apiRequestUrl(path, configuredApiOrigin) : path, {
+  if (oauthAccessToken) headers.set("Authorization", `Bearer ${oauthAccessToken}`);
+  return fetch(apiRequestUrl(path, configuredApiOrigin), {
     ...init,
     headers,
     // A bearer request never carries ambient cookies, avoiding dual
     // cookie/bearer credentials when the API has moved to its own origin.
-    credentials: apiRequest && oauthAccessToken ? "omit" : "same-origin",
+    credentials: oauthAccessToken ? "omit" : "same-origin",
   });
 }
 
@@ -459,58 +371,14 @@ export function clearNativeApiSession(): void {
   oauthAccessToken = undefined;
 }
 
-async function fetchHostedResponseForLifecycle(path: string, init: RequestInit, lifecycle: number): Promise<Response> {
-  const response = await fetchHostedRequest(path, init);
-  // A response already in flight may settle while this document is leaving.
-  // Do not start a refresh exchange or retry after the departure fence closes.
-  if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(response, lifecycle, init);
-  if (hostedMode !== true || path.startsWith("/_platform/")) return response;
-  const grantRejected = await isHostedGrantRejection(response);
-  if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(response, lifecycle, init);
-  if (!grantRejected) return response;
-
-  // Web Locks serialize refresh-cookie rotation across tabs. Once inside the
-  // lock, retry the rejected request with the current cookies first: another
-  // tab may already have refreshed while this request waited.
-  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
-  if (locks) {
-    return locks.request("scriptorium-hosted-grant-refresh", async () => {
-      if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(response, lifecycle, init);
-      const current = await fetchHostedRequest(path, init);
-      if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(current, lifecycle, init);
-      if (!(await isHostedGrantRejection(current))) return current;
-      if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(current, lifecycle, init);
-      const refreshed = await refreshHostedGrantForLifecycle(lifecycle);
-      if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(current, lifecycle, init);
-      if (refreshed) {
-        const retried = await fetchHostedRequest(path, init);
-        return returnOrAbortAfterDeparture(retried, lifecycle, init);
-      }
-      return current;
-    });
-  }
-
-  // Browsers without Web Locks retain same-tab single-flight refresh.
-  const refreshed = await refreshHostedGrantForLifecycle(lifecycle);
-  if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(response, lifecycle, init);
-  if (refreshed) {
-    const retried = await fetchHostedRequest(path, init);
-    return returnOrAbortAfterDeparture(retried, lifecycle, init);
-  }
-  return response;
-}
-
-async function fetchWithHostedRefresh(path: string, init: RequestInit): Promise<Response> {
-  const lifecycle = documentLifecycle;
-  return withDocumentDepartureClassification(lifecycle, init, () => fetchHostedResponseForLifecycle(path, init, lifecycle));
+function fetchApiResponse(path: string, init: RequestInit, lifecycle: number): Promise<Response> {
+  return withDocumentDepartureClassification(lifecycle, init, () => fetchApiRequest(path, init));
 }
 
 async function request<T>(guard: ResponseGuard<T>, path: string, init: RequestInit = {}): Promise<T> {
   const lifecycle = documentLifecycle;
   return withDocumentDepartureClassification(lifecycle, init, async () => {
-    const headers = new Headers(init.headers);
-    if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    return readApiResponse(await fetchWithHostedRefresh(path, { ...init, headers }), guard);
+    return readApiResponse(await fetchApiResponse(path, init, lifecycle), guard);
   });
 }
 
@@ -521,7 +389,7 @@ async function requestEventStream(path: string, signal: AbortSignal): Promise<Re
   const init = { headers: { Accept: "text/event-stream" }, signal };
   const lifecycle = documentLifecycle;
   return withDocumentDepartureClassification(lifecycle, init, async () => {
-    const response = await fetchWithHostedRefresh(path, init);
+    const response = await fetchApiResponse(path, init, lifecycle);
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => null);
       const details = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -545,47 +413,14 @@ function persistencePath(projectId: string, suffix = ""): string {
   return suffix ? `${root}/${suffix}` : root;
 }
 
-async function requestRuntimeVersion(): Promise<RuntimeVersion> {
-  if (nativeApiSession) return request(dto.version, "/api/version");
-  try {
-    return await request(dto.version, "/api/browser/version");
-  } catch (error) {
-    // Independent deployments may leave the browser ahead of the origin.
-    if (error instanceof ApiError && ((error.status === 404 && error.code === "NOT_FOUND") ||
-        (error.status === 401 && error.code === "UNAUTHORIZED"))) {
-      return request(dto.version, "/api/version");
-    }
-    throw error;
-  }
+function requestRuntimeVersion(): Promise<RuntimeVersion> {
+  return request(dto.version, nativeApiSession ? "/api/version" : "/api/browser/version");
 }
 
 /** The browser talks only to the public HTTP adapter and the shared contracts. */
 export const api = {
-  version: async () => {
-    const version = await requestRuntimeVersion();
-    hostedMode = version.hosted;
-    return version;
-  },
-  login: (token: string) => request(dto.loggedIn, "/api/login", { method: "POST", body: JSON.stringify({ token }) }),
+  version: requestRuntimeVersion,
   session: () => request(dto.session, "/api/session"),
-  logout: async () => {
-    const lifecycle = documentLifecycle;
-    const init = { method: "POST" };
-    return withDocumentDepartureClassification(lifecycle, init, async () => {
-      if (hostedMode === true) {
-        const response = await fetchWithHostedRefresh("/_platform/logout", init);
-        if (response.status === 204) return { authenticated: false as const };
-        const body: unknown = await response.json().catch(() => null);
-        if (!response.ok) {
-          const details = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-          throw new ApiError(typeof details.error === "string" ? details.error : `Logout failed (${response.status})`, response.status,
-            typeof details.code === "string" ? details.code : "LOGOUT_FAILED");
-        }
-        return decodeResponse(body, dto.loggedOut);
-      }
-      return request(dto.loggedOut, "/api/logout", { method: "POST", body: "{}" });
-    });
-  },
   jobs: (signal?: AbortSignal) => request(dto.jobs, "/api/jobs", { ...(signal ? { signal } : {}) }),
   job: (jobId: string, signal?: AbortSignal) =>
     request(dto.job, `/api/jobs/${encodeURIComponent(jobId)}`, { ...(signal ? { signal } : {}) }),
@@ -633,14 +468,10 @@ export const api = {
     if (documentId) query.set("documentId", documentId);
     const result = await request(dto.moduleSnapshot, `${projectPath(projectId, "snapshot")}?${query}`);
     const path = documentId ? `documents/${documentId}.md` : undefined;
-    if ("document" in result) {
-      if (result.document && result.document.path !== path) {
-        throw new ApiError("The server returned a different editor document", 502, "INVALID_RESPONSE");
-      }
-      return result;
+    if (result.document && result.document.path !== path) {
+      throw new ApiError("The server returned a different editor document", 502, "INVALID_RESPONSE");
     }
-    const file = result.files.find((entry) => entry.path === path);
-    return { snapshot: result.snapshot, document: file?.revision ? { path: file.path, revision: file.revision } : null };
+    return result;
   },
   modules: (projectId: string) => request(dto.modules, projectPath(projectId, "modules")),
   contributions: (projectId: string) => request(dto.contributions, projectPath(projectId, "contributions")),
@@ -648,20 +479,27 @@ export const api = {
     projectPath(projectId, `actions/${encodeURIComponent(actionId)}`),
     { method: "POST", body: JSON.stringify({ input, ...(snapshot ? { snapshot } : {}) }), ...(signal ? { signal } : {}) },
   ),
+  resolveDocumentReference: async (projectId: string, path: string, snapshot?: SnapshotId): Promise<string | null> => {
+    const resolution = await api.action(projectId, "core.document.resolve", { path }, undefined, snapshot);
+    if (!resolution.ok) throw new Error(resolution.error.message);
+    const { data } = resolution;
+    if (resolution.snapshot.projectId !== projectId ||
+        (snapshot && resolution.snapshot.projectVersion !== snapshot.projectVersion) ||
+        !data || typeof data !== "object" || !("documentId" in data) ||
+        (data.documentId !== null && (typeof data.documentId !== "string" || !data.documentId.trim()))) {
+      throw new ApiError("The server returned an invalid document reference", 502, "INVALID_RESPONSE");
+    }
+    return data.documentId;
+  },
   persistenceStatus: (signal?: AbortSignal) => request(dto.persistenceStatus, "/api/v1/persistence/status", { ...(signal ? { signal } : {}) }),
   exportWorkArchive: (projectId: string, signal?: AbortSignal) => request(dto.portableWorkArchive,
     persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),
   importWorkArchive: (archive: unknown, signal?: AbortSignal) => request(dto.portableWorkImport,
     "/api/v1/persistence/import", { method: "POST", body: JSON.stringify(archive), ...(signal ? { signal } : {}) }),
-  persistenceProjects: (limit = 100, signal?: AbortSignal) => request(dto.persistenceProjects,
-    `/api/v1/persistence/projects?${new URLSearchParams({ limit: String(limit) })}`, { ...(signal ? { signal } : {}) }),
-  persistenceProjectPage: async (limit = 200, cursor?: string, signal?: AbortSignal): Promise<PersistenceProjectPage> => {
-    const query = new URLSearchParams({ page: "1", limit: String(limit) });
+  persistenceProjectPage: (limit = 200, cursor?: string, signal?: AbortSignal): Promise<PersistenceProjectPage> => {
+    const query = new URLSearchParams({ limit: String(limit) });
     if (cursor !== undefined) query.set("cursor", cursor);
-    const result = await request((value): value is PersistenceProjectPage | PersistenceProject[] =>
-      dto.persistenceProjectPage(value) || dto.persistenceProjects(value),
-    `/api/v1/persistence/projects?${query}`, { ...(signal ? { signal } : {}) });
-    return Array.isArray(result) ? { projects: result, nextCursor: null } : result;
+    return request(dto.persistenceProjectPage, `/api/v1/persistence/projects?${query}`, { ...(signal ? { signal } : {}) });
   },
   createPersistenceProject: (command: CreateProjectCommand, signal?: AbortSignal) => request(dto.persistenceProject, "/api/v1/persistence/projects", {
     method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),
@@ -686,12 +524,10 @@ export const api = {
     if (result.documents.length >= 1000) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
     return result;
   },
-  persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
-    persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
-  persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgeResult> => {
+  persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgePage> => {
     const query = new URLSearchParams({ limit: "50", q: filters.q, type: filters.type, status: filters.status });
     if (filters.cursor) query.set("cursor", filters.cursor);
-    return request(dto.persistenceNodes, persistencePath(projectId, `nodes?${query}`), { ...(signal ? { signal } : {}) });
+    return request(dto.persistenceKnowledgePage, persistencePath(projectId, `nodes?${query}`), { ...(signal ? { signal } : {}) });
   },
   updatePersistenceDocument: (projectId: string, documentId: string, command: { expectedVersion: number; title?: string; parentId?: string | null; orderKey?: string }) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/metadata`), { method: "PATCH", body: JSON.stringify(command) }),
   deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),

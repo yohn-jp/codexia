@@ -5,7 +5,7 @@
       - ansible_facts.user_id == 'codexia'
       - codexia_service_user == 'codexia'
       - codexia_lifecycle_verification_file is string and codexia_lifecycle_verification_file is match('^/[^\r\n]+$')
-      - codexia_lifecycle_candidate_key is string and codexia_lifecycle_candidate_key in ['head', 'compatible', 'failed', 'auth-primary', 'auth-update', 'auth-failed']
+      - codexia_lifecycle_candidate_key is string and codexia_lifecycle_candidate_key in ['head', 'prior', 'failed', 'auth-primary', 'auth-update', 'auth-failed']
       - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$')
       - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
       - not ansible_check_mode
@@ -55,15 +55,6 @@
 - name: Prepare shared push deployment state and helpers
   ansible.builtin.include_tasks: deploy-prepare.yml
 
-- name: Recover interrupted disposable deployment before examining the active API
-  ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
-  environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
-    CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
-  register: codexia_deploy_recovery
-  changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
-
 - name: Verify the isolated SSHFS destination before changing services
   ansible.builtin.command:
     argv: ["{{ home }}/.local/bin/codexia-backup", validate-destination, "{{ codexia_backup_destination }}"]
@@ -90,7 +81,7 @@
 
 - name: Create a stopped metadata container for the actual candidate image
   ansible.builtin.command:
-    argv: [podman, create, --entrypoint, /bin/false, "{{ codexia_image }}"]
+    argv: [podman, create, --image-volume=ignore, --entrypoint, /bin/false, "{{ codexia_image }}"]
   register: codexia_lifecycle_candidate_container
   changed_when: false
 

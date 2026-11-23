@@ -315,11 +315,12 @@ function DocumentBodyReview({ projectId, operation }: { projectId: string; opera
   return null;
 }
 
-export function NativeChangeSetReview({ projectId, canWrite = true, showCoreReviews = false, onApplied, onOpenSource }: {
+export function NativeChangeSetReview({ projectId, canWrite = true, showCoreReviews = false, requestedChangeSetId, onApplied, onOpenSource }: {
   projectId: string;
   canWrite?: boolean;
   showCoreReviews?: boolean;
-  onApplied: () => void;
+  requestedChangeSetId?: string;
+  onApplied: (changeSet: ChangeSet) => void;
   onOpenSource?: (anchor: SaveEvidenceAnchorCommand, quote: string) => Promise<void>;
 }) {
   const [changeSets, setChangeSets] = useState<ChangeSet[]>([]);
@@ -334,6 +335,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const sequence = useRef(0);
   const applyVersions = useRef(new Map<string, number>());
+  const loadedRequest = useRef(requestedChangeSetId);
   const selectedIdRef = useRef(selectedId);
   const projectIdRef = useRef(projectId);
   selectedIdRef.current = selectedId;
@@ -346,26 +348,14 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
     setDetail(null);
     setSourceQuote(null);
     try {
-      let reviewFeed: Awaited<ReturnType<typeof api.authorReviewFeed>> | null = null;
-      let legacyList: Awaited<ReturnType<typeof api.nativeChangeSets>> | null = null;
-      if (canWrite) {
-        try {
-          reviewFeed = await api.authorReviewFeed(projectId, 100, signal);
-        } catch (error) {
-          if (!(error instanceof ApiError) || error.status !== 404) throw error;
-          legacyList = await api.nativeChangeSets(projectId, 100, signal);
-        }
-      } else {
-        legacyList = await api.nativeChangeSets(projectId, 100, signal);
-      }
+      const reviewFeed = canWrite ? await api.authorReviewFeed(projectId, 100, signal) : null;
       const changeSets = reviewFeed
         ? reviewFeed.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "native-change-set" }> => item.kind === "native-change-set").map(item => item.changeSet)
-        : legacyList!.changeSets;
+        : (await api.nativeChangeSets(projectId, 100, signal)).changeSets;
       if (signal?.aborted || sequence.current !== currentSequence) return;
       if (changeSets.some((item) => item.projectId !== projectId) || reviewFeed?.items.some((item) => item.projectId !== projectId)) throw new Error("提案の作品スコープが一致しません。");
       setChangeSets(changeSets);
       setCoreReviews(showCoreReviews ? reviewFeed?.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "core-proposal" }> => item.kind === "core-proposal") ?? [] : []);
-      if (!reviewFeed && canWrite) setMessage("統合レビューfeedは利用できないため、ネイティブChangeSet一覧を既存APIから読み込みました。");
       const nextId = requestedId && changeSets.some((item) => item.id === requestedId)
         ? requestedId
         : changeSets.some((item) => item.id === selectedIdRef.current) ? selectedIdRef.current : changeSets[0]?.id ?? "";
@@ -398,9 +388,17 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
     setCoreReviews([]);
     setSelectedId("");
     setDetail(null);
-    void load(controller.signal);
+    void load(controller.signal, loadedRequest.current);
     return () => { controller.abort(); sequence.current += 1; };
-  }, [load]);
+  }, [load, projectId]);
+
+  useEffect(() => {
+    if (!projectId || busy || !requestedChangeSetId || requestedChangeSetId === loadedRequest.current) return;
+    loadedRequest.current = requestedChangeSetId;
+    const controller = new AbortController();
+    void load(controller.signal, requestedChangeSetId);
+    return () => controller.abort();
+  }, [busy, load, projectId, requestedChangeSetId]);
 
   const inspect = useCallback(async (id: string) => {
     const currentSequence = ++sequence.current;
@@ -430,10 +428,10 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
     if (action === "apply") applyVersions.current.set(id, requestVersion);
     let actionError: unknown;
     let projectionRefreshed = false;
-    const refreshProjection = () => {
+    const refreshProjection = (changeSet: ChangeSet) => {
       if (projectionRefreshed) return;
       projectionRefreshed = true;
-      onApplied();
+      onApplied(changeSet);
     };
     try {
       if (action === "approve") await api.approveNativeChangeSet(projectId, id, requestVersion);
@@ -444,7 +442,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
         if (applied.changeSet.id !== id || applied.changeSet.projectId !== projectId) throw new Error("適用receiptの識別子が一致しません。");
         applyVersions.current.delete(id);
         setDetail({ changeSet: applied.changeSet, receipt: applied });
-        refreshProjection();
+        refreshProjection(applied.changeSet);
       }
     } catch (error) {
       if (!mounted.current || projectIdRef.current !== projectId) return;
@@ -463,7 +461,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
       setDetail(authoritative);
       if (authoritative.receipt || authoritative.changeSet.status === "applied") {
         applyVersions.current.delete(id);
-        refreshProjection();
+        refreshProjection(authoritative.changeSet);
         setMessage(authoritative.receipt ? "適用receiptを確認しました。正本の状態を再読み込みしました。" : "適用済みの状態を確認しました。receiptは再確認してください。");
       } else if (authoritative.changeSet.status === "approved" && action === "apply") {
         applyVersions.current.set(id, requestVersion);

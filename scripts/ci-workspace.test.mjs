@@ -107,7 +107,7 @@ test('root unit preparation builds the API dependency closure before invoking ro
 test('grouped unit preparation builds shared dependencies once and retains root API preparation', async () => {
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
   try {
-    const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,persistence-contracts,persistence-postgres,module-runtime,migration,core,api,root'], fixture.env);
+    const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,persistence-contracts,persistence-postgres,module-runtime,core,api,root'], fixture.env);
     assert.equal(prepared.status, 0, prepared.stderr);
     const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     const packages = commands.flatMap(command => command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : []));
@@ -315,7 +315,7 @@ test('root typecheck shares completed compiler builds and runs distinct checks',
   for (const [workspace, change] of [
     ['packages/contracts', { build: 'tsc -p tsconfig.json', typecheck: 'tsc -p tsconfig.json --noEmit' }],
     ['modules/search', { typecheck: 'tsc -p tsconfig.strict.json --noEmit' }],
-    ['packages/migration', { posttypecheck: 'node check-migrations.mjs' }],
+    ['packages/module-runtime', { posttypecheck: 'node check-runtime.mjs' }],
   ]) {
     const manifestPath = path.join(fixture.projectRoot, workspace, 'package.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -334,7 +334,7 @@ test('root typecheck shares completed compiler builds and runs distinct checks',
     assert.ok(build.has(name) || typecheck.has(name), `Missing production check for ${name}`);
   }
   assert.ok(build.has('@codexia/contracts') && !typecheck.has('@codexia/contracts'));
-  for (const name of ['@codexia/module-search', '@codexia/migration']) {
+  for (const name of ['@codexia/module-search', '@codexia/module-runtime']) {
     assert.ok(typecheck.has(name), `A distinct compiler command or lifecycle hook must run for ${name}`);
   }
   for (const name of ['@codexia/api', '@codexia/app']) assert.ok(!build.has(name) && typecheck.has(name));

@@ -1,9 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { snapshotKey, type BrowserEditorDocument, type BrowserModuleContext, type BrowserModuleDefinition, type ChangeOperation, type ChangeProposal, type ModuleStatus, type SnapshotId, type UiContribution } from "@codexia/contracts";
 import { api } from "../api";
+import { decodeResponse, responseContracts } from "../api-response";
 import { moduleBrowserLoaders } from "../generated/browser-modules";
 import type { BrowserJournal, JournalProposalOwnership } from "../storage/journal";
 import { discoverableContributions, workspaceContributions } from "./catalog";
+
+const NATIVE_REVIEW_REFERENCE_ACTIONS = new Set([
+  "publishing.episodes.propose", "publishing.shares.create", "publishing.shares.revoke", "nlp.updateExternalConsent",
+]);
 
 const SLOT_LABELS = {
   editor: "執筆ツール",
@@ -23,6 +28,7 @@ export function ContributionHost({
   refresh,
   journal,
   onProposalStored,
+  onNativeChangeSetProposed,
   readCurrentEditor,
 }: {
   projectId: string;
@@ -34,6 +40,7 @@ export function ContributionHost({
   refresh: () => Promise<void>;
   journal: BrowserJournal | null;
   onProposalStored: () => void;
+  onNativeChangeSetProposed: (projectId: string, changeSetId: string) => void;
   readCurrentEditor: () => BrowserEditorDocument | null;
 }) {
   const visible = discoverableContributions(contributions, modules, slot);
@@ -68,6 +75,7 @@ export function ContributionHost({
           refresh={refresh}
           journal={journal}
           onProposalStored={onProposalStored}
+          onNativeChangeSetProposed={onNativeChangeSetProposed}
           readCurrentEditor={readCurrentEditor}
         />
       )}
@@ -83,6 +91,7 @@ export function MountedContribution({
   refresh,
   journal,
   onProposalStored,
+  onNativeChangeSetProposed,
   readCurrentEditor,
   navigateDocument,
 }: {
@@ -93,6 +102,7 @@ export function MountedContribution({
   refresh: () => Promise<void>;
   journal: BrowserJournal | null;
   onProposalStored: () => void;
+  onNativeChangeSetProposed: (projectId: string, changeSetId: string) => void;
   readCurrentEditor: () => BrowserEditorDocument | null;
   navigateDocument?: (path: string) => Promise<void>;
 }) {
@@ -101,8 +111,8 @@ export function MountedContribution({
   const snapshotId = snapshotKey(snapshot);
   // Callback identities change with workspace render state. Refresh their values
   // without remounting a live module panel or discarding in-flight search results.
-  const hostCallbacksRef = useRef({ readCurrentEditor, navigateDocument, onProposalStored, refresh });
-  hostCallbacksRef.current = { readCurrentEditor, navigateDocument, onProposalStored, refresh };
+  const hostCallbacksRef = useRef({ readCurrentEditor, navigateDocument, onProposalStored, onNativeChangeSetProposed, refresh });
+  hostCallbacksRef.current = { readCurrentEditor, navigateDocument, onProposalStored, onNativeChangeSetProposed, refresh };
 
   useEffect(() => {
     let cancelled = false;
@@ -135,7 +145,14 @@ export function MountedContribution({
             const result = await api.action(projectId, actionId, input, controller.signal, snapshot);
             if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
             if (snapshotKey(result.snapshot) !== snapshotId) throw new Error("Action result belongs to a different project revision.");
-            if (result.ok && result.proposals?.length) {
+            const nativeReviewReference = NATIVE_REVIEW_REFERENCE_ACTIONS.has(actionId);
+            if (result.ok && (nativeReviewReference || actionId === "core.hierarchy.reorder")) {
+              const { changeSet } = decodeResponse(result.data, nativeReviewReference
+                ? responseContracts.nativeChangeSetReferenceEnvelope
+                : responseContracts.nativeChangeSetEnvelope);
+              if (changeSet.projectId !== projectId) throw new Error("ChangeSet belongs to a different project.");
+              hostCallbacksRef.current.onNativeChangeSetProposed(changeSet.projectId, changeSet.id);
+            } else if (result.ok && result.proposals?.length) {
               if (!journal) throw new Error("Browser recovery storage is unavailable; the module proposal was not delivered to its panel.");
               for (const proposal of result.proposals) await journal.putProposal(snapshot.projectId, authorScope, proposal);
               if (result.proposals.length > 0) hostCallbacksRef.current.onProposalStored();

@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
+import { PUBLISHING_EPISODES_KEY, PUBLISHING_SHARE_GRANTS_KEY } from "@codexia/contracts";
+import type { ActionResult, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
 import { readEpubBibleEntries } from "./bible.js";
-import { buildEpubExport, DEFAULT_EPUB_COVER_PATH, type EpubExportOptions } from "./epub.js";
-import { readEpisodeMap, mergeEpisodeMap, EPISODES_PATH } from "./episodes.js";
+import { buildEpubExport, type EpubExportOptions } from "./epub.js";
+import { readEpisodeMap, mergeEpisodeMap } from "./episodes.js";
 import {
   createShareGrant,
   readShareGrants,
   safeShareGrant,
-  serializeShareGrants,
-  SHARE_GRANTS_PATH,
   type ShareGrant,
 } from "./grants.js";
 import { buildPlaintextExport, type PlaintextOptions } from "./plaintext.js";
@@ -123,46 +122,34 @@ function parseShareRevokeInput(value: unknown): { id: string } {
   return { id };
 }
 
-async function makeMetadataOperation(context: ModuleActionContext, path: string, content: string, message: string): Promise<ChangeOperation> {
-  const current = await context.reader.read(path);
-  const snapshot = context.reader.snapshot;
-  return {
-    id: randomUUID().replaceAll("-", ""),
-    generation: 0,
-    projectId: snapshot.projectId,
-    baseProjectVersion: snapshot.projectVersion,
-    effect: "metadata",
-    reads: [{ path, revision: current?.revision ?? null }],
-    writes: [{ path, revision: current?.revision ?? null, content }],
-    message,
-  };
-}
-
-function sortedGrantContent(grants: ShareGrant[]): string {
-  return serializeShareGrants([...grants].sort((left, right) => left.id.localeCompare(right.id)));
+async function proposeShareGrants(context: ModuleActionContext, grants: ShareGrant[], expectedVersion: number | null) {
+  if (!context.proposeOwnModuleRecord) throw new Error("Publishing share proposals are unavailable");
+  return context.proposeOwnModuleRecord({
+    key: PUBLISHING_SHARE_GRANTS_KEY,
+    value: { version: 1, grants: [...grants].sort((left, right) => left.id.localeCompare(right.id)) },
+    expectedVersion,
+    idempotencyKey: randomUUID(),
+  });
 }
 
 export function createPublishingActions(): ModuleAction[] {
   const actions: ModuleAction[] = [];
 
   actions.push(defineAction(valueSchema(parsePlaintextInput), "publishing.export.plaintext", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, input);
     const exported = buildPlaintextExport(project, input);
     return { filename: exported.filename, mediaType: "text/plain; charset=utf-8", contentBase64: Buffer.from(exported.text, "utf8").toString("base64") };
   }));
 
   actions.push(defineAction(valueSchema(parseEpubInput), "publishing.export.epub", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
-    const options = { ...input, ...(input.coverPath ? {} : {}) };
-    // The legacy import moves .arcadia/cover.jpg to the module-owned path.
-    if (input.coverPath === ".arcadia/cover.jpg") options.coverPath = DEFAULT_EPUB_COVER_PATH;
+    const project = await readPublishingProjectFromCore(context, input);
     const bibleEntries = input.includeBibleAppendix ? await readEpubBibleEntries(context.reader) : [];
-    const exported = await buildEpubExport(project, options, context.reader, bibleEntries);
+    const exported = await buildEpubExport(project, input, context.reader, bibleEntries);
     return { filename: exported.filename, mediaType: "application/epub+zip", contentBase64: exported.buffer.toString("base64") };
   }));
 
   actions.push(defineAction(valueSchema(parseVerticalInput), "publishing.export.vertical-print", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, input);
     const scenes = collectScenesForVerticalPrint(project, input.scope, input.id);
     const text = composeVerticalPrintText(scenes.map((scene) => ({ id: scene.id, title: scene.title, body: scene.body })));
     return { text, sectionCount: scenes.length };
@@ -187,42 +174,43 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.episodes.read", "read", async (_input, context) => {
-    const map = await readEpisodeMap(context.reader);
-    return { episodes: map.episodes };
+    const { document } = await readEpisodeMap(context);
+    return { episodes: document.episodes };
   }));
 
   actions.push(defineAction(valueSchema(parseEpisodeInput), "publishing.episodes.propose", "propose", async (input, context) => {
-    const existing = await readEpisodeMap(context.reader);
-    const merged = mergeEpisodeMap(existing, input.episodes);
-    const operation = await makeMetadataOperation(context, EPISODES_PATH, merged.content, "Update publication episode mapping");
-    const proposal = await context.propose([operation]);
-    return { episodes: merged.episodes, proposalId: proposal.id, activation: "requires author approval and PostgreSQL apply" };
+    if (!context.proposeOwnModuleRecord) throw new Error("Publishing episode proposals are unavailable");
+    const existing = await readEpisodeMap(context);
+    const document = mergeEpisodeMap(existing.document, input.episodes);
+    const changeSet = await context.proposeOwnModuleRecord({
+      key: PUBLISHING_EPISODES_KEY, value: { version: 1, document }, expectedVersion: existing.version, idempotencyKey: randomUUID(),
+    });
+    return { episodes: document.episodes, proposalId: changeSet.id, changeSet, activation: "requires author approval and PostgreSQL apply" };
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.shares.list", "read", async (_input, context) => {
-    const { grants } = await readShareGrants(context.reader);
+    const { grants } = await readShareGrants(context);
     const now = Date.now();
     return { shares: grants.map((grant) => ({ ...safeShareGrant(grant), active: !grant.revokedAt && Date.parse(grant.expiresAt) > now })) };
   }));
 
   actions.push(defineAction(valueSchema(parseShareCreateInput), "publishing.shares.create", "propose", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, { includeManuscripts: false });
     resolveShareScope(project, input.scope);
-    const { grants, content } = await readShareGrants(context.reader);
+    const { grants, version } = await readShareGrants(context);
     const { grant, rawToken } = createShareGrant(input);
-    const next = [...grants, grant];
-    const operation = await makeMetadataOperation(context, SHARE_GRANTS_PATH, sortedGrantContent(next), content ? "Create read-only publication share" : "Create read-only publication share index");
-    const proposal = await context.propose([operation]);
+    const changeSet = await proposeShareGrants(context, [...grants, grant], version);
     return {
       share: safeShareGrant(grant),
       token: rawToken,
-      proposalId: proposal.id,
+      proposalId: changeSet.id,
+      changeSet,
       activation: "This link becomes readable only after author approval and PostgreSQL apply.",
     };
   }));
 
   actions.push(defineAction(valueSchema(parseShareRevokeInput), "publishing.shares.revoke", "propose", async (input, context) => {
-    const existing = await readShareGrants(context.reader);
+    const existing = await readShareGrants(context);
     const index = existing.grants.findIndex((grant) => grant.id === input.id);
     if (index < 0) throw new Error("Share grant not found");
     const prior = existing.grants[index]!;
@@ -234,9 +222,8 @@ export function createPublishingActions(): ModuleAction[] {
         revokedAt: new Date().toISOString(),
       };
     }
-    const operation = await makeMetadataOperation(context, SHARE_GRANTS_PATH, sortedGrantContent(existing.grants), "Revoke read-only publication share");
-    const proposal = await context.propose([operation]);
-    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: proposal.id, activation: "Revocation reaches public readers after the change is approved and applied." };
+    const changeSet = await proposeShareGrants(context, existing.grants, existing.version);
+    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: changeSet.id, changeSet, activation: "Revocation reaches public readers after the change is approved and applied." };
   }));
 
   return actions;

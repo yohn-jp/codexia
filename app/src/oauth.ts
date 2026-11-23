@@ -2,6 +2,8 @@
  * The application owns token lifetime in memory; only the short-lived PKCE
  * transaction needed to survive the provider redirect is kept in tab storage.
  */
+import { parseApplicationLocation } from "./application/navigation";
+
 export interface OAuthWebConfig {
   issuer: string;
   clientId: string;
@@ -39,7 +41,7 @@ export function webOAuthConfig(shell: WebShell): OAuthWebConfig | null {
   };
 }
 
-interface OAuthTransaction { state: string; verifier: string; createdAt: number }
+interface OAuthTransaction { state: string; verifier: string; createdAt: number; returnPath: string | null }
 const TRANSACTION_KEY = "codexia.oauth.pkce.v1";
 const TRANSACTION_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -138,12 +140,30 @@ function oneSearchParam(url: URL, name: string): string | null {
   return values[0] ?? null;
 }
 
+function applicationReturnPath(value: unknown, redirect: URL): string | null {
+  if (typeof value !== "string") return null;
+  const shell = parseApplicationLocation(redirect.pathname)?.mode;
+  if (!shell) return null;
+  try {
+    const url = new URL(value, redirect.origin);
+    if (url.origin !== redirect.origin || url.username || url.password ||
+        (url.pathname !== `/${shell}` && !url.pathname.startsWith(`/${shell}/`))) return null;
+    for (const name of ["code", "state", "iss", "error", "error_description"]) url.searchParams.delete(name);
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function beginOAuthAuthorization(config: OAuthWebConfig, fetcher: typeof fetch = fetch): Promise<void> {
   validateConfig(config);
   const metadata = await discoverAuthorizationServer(config, fetcher);
   const state = randomBase64Url();
   const verifier = randomBase64Url(48);
-  const transaction: OAuthTransaction = { state, verifier, createdAt: Date.now() };
+  const transaction: OAuthTransaction = {
+    state, verifier, createdAt: Date.now(),
+    returnPath: applicationReturnPath(window.location.href, new URL(config.redirectUri)),
+  };
   sessionStorage.setItem(TRANSACTION_KEY, JSON.stringify(transaction));
   const authorizationUrl = trustedHttpsUrl(metadata.authorization_endpoint, "Authorization endpoint");
   authorizationUrl.searchParams.set("response_type", "code");
@@ -161,7 +181,7 @@ export async function completeOAuthAuthorization(
   config: OAuthWebConfig,
   callbackUrl = window.location.href,
   fetcher: typeof fetch = fetch,
-): Promise<string | null> {
+): Promise<{ accessToken: string; returnPath: string } | null> {
   validateConfig(config);
   const callback = new URL(callbackUrl);
   const expected = trustedHttpsUrl(config.redirectUri, "Redirect URI");
@@ -213,7 +233,10 @@ export async function completeOAuthAuthorization(
       typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
     throw new Error("The provider did not return a usable API bearer access token.");
   }
-  return token.access_token;
+  return {
+    accessToken: token.access_token,
+    returnPath: applicationReturnPath(transaction.returnPath, expected) ?? `${callback.pathname}${callback.hash}`,
+  };
 }
 
 /** Resolve only API paths to the configured HTTPS API origin. */

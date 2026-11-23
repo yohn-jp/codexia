@@ -119,8 +119,7 @@ async function hasPasskeyAuthRuntime(): Promise<boolean> {
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
-      // Standalone token-mode and degraded auth runtimes must not leave an
-      // optional capability probe in flight for the lifetime of the workspace.
+      // Limit how long a degraded auth endpoint can delay the optional panel.
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return false;
@@ -133,7 +132,7 @@ async function hasPasskeyAuthRuntime(): Promise<boolean> {
   }
 }
 
-export function IdentityManagementPanel({ placement, hosted }: { placement: "desktop" | "mobile"; hosted?: boolean }) {
+export function IdentityManagementPanel({ placement }: { placement: "desktop" | "mobile" }) {
   const [access, setAccess] = useState<OwnerAccess>({ status: "checking" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -156,13 +155,8 @@ export function IdentityManagementPanel({ placement, hosted }: { placement: "des
 
   useEffect(() => {
     let active = true;
-    if (hosted === true) {
-      setAccess({ status: "hidden" });
-      return () => { active = false; };
-    }
     void (async () => {
-      // This endpoint exists only in the Better Auth runtime. Check it before
-      // the broader API session route so token-mode shells incur no owner lookup.
+      // Check passkey capability before requesting the authenticated owner session.
       if (!await hasPasskeyAuthRuntime()) {
         if (active) setAccess({ status: "hidden" });
         return;
@@ -206,7 +200,7 @@ export function IdentityManagementPanel({ placement, hosted }: { placement: "des
       }
     })();
     return () => { active = false; };
-  }, [hosted]);
+  }, []);
 
   const loadPasskeys = useCallback(async (): Promise<boolean> => {
     setPasskeyLoading(true);

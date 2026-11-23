@@ -56,7 +56,7 @@ for volume in codexia-data codexia-history; do
   test "$rc" = 1
 done
 podman volume exists codexia-postgres
-for secret in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+for secret in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
   podman secret exists "$secret"
 done
 test ! -e /etc/codexia
@@ -121,7 +121,6 @@ cleanup() {
   podman network rm codexia-data codexia >/dev/null 2>&1 || true
   podman volume rm codexia-postgres codexia-data codexia-history >/dev/null 2>&1 || true
   podman secret rm \
-    codexia-auth-token \
     codexia-tunnel-token \
     codexia-tunnel-token-wrong \
     codexia-postgres-admin-password \

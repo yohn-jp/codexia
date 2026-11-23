@@ -34,6 +34,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/profile-package.mjs',
   'scripts/verify-oci.sh',
   'scripts/verify-oci-http.mjs',
+  'scripts/oci-better-auth-fixture.sh',
+  'scripts/push-auth-lifecycle-oidc.mjs',
   'tests/integration/model-oci-lifecycle.acceptance.mjs',
   'tests/integration/model-oci-lifecycle-arguments.mjs',
   'tests/integration/model-oci-lifecycle-arguments.test.mjs',
@@ -148,11 +150,10 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
 
-export function createVerificationPlan({ files, event, sha, base = null, forceFull = false }) {
+export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
-  if (typeof forceFull !== 'boolean') throw new Error('Invalid full verification fallback flag');
   const selected = new Set(['coverage']);
-  let full = forceFull || event !== 'pull_request' || !Array.isArray(files);
+  let full = event !== 'pull_request' || !Array.isArray(files);
   const fullModelOci = event === 'pull_request' && Array.isArray(files) && files.some(matchesFullModelOciPath);
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
@@ -172,7 +173,7 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     if (isNonExecutableDocumentation(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
-    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api'].includes(owner.id)) {
+    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].includes(owner.id)) {
       const spec = BROWSER_SHARDS.find(item => file === `tests/e2e/${item.file}`);
       if (spec) {
         add('test-types-app-e2e');
@@ -202,11 +203,9 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   }
   // A selected browser suite always consumes the same-profile build result.
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
-  if ([...selected].some(task => task.startsWith('hosted-native-'))) add('hosted-native-catalog');
-  if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
-    version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null, forceFull,
+    version: 3, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
     full_model_oci: fullModelOci,
     tasks,
     groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
@@ -216,17 +215,22 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
 
 export function validateVerificationPlan(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Verification plan is invalid');
-  const { taskInputReuse, ...canonical } = plan;
+  const { coverageReuse, ...canonical } = plan;
   if (JSON.stringify(canonical) !== JSON.stringify(createVerificationPlan(canonical))) throw new Error('Verification plan does not match canonical impact rules');
-  if (taskInputReuse !== undefined) assertTaskInputReuse(plan, taskInputReuse);
+  if (coverageReuse !== undefined) assertCoverageReuse(plan, coverageReuse);
   return plan;
 }
 
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
-function assertTaskInputReuse(plan, reuse) {
-  if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
-  if (!['codexia-ci-task-input-reuse/v1', 'codexia-ci-task-input-reuse/v2'].includes(reuse.format)) throw new Error('Unknown task input reuse format');
-  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
+function assertCoverageReuse(plan, receipt) {
+  const fields = ['task', 'sourceSha', 'proofSourceSha', 'planDigest', 'workflowRunId',
+    'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'workflowJob', 'artifactId',
+    'artifactName', 'artifactDigest', 'inputClosure', 'runtime', 'certification'];
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+      JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(fields.sort())) {
+    throw new Error('Invalid coverage reuse receipt schema');
+  }
+  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Coverage proof reuse is only valid for a selected PR coverage task');
   const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
       throw new Error(`Invalid exact-base ${task} proof identity`);
@@ -257,23 +261,25 @@ function assertTaskInputReuse(plan, reuse) {
       if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
     }
   };
-  if (reuse.format === 'codexia-ci-task-input-reuse/v1') {
-    if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
-    assertReceipt(reuse.coverage, 'coverage');
-    return;
+  assertReceipt(receipt, 'coverage');
+}
+
+
+/** Independently bind an affected PR plan to the actual event base and Git diff. */
+export function assertExactPrImpact(plan, expectedBase, changedFiles) {
+  validateVerificationPlan(plan);
+  if (plan.event !== 'pull_request') throw new Error('Exact PR impact verification requires a PR plan');
+  if (!/^[a-f0-9]{40}$/u.test(expectedBase ?? '') || plan.base !== expectedBase) {
+    throw new Error('Impact plan PR base does not match the event');
   }
-  if (Object.keys(reuse).some(key => !['format', 'coverage', 'omitted'].includes(key))) throw new Error('Unsupported task input proof task');
-  if (reuse.coverage !== undefined) assertReceipt(reuse.coverage, 'coverage');
-  const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
-  if (!reuse.omitted || typeof reuse.omitted !== 'object' || Array.isArray(reuse.omitted) ||
-      JSON.stringify(Object.keys(reuse.omitted).sort()) !== JSON.stringify(omitted.sort())) {
-    throw new Error('Task proof inventory does not match omitted validations');
+  if (plan.mode === 'affected' &&
+      (!Array.isArray(changedFiles) || JSON.stringify(plan.files) !== JSON.stringify(changedFiles))) {
+    throw new Error('Impact plan does not match the exact PR diff');
   }
-  for (const task of omitted) assertReceipt(reuse.omitted[task], task, { taskExecution: true });
 }
 
 export function planDigest(plan) {
-  const { taskInputReuse: _taskInputReuse, ...canonical } = validateVerificationPlan(plan);
+  const { coverageReuse: _coverageReuse, ...canonical } = validateVerificationPlan(plan);
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
@@ -287,8 +293,6 @@ export function verificationPlanOutputs(plan) {
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
       .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
-    hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
-    hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
     full_model_oci: String(plan.full_model_oci),
   };
 }

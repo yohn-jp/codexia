@@ -1,5 +1,5 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
-import type { SnapshotReader } from "@codexia/contracts";
+import { SNAPSHOT_READ_MANY_LIMIT, type SnapshotFile, type SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
 export interface CanonicalSnapshotEntity {
@@ -12,7 +12,8 @@ export interface CanonicalSnapshotEntity {
   body?: string;
 }
 
-const ENTITY_PREFIXES = ["bible", "plot", "meta", "manuscript", "documents"] as const;
+const ENTITY_PREFIXES = ["bible", "plot", "meta", "manuscript"] as const;
+const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_ENTITY_FILES = 20_000;
 const FRONT_MATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
@@ -44,71 +45,104 @@ function frontMatter(content: string): { raw: Record<string, unknown>; body: str
   return { raw: parsed as Record<string, unknown>, body: content.slice(match[0].length).trim() };
 }
 
-/**
- * Reconstruct the source Core entity inputs from one immutable snapshot. This
- * mirrors loader.ts without activating the optional Story module, and is shared
- * by NLP candidate discovery and diagnostics scene metadata lookup.
- */
+function nativeSceneBodyPath(path: unknown): string | undefined {
+  return typeof path === "string" && path.startsWith("documents/") && /\.md$/i.test(path) ? path : undefined;
+}
+
+function canonicalEntity(
+  id: string, type: string, filePath: string, raw: Record<string, unknown>, body?: string,
+): CanonicalSnapshotEntity {
+  const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined;
+  return {
+    id,
+    type,
+    filePath,
+    ...(typeof raw.name === "string" ? { name: raw.name } : typeof raw.title === "string" && body !== undefined ? { name: raw.title } : {}),
+    ...(aliases ? { aliases } : {}),
+    raw,
+    ...(body !== undefined ? { body } : {}),
+  };
+}
+
+function parseFileEntity(path: string, file: SnapshotFile, isNativeSceneBody: boolean): CanonicalSnapshotEntity | undefined {
+  if (file.documentKind === "note") return;
+  const isMarkdown = /\.md$/i.test(path);
+  let raw: Record<string, unknown>;
+  let body: string | undefined;
+  if (isMarkdown && (isNativeSceneBody || path.startsWith("manuscript/"))) {
+    const manuscript = splitManuscriptMarkdown(file.content);
+    raw = manuscript.metadata;
+    body = manuscript.body.trim();
+  } else if (isMarkdown) {
+    const parsed = frontMatter(file.content);
+    if (!parsed) return;
+    raw = parsed.raw;
+    body = parsed.body;
+  } else {
+    let parsed: unknown;
+    try { parsed = YAML.parse(file.content); } catch { return; }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    raw = parsed as Record<string, unknown>;
+    if (typeof raw.id !== "string") return;
+  }
+  const id = isNativeSceneBody
+    ? `doc-${path.slice("documents/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
+    : isMarkdown
+      ? `ms-${path.slice("manuscript/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
+      : raw.id as string;
+  return canonicalEntity(id, isNativeSceneBody ? "scene" : inferredType(path, raw), path, raw, body);
+}
+
+/** Read the pinned hierarchy and file-backed entity inputs without activating Story. */
 export async function readCanonicalSnapshotEntities(
   reader: SnapshotReader,
   signal: AbortSignal,
 ): Promise<CanonicalSnapshotEntity[]> {
-  const paths = [...new Set((await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat())]
-    .filter((path) => /\.(?:ya?ml|md)$/i.test(path))
-    .sort();
+  const assertActive = () => {
+    if (signal.aborted) throw Object.assign(new Error("Snapshot entity read was cancelled"), { code: "job_cancelled" });
+  };
+  assertActive();
+  const hierarchy = new Map((reader.nativeStoryDocuments ?? [])
+    .filter((document) => !PRESERVATION_ARCHIVE_PATH.test(document.metadataPath))
+    .map((document) => [document.metadataPath, document]));
+  const nativeSceneBodyPaths = new Set<string>();
+  for (const document of hierarchy.values()) {
+    if (document.kind !== "scene") continue;
+    const path = nativeSceneBodyPath(document.metadata.manuscript);
+    if (path) nativeSceneBodyPaths.add(path);
+  }
+  // Native document bodies are selected by the pinned scene links, not a path inventory.
+  const listedPaths = (await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat();
+  assertActive();
+  const listedEntities = listedPaths.filter((path) => !PRESERVATION_ARCHIVE_PATH.test(path) && /\.(?:ya?ml|md)$/i.test(path));
+  const paths = [...new Set([...listedEntities, ...hierarchy.keys(), ...nativeSceneBodyPaths])].sort();
   if (paths.length > MAX_ENTITY_FILES) throw new TypeError(`Project analysis exceeds ${MAX_ENTITY_FILES} canonical entity files`);
 
-  const nativeSceneBodyPaths = new Set<string>();
-  const orderedPaths = [
-    ...paths.filter((path) => !path.startsWith("documents/")),
-    ...paths.filter((path) => path.startsWith("documents/")),
-  ];
   const entities: CanonicalSnapshotEntity[] = [];
-  for (const path of orderedPaths) {
-    if (signal.aborted) throw Object.assign(new Error("Snapshot entity read was cancelled"), { code: "job_cancelled" });
-    const file = await reader.read(path);
-    if (!file) continue;
-    if (file.documentKind === "note") continue;
-    const isMarkdown = /\.md$/i.test(path);
-    const isNativeSceneBody = nativeSceneBodyPaths.has(path);
-    if (path.startsWith("documents/") && !isNativeSceneBody) continue;
-    let raw: Record<string, unknown>;
-    let body: string | undefined;
-    if (isMarkdown && (isNativeSceneBody || path.startsWith("manuscript/"))) {
-      const manuscript = splitManuscriptMarkdown(file.content);
-      raw = manuscript.metadata;
-      body = manuscript.body.trim();
-    } else if (isMarkdown) {
-      const parsed = frontMatter(file.content);
-      if (!parsed) continue;
-      raw = parsed.raw;
-      body = parsed.body;
-    } else {
-      let parsed: unknown;
-      try { parsed = YAML.parse(file.content); } catch { continue; }
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-      raw = parsed as Record<string, unknown>;
-      if (typeof raw.id !== "string") continue;
-      if (file.documentKind === "scene" && typeof raw.manuscript === "string" &&
-          raw.manuscript.startsWith("documents/") && /\.md$/i.test(raw.manuscript)) {
-        nativeSceneBodyPaths.add(raw.manuscript);
+  const batchSize = reader.readMany ? SNAPSHOT_READ_MANY_LIMIT : 1;
+  for (let offset = 0; offset < paths.length; offset += batchSize) {
+    assertActive();
+    const batch = paths.slice(offset, offset + batchSize).filter((path) =>
+      hierarchy.has(path) || !path.startsWith("documents/") || nativeSceneBodyPaths.has(path));
+    const filePaths = batch.filter((path) => !hierarchy.has(path));
+    const files = filePaths.length === 0 ? [] : reader.readMany
+      ? await reader.readMany(filePaths)
+      : await Promise.all(filePaths.map((path) => reader.read(path)));
+    assertActive();
+    if (files.length !== filePaths.length) throw new TypeError("Snapshot file batch has the wrong length");
+    let fileIndex = 0;
+    for (const path of batch) {
+      const document = hierarchy.get(path);
+      if (document) {
+        const raw = document.metadata;
+        const type = typeof raw.type === "string" ? raw.type : document.kind;
+        entities.push(canonicalEntity(document.id, type, path, raw));
+        continue;
       }
+      const file = files[fileIndex++];
+      const entity = file && parseFileEntity(path, file, nativeSceneBodyPaths.has(path));
+      if (entity) entities.push(entity);
     }
-    const id = isNativeSceneBody
-      ? `doc-${path.slice("documents/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
-      : isMarkdown
-        ? `ms-${path.slice("manuscript/".length).replaceAll("/", "-").replace(/\.md$/i, "")}`
-        : raw.id as string;
-    const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((alias): alias is string => typeof alias === "string") : undefined;
-    entities.push({
-      id,
-      type: isNativeSceneBody ? "scene" : inferredType(path, raw),
-      filePath: path,
-      ...(typeof raw.name === "string" ? { name: raw.name } : typeof raw.title === "string" && isMarkdown ? { name: raw.title } : {}),
-      ...(aliases ? { aliases } : {}),
-      raw,
-      ...(body !== undefined ? { body } : {}),
-    });
   }
-  return entities.sort((left, right) => left.filePath < right.filePath ? -1 : left.filePath > right.filePath ? 1 : 0);
+  return entities;
 }

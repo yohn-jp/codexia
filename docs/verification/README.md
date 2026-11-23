@@ -1,5 +1,13 @@
 # Verification
 
+[Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は単一の公開ワークフローと各画面のデータ出典、観測の限界をまとめる。
+[Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は画面の設計正本を定義する。
+統合ポータルの受入証拠は、対象SHAのRepository Audit Pagesの結果と生成物を参照する。
+
+[Architecture Atlas](ARCHITECTURE-ATLAS.md) specifies static SVG generation and actual browser acceptance for the canonical architecture and UI/deployment transitions.
+
+Verification demonstrates conformance to the [canonical design](../architecture/SYSTEM-DESIGN.md), [user/owner navigation](../design/USER-SCREEN-FLOW.md), [owner security](../design/ADMIN-SCREEN-FLOW.md), [initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md), and [updates](../deployment/UPDATE-FLOW.md); a passing unit or browser suite does not establish live-VM or independent recovery acceptance.
+
 Run from the repository root with Node.js and pnpm versions satisfying `package.json`.
 
 ```sh
@@ -62,15 +70,9 @@ This opt-in source-build acceptance is not a replay of the byte-identical deploy
 
 ## OCI and integration checks
 
-[OCI verification](OCI.md) checks packaging and startup. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and PostgreSQL restore/container replacement. Hosted producer checks run with:
+[OCI verification](OCI.md) checks packaging and startup for the Core and Full profiles. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and PostgreSQL restore/container replacement.
 
-```sh
-pnpm verify:hosted
-```
-
-That command verifies local producer/catalog/build composition contracts; it does not certify a deployed Hosted instance or publish a release. It requires a usable OCI engine and capacity for disposable local builds.
-
-`pnpm verify` runs frozen installation, production/test-source/safety type checks, tests, Core and Full builds, Core auditing, browser and OCI checks, MCP, Diagnostics persistence and legacy import acceptance. It requires the configured browsers, OCI engine and tokenizer artifacts. Separate CPU model lifecycle and PostgreSQL restore/container recovery checks require their own inputs and commands. Legacy Git publish and real-provider streaming acceptance is retired; it is not current verification evidence.
+`pnpm verify` runs frozen installation, production/test-source/safety type checks, tests, Core and Full builds, Core auditing, browser and OCI checks, MCP and Diagnostics persistence acceptance. It requires the configured browsers, OCI engine and tokenizer artifacts. Separate CPU model lifecycle and PostgreSQL restore/container recovery checks require their own inputs and commands. Historical Git publish and real-provider streaming tests remain in repository history.
 
 ## Repository CI and release
 

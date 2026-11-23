@@ -8,13 +8,13 @@ const WORKFLOW_SOURCE = './verify.yml';
 
 const el = id => document.getElementById(id);
 const date = input => { const d = Date.parse(input ?? ''); return Number.isFinite(d) ? d : null; };
-const duration = sec => sec == null || !Number.isFinite(sec) ? '—'
+const duration = sec => sec == null || !Number.isFinite(sec) ? '未計測'
   : sec >= 3600 ? (sec / 3600).toFixed(1) + 'h'
     : sec >= 60 ? (sec / 60).toFixed(1) + 'm' : sec.toFixed(0) + 's';
 const formatTime = input => input ? new Intl.DateTimeFormat('ja-JP', {
   timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit',
-}).format(new Date(input)) + ' JST' : '—';
+}).format(new Date(input)) + ' JST' : '未計測';
 const node = (type, cls, text) => {
   const n = document.createElement(type);
   if (cls) n.className = cls;
@@ -22,6 +22,28 @@ const node = (type, cls, text) => {
   return n;
 };
 const clear = target => target.replaceChildren();
+function setStatus(message, state = 'info') {
+  document.querySelector('.status').dataset.state = state;
+  el('status').textContent = message;
+}
+function setMetric(id, value) {
+  const target = el(id);
+  const measured = value != null && value !== '' && value !== '未計測';
+  target.textContent = measured ? value : '未計測';
+  target.dataset.measure = measured ? 'measured' : 'unmeasured';
+}
+function resetPanels(message = 'この観測範囲にデータがありません。') {
+  for (const id of ['timeline', 'history', 'steps']) {
+    el(id).replaceChildren(node('p', 'empty', message));
+  }
+  el('timeline-foot').textContent = '未計測';
+  el('history-stat').textContent = '比較可能な観測がありません。';
+  el('chain').replaceChildren(node('li', '', '依存チェーン未計測'));
+  el('chain-note').textContent = message;
+  clear(el('context'));
+  for (const id of ['wall', 'gate', 'runner', 'queue']) setMetric(id, null);
+  resetSelectionSummary();
+}
 const validLink = url => typeof url === 'string' &&
   /^https:\/\/github\.com\/yohn-jp\/codexia\/actions\/runs\/\d+(?:\/job\/\d+)?(?:\/attempts\/\d+)?$/u.test(url);
 function link(text, url) {
@@ -51,11 +73,51 @@ function contextRow(label, value) {
   row.append(node('span', '', label), node('strong', '', value));
   return row;
 }
+function jobState(job) {
+  if (job.conclusion === 'success') return { label: 'success', className: 'success' };
+  if (job.conclusion === 'skipped') return { label: 'skipped', className: 'skipped' };
+  if (job.conclusion === 'failure' || job.conclusion === 'timed_out') return { label: 'failed', className: 'failed' };
+  if (job.conclusion === 'action_required') return { label: 'blocked · action required', className: 'blocked' };
+  if (job.conclusion === 'cancelled') return { label: 'cancelled', className: 'cancelled' };
+  if (job.conclusion === 'neutral') return { label: 'neutral', className: 'unknown' };
+  if (job.conclusion === 'stale') return { label: 'unknown · stale', className: 'unknown' };
+  if (job.status === 'in_progress') return { label: 'running', className: 'running' };
+  if (job.status === 'queued') return { label: 'queued · cause unknown', className: 'unknown' };
+  return { label: job.conclusion ? 'unknown · ' + job.conclusion : 'unknown', className: 'unknown' };
+}
+function resetSelectionSummary() {
+  const result = el('selection-result');
+  result.textContent = '未計測';
+  result.className = 'summary-state';
+  el('selection-bottleneck').textContent = '未計測';
+  const href = el('verify-link');
+  href.hidden = true;
+  href.removeAttribute('href');
+}
+function renderSelectionSummary(pr) {
+  const verify = pr.runs.find(run => run.id === pr.verifyId);
+  const result = el('selection-result');
+  const state = verify ? jobState(verify) : { label: 'unknown', className: 'unknown' };
+  result.textContent = verify?.conclusion ?? verify?.status ?? 'Verify未計測';
+  result.className = 'summary-state ' + state.className;
+  const bottleneck = verify?.bottleneck;
+  el('selection-bottleneck').textContent = bottleneck?.available
+    ? bottleneck.leafName + ' · ' + duration(bottleneck.leafSeconds)
+    : '未計測 · ' + (bottleneck?.reason ?? verify?.chain?.reason ?? 'Verifyデータがありません');
+  const href = el('verify-link');
+  if (verify?.url && validLink(verify.url)) {
+    href.href = verify.url;
+    href.hidden = false;
+  } else {
+    href.hidden = true;
+    href.removeAttribute('href');
+  }
+}
 function renderContext(pr) {
   const out = el('context'); clear(out);
   const verify = pr.runs.find(run => run.id === pr.verifyId);
   out.append(
-    contextRow('PR HEAD', pr.sha.slice(0, 12)),
+    contextRow('Executed source SHA', pr.sha),
     contextRow('Workflow数', String(pr.runs.length)),
     contextRow('Verify attempt', verify ? '#' + verify.attempt : '—'),
     contextRow('Verify result', verify?.conclusion ?? '—'),
@@ -83,6 +145,16 @@ function renderContext(pr) {
     a.className = 'context-row';
     out.append(a);
   }
+  const workflows = node('div', 'workflow-runs');
+  workflows.append(node('strong', '', 'Observed workflow runs'));
+  for (const run of pr.runs) {
+    const state = jobState({ status: run.status, conclusion: run.conclusion });
+    const item = node('div', 'workflow-run');
+    item.append(link(run.name + ' · attempt #' + run.attempt, run.url),
+      node('span', 'state ' + state.className, state.label));
+    workflows.append(item);
+  }
+  out.append(workflows);
 }
 function renderChain(pr) {
   const list = el('chain'); clear(list);
@@ -131,8 +203,8 @@ function renderTimeline(pr) {
   const pos = time => Math.min(100, Math.max(0, ((time - first) / span) * 100));
   const slot = (left, right, cls, title) => {
     const bar = node('div', 'bar ' + cls);
-    bar.style.left = pos(left) + '%';
-    bar.style.width = Math.max(0.15, pos(right) - pos(left)) + '%';
+    bar.style.insetInlineStart = pos(left) + '%';
+    bar.style.inlineSize = Math.max(0.15, pos(right) - pos(left)) + '%';
     bar.title = title;
     return bar;
   };
@@ -142,26 +214,61 @@ function renderTimeline(pr) {
     for (const job of rows) {
       const row = node('div', 'timeline-row');
       const left = node('div', 'timeline-label');
-      if (job.critical) left.append(node('span', 'flag', '◆ '));
-      left.append(link(job.name, job.url));
+      if (job.critical) left.append(node('span', 'flag', 'CHAIN'));
+      const state = jobState(job);
+      const jobLink = link(job.name, job.url);
+      if (job.name.length > 18) jobLink.className = 'timeline-name-long';
+      left.append(jobLink, node('span', 'state ' + state.className, state.label));
       left.title = job.name + ' · ' + job.runner;
       const track = node('div', 'timeline-track');
+      track.setAttribute('aria-hidden', 'true');
       const created = date(job.createdAt), started = date(job.startedAt), finished = date(job.completedAt);
       if (created !== null && started !== null && started >= created) {
         track.append(slot(created, started, 'wait', 'Queue: ' + duration(job.queueSeconds)));
       }
       if (started !== null && finished !== null && finished >= started) {
         track.append(slot(started, finished, job.conclusion === 'success'
-          ? job.critical ? 'critical' : 'exec' : 'failed',
+          ? job.critical ? 'critical' : 'exec' : state.className,
         'Execution: ' + duration(job.durationSeconds)));
       }
-      row.append(left, track, node('div', 'timeline-time', duration(job.durationSeconds)));
-      out.append(row);
+      row.setAttribute('role', 'group');
+      const elapsed = job.conclusion === 'skipped' ? null : job.durationSeconds;
+      row.setAttribute('aria-label', job.name + ': ' + state.label + ', ' + duration(elapsed) +
+        (job.critical ? ', 推定依存チェーン' : ''));
+      row.append(left, track, node('div', 'timeline-time', duration(elapsed)));
+      const detailRow = node('details', 'job-steps');
+      const summary = node('summary', '', 'Steps (' + job.steps.length + ') · ' + state.label);
+      detailRow.append(summary);
+      if (job.steps.length) {
+        const list = node('ul', 'job-step-list');
+        for (const step of job.steps) {
+          const stepState = step.conclusion ?? (job.status === 'in_progress' ? 'running' : 'unknown');
+          const item = node('li', 'job-step');
+          const elapsed = step.conclusion === 'skipped' ? null : step.durationSeconds;
+          item.append(node('span', '', step.name), node('span', 'step-meta', stepState + ' · ' + duration(elapsed)));
+          list.append(item);
+        }
+        detailRow.append(list);
+      } else detailRow.append(node('p', 'empty', 'Step inventory unavailable.'));
+      out.append(row, detailRow);
     }
   }
   el('timeline-foot').textContent = 'Range: ' + formatTime(new Date(first).toISOString()) +
     ' — ' + formatTime(new Date(last).toISOString()) + ' · ' + jobs.length +
-    ' observed jobs · Skipped / carried jobs are not represented as executed work.';
+    ' observed jobs. Job state labels use the Actions API conclusion; queued cause remains unknown.';
+}
+function updateSelectionUrl(pr) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('pr', String(pr.number));
+  url.searchParams.set('sha', pr.sha);
+  window.history.replaceState(null, '', url);
+}
+function requestedSelection(items) {
+  const url = new URL(window.location.href);
+  const pr = Number(url.searchParams.get('pr'));
+  const sha = url.searchParams.get('sha');
+  const index = items.findIndex(item => item.number === pr && item.sha === sha);
+  return index >= 0 ? index : 0;
 }
 function renderHistory(pr) {
   const target = el('history'); clear(target);
@@ -195,6 +302,7 @@ function renderHistory(pr) {
       selected = item;
       el('pr').value = String(all.indexOf(item));
       el('copy-status').textContent = '';
+      updateSelectionUrl(item);
       render();
     });
     target.append(button);
@@ -204,12 +312,13 @@ function render() {
   const pr = selected;
   if (!pr) return;
   const verify = pr.runs.find(run => run.id === pr.verifyId);
-  el('wall').textContent = duration(pr.elapsedSeconds);
-  el('gate').textContent = duration(verify?.timing.certificationSeconds);
-  el('runner').textContent = duration(pr.runnerSeconds);
+  renderSelectionSummary(pr);
+  setMetric('wall', duration(pr.elapsedSeconds));
+  setMetric('gate', duration(verify?.timing.certificationSeconds));
+  setMetric('runner', duration(pr.runnerSeconds));
   const queueValues = pr.runs.map(run => run.timing.queueSeconds);
-  el('queue').textContent = queueValues.every(v => v !== null)
-    ? duration(queueValues.reduce((a,b) => a+b, 0)) : '—';
+  setMetric('queue', queueValues.length > 0 && queueValues.every(v => v !== null)
+    ? duration(queueValues.reduce((a,b) => a+b, 0)) : null);
   renderTimeline(pr);
   renderChain(pr);
   renderSteps(pr);
@@ -237,8 +346,17 @@ async function copyDiagnostics() {
   }
 }
 
-async function main() {
-  el('copy-diagnostics').addEventListener('click', copyDiagnostics);
+async function loadDashboard() {
+  const retry = el('retry');
+  const select = el('pr');
+  const copyButton = el('copy-diagnostics');
+  retry.disabled = true;
+  retry.hidden = true;
+  copyButton.disabled = true;
+  select.disabled = true;
+  setStatus('実測データを読み込んでいます。', 'loading');
+  all = []; selected = null;
+  resetPanels('データを読み込んでいます。');
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
       signal: AbortSignal.timeout(20_000),
@@ -250,31 +368,51 @@ async function main() {
     if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
     all = result.prs;
     coverage = { ...result.coverage, observedAt: result.observedAt };
-    const select = el('pr'); clear(select);
+    clear(select);
     for (const [index, pr] of all.entries()) {
       const option = node('option', '', '#' + pr.number + ' / ' + pr.sha.slice(0, 9));
       option.value = String(index); select.append(option);
     }
     select.disabled = !all.length;
     if (!all.length) {
-      el('status').textContent = (coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
-        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.';
-      for (const id of ['timeline','history','steps']) el(id).replaceChildren(node('p','empty','データなし'));
+      resetPanels('この観測範囲にPRデータがありません。');
+      setStatus((coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
+        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.', 'empty');
       return;
     }
-    selected = all[0];
-    el('copy-diagnostics').disabled = false;
-    select.value = '0';
-    select.addEventListener('change', () => { selected = all[Number(select.value)]; el('copy-status').textContent = ''; render(); });
-    el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
+    const index = requestedSelection(all);
+    selected = all[index];
+    copyButton.disabled = false;
+    select.disabled = false;
+    select.value = String(index);
+    updateSelectionUrl(selected);
+    setStatus('Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
       ((coverage.unresolvedRunCount ?? 0) > 0
         ? ' · ' + coverage.unresolvedRunCount + ' runs excluded: PR/source mapping unresolved' : '') +
-      ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。';
+      ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。', 'success');
     render();
   } catch (error) {
-    el('status').textContent = 'CIデータを読み込めませんでした: ' + (error instanceof Error ? error.message : error);
+    const detail = error instanceof Error ? error.message : String(error);
+    const guidance = /HTTP 429/u.test(detail)
+      ? 'GitHub APIのレート制限に達しました。時間をおいて再試行してください。'
+      : /HTTP 403/u.test(detail)
+        ? 'GitHub APIへのアクセスが拒否されました。公開リポジトリの状態を確認して再試行してください。'
+        : 'データを取得できませんでした。接続状態を確認して再試行してください。';
+    resetPanels(guidance);
+    setStatus('CIデータを読み込めませんでした。' + guidance + ' (' + detail + ')', 'error');
+    retry.hidden = false;
+  } finally {
+    retry.disabled = false;
   }
 }
-main();
+el('copy-diagnostics').addEventListener('click', copyDiagnostics);
+el('retry').addEventListener('click', loadDashboard);
+el('pr').addEventListener('change', () => {
+  selected = all[Number(el('pr').value)];
+  el('copy-status').textContent = '';
+  updateSelectionUrl(selected);
+  render();
+});
+loadDashboard();

@@ -1,5 +1,7 @@
 # Codexia — 操作・状態・復旧の詳細設計
 
+保存・競合・作者切替の遷移規約は [利用画面遷移](USER-SCREEN-FLOW.md) と本書が共同で所有する。原稿の保存成功は DB receipt と対応する local journal の確定でのみ表示する。
+
 ## 位置付け
 
 [UX contract](UX-CONTRACT.md) の状態・遷移を具体化する設計提案。画面上の言葉や状態表示を整理するが、保存、認可、提案、正本を決める既存のCore／API／journalの契約が優先される。新たな保存プロトコルやデータ正本を導入しない。
@@ -38,7 +40,7 @@
 
 | 操作 | 許可と開始 | 待機・完了 | 失敗・戻り先 |
 | --- | --- | --- | --- |
-| 起動・直接リンク | version、session、persistence、対象取得と回復照合 | 表示可能な情報を先に出す。照合後に編集可 | SSO時に独自トークンフォームを出さない。API不明、権限、DB不良を区別 |
+| 起動・直接リンク | version、session、persistence、対象取得と回復照合 | 表示可能な情報を先に出す。照合後に編集可 | サインインが必要ならOAuthへ案内する。API不明、権限、DB不良を区別 |
 | 同一原稿の一時参照 | 既存guardで必要なjournal保護 | sheet/panel表示、editor状態を保持 | guard拒否ならその場に理由、元の入力とfocus |
 | 別文書・別作品 | author/project/document、navigation generation、guard | 正規ルートの対象が確定したら遷移 | 遅延・古い応答を破棄、入力を保持 |
 | 構成変更 | stable ID、expectedVersion、必要な確認、guard | APIの結果から構成を更新 | 競合時は最新状態、対象行とフォーム保持 |
@@ -51,23 +53,24 @@
 | 提案承認・却下 | proposal authority、ID、version、権限 | 正規の状態再取得 | 不明時に同じ提案の照合、正本未適用 |
 | 提案適用 | 承認済み、適用対象・version、既存guard | receiptと正本更新、保護中本文を維持 | stale/replay/unknownの既存処理。自動承認・新規適用なし |
 | 配置変更／保存 | Workspace guardとcatalog | 現配置の変化／明示的なlayout保存 | 元layout保持、原稿保存成功と表示しない |
-| サインアウト・shell変更 | protectTransitionと現在scope | Access logout／既存token logout／Hosted logoutまたは既存shell切替 | 保護できない時は遷移拒否。復帰時は同一authorで照合 |
+| サインアウト・shell変更 | `protectTransition`で現在の作者の下書きを保護 | OAuthサインアウトまたはshell切替 | 保護できない時は遷移拒否。復帰時は同じ作者で照合 |
 
-認証モードは `api.version` が示す既存情報を利用する。AccessのSSOモード、ローカルのトークンモード、Hosted grantを別々に扱う。Accessログアウトは他のAccessアプリのセッションにも影響するため、明示操作として説明できる導線を設ける。再認証のためのトップレベル遷移は入力を失わない既存の回復契約を優先する。Bearerをブラウザ作者権限として利用しない。UI改善のため認証エンドポイントを追加・緩和しない。
+Desktop WebとiOS Nativeは別public OAuth clientで同じBetter Auth/API認可を利用する。Webでは`protectTransition`でIndexedDB draftを保護し、iOSではSwift coordinatorで保護されたdraft journalを確定してから破壊的遷移する。Webのサインアウトはメモリ内のAPIアクセス・トークンを破棄し、Better Authにブラウザーセッションの終了を要求する。終了を確認できなければ画面に伝える。Cloudflare Accessは静的UIの入口を制御する。APIは作者用クライアント、本人、対象作品への権限を検証する。
 
 ## 実装境界
 
 | 所有者 | 変えてよいpresentation | 保持すべき契約 |
 | --- | --- | --- |
-| launcher / PersistenceEntry | 入り口、状態表示 | 既存shell選択、auth mode、scope |
+| Web launcher / PersistenceEntry | Desktop Web入口と状態表示 | Web auth mode、scope。旧Mobile選択は撤去対象 |
 | PersistenceWorkspace controller | 表示用projection、画面構成 | canonical input、journal、guard、save/recovery、API |
-| DesktopShell / MobileShell | 各プラットフォームの操作面 | shell identity、Mobile route/history、IMEとfocus |
+| DesktopShell (Web) | Desktop React操作面 | Web route/history、CodeMirror IMEとfocus |
 | Workspace | 初期preset、chrome、操作配置 | schema、catalog、layout persistence、lifetime |
-| ManuscriptInput / MobileReadingPager | chromeと既存組版の見せ方 | CodeMirror state、ルビ、読み方向、位置 |
+| ManuscriptInput (Web) | Desktop編集・表示 | CodeMirror state、ルビ、読み方向、位置 |
+| SwiftUI app + UIKit TextKit editor (iOS target) | ネイティブ画面と本文編集 | Native IME/undo/selection、draft journal、API receipt、scope |
 | KnowledgeContextInspector / NativeChangeSetReview | 一覧・詳細・人が読める差分 | native ID、scope、version、preview、receipt、author authority |
 | module contributions | 登録済み道具の提示 | availability、effect、snapshot、Core/Full、内部LLM freeze |
 
-コンポーネント分割は責務の分離に役立つ範囲で許容するが、同じ状態と操作を別実装することは避ける。React stateの整理を理由に新規状態管理ライブラリを追加しない。
+**同じクライアント内**で同じ状態を二重実装しない。Desktop ReactとiOS SwiftUIは独立クライアントとして状態管理を別実装するが、Core/API保存と認可の意味論は一致させる。
 
 ## 受入マトリクス
 
@@ -81,14 +84,14 @@
 | 配置 | 3プリセット、カスタム、壊れた保存値、Core-only | 復元可能、原稿非変更、全操作への代替手段 | modular-workspace.acceptance.spec.ts |
 | 根拠 | 確定・古い・曖昧・孤立anchor、同名ノード | 正確な対象、偽の位置確定なし | persistence-database.acceptance.spec.ts |
 | レビュー | 未承認、承認のみ、適用、stale、応答損失、replay | 正本とreceipt一致、許可されない変更なし | native-review.acceptance.spec.ts / review-contributions.acceptance.spec.ts |
-| Mobile | 参照sheet、戻る、IME、キーボード、狭幅 | 同一editor、位置保持、守られた遷移 | ui-v1.acceptance.spec.ts / modular-workspace.acceptance.spec.ts |
+| iOS Native | SwiftUI sheet、TextKit IME、back、背景復帰、長文編集 | editor/draft/selection保持、receipt/guard、物理iPhone受入 | [iOS SwiftUI設計](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)（未検証） |
 | 表示 | 長い日本語、3テーマ、Core/Full、module無効 | 実レンダリングで重心、contrast、focus、overflow確認 | [Visual system](VISUAL-SYSTEM.md) |
 
 全体の受入はUX-CONTRACTのS-A各条件と[Verification](../verification/README.md)を維持する。ブラウザの実操作、DB状態・receipt、スクリーンショットを別種の証拠として確認する。外部IdP・本番Tunnel、物理端末・実IME等の環境固有要件はシミュレーション結果と区別する。
 
 ### 確定した版とその後の入力を確かめる
 
-DesktopとMobileの保存詳細は、現在の入力をこのブラウザーで回復できるかと、作品で確かめた版を分けて示す。
+Desktop WebとiOS Nativeの保存詳細は、現在の入力を**この端末**で回復できるかと、作品で確かめた版を分けて示す。
 保存応答を待っている詳細には送信時点を示し、その後の編集が今回の保存に含まれないことを伝える。
 短い状態表示と詳細は既存の開閉操作を使う。
 通常の記録中や入力ごとの更新は読み上げず、通常保存の通知は入力やフォーカスを移さない。

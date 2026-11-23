@@ -6,7 +6,6 @@ import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { assertProfileReceipt } from './ci-profile-artifact.mjs';
-import { assertNativeReceipt } from './ci-native-producer.mjs';
 import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
@@ -45,7 +44,6 @@ const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
 const node = (...args) => run(process.execPath, args);
 let preparationError;
 let profileArtifact;
-let nativeArtifact;
 try {
   const requiredProfile = requiredBuildProfile(group);
   if (requiredProfile) {
@@ -55,11 +53,6 @@ try {
     assertProfileReceipt(profileArtifact, plan, requiredProfile, process.env.GITHUB_RUN_ID);
   }
   if (group.startsWith('browser-')) await node('scripts/verify-browser-runtime.mjs');
-  if (group.startsWith('hosted-native-') && group !== 'hosted-native-catalog') {
-    if (process.env.CODEXIA_CI_NATIVE_RESTORE !== 'success') throw new Error('Hosted Native producer prerequisite failed');
-    nativeArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_NATIVE_RECEIPT,'utf8'));
-    assertNativeReceipt(nativeArtifact,plan,process.env.GITHUB_RUN_ID);
-  }
 } catch (error) { preparationError = String(error); }
 const preparationStarted = Date.now();
 if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationError) {
@@ -109,14 +102,6 @@ async function executeTaskInContext(task, index, scope) {
                 CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
           });
         } catch (error) { if (!executing) blocked = true; throw error; }
-      } else if (task.startsWith('hosted-native-')) {
-        const selection = task.slice(14);
-        // Composition consumers have already restored every Full server/module build.
-        // profile-package still rebuilds the actual selected UI and verifies its deployed closure.
-        if (selection === 'catalog') await run('pnpm', ['--filter', '@codexia/module-*...', 'build']);
-        await run(process.execPath, ['scripts/verify-hosted-native.mjs', '--selection', selection],
-          { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json'),
-            ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
         const runtime = coverageRuntime();
         const workflowRunId = Number(process.env.GITHUB_RUN_ID);
@@ -126,7 +111,7 @@ async function executeTaskInContext(task, index, scope) {
           invocation: coverageInvocation(runtime.execPath), workflowJob });
         const proofArgs = { closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime };
         const candidateProof = coverageInputProof(proofArgs);
-        const reuse = plan.taskInputReuse?.coverage;
+        const reuse = plan.coverageReuse;
         let reusable = false;
         if (reuse && plan.base === reuse.sourceSha && process.env.GITHUB_RUN_ID && process.env.GITHUB_RUN_ATTEMPT) {
           const baselineProof = { ...reuse, sourceSha: reuse.proofSourceSha, format: 'codexia-ci-task-input-proof/v2', mode: 'static-coverage', status: 'passed' };
@@ -144,7 +129,7 @@ async function executeTaskInContext(task, index, scope) {
         }
         // These supplemental contract tests remain mandatory for affected plans even when the
         // static coverage check itself is safely reused.
-        if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/ci-task-input-proof.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
+        if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/ci-task-input-proof.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
@@ -222,7 +207,7 @@ if (process.env.GITHUB_RUN_ID !== undefined) {
     },
   });
 }
-const report = { group, sha, planDigest: digest, ...(workflowIdentity ?? {}), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results: reportResults, ...(producerInventory ? { producerInventory } : {}) };
+const report = { group, sha, planDigest: digest, ...(workflowIdentity ?? {}), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), results: reportResults, ...(producerInventory ? { producerInventory } : {}) };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);

@@ -19,11 +19,29 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   mkdirSync(mockBin);
   const previousImage = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
   const candidateImage = `ghcr.io/yohn-jp/codexia-backend@sha256:${'b'.repeat(64)}`;
-  const previousUnit = `Image=${previousImage}\nEnvironment=CODEXIA_AUTH_MODE=token\nEnvironment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token\n`;
-  writeFileSync(path.join(quadletDir, 'codexia-api.container'), `Image=${candidateImage}\nEnvironment=CODEXIA_AUTH_MODE=token\nEnvironment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token\n`);
-  writeFileSync(path.join(stateDir, 'rollback-api.container'), previousUnit);
-  writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({ image: candidateImage }) + '\n');
-  writeFileSync(path.join(stateDir, 'rollback-release.json'), JSON.stringify({ image: previousImage }) + '\n');
+  const settingsDirectory = path.join(root, '.config', 'codexia-auth');
+  mkdirSync(settingsDirectory, { recursive: true });
+  const releaseFixture = (image, publicOrigin) => {
+    const settings = `CODEXIA_PUBLIC_ORIGIN=${publicOrigin}\n`;
+    const authSettingsSha256 = createHash('sha256').update(settings).digest('hex');
+    const settingsFile = path.join(settingsDirectory, `runtime-${authSettingsSha256}.env`);
+    writeFileSync(settingsFile, settings, { mode: 0o600 });
+    const unit = [
+      `Image=${image}`,
+      'Environment=CODEXIA_AUTH_MODE=better-auth',
+      `Environment=CODEXIA_AUTH_SETTINGS_SHA256=${authSettingsSha256}`,
+      `EnvironmentFile=${settingsFile}`,
+      '',
+    ].join('\n');
+    return { unit, settingsFile, record: { image, authMode: 'better-auth', authSettingsSha256 } };
+  };
+  const previous = releaseFixture(previousImage, 'https://codexia.example.test');
+  const candidate = releaseFixture(candidateImage, 'https://candidate.example.test');
+  writeFileSync(path.join(quadletDir, 'codexia-api.container'), candidate.unit);
+  writeFileSync(path.join(stateDir, 'rollback-api.container'), previous.unit);
+  writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify(candidate.record) + '\n');
+  writeFileSync(path.join(stateDir, 'rollback-release.json'), JSON.stringify(previous.record) + '\n');
+  writeFileSync(path.join(stateDir, 'host.lock'), '');
   writeFileSync(path.join(stateDir, 'deploy-transaction.json'), JSON.stringify({
     format: 'codexia-deploy-transaction/v1',
     phase,
@@ -45,7 +63,8 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
     quadletDir,
     mockBin,
     logFile,
-    previousUnit,
+    previous,
+    candidate,
     env: {
       ...process.env,
       CODEXIA_PUSH_STATE_DIR: stateDir,
@@ -74,8 +93,8 @@ test('interrupted deployment restores the exact previous unit and release before
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /RECOVERED_PREVIOUS_RELEASE/u);
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), target.previousUnit);
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE });
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), target.previous.unit);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.previous.record);
     assert.equal(existsSync(path.join(target.stateDir, 'deploy-transaction.json')), false, 'pending intent must be removed only after recovery');
     const calls = readFileSync(target.logFile, 'utf8');
     assert.match(calls, /systemctl --user stop codexia-tunnel\.service/u);
@@ -94,8 +113,8 @@ test('unhealthy prior release keeps the durable recovery record for another atte
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Prior API did not recover/u);
     assert.ok(readFileSync(path.join(target.stateDir, 'deploy-transaction.json'), 'utf8'));
-    assert.equal(readFileSync(path.join(target.stateDir, 'rollback-api.container'), 'utf8'), target.previousUnit);
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.equal(readFileSync(path.join(target.stateDir, 'rollback-api.container'), 'utf8'), target.previous.unit);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -110,7 +129,7 @@ test('failed API stop keeps the interrupted transaction and does not claim recov
     assert.match(result.stderr, /Could not stop and verify the active API/u);
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
     assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8').includes(target.env.CODEXIA_TEST_CANDIDATE_IMAGE), true);
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
     assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
@@ -122,6 +141,7 @@ test('recovery before first API unit installation does not require a nonexistent
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
   writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  writeFileSync(path.join(target.stateDir, 'deployed-release.json.tmp'), 'partial');
   rmSync(path.join(target.stateDir, 'rollback-api.container'));
   rmSync(path.join(target.stateDir, 'rollback-release.json'));
   target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
@@ -132,6 +152,7 @@ test('recovery before first API unit installation does not require a nonexistent
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /RECOVERED_PREVIOUS_RELEASE/u);
     assert.equal(existsSync(intentPath), false);
+    assert.equal(existsSync(path.join(target.stateDir, 'deployed-release.json.tmp')), false);
     assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
     assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
   } finally {
@@ -181,7 +202,7 @@ test('healthy candidate image cannot satisfy prior release recovery', () => {
     assert.equal(result.status, 1);
     assert.match(result.stderr, /does not match the recorded prior release/u);
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
     assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
@@ -190,63 +211,49 @@ test('healthy candidate image cannot satisfy prior release recovery', () => {
 
 test('recovery refuses a release record that disagrees with its prior Quadlet', () => {
   const target = fixture();
-  writeFileSync(path.join(target.stateDir, 'rollback-release.json'), JSON.stringify({ image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE }) + '\n');
+  writeFileSync(path.join(target.stateDir, 'rollback-release.json'), JSON.stringify(target.candidate.record) + '\n');
   try {
     const result = runRecovery(target);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Invalid deployment transaction or prior release snapshot/u);
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_CANDIDATE_IMAGE}\nEnvironment=CODEXIA_AUTH_MODE=token\nEnvironment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token\n`);
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), target.candidate.unit);
     assert.equal(existsSync(target.logFile), false, 'recovery must validate snapshots before changing services');
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
 });
 
-function betterAuthRecoveryFixture() {
+test('older pending token deployment is preserved for recovery with its original release', () => {
   const target = fixture();
-  const settings = 'CODEXIA_PUBLIC_ORIGIN=https://codexia.example.test\n';
-  const settingsSha256 = createHash('sha256').update(settings).digest('hex');
-  const settingsDirectory = path.join(target.root, '.config', 'codexia-auth');
-  mkdirSync(settingsDirectory, { recursive: true });
-  const settingsFile = path.join(settingsDirectory, 'runtime-' + settingsSha256 + '.env');
-  writeFileSync(settingsFile, settings, { mode: 0o600 });
-  const previousUnit = [
-    `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}`,
-    'Environment=CODEXIA_AUTH_MODE=better-auth',
-    `Environment=CODEXIA_AUTH_SETTINGS_SHA256=${settingsSha256}`,
-    'EnvironmentFile=' + settingsFile,
-    '',
-  ].join('\n');
-  writeFileSync(path.join(target.stateDir, 'rollback-api.container'), previousUnit);
-  writeFileSync(path.join(target.stateDir, 'rollback-release.json'), JSON.stringify({
-    image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE,
-    authMode: 'better-auth',
-    authSettingsSha256: settingsSha256,
-  }) + '\n');
-  return { target, previousUnit, settingsSha256, settingsFile };
-}
-
-test('recovery retains the prior Better Auth mode and settings identity', () => {
-  const { target, previousUnit, settingsSha256 } = betterAuthRecoveryFixture();
   try {
+    const priorUnit = path.join(target.stateDir, 'rollback-api.container');
+    const priorRelease = path.join(target.stateDir, 'rollback-release.json');
+    writeFileSync(priorUnit, [
+      `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}`,
+      'Environment=CODEXIA_AUTH_MODE=token',
+      'Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token',
+      '',
+    ].join('\n'));
+    writeFileSync(priorRelease, JSON.stringify({ image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE, authMode: 'token' }));
+    const files = [priorUnit, priorRelease, path.join(target.stateDir, 'host.lock'),
+      path.join(target.stateDir, 'deploy-transaction.json'), path.join(target.stateDir, 'deployed-release.json'),
+      path.join(target.quadletDir, 'codexia-api.container'), target.candidate.settingsFile, target.previous.settingsFile];
+    const before = files.map(file => readFileSync(file));
     const result = runRecovery(target);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), previousUnit);
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), {
-      image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE,
-      authMode: 'better-auth',
-      authSettingsSha256: settingsSha256,
-    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Recover older deployments using their recording release/u);
+    assert.deepEqual(files.map(file => readFileSync(file)), before);
+    assert.equal(existsSync(target.logFile), false, 'no service or container command may run');
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
 });
 
 test('recovery rejects changed Better Auth settings before stopping services', () => {
-  const { target, settingsFile } = betterAuthRecoveryFixture();
+  const target = fixture();
   try {
-    writeFileSync(settingsFile, 'CODEXIA_PUBLIC_ORIGIN=https://other.example.test\n');
+    writeFileSync(target.previous.settingsFile, 'CODEXIA_PUBLIC_ORIGIN=https://other.example.test\n');
     const result = runRecovery(target);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Invalid deployment transaction or prior release snapshot/u);
@@ -259,16 +266,9 @@ test('recovery rejects changed Better Auth settings before stopping services', (
 
 test('recovery rejects a Better Auth release whose settings digest differs from its Quadlet', () => {
   const target = fixture();
-  writeFileSync(path.join(target.stateDir, 'rollback-api.container'), [
-    `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}`,
-    'Environment=CODEXIA_AUTH_MODE=better-auth',
-    `Environment=CODEXIA_AUTH_SETTINGS_SHA256=${'c'.repeat(64)}`,
-    '',
-  ].join('\n'));
   writeFileSync(path.join(target.stateDir, 'rollback-release.json'), JSON.stringify({
-    image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE,
-    authMode: 'better-auth',
-    authSettingsSha256: 'd'.repeat(64),
+    ...target.previous.record,
+    authSettingsSha256: target.candidate.record.authSettingsSha256,
   }) + '\n');
   try {
     const result = runRecovery(target);
@@ -287,8 +287,8 @@ test('committed transaction only cleans snapshots and does not switch a healthy 
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /CLEANED_COMMITTED_TRANSACTION/u);
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_CANDIDATE_IMAGE}\nEnvironment=CODEXIA_AUTH_MODE=token\nEnvironment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token\n`);
-    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), target.candidate.unit);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
     assert.equal(existsSync(target.logFile), false, 'a committed intent is cleanup only and must not touch systemd');
   } finally {
     rmSync(target.root, { recursive: true, force: true });

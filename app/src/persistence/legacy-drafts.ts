@@ -1,4 +1,17 @@
-import { draftKey, type LocalDraft } from "../drafts";
+const DRAFT_KEY_PREFIX = "scriptorium:draft:";
+
+interface LegacyLocalDraft {
+  version: 1;
+  projectId: string;
+  sceneId: string;
+  text: string;
+  revision: string;
+  savedAt: number;
+}
+
+function draftKey(projectId: string, sceneId: string): string {
+  return `${DRAFT_KEY_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sceneId)}`;
+}
 
 export interface LegacyStorage {
   readonly length: number;
@@ -6,17 +19,17 @@ export interface LegacyStorage {
   getItem(key: string): string | null;
   removeItem(key: string): void;
 }
-export interface LegacyDraftSnapshot { key: string; raw: string; draft: LocalDraft }
+export interface LegacyDraftSnapshot { key: string; raw: string; draft: LegacyLocalDraft }
 
 /** Inspect only known recovery records. Malformed records stay available to manual recovery. */
 export function readLegacyDraft(storage: LegacyStorage, key: string): LegacyDraftSnapshot | null {
-  if (!key.startsWith("scriptorium:draft:")) return null;
+  if (!key.startsWith(DRAFT_KEY_PREFIX)) return null;
   const raw = storage.getItem(key);
   if (!raw || raw.length > 8 * 1024 * 1024) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const draft = value as LocalDraft;
+    const draft = value as LegacyLocalDraft;
     if (draft.version !== 1 || typeof draft.projectId !== "string" || typeof draft.sceneId !== "string" ||
         typeof draft.text !== "string" || typeof draft.revision !== "string" || !Number.isFinite(draft.savedAt) ||
         draftKey(draft.projectId, draft.sceneId) !== key) return null;

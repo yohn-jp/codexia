@@ -11,7 +11,7 @@ const packageManifest = JSON.parse(await readFile(path.join(root, 'package.json'
 test('omitted and explicit Core profiles build the API and browser with a Core registry and no optional producers', async () => {
   const core = JSON.parse(await readFile(path.join(root, 'profiles/core.json'), 'utf8'));
   const full = JSON.parse(await readFile(path.join(root, 'profiles/full.json'), 'utf8'));
-  const optionalPackages = new Set(['@codexia/migration', ...full.modules.map(id => '@codexia/module-' + id)]);
+  const optionalPackages = new Set(full.modules.map(id => '@codexia/module-' + id));
   for (const selection of [undefined, '', 'core']) {
     const commands = createRootBuildCommands(selection, core);
     const app = commands.findIndex(({ args }) => args.includes('@codexia/app'));

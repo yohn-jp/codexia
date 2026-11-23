@@ -139,7 +139,7 @@ test('Search browser changes do not run unrelated units or native image builds',
   assert.ok(selected.tasks.includes('browser-full-ui-v1'));
   assert.ok(!selected.tasks.includes('unit-core'));
   assert.ok(!selected.tasks.includes('unit-speaker'));
-  assert.ok(!selected.tasks.some(task => task.startsWith('hosted-native-') || task.startsWith('oci-')));
+  assert.ok(!selected.tasks.some(task => task.startsWith('oci-')));
 });
 
 test('shared app changes retain both profile browser coverage without backend units', async () => {
@@ -151,7 +151,6 @@ test('shared app changes retain both profile browser coverage without backend un
     assert.ok(selected.tasks.includes(`browser-${profile}-core`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
-  assert.ok(!selected.tasks.some(task => task.startsWith('hosted-native-')));
 });
 
 test('main, manual, shared contracts, lockfiles, manifests and unknown files fail closed to full verification', async () => {
@@ -177,22 +176,34 @@ test('test-only changes select their owner while non-executable documentation se
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
 });
 
-test('proof ineligibility can expand an affected PR plan to the complete task inventory without losing its actual diff', async () => {
+test('impact selection is independent of proof availability; unknown diffs still fail closed', async () => {
   const { createVerificationPlan, verificationPlanOutputs } = await import('./ci-impact.mjs');
-  const affected = createVerificationPlan({ files: ['modules/search/src/browser.ts'], event: 'pull_request',
-    sha: 'a'.repeat(40), base: 'b'.repeat(40) });
-  const fallback = createVerificationPlan({ ...affected, forceFull: true });
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  const affected = createVerificationPlan({ ...input, files: ['docs/authoring.md'] });
   assert.equal(affected.mode, 'affected');
-  assert.equal(fallback.mode, 'full');
-  assert.equal(fallback.forceFull, true);
-  assert.deepEqual(fallback.files, affected.files, 'Fallback retains the exact source diff for later first-parent validation');
-  assert.deepEqual(fallback.tasks, VERIFICATION_TASKS);
-  assert.equal(fallback.full_model_oci, affected.full_model_oci);
-  const outputs = verificationPlanOutputs(fallback);
-  assert.deepEqual(JSON.parse(outputs.unit), ['core', 'modules']);
-  assert.deepEqual(JSON.parse(outputs.types), ['sources', 'tests']);
-  assert.equal(JSON.parse(outputs.plan).forceFull, true);
+  assert.deepEqual(affected.tasks, ['coverage']);
+  assert.equal(affected.excluded.length, VERIFICATION_TASKS.length - 1);
+  assert.deepEqual(JSON.parse(verificationPlanOutputs(affected).types), ['tests']);
+
+  const unknown = createVerificationPlan({ ...input, files: null });
+  assert.equal(unknown.mode, 'full');
+  assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
+  assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, VERIFICATION_TASKS);
+  assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
+});
+
+test('certification rejects tampered PR base or changed-file inventory without historical proofs', async () => {
+  const { createVerificationPlan, assertExactPrImpact } = await import('./ci-impact.mjs');
+  const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  const affected = createVerificationPlan({ ...input, files: ['docs/architecture/SYSTEM-DESIGN.md'] });
+  assert.doesNotThrow(() => assertExactPrImpact(affected, input.base, affected.files));
+  assert.throws(() => assertExactPrImpact(affected, 'c'.repeat(40), affected.files), /PR base/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, ['packages/api/src/server.ts']), /exact PR diff/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, null), /exact PR diff/);
+  const full = createVerificationPlan({ ...input, files: null });
+  assert.doesNotThrow(() => assertExactPrImpact(full, input.base, null), 'Unknown diff already selects full verification');
+  assert.throws(() => assertExactPrImpact(full, 'c'.repeat(40), null), /PR base/);
 });
 
 test('OAuth browser acceptance is selected in both profile browser lanes', async () => {
@@ -214,7 +225,7 @@ test('every selected task has one execution group and every exclusion has a reas
   assert.ok(selected.excluded.every(item => item.reason && !selected.tasks.includes(item.task)));
 });
 
-test('known operational inputs retain root proof without unrelated browser, OCI or Hosted work', async () => {
+test('known operational inputs retain root proof without unrelated browser or OCI work', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
@@ -237,6 +248,7 @@ test('operational proof remains owned by one exact-head root task and matching i
   const readWorkflow = name => parse(readFileSync(new URL('../.github/workflows/'+name, import.meta.url), 'utf8'));
   const infra = readWorkflow('deployment-config.yml');
   for (const event of ['pull_request','push']) {
+    assert.deepEqual(infra.on[event].branches, ['main'], event);
     for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
       assert.ok(infra.on[event].paths.includes(path), path);
     }
@@ -266,6 +278,7 @@ test('Mitogen launcher changes select the rootless contract on PR and main', asy
   const fixture = workflow.jobs['rootless-secrets'].steps.find(step => step.env?.ANSIBLE_PLAYBOOK);
   assert.equal(fixture.env.ANSIBLE_PLAYBOOK, '${{ github.workspace }}/' + launcher);
   for (const event of ['pull_request', 'push']) {
+    assert.deepEqual(workflow.on[event].branches, ['main'], event);
     assert.ok(workflow.on[event].paths.includes(launcher), event);
   }
   assert.deepEqual((await plan([launcher])).tasks, ['unit-root', 'coverage']);

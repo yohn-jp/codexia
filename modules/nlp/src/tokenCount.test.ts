@@ -15,11 +15,11 @@ test("source-approved approximation counts CJK code points and conservatively ro
   assert.equal(sourceApproxTokenCount("駅abc"), 2);
 });
 
-test("model selection follows explicit model, tokenizer environment, then LLM environment", () => {
+test("token counter selects only explicit and tokenizer-scoped model configurations", () => {
   const environment = { ARCADIA_TOKENIZER_MODEL: "env/tokenizer", ARCADIA_LLM_MODEL: "env/llm" };
   assert.equal(resolveTokenCountConfiguration(environment, { modelId: " explicit/model " }).modelId, "explicit/model");
   assert.equal(resolveTokenCountConfiguration(environment).modelId, "env/tokenizer");
-  assert.equal(resolveTokenCountConfiguration({ ARCADIA_LLM_MODEL: "env/llm" }).modelId, "env/llm");
+  assert.equal(resolveTokenCountConfiguration({ ARCADIA_LLM_MODEL: "env/llm" }).fallbackReason, "model_unconfigured", "legacy provider settings must not select the tokenizer");
   assert.equal(resolveTokenCountConfiguration({}).fallbackReason, "model_unconfigured");
   assert.equal(resolveTokenCountConfiguration({ ARCADIA_TOKENIZER_BACKEND: "approx", ARCADIA_TOKENIZER_MODEL: "env/tokenizer" }).fallbackReason, "backend_approx");
   assert.equal(resolveTokenCountConfiguration({ ARCADIA_TOKENIZER_MODEL: "https://secret.example/tokenizer" }).fallbackReason, "tokenizer_unavailable");

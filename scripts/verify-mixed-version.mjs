@@ -32,8 +32,8 @@ export function assertDisposableDatabase(value) {
 export function assertIsolatedEnvironment(env) {
   for (const name of ['CODEXIA_E2E_BASE_URL', 'CODEXIA_BASE_URL', 'CODEXIA_E2E_EXTERNAL_DATABASE',
     'CODEXIA_E2E_TEST_FILE', 'CODEXIA_E2E_STATE_DIR', 'CODEXIA_E2E_COVERAGE_FILE',
-    'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_PROJECT_TITLE',
-    'CODEXIA_BROWSER_MODULE_PROFILE_PATH', 'SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH',
+    'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_COMPAT_FRONTEND_SOURCE', 'CODEXIA_E2E_PROJECT_TITLE',
+    'CODEXIA_BROWSER_MODULE_PROFILE_PATH',
     'CODEXIA_STANDALONE_IDENTITY']) {
     assert.ok(!env[name], 'Unset ' + name + ' for isolated mixed-version verification');
   }
@@ -68,25 +68,31 @@ function main() {
   git(root, 'merge-base', '--is-ancestor', priorSha, currentSha);
   const { apiEpoch } = JSON.parse(readFileSync(join(root, 'deploy/update-compatibility.json'), 'utf8'));
   const priorEpoch = JSON.parse(readFileSync(join(previous, 'deploy/frontend-compatibility.json'), 'utf8')).apiEpoch;
-  assert.equal(priorEpoch, apiEpoch, 'Breaking API epoch changes require coordinated manual acceptance');
-  const env = { ...process.env, CODEXIA_PROFILE: profile };
+  assert.ok(Number.isSafeInteger(apiEpoch) && apiEpoch > 0, 'Invalid candidate API epoch');
+  assert.ok(Number.isSafeInteger(priorEpoch) && priorEpoch > 0, 'Invalid prior API epoch');
+  if (priorEpoch !== apiEpoch) {
+    console.error(`API epoch ${priorEpoch} → ${apiEpoch} requires coordinated manual acceptance`);
+    return 78;
+  }
+  // A historical checkout may still honor a retired override from this shell.
+  const inheritedEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^SCRIPTORIUM_/iu.test(name)));
+  const env = { ...inheritedEnvironment, CODEXIA_PROFILE: profile };
   run(previous, ['install', '--frozen-lockfile'], env);
-  run(previous, ['build:frontend'], env);
-  const directory = join(previous, 'app/dist');
-  const frontend = JSON.parse(readFileSync(join(directory, 'desktop/update-identity.json'), 'utf8'));
-  assertMixedVersionPair(frontend, { priorSha, currentSha, profile, apiEpoch });
   run(root, ['install', '--frozen-lockfile'], env);
   run(root, ['build'], env);
-  assert.equal(cleanSource(previous), priorSha);
-  assert.equal(cleanSource(root), currentSha);
-  console.log(JSON.stringify({ frontend, backendSourceSha: currentSha, apiEpoch, profile }));
-  // Run existing browser/real PostgreSQL scenarios, not an identity-only mock.
-  // The test server loads current API and serves only the prior static assets.
+  // The browser worker builds the prior checkout with its registered OAuth client,
+  // then serves those assets from the candidate API against real PostgreSQL.
   run(root, ['exec', 'playwright', 'test', '--config', 'tests/e2e/playwright.config.ts',
     '--project', 'chromium', '--grep',
     'revision history keeps immutable content|exact revision acknowledgement|new typing survives recovery against a newer PostgreSQL base revision'],
-    { ...env, CODEXIA_E2E_COMPAT_FRONTEND_DIR: directory,
+    { ...env, CODEXIA_AUTH_TEST_DISPOSABLE: '1', CODEXIA_E2E_COMPAT_FRONTEND_SOURCE: previous,
       CODEXIA_E2E_TEST_FILE: 'core.acceptance.spec.ts' });
+  const frontend = JSON.parse(readFileSync(join(previous, 'app/dist/desktop/update-identity.json'), 'utf8'));
+  assertMixedVersionPair(frontend, { priorSha, currentSha, profile, apiEpoch });
+  assert.equal(cleanSource(previous), priorSha);
+  assert.equal(cleanSource(root), currentSha);
+  console.log(JSON.stringify({ frontend, backendSourceSha: currentSha, apiEpoch, profile }));
+  return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main();

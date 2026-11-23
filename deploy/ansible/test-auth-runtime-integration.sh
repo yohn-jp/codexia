@@ -198,7 +198,31 @@ fi
 sed -i 's/codexia_auth_registration_pending: true/codexia_auth_registration_pending: false/' "$tmp/auth-inventory.yml"
 sed -i '/codexia_auth_registration_pending: false/a\        codexia_oauth_owner_subject: fixture-provider|stable-owner-subject' "$tmp/auth-inventory.yml"
 apply_stage > "$tmp/auth-finalize.log" 2>&1 || { cat "$tmp/auth-finalize.log"; exit 1; }
+as_service test ! -e "$registration_launcher"
+as_service test ! -e "$service_home/.local/bin/codexia-grant-passkey-owner"
+as_service test -x "$service_home/.local/bin/codexia-grant-passkey-recovery"
 as_service grep -Fxq 'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-provider|stable-owner-subject' "$runtime_env"
+
+if as_service grep -Eq '^CODEXIA_OAUTH_MCP_(CLIENT_IDS|PROJECT_ASSIGNMENTS)=' "$runtime_env"; then
+  echo 'Owner-only runtime settings unexpectedly enabled MCP OAuth' >&2
+  exit 1
+fi
+cp "$tmp/auth-inventory.yml" "$tmp/owner-only-inventory.yml"
+printf '        codexia_oauth_mcp_client_ids: fixture-mcp\n' >> "$tmp/auth-inventory.yml"
+if apply_stage > "$tmp/mcp-incomplete.log" 2>&1; then
+  echo 'Auth runtime accepted MCP clients without project assignments' >&2
+  exit 1
+fi
+grep -Fq 'Configure registered MCP clients and explicit project assignments together' "$tmp/mcp-incomplete.log"
+cat >> "$tmp/auth-inventory.yml" <<'YAML'
+        codexia_oauth_mcp_project_assignments:
+          fixture-mcp: [00000000-0000-4000-8000-000000000001]
+YAML
+apply_stage > "$tmp/auth-mcp-finalize.log" 2>&1 || { cat "$tmp/auth-mcp-finalize.log"; exit 1; }
+as_service grep -Fxq 'CODEXIA_OAUTH_MCP_CLIENT_IDS=fixture-mcp' "$runtime_env"
+as_service grep -Fxq 'CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS={"fixture-mcp":["00000000-0000-4000-8000-000000000001"]}' "$runtime_env"
+mv "$tmp/owner-only-inventory.yml" "$tmp/auth-inventory.yml"
+apply_stage > "$tmp/auth-reset-owner-only.log" 2>&1 || { cat "$tmp/auth-reset-owner-only.log"; exit 1; }
 
 apply_stage > "$tmp/auth-repeat.log" 2>&1 || { cat "$tmp/auth-repeat.log"; exit 1; }
 grep -q 'changed=0' "$tmp/auth-repeat.log"

@@ -317,18 +317,9 @@ importers:
 
   modules/assistant:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: 4.0.106
-        version: 4.0.106(zod@4.6.7)
-      '@ai-sdk/openai-compatible':
-        specifier: 2.0.93
-        version: 2.0.93(zod@4.6.7)
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -347,18 +338,6 @@ importers:
       '@codexia/module-story':
         specifier: workspace:*
         version: link:../story
-      ai:
-        specifier: 7.0.176
-        version: 7.0.176(zod@4.6.7)
-      jsonrepair:
-        specifier: 3.15.0
-        version: 3.15.0
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.3.1
-        version: 19.3.1(react@19.3.1)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -371,9 +350,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
@@ -407,9 +383,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
@@ -434,9 +407,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       jszip:
         specifier: ^3.10.2
         version: 3.10.2
@@ -464,9 +434,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
@@ -494,9 +461,6 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -524,9 +488,6 @@ importers:
       '@codexia/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@codexia/migration':
-        specifier: workspace:*
-        version: link:../../packages/migration
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -608,12 +569,6 @@ importers:
         specifier: workspace:*
         version: link:../persistence-postgres
 
-  packages/migration:
-    dependencies:
-      '@codexia/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-
   packages/module-runtime:
     dependencies:
       '@codexia/contracts':
@@ -684,44 +639,6 @@ importers:
         version: link:../../packages/persistence-postgres
 
 packages:
-
-  '@ai-sdk/anthropic@4.0.106':
-    resolution: {integrity: sha512-CKqIoPG91+uqmZxxxQEaS2anQlDxA+4UPeYB0TgcHAit1HZgx0m2y9JJ7QwJVYmgBuZHO1OXowMovV0kwvrTcQ==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/gateway@4.0.149':
-    resolution: {integrity: sha512-xUDEBEU/3I4+8vAKomK3qCIIYHlWv0YF23EWxO+Th6lVAGWYNcdVn5uj5cV5Zp6W1PGdBVT+MQqO9sNoY3fY/g==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/openai-compatible@2.0.93':
-    resolution: {integrity: sha512-5R5H7Opq2raqF+BVrxFULmN6tjV0WxgpZ3SMID99xhuuHBE4xg418vZnJIYBxz542QtXBXc/js5We8x/qMyV8Q==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider-utils@4.0.66':
-    resolution: {integrity: sha512-tITCIYBJlxD4PmDIAI2VXb67yEbWRepvJBJrv2pIY5vMRUta51AFRxLlxm0IexRGdIBGuQ10+ClClZMXtawkbA==}
-    engines: {node: '>=18.17'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider-utils@5.0.82':
-    resolution: {integrity: sha512-9s3Le9LsTR0exy14H8SERw4uMgFhiP0yJVoLefzfQCnnptj71noYh1AoVEsjfJjmMH1y16+1OqBVTDpTpU6M3Q==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider@3.0.19':
-    resolution: {integrity: sha512-5lWq7zSfRaU5ylDESn3sDQjgGl2AI1vjZKO/6JY3aFW70ct4zcP1kN+ZUYOuTXr28fVsYbyu2YFhddLdIgQFZQ==}
-    engines: {node: '>=18'}
-
-  '@ai-sdk/provider@4.0.39':
-    resolution: {integrity: sha512-jRvAhvW23+TeMGVCME2WGejP/TjzyDg7TplUep3t8HcEYnC2/8zqhCy9RRrjjVs1ljcygABZ8pQ21MbCRdF01w==}
-    engines: {node: '>=22'}
 
   '@better-auth/core@1.7.26':
     resolution: {integrity: sha512-k9tECegh1/MZmAQ9tD+4fjF2zYCzMcy0Xhu3nASp8bj48NrK1E0yV2BAeWnprMVRqh62ka07xc0MZuqmvlXNDQ==}
@@ -1730,10 +1647,6 @@ packages:
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
 
-  '@vercel/oidc@3.2.0':
-    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
-    engines: {node: '>= 20'}
-
   '@vitejs/plugin-react@6.3.0':
     resolution: {integrity: sha512-H9E955aVvD2F4zNHCw4eIZbIfF6xKldlh7MNu+hSU7xwQzh65lI/N+CJWqmfhi0PEjDXIt/H7T7J/4wU63KJiw==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1750,9 +1663,6 @@ packages:
       oxc-transform-react:
         optional: true
 
-  '@workflow/serde@4.1.0':
-    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
-
   abstract-logging@2.0.1:
     resolution: {integrity: sha512-2BjRTZxTPvheOvGbBslFSYOUkr+SjPtOnrLP33f+VIWLzezQpZcqVg7ja3L4dBXmzzgwT+a029jRx5PCi3JuiA==}
 
@@ -1763,12 +1673,6 @@ packages:
   adm-zip@0.6.1:
     resolution: {integrity: sha512-Xwrja8nx9e5o2N1my4DsKCeKpdrnACyr1wtbPxBDgGzKzKyE9kRtBFA8mWldI+RVlD7CBZNWY/wQ2+ydwOR6kQ==}
     engines: {node: '>=14.0'}
-
-  ai@7.0.176:
-    resolution: {integrity: sha512-zIbiX58LQx3NB3+e0vYFcn4fipIqkVG9FHtWj7HVBCjh5f7GfWz5WVDeKmQ+M89RHAw9MU9pzfkFIAYEBeQi0g==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -2210,13 +2114,6 @@ packages:
 
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
-
-  json-schema@0.4.0:
-    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
-
-  jsonrepair@3.15.0:
-    resolution: {integrity: sha512-wy8OTjwsJwQRnQJkKnMJJ9vcytRdBPAgIF/Hy6+s1dAj42BHMKiyL8JzEieIl3JY7idt8eyHwBWTO8mh/+mtwA==}
-    hasBin: true
 
   jszip@3.10.2:
     resolution: {integrity: sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==}
@@ -2782,10 +2679,6 @@ packages:
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
-  undici@6.29.1:
-    resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
-    engines: {node: '>=18.17'}
-
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
@@ -2869,49 +2762,6 @@ packages:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
-
-  '@ai-sdk/anthropic@4.0.106(zod@4.6.7)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.39
-      '@ai-sdk/provider-utils': 5.0.82(zod@4.6.7)
-      zod: 4.6.7
-
-  '@ai-sdk/gateway@4.0.149(zod@4.6.7)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.39
-      '@ai-sdk/provider-utils': 5.0.82(zod@4.6.7)
-      '@vercel/oidc': 3.2.0
-      zod: 4.6.7
-
-  '@ai-sdk/openai-compatible@2.0.93(zod@4.6.7)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.19
-      '@ai-sdk/provider-utils': 4.0.66(zod@4.6.7)
-      zod: 4.6.7
-
-  '@ai-sdk/provider-utils@4.0.66(zod@4.6.7)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.19
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.1.1
-      undici: 6.29.1
-      zod: 4.6.7
-
-  '@ai-sdk/provider-utils@5.0.82(zod@4.6.7)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.39
-      '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.1
-      zod: 4.6.7
-
-  '@ai-sdk/provider@3.0.19':
-    dependencies:
-      json-schema: 0.4.0
-
-  '@ai-sdk/provider@4.0.39':
-    dependencies:
-      json-schema: 0.4.0
 
   '@better-auth/core@1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.17)(kysely@0.29.9)(nanostores@1.5.5)':
     dependencies:
@@ -3799,14 +3649,10 @@ snapshots:
     dependencies:
       csstype: 3.2.4
 
-  '@vercel/oidc@3.2.0': {}
-
   '@vitejs/plugin-react@6.3.0(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@rolldown/pluginutils': 1.1.1
       vite: 8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1)
-
-  '@workflow/serde@4.1.0': {}
 
   abstract-logging@2.0.1: {}
 
@@ -3816,13 +3662,6 @@ snapshots:
       negotiator: 1.1.0
 
   adm-zip@0.6.1: {}
-
-  ai@7.0.176(zod@4.6.7):
-    dependencies:
-      '@ai-sdk/gateway': 4.0.149(zod@4.6.7)
-      '@ai-sdk/provider': 4.0.39
-      '@ai-sdk/provider-utils': 5.0.82(zod@4.6.7)
-      zod: 4.6.7
 
   ajv-formats@3.0.1:
     dependencies:
@@ -4308,10 +4147,6 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json-schema-typed@8.0.2: {}
-
-  json-schema@0.4.0: {}
-
-  jsonrepair@3.15.0: {}
 
   jszip@3.10.2:
     dependencies:
@@ -4887,8 +4722,6 @@ snapshots:
   typescript@5.9.3: {}
 
   undici-types@7.24.6: {}
-
-  undici@6.29.1: {}
 
   unpipe@1.0.0: {}
 

@@ -35,7 +35,7 @@ for _ in $(seq 1 20); do
 done
 systemctl --user show --property=Version
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
   rc=0; podman secret exists "$name" || rc=$?
   test "$rc" = 1
 done
@@ -43,7 +43,6 @@ for name in codexia-postgres codexia-data codexia-history; do
   rc=0; podman volume exists "$name" || rc=$?
   test "$rc" = 1
 done
-printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
 printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"
@@ -61,21 +60,20 @@ all:
         codexia_service_uid: $service_uid
         codexia_service_home: "$service_home"
         codexia_secrets_approved: true
-        codexia_auth_token_file: "$tmp/auth"
         codexia_tunnel_token_file: "$tmp/tunnel"
         codexia_postgres_admin_password_file: "$tmp/admin"
         codexia_postgres_app_password_file: "$tmp/app"
 YAML
 apply() { ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
-printf 'fixture-auth-token\n' > "$tmp/auth"
-if apply > "$tmp/short-token.log"; then echo 'Short API token accepted' >&2; exit 1; fi
-for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+printf 'fixture tunnel with spaces\n' > "$tmp/tunnel"
+if apply > "$tmp/invalid-tunnel-token.log"; then echo 'Malformed Tunnel token accepted' >&2; exit 1; fi
+for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
   rc=0; podman secret exists "$name" || rc=$?
   test "$rc" = 1
 done
-printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
+printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
-for pair in 'auth codexia-auth-token' 'tunnel codexia-tunnel-token' 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
+for pair in 'tunnel codexia-tunnel-token' 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
   read -r file name <<< "$pair"
   podman secret inspect --showsecret "$name" | jq -j '.[0].SecretData' | cmp - "$tmp/$file"
 done
@@ -93,7 +91,7 @@ test "$rc" = 1
 # test; this is fixture cleanup, not Ansible-managed secret rotation.
 cat "$tmp/tunnel" | podman secret create codexia-tunnel-token - >/dev/null
 podman secret inspect --showsecret codexia-tunnel-token | jq -j '.[0].SecretData' | cmp - "$tmp/tunnel"
-if grep -Eq 'fixture-auth-token|fixture-tunnel-token|0{63}[12]' "$tmp/"*.log; then
+if grep -Eq 'fixture-tunnel-token|0{63}[12]' "$tmp/"*.log; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
 fi
 printf '%s\n' 'Verified real rootless Podman secret creation, exact adoption, idempotence and existing-data missing-secret denial.'

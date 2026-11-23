@@ -16,8 +16,12 @@ intent="$state_dir/deploy-transaction.json"
 release_state="$state_dir/deployed-release.json"
 lock_file="$state_dir/host.lock"
 
-mkdir -p -- "$state_dir"
-exec 9>"$lock_file"
+[[ -e "$intent" || -L "$intent" ]] || exit 0
+[[ -f "$lock_file" && ! -L "$lock_file" ]] || {
+  echo 'Deployment transaction is missing its regular host lock; recovery state retained' >&2
+  exit 1
+}
+exec 9>>"$lock_file"
 flock --exclusive --nonblock 9 || {
   echo 'Another Codexia deployment or backup holds the host lock' >&2
   exit 75
@@ -42,46 +46,32 @@ if (value.phase === 'pending' && value.hadUnit) {
   const unitInfo = fs.lstatSync(process.argv[4]);
   if (!unitInfo.isFile() || unitInfo.isSymbolicLink()) process.exit(2);
   const unit = fs.readFileSync(process.argv[4], 'utf8');
-  const unitMatch = unit.match(/^Image=(\S+)$/m);
-  const unitImage = unitMatch?.[1] ?? '';
+  const images = [...unit.matchAll(/^Image=([^\r\n]*)$/gm)].map(match => match[1]);
   const modes = [...unit.matchAll(/^Environment=CODEXIA_AUTH_MODE=([^\r\n]*)$/gm)].map(match => match[1]);
-  const unitAuthMode = modes.length === 1 ? modes[0] : modes.length === 0 && unit.includes('Environment=CODEXIA_AUTH_TOKEN_FILE=') &&
-    !unit.includes('codexia-auth-database-url') && !unit.includes('codexia-auth/runtime') ? 'token' : '';
-  const settingsDigests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([a-f0-9]{64}|none)$/gm)].map(match => match[1]);
-  if (!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(unitImage)) process.exit(2);
-  if (modes.length > 1 || !['token', 'better-auth'].includes(unitAuthMode) || settingsDigests.length > 1) process.exit(2);
-  if (unitAuthMode === 'better-auth') {
-    const [digest] = settingsDigests;
-    const files = [...unit.matchAll(/^EnvironmentFile=([^\r\n]+)$/gm)].map(match => match[1]);
-    if (!value.releasePresent || !/^[a-f0-9]{64}$/.test(digest || '') || files.length !== 1 ||
-        !files[0].startsWith('/') || !files[0].endsWith('/.config/codexia-auth/runtime-' + digest + '.env')) process.exit(2);
-    const settings = fs.lstatSync(files[0], { throwIfNoEntry: false });
-    if (!settings?.isFile() || settings.uid !== process.getuid() || (settings.mode & 0o777) !== 0o600 ||
-        createHash('sha256').update(fs.readFileSync(files[0])).digest('hex') !== digest) process.exit(2);
-  }
-  if (value.releasePresent) {
-    const info = fs.lstatSync(process.argv[3]);
-    if (!info.isFile() || info.isSymbolicLink()) process.exit(2);
-    const release = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-    previousImage = release.image;
-    if (unitAuthMode === 'better-auth' && (release.authMode !== unitAuthMode || release.authSettingsSha256 !== settingsDigests[0])) process.exit(2);
-    if (release.authMode !== undefined && release.authMode !== unitAuthMode) process.exit(2);
-    if (release.authSettingsSha256 !== undefined) {
-      if (!/^([a-f0-9]{64}|none)$/.test(release.authSettingsSha256)) process.exit(2);
-      const unitDigest = settingsDigests[0] ?? (unitAuthMode === 'token' ? 'none' : '');
-      if (release.authSettingsSha256 !== unitDigest) process.exit(2);
-    }
-  } else {
-    previousImage = unitImage;
-  }
-  if (previousImage !== unitImage || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(previousImage)) process.exit(2);
+  const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([^\r\n]*)$/gm)].map(match => match[1]);
+  const files = [...unit.matchAll(/^EnvironmentFile=([^\r\n]*)$/gm)].map(match => match[1]);
+  const [image] = images;
+  const [digest] = digests;
+  const [file] = files;
+  if (images.length !== 1 || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(image) ||
+      modes.length !== 1 || modes[0] !== 'better-auth' || !value.releasePresent ||
+      digests.length !== 1 || !/^[a-f0-9]{64}$/.test(digest) || files.length !== 1 ||
+      !file.startsWith('/') || !file.endsWith('/.config/codexia-auth/runtime-' + digest + '.env')) process.exit(2);
+  const settings = fs.lstatSync(file, { throwIfNoEntry: false });
+  if (!settings?.isFile() || settings.uid !== process.getuid() || (settings.mode & 0o777) !== 0o600 ||
+      createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== digest) process.exit(2);
+  const releasePath = process.argv[3];
+  if (!fs.lstatSync(releasePath, { throwIfNoEntry: false })?.isFile()) process.exit(2);
+  const release = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+  if (release.authMode !== 'better-auth' || release.authSettingsSha256 !== digest || release.image !== image) process.exit(2);
+  previousImage = image;
 }
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
   value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent, previousImage || '-'].join('\n'));
 NODE
 )"
 then
-  echo 'Invalid deployment transaction or prior release snapshot' >&2
+  echo 'Invalid deployment transaction or prior release snapshot. Recover older deployments using their recording release; recovery state retained.' >&2
   exit 1
 fi
 mapfile -t recovery_fields <<< "$recovery"
@@ -91,7 +81,7 @@ mapfile -t recovery_fields <<< "$recovery"
 }
 
 if [[ "${recovery_fields[1]}" == committed ]]; then
-  rm -f -- "$intent" "$intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+  rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
   echo 'CLEANED_COMMITTED_TRANSACTION'
   exit 0
 fi
@@ -233,5 +223,5 @@ if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
   systemctl --user start codexia-tunnel.service
 fi
 
-rm -f -- "$intent" "$intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
 echo 'RECOVERED_PREVIOUS_RELEASE'

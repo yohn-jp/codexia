@@ -81,7 +81,12 @@ export function backendReleaseSourceTree(sourceSha,git=execFileSync){
   return git('git',['rev-parse',sourceSha+'^{tree}'],{encoding:'utf8'}).trim();
 }
 
-export async function verifyExistingBackendRelease({env=process.env,args=process.argv.slice(2)}={}){
+export function publishedBackendCompatibility(sourceSha) {
+  assert.match(sourceSha ?? '', /^[a-f0-9]{40}$/u, 'Backend release source SHA is invalid');
+  return JSON.parse(execFileSync('git', ['show', `${sourceSha}:deploy/update-compatibility.json`], { encoding: 'utf8' }));
+}
+
+export async function verifyExistingBackendRelease({env=process.env,args=process.argv.slice(2),usePublishedSourceCompatibility=false}={}){
   const [image,mainSha,producerSha,version,profile,event]=args;
   assert.equal(env.GITHUB_REPOSITORY,REPOSITORY);
   assert.equal(env.GITHUB_REF,'refs/heads/main');
@@ -91,7 +96,6 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   const publicationEvent=env.GITHUB_EVENT_NAME;
   assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
-  const compatibility=JSON.parse(await readFile(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
   const tag='backend-v'+version;
   const releaseMatches=(await listBackendReleases(token)).filter(item=>item?.tag_name===tag);
   assert.equal(releaseMatches.length,1,'Expected one exact backend release record');
@@ -100,6 +104,10 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
     .filter(item=>item?.ref==='refs/tags/'+tag);
   assert.equal(refMatches.length,1,'Expected one exact backend release tag');
   const tagRef=refMatches[0];
+  if (usePublishedSourceCompatibility) {
+    assert.equal(tagRef.object?.type, 'commit', 'Existing backend tag must directly name its source');
+    assert.equal(tagRef.object.sha, mainSha, 'Existing backend tag/main source mismatch');
+  }
   let receipt=null,mainTree=null;
   if(event==='pull_request'){
     const directory=env.CODEXIA_BACKEND_PROMOTION_DIR;
@@ -117,6 +125,9 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
     assert.equal(receipt.version,version,'Backend build receipt version mismatch');
     assert.equal(receipt.sourceTree,mainTree,'Backend build receipt tree mismatch');
   }
+  const compatibility = usePublishedSourceCompatibility
+    ? publishedBackendCompatibility(mainSha)
+    : JSON.parse(await readFile(new URL('../deploy/update-compatibility.json', import.meta.url), 'utf8'));
   const publication=backendPublicationFromEnvironment(env,mainSha);
   const metadata=assertExistingBackendReleaseBinding(release,tagRef,{image,mainSha,producerSha,version,profile,event,receipt,mainTree,compatibility,publication});
   if(event==='pull_request')assert.equal(metadata.producer.sourceSha,producerSha,'Existing release producer SHA mismatch');

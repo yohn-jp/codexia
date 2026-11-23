@@ -9,7 +9,7 @@ CODEXIA_PROFILE=full pnpm build
 
 ## MCP and approved mutation
 
-These required checks need a disposable PostgreSQL database. The MCP and legacy-inspection tests fail clearly if database configuration is absent; use `CODEXIA_TEST_DATABASE_URL` for this disposable database. A database-dependent skip is not acceptance evidence. For a local run:
+These required checks need a disposable PostgreSQL database. Set `CODEXIA_TEST_DATABASE_URL` to the disposable database. A database-dependent skip is not acceptance evidence. For a local run:
 
 ```sh
 docker run --rm -d --name codexia-integration-postgres \
@@ -28,17 +28,16 @@ CODEXIA_MCP_ACCEPTANCE_MODULES=story,nlp,diagnostics,semantic,speaker,assistant,
 
 This runs production stdio and SDK Streamable HTTP transports against PostgreSQL. It checks scoped native Knowledge access, project/version boundaries, proposal replay, stale-preview rejection, provider non-execution, MCP bearer denial of approval/application, and owner HTTP approval/application with a durable receipt. With the full module set shown here, a separate test also exercises cancellation through the real NLP worker on both transports; a restricted native MCP composition does not require NLP. Partial module proposal approval and retry after Core reconstruction remain covered by `packages/api/src/server.test.ts` and `modules/story/tests/production.acceptance.mjs`. MCP can propose native changes; it cannot grant itself author approval. The provider-admission probe confirms denied Assistant calls make no provider request or usage record.
 
-## Import and derived-state reconstruction
+## Derived-state reconstruction
 
 The Diagnostics production acceptance needs `CODEXIA_TOKENIZER_MODELS_DIR` to point to an external tokenizer cache containing the same pinned `tokenizer.json` and `tokenizer_config.json` at both `Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/` and `Xenova/multilingual-e5-small/`. These tokenizer files are required; model weight files are not. Set the variable before running the command below; without the pinned tokenizer artifacts, the required acceptance is unavailable and must not be reported as passed.
 
 ```sh
 export CODEXIA_TOKENIZER_MODELS_DIR=/path/to/tokenizer-cache
 node --test modules/diagnostics/tests/production.acceptance.mjs
-node --test tests/integration/migration-acceptance.test.mjs
 ```
 
-These checks exercise derived-state reconstruction and read-only legacy inspection through Core review against PostgreSQL. Migration acceptance repeats inspection and proposal submission, checks operation replay receipts after reconnecting to PostgreSQL, preserves an author-maintained Speaker correction and opaque records with both Story enabled and disabled, and compares the legacy Git/files/SQLite sources before and after review and application. The migration package tests also check deterministic operation identity and withholding conflicting producer writes. `packages/migration` is an operator-side conversion tool; the ordinary product import is the portable PostgreSQL work archive described in [Core architecture](../architecture/CORE.md). The integration acceptance does not exercise Git publish, remote commit reconstruction, or Git as runtime persistence. Diagnostics recovery after reopening PostgreSQL remains covered by its production acceptance test. A local fixture round trip does not establish hosted lifecycle behavior.
+The Diagnostics acceptance checks derived-state recovery after reopening PostgreSQL. The [archived converter acceptance](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/tests/integration/migration-acceptance.test.mjs) stays with the historical Git, SQLite and workspace import code. Current [portable work import and export](../authoring-portable.md) are covered by the API and browser acceptance suites.
 
 ## CPU model lifecycle
 

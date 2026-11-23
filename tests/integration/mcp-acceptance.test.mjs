@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,14 +9,14 @@ import { createServer as createNodeServer } from "node:http";
 import test from "node:test";
 
 import { CoreStore } from "../../packages/core/dist/index.js";
-import { MODEL_USAGE_CAPABILITY } from "../../packages/contracts/dist/index.js";
 import { createPostgresPersistence, migratePostgresDatabase } from "../../packages/persistence-postgres/dist/index.js";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 import { createServer } from "../../packages/api/dist/server.js";
-import { HistoricalModelUsageStore } from "../../packages/api/dist/historical-store.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const moduleRequire = createRequire(resolve(root, "modules/mcp/package.json"));
+const apiRequire = createRequire(resolve(root, "packages/api/package.json"));
+const { SignJWT, exportJWK, generateKeyPair } = await import(apiRequire.resolve("jose"));
 const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }] = await Promise.all([
   import(moduleRequire.resolve("@modelcontextprotocol/sdk/client/index.js")),
   import(moduleRequire.resolve("@modelcontextprotocol/sdk/client/stdio.js")),
@@ -34,7 +34,43 @@ const READY_MODULES = (process.env.CODEXIA_MCP_ACCEPTANCE_MODULES ?? "story,nlp,
   .filter(Boolean);
 const DATABASE_URL = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
 if (!DATABASE_URL) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL database for MCP acceptance");
-const ACCESS_TOKEN = randomBytes(32).toString("base64url");
+const FIXTURE_ISSUER = "https://mcp-acceptance.codexia.test/api/auth";
+const FIXTURE_RESOURCE = "https://mcp-acceptance.codexia.test/api";
+const FIXTURE_SUBJECT = "owner";
+const WEB_CLIENT = "acceptance-web";
+const MCP_CLIENT = "acceptance-mcp";
+
+async function createSignedRequests() {
+  const { privateKey, publicKey } = await generateKeyPair("ES256");
+  const jwk = { ...await exportJWK(publicKey), kid: "acceptance-signing-key", alg: "ES256", use: "sig" };
+  const active = new Set();
+  const issue = async (clientId, scope) => {
+    const token = await new SignJWT({ client_id: clientId, azp: clientId, scope })
+      .setProtectedHeader({ alg: "ES256", typ: "at+jwt", kid: jwk.kid })
+      .setIssuer(FIXTURE_ISSUER)
+      .setAudience(FIXTURE_RESOURCE)
+      .setSubject(FIXTURE_SUBJECT)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .setJti(randomUUID())
+      .sign(privateKey);
+    active.add(token);
+    return token;
+  };
+  return { publicJwks: { keys: [jwk] }, isActive: async token => active.has(token), issue };
+}
+
+function clientAdmission(projectIds, publicJwks, isActive) {
+  const verifier = {
+    issuer: FIXTURE_ISSUER, audience: FIXTURE_RESOURCE, ownerSubject: FIXTURE_SUBJECT,
+    jwksUrl: FIXTURE_ISSUER + "/jwks", fetch: async () => Response.json(publicJwks), verifyActiveToken: isActive,
+  };
+  return {
+    betterAuth: { issuer: FIXTURE_ISSUER, audience: FIXTURE_RESOURCE },
+    oauthOwner: { ...verifier, requiredScopes: ["codexia:api"], allowedClientIds: [WEB_CLIENT] },
+    oauthMcp: { ...verifier, allowedClientIds: [MCP_CLIENT], ownerClientIds: [WEB_CLIENT], projectIdsByClient: { [MCP_CLIENT]: projectIds } },
+  };
+}
 
 async function runtimeOptions(cacheDirectory, usageDirectory) {
   const manifests = [];
@@ -61,22 +97,29 @@ async function runtimeOptions(cacheDirectory, usageDirectory) {
     loaders,
     moduleDirectories,
     workerEntries,
-    hostCapabilities: [MODEL_USAGE_CAPABILITY],
-    capabilityProviders: {
-      [MODEL_USAGE_CAPABILITY]: { create: () => new HistoricalModelUsageStore(usageDirectory) },
-    },
     cacheDirectory,
   });
 }
 
-async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted }) {
+async function startAdmissionHost({ cacheDirectory, usageDirectory, assignedProjects }) {
   const databaseUrl = DATABASE_URL;
   await migratePostgresDatabase(databaseUrl);
   const persistence = createPostgresPersistence(databaseUrl);
   const runtime = await runtimeOptions(cacheDirectory, usageDirectory);
   const store = new CoreStore({ persistence });
+  assert.ok(assignedProjects.length > 0, "Standalone MCP requires explicitly assigned fixture projects");
+  for (let offset = 0; offset < assignedProjects.length; offset += 20) {
+    await Promise.all(assignedProjects.slice(offset, offset + 20).map(project => persistence.transaction(tx => tx.createProject(project))));
+  }
+  const signer = await createSignedRequests();
+  const admission = clientAdmission(assignedProjects.map(project => project.id), signer.publicJwks, signer.isActive);
+  const credentials = {
+    owner: await signer.issue(WEB_CLIENT, "codexia:api"),
+    mcp: await signer.issue(MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
+    reader: await signer.issue(MCP_CLIENT, "mcp:read"),
+  };
   const server = createServer({
-    store, persistence, ...(hosted ? { hosted, trustProxy: true } : { authToken: ACCESS_TOKEN }),
+    store, persistence, ...admission,
     staticDir: resolve(root, "app/dist"), runtime, usageDirectory,
     profile: "mcp-admission-acceptance",
   });
@@ -88,7 +131,7 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted }) {
   assert.ok(address && typeof address === "object");
   let closePromise;
   return {
-    base: `http://127.0.0.1:${address.port}`, runtime, store,
+    base: `http://127.0.0.1:${address.port}`, runtime, store, credentials,
     close() {
       closePromise ??= new Promise((resolveClose, rejectClose) => {
         server.close(async (error) => {
@@ -102,10 +145,9 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted }) {
   };
 }
 
-async function apiRequest(host, path, { method = "GET", body, cookie, bearer = false } = {}) {
+async function apiRequest(host, path, { method = "GET", body, accessToken } = {}) {
   const headers = {};
-  if (cookie) headers.Cookie = cookie;
-  if (bearer) headers.Authorization = `Bearer ${ACCESS_TOKEN}`;
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     headers.Origin = host.base;
@@ -123,26 +165,18 @@ async function responseJson(response, label) {
   catch { throw new Error(`${label} returned invalid JSON (HTTP ${response.status})`); }
 }
 
-async function ownerJson(host, cookie, path, { method = "GET", body, status = 200 } = {}) {
-  const response = await apiRequest(host, path, { method, body, cookie });
+async function ownerJson(host, path, { method = "GET", body, status = 200 } = {}) {
+  const response = await apiRequest(host, path, { method, body, accessToken: host.credentials.owner });
   assert.equal(response.status, status, `${method} ${path} should return HTTP ${status}, got ${response.status}`);
   return response.status === 204 ? undefined : responseJson(response, `${method} ${path}`);
 }
 
-async function ownerAction(host, cookie, projectId, actionId, input) {
-  const result = await ownerJson(host, cookie,
+async function ownerAction(host, projectId, actionId, input) {
+  const result = await ownerJson(host,
     `/api/projects/${encodeURIComponent(projectId)}/actions/${encodeURIComponent(actionId)}`,
     { method: "POST", body: { input } });
   assert.equal(result.ok, true, `${actionId} failed: ${JSON.stringify(result.error)}`);
   return result;
-}
-
-async function login(host) {
-  const response = await apiRequest(host, "/api/login", { method: "POST", body: { token: ACCESS_TOKEN } });
-  assert.equal(response.status, 200);
-  const cookie = response.headers.get("set-cookie");
-  assert.ok(cookie, "Owner login did not establish a cookie session");
-  return cookie.split(";", 1)[0];
 }
 
 function success(result, name) {
@@ -158,11 +192,12 @@ function errorCode(result, name) {
   return content.error.code;
 }
 
-async function startStdioClient(host, projectId, token = ACCESS_TOKEN) {
+async function startStdioClient(host, projectId, token = host.credentials.mcp) {
   const environment = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     CODEXIA_API_URL: host.base,
-    CODEXIA_AUTH_TOKEN: token,
+    // The fixture signs the access token locally while the API verifies its claims and assignment.
+    CODEXIA_MCP_ACCESS_TOKEN: token,
     CODEXIA_PROJECT_ID: projectId,
   };
   const transport = new StdioClientTransport({
@@ -177,8 +212,8 @@ async function startStdioClient(host, projectId, token = ACCESS_TOKEN) {
   return { client, transport };
 }
 
-async function startHttpClient(host, projectId, token = ACCESS_TOKEN) {
-  const path = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;
+async function startHttpClient(host, projectId, token = host.credentials.mcp) {
+  const path = `/mcp?projectId=${encodeURIComponent(projectId)}`;
   const transport = new StreamableHTTPClientTransport(new URL(path, host.base), {
     fetch: (input, init) => {
       const headers = new Headers(init?.headers);
@@ -219,13 +254,11 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
     await rm(rootDir, { recursive: true, force: true });
   });
 
-  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory: resolve(rootDir, "host-history") });
-  const cookie = await login(host);
-  const directProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
-    method: "POST", status: 201, body: { title: `Root scene only ${randomUUID()}` },
-  });
-  const mixedProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
-    method: "POST", status: 201, body: { title: `Mixed root and volume scenes ${randomUUID()}` },
+  const directProject = { id: randomUUID(), title: `Root scene only ${randomUUID()}` };
+  const mixedProject = { id: randomUUID(), title: `Mixed root and volume scenes ${randomUUID()}` };
+  host = await startAdmissionHost({
+    cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory: resolve(rootDir, "host-history"),
+    assignedProjects: [directProject, mixedProject],
   });
   const makeScene = async (transaction, projectId, { parentId = null, id = randomUUID(), title, orderKey, markdown, stateEvents = [] }) => {
     await transaction.createDocument({
@@ -257,7 +290,7 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
     payload: { layer: "character-belief", predicate: "knows" }, status: "confirmed",
   });
 
-  const direct = { projectId: directProject.project.id };
+  const direct = { projectId: directProject.id };
   await persistence.transaction(async (transaction) => {
     await addCharacterArtifacts(transaction, direct.projectId);
     direct.firstSceneId = randomUUID();
@@ -270,7 +303,7 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
     });
   });
 
-  const mixed = { projectId: mixedProject.project.id };
+  const mixed = { projectId: mixedProject.id };
   await persistence.transaction(async (transaction) => {
     await addCharacterArtifacts(transaction, mixed.projectId);
     mixed.firstSceneId = randomUUID();
@@ -309,12 +342,12 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
     { ...direct, expectedOrder: 2, expectedDisclosures: ["direct-reader-disclosure"], expectedBody: "Direct-only saved body.\n" },
     { ...mixed, expectedOrder: 3, expectedDisclosures: ["reader-root", "reader-nested"], expectedBody: "Fixed mixed-hierarchy body.\n" },
   ]) {
-    const actionTemporal = await ownerAction(host, cookie, fixture.projectId, "story.world-state.temporal", { sceneId: fixture.targetSceneId });
+    const actionTemporal = await ownerAction(host, fixture.projectId, "story.world-state.temporal", { sceneId: fixture.targetSceneId });
     assert.equal(actionTemporal.data.narrativeOrder, fixture.expectedOrder);
     assert.equal(actionTemporal.data.worldTime, null);
     assert.deepEqual(actionTemporal.data.disclosed.map((fact) => fact.eventId), fixture.expectedDisclosures);
 
-    const actionAuthor = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+    const actionAuthor = await ownerAction(host, fixture.projectId, "story.context.package", {
       sceneId: fixture.targetSceneId, scope: "author", budget: 200_000,
     });
     const authorManuscript = actionAuthor.data.parts.find((part) => part.kind === "manuscript");
@@ -326,13 +359,13 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
     assert.deepEqual(actionAuthor.snapshot, pinnedReader.snapshot);
     assert.equal(authorManuscript.value.revision, pinnedManuscript.revision, "author context is bound to the saved PostgreSQL body revision");
 
-    const actionReader = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+    const actionReader = await ownerAction(host, fixture.projectId, "story.context.package", {
       sceneId: fixture.targetSceneId, scope: "reader", budget: 200_000,
     });
     assert.deepEqual(actionReader.data.parts.map((part) => [part.kind, part.value.eventId]),
       fixture.expectedDisclosures.map((eventId) => ["reader-disclosure", eventId]));
     assert.doesNotMatch(JSON.stringify(actionReader.data), /future-secret|Fixed mixed-hierarchy body|Direct-only saved body/);
-    const actionCharacter = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+    const actionCharacter = await ownerAction(host, fixture.projectId, "story.context.package", {
       sceneId: fixture.targetSceneId, scope: "character", characterId: "char-uma", budget: 200_000,
     });
     assert.equal(actionCharacter.data.parts.some((part) => part.kind === "reader-disclosure" || part.kind === "manuscript"), false);
@@ -401,12 +434,12 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     }
   });
 
-  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
-  const cookie = await login(host);
-  const project = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
-    method: "POST", status: 201, body: { title: `Native MCP ${randomUUID()}` },
+  const projectId = randomUUID();
+  const paginationRows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `MCP pagination ${index}` }));
+  host = await startAdmissionHost({
+    cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory,
+    assignedProjects: [{ id: projectId, title: `Native MCP ${randomUUID()}` }, ...paginationRows],
   });
-  const projectId = project.project.id;
   const sourceId = randomUUID();
   const targetId = randomUUID();
   await persistence.transaction(async tx => {
@@ -511,10 +544,6 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
 
   // Exercise project discovery through the real PostgreSQL-backed MCP client
   // beyond the former single-page boundary.
-  const paginationRows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `MCP pagination ${index}` }));
-  for (let offset = 0; offset < paginationRows.length; offset += 20) {
-    await Promise.all(paginationRows.slice(offset, offset + 20).map((row) => persistence.transaction((tx) => tx.createProject(row))));
-  }
   const projectPage1 = success(await stdio.client.callTool({ name: "list_projects", arguments: { limit: 200 } }), "native MCP project page 1").data;
   assert.equal(projectPage1.projects.length, 200);
   assert.equal(typeof projectPage1.next_cursor, "string");
@@ -522,7 +551,7 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   assert.ok(projectPage2.projects.length > 0);
   const discoveredIds = [...projectPage1.projects, ...projectPage2.projects].map((item) => item.id);
   assert.equal(new Set(discoveredIds).size, discoveredIds.length, "MCP keyset pages must not repeat projects");
-  assert.ok(paginationRows.every((row) => discoveredIds.includes(row.id)), "both MCP pages must expose every project in the >200 fixture");
+  assert.deepEqual(new Set(discoveredIds), new Set([projectId, ...paginationRows.map(row => row.id)]));
 
   for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
     const catalog = await connection.client.listTools();
@@ -534,9 +563,8 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     assert.deepEqual(new Set(nodes.data.map(node => node.id)), new Set([sourceId, targetId]));
   }
 
-  // Standalone owner credentials may select another owned project. Use the actual
-  // Hosted assignment boundary for cross-project and read-only grant checks.
-  const otherProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
+  // The author can create a project outside the external client’s configured assignment.
+  const otherProject = await ownerJson(host, "/api/v1/persistence/projects", {
     method: "POST", status: 201, body: { title: `Other native MCP ${randomUUID()}` },
   });
   const otherProjectId = otherProject.project.id;
@@ -546,31 +574,13 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     attributes: {}, status: "confirmed", expectedVersion: null,
   }));
   const otherVersion = (await persistence.read(reader => reader.getProject(otherProjectId))).version;
-  const assignment = {
-    contractVersion: "scriptorium-platform/v1", instanceId: "native-mcp-acceptance", repositoryId: 123,
-    repositoryLocator: "https://github.com/owner/work", defaultBranchPolicy: "repository-default",
-    runtimeEpoch: 3, imageDigest: `sha256:${"a".repeat(64)}`,
-    compositionManifestDigest: `sha256:${"b".repeat(64)}`, enabledModuleIds: READY_MODULES,
-    credentialBrokerLocator: "https://praetorium.example/internal/github/credential",
-    controlServicePolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/control-jwks.json", audience: "praetorium-runtime-control" },
-    grantPolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json", audience: "https://native-mcp-acceptance.instances.example" },
-  };
-  const readToken = randomBytes(32).toString("base64url");
-  const writeToken = randomBytes(32).toString("base64url");
-  const hosted = await startAdmissionHost({
-    cacheDirectory: resolve(rootDir, "hosted-module-cache"), usageDirectory: resolve(rootDir, "hosted-history"),
-    hosted: { assignment, projectId, authorization: {
-      async authenticate(token, requiredPermission = "read") {
-        if (token !== readToken && token !== writeToken) throw Object.assign(new Error("grant invalid"), { status: 401 });
-        const permissions = token === writeToken ? ["read", "write"] : ["read"];
-        if (!permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
-        return { userId: token === writeToken ? "writer-1" : "reader-1", permissions,
-          repositoryId: assignment.repositoryId, instanceId: assignment.instanceId, runtimeEpoch: assignment.runtimeEpoch,
-          sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000 };
-      },
-    } },
-  });
-  t.after(() => hosted.close());
+  const challenge = await apiRequest(host, "/mcp", { method: "POST", body: { jsonrpc: "2.0", id: 1, method: "initialize" } });
+  assert.equal(challenge.status, 401);
+  assert.equal(challenge.headers.get("www-authenticate"),
+    `Bearer resource_metadata="${new URL(FIXTURE_RESOURCE).origin}/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"`);
+  assert.equal((await apiRequest(host, "/mcp", { accessToken: host.credentials.mcp })).status, 400, "multiple assignments require an explicit project");
+  assert.equal((await apiRequest(host, `/mcp?projectId=${otherProjectId}`, { accessToken: host.credentials.mcp })).status, 404);
+
   const rejectedNode = randomUUID();
   const otherOperation = { type: "knowledge.node.save", command: {
     projectId: otherProjectId, id: rejectedNode, type: "person", name: "Must not be written",
@@ -581,13 +591,17 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     assert.equal(result.isError, true, `${label} unexpectedly succeeded: ${JSON.stringify(result.structuredContent ?? result.content)}`);
     return result;
   };
-  for (const [label, connect, isHttp] of [["stdio", startStdioClient, false], ["Streamable HTTP", startHttpClient, true]]) {
-    const writer = await connect(hosted, projectId, writeToken);
+  const connections = [
+    ["stdio", startStdioClient, false],
+    ["Streamable HTTP", startHttpClient, true],
+  ];
+  for (const [label, connect, isHttp] of connections) {
+    const writer = await connect(host, projectId);
     let reader;
     try {
       const validPreview = success(await writer.client.callTool({
         name: "knowledge.merge.preview", arguments: { source_id: sourceId, target_id: targetId, project_version: projectVersion },
-      }), `${label} Hosted writer preview`);
+      }), `${label} writer preview`);
       assert.equal(validPreview.snapshot.projectId, projectId);
       assert.equal(validPreview.snapshot.projectVersion, projectVersion);
       for (const [tool, args] of [
@@ -603,7 +617,7 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
         ["invoke_action", { action_id: "core.knowledge.propose", input: { projectVersion, idempotencyKey: "wrong-operation-generic", operations: [{ type: "knowledge.merge", command: {} }] } }],
       ]) await rejected(writer, tool, args, `${label} ${tool} boundary`);
 
-      reader = await connect(hosted, projectId, readToken);
+      reader = await connect(host, projectId, host.credentials.reader);
       const read = success(await reader.client.callTool({ name: "knowledge.nodes.list", arguments: { project_version: projectVersion } }), `${label} read-only grant`);
       assert.equal(read.snapshot.projectId, projectId);
       assert.deepEqual(new Set(read.data.map(node => node.id)), new Set([sourceId, targetId]));
@@ -649,20 +663,20 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   assert.equal(detail.data.changeSet.id, changeSet.id);
 
   const forbiddenApproval = await apiRequest(host, `/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/approve`, {
-    method: "POST", bearer: true, body: { expectedVersion: changeSet.version },
+    method: "POST", accessToken: host.credentials.mcp, body: { expectedVersion: changeSet.version },
   });
   assert.equal(forbiddenApproval.status, 403, "external MCP bearer cannot approve a native ChangeSet");
   const forbiddenApply = await apiRequest(host, `/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/apply`, {
-    method: "POST", bearer: true, body: { expectedVersion: changeSet.version },
+    method: "POST", accessToken: host.credentials.mcp, body: { expectedVersion: changeSet.version },
   });
   assert.equal(forbiddenApply.status, 403, "external MCP bearer cannot apply a native ChangeSet");
 
   const approval = await fetch(`${host.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/approve`, {
-    method: "POST", headers: { Cookie: cookie, Origin: host.base, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version }),
+    method: "POST", headers: { Authorization: `Bearer ${host.credentials.owner}`, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version }),
   });
   assert.equal(approval.status, 200, await approval.text());
   const apply = await fetch(`${host.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/apply`, {
-    method: "POST", headers: { Cookie: cookie, Origin: host.base, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version + 1 }),
+    method: "POST", headers: { Authorization: `Bearer ${host.credentials.owner}`, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version + 1 }),
   });
   const appliedBody = await apply.text();
   assert.equal(apply.status, 200, appliedBody);
@@ -779,12 +793,11 @@ test("MCP cancellation stops real NLP worker jobs through stdio and Streamable H
     await rm(rootDir, { recursive: true, force: true });
   });
 
-  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
-  const cookie = await login(host);
-  const project = await ownerJson(host, cookie, "/api/projects", {
-    method: "POST", status: 201, body: { title: "MCP cancellation acceptance" },
+  const projectId = randomUUID();
+  host = await startAdmissionHost({
+    cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory,
+    assignedProjects: [{ id: projectId, title: "MCP cancellation acceptance" }],
   });
-  const projectId = project.id;
   stdio = await startStdioClient(host, projectId);
   http = await startHttpClient(host, projectId);
 
@@ -820,12 +833,11 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
     }
   });
 
-  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
-  const cookie = await login(host);
-  const project = await ownerJson(host, cookie, "/api/projects", {
-    method: "POST", status: 201, body: { title: "MCP admission acceptance" },
+  const projectId = randomUUID();
+  host = await startAdmissionHost({
+    cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory,
+    assignedProjects: [{ id: projectId, title: "MCP admission acceptance" }],
   });
-  const projectId = project.id;
   stdio = await startStdioClient(host, projectId);
   http = await startHttpClient(host, projectId);
 
@@ -851,24 +863,24 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
   }
 
   const bearerAction = await apiRequest(host, `/api/projects/${encodeURIComponent(projectId)}/actions/assistant.future-generation`, {
-    method: "POST", bearer: true, body: { input: {} },
+    method: "POST", accessToken: host.credentials.mcp, body: { input: {} },
   });
   assert.equal(bearerAction.status, 403);
   assert.equal((await responseJson(bearerAction, "direct bearer Assistant action")).code, "external_agent_assistant_denied");
   const bearerHttp = await apiRequest(host, `/api/projects/${encodeURIComponent(projectId)}/modules/assistant/rewrite/stream`, {
-    method: "POST", bearer: true, body: { sceneId: "missing-scene", sentenceIndex: 0 },
+    method: "POST", accessToken: host.credentials.mcp, body: { sceneId: "missing-scene", sentenceIndex: 0 },
   });
   assert.equal(bearerHttp.status, 403);
-  assert.equal((await responseJson(bearerHttp, "direct bearer Assistant HTTP route")).code, "external_agent_assistant_denied");
+  assert.equal((await responseJson(bearerHttp, "direct bearer Assistant HTTP route")).code, "OAUTH_MCP_MODULE_DENIED");
 
   const proposal = success(await stdio.client.callTool({
     name: "invoke_action",
     arguments: { project_id: projectId, action_id: "core.hierarchy.create", input: {
-      kind: "volume", id: "mcp-proposed-volume", title: "Proposed volume", proposalId: "mcp-admission-proposal",
+      kind: "volume", id: "mcp-proposed-volume", title: "Proposed volume", idempotencyKey: "mcp-admission-proposal",
     } },
   }), "MCP Core proposal");
-  assert.equal(proposal.data.proposal.source, "mcp");
+  assert.equal(proposal.data.changeSet.status, "proposed");
+  assert.equal(proposal.data.changeSet.provenance.details.origin, "external-agent");
+  assert.deepEqual(proposal.data.changeSet.operations.map(({ type }) => type), ["document.create"]);
   assert.equal(providerProbe.callCount(), 0, "MCP dispatch and direct bearer paths must not call the configured model provider");
-  const usage = await ownerAction(host, cookie, projectId, "assistant.usage.read", { limit: 200 });
-  assert.deepEqual(usage.data.events, [], "denied Assistant requests must not create provider usage records");
 });

@@ -5,10 +5,10 @@ import { VERIFICATION_LEAF_JOBS } from '../ci-contract.mjs';
 const stamp = input => { const n = Date.parse(input ?? ''); return Number.isFinite(n) ? n : null; };
 const value = input => String(input ?? '').slice(0, 180);
 const elapsed = (a,b) => seconds(a,b);
-const current = (run, job) =>
-  job.conclusion !== 'skipped' &&
+const currentAttempt = (run, job) =>
   (job.run_attempt === undefined || Number(job.run_attempt) === Number(run.run_attempt)) &&
   (Number(run.run_attempt) <= 1 || stamp(job.started_at) >= stamp(run.run_started_at));
+const current = (run, job) => job.conclusion !== 'skipped' && currentAttempt(run, job);
 
 export function readVerifyGraph(source) {
   const graph = [];
@@ -136,10 +136,11 @@ function phase(name) {
 
 export function observeRun(run, jobs, verifySource) {
   const relevant = jobs.filter(job => current(run, job));
+  const visibleJobs = jobs.filter(job => currentAttempt(run, job));
   const timing = summarizeCiTiming(run, jobs);
   const chain = run.name === 'Verify Codexia' ? blockingChain(run, jobs, verifySource) : null;
   const path = new Set(chain?.names ?? []);
-  const observedJobs = relevant.map(job => ({
+  const observedJobs = visibleJobs.map(job => ({
     id: job.id, name: value(job.name), status: job.status, conclusion: job.conclusion,
     createdAt: job.created_at ?? null, startedAt: job.started_at ?? null, completedAt: job.completed_at ?? null,
     queueSeconds: elapsed(job.created_at, job.started_at), durationSeconds: elapsed(job.started_at, job.completed_at),

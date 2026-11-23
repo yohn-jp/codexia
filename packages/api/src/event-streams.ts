@@ -1,9 +1,7 @@
 import type { ServerResponse } from "node:http";
 
-import { scheduleAtDeadline } from "./deadline-timer.js";
-
 export class EventStreams {
-  private readonly streams = new Map<ServerResponse, { cleanup: () => void; end: () => void; expiresAt?: number }>();
+  private readonly streams = new Map<ServerResponse, { cleanup: () => void; end: () => void }>();
 
   constructor(private readonly limit = 100, private readonly heartbeatMs = 30_000) {}
 
@@ -21,30 +19,24 @@ export class EventStreams {
       stream.cleanup();
       return;
     }
-    if (stream.expiresAt !== undefined && stream.expiresAt <= Date.now()) {
-      stream.end();
-      return;
-    }
     // A disconnected consumer can reconnect; never queue additional frames on a slow socket.
     try {
       if (response.writableNeedDrain || !response.write(frame)) this.disconnect(response);
     } catch { this.disconnect(response); }
   }
 
-  open(response: ServerResponse, cacheControl: string, initialFrame?: string, expiresAt?: number): void {
+  open(response: ServerResponse, cacheControl: string, initialFrame?: string): void {
     if (this.full) throw new Error("Event stream capacity exhausted");
     let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let cancelExpiration: (() => void) | undefined;
     const cleanup = () => {
       this.streams.delete(response);
       clearInterval(heartbeat);
-      cancelExpiration?.();
     };
     const end = () => {
       cleanup();
       try { response.end(); } catch { response.destroy(); }
     };
-    this.streams.set(response, { cleanup, end, ...(expiresAt !== undefined ? { expiresAt } : {}) });
+    this.streams.set(response, { cleanup, end });
     response.once("close", cleanup);
     response.once("finish", cleanup);
     response.on("error", () => this.disconnect(response));
@@ -60,9 +52,6 @@ export class EventStreams {
       if (!this.streams.has(response)) return;
       heartbeat = setInterval(() => this.write(response, ": heartbeat\n\n"), this.heartbeatMs);
       heartbeat.unref();
-      if (expiresAt !== undefined) {
-        cancelExpiration = scheduleAtDeadline(expiresAt, end);
-      }
     } catch { this.disconnect(response); }
   }
 

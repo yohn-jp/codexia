@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { NLP_FEATURE_SETTINGS_KEY, parseNlpFeatureSettings } from "@codexia/contracts";
 import type { ActionResult, ChangeOperation, JobRequest, ModuleAction, ModuleContext, ModuleDefinition, ModuleManifest, ModuleActionContext, SnapshotId, ValueSchema } from "@codexia/contracts";
 import type { WorkerService } from "@codexia/contracts";
 import { NLP_TOKENIZER_CAPABILITY, NLP_TOKENIZER_CAPABILITY_VERSION, NLP_TOKEN_COUNTER_CAPABILITY, NLP_TOKEN_COUNTER_CAPABILITY_VERSION, NLP_TOKENIZER_ENGINE_VERSION, NLP_APPROX_TOKEN_COUNTER_VERSION, NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_MODULE_VERSION, type NlpTokenCountBatch, type NlpTokenCounterCapability, type NlpTokenizerCapability } from "./contracts.js";
@@ -36,7 +37,6 @@ const manifest: ModuleManifest = {
 const MAX_TEXT_LENGTH = 1_000_000;
 const SYNONYMS_PATH = "meta/scriptorium/modules/nlp/synonyms.yaml";
 const IGNORED_PATH = "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml";
-const FEATURE_SETTINGS_PATH = "meta/scriptorium/modules/nlp/feature-settings.json";
 
 type ObjectValue = Record<string, unknown>;
 function record(value: unknown, label: string): ObjectValue {
@@ -193,6 +193,14 @@ const featureRegistry = [
 ] as const;
 const externalFeatures = featureRegistry.filter((feature) => feature.locality === "external");
 
+async function readFeatureSettings(context: ModuleActionContext) {
+  if (!context.readOwnModuleRecord) {
+    throw Object.assign(new Error("NLP consent is unavailable for this snapshot"), { code: "snapshot_unavailable" });
+  }
+  const record = await context.readOwnModuleRecord(NLP_FEATURE_SETTINGS_KEY);
+  return { settings: parseNlpFeatureSettings(record?.value ?? {}), version: record?.version ?? null };
+}
+
 function makeActions(moduleContext: ModuleContext): ModuleAction[] {
   return [
     action("nlp.analyze", "compute", { parse: textInput }, async (value, context) => {
@@ -298,17 +306,9 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       return { ok: true, snapshot: context.reader.snapshot, data: { ignored: [...ignored].sort(), proposal } } as ActionResult;
     }),
     action("nlp.features", "read", { parse: emptyInput }, async (_value, context) => {
-      const file = await context.reader.read(FEATURE_SETTINGS_PATH);
-      let settings: ObjectValue = { externalEnabled: {} };
-      if (file) {
-        try { settings = record(JSON.parse(file.content), "NLP feature settings"); }
-        catch (error) { throw new TypeError(`NLP feature settings are invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
-      }
-      const enabled = record(settings.externalEnabled ?? {}, "externalEnabled");
-      // Missing consent is denied. This differs from the source default-on
-      // behavior because the migration contract requires explicit allowance.
-      const features = featureRegistry.map((feature) => ({ ...feature, enabled: feature.locality === "local" || enabled[feature.id] === true }));
-      return { ok: true, snapshot: context.reader.snapshot, data: { features, settings: { ...settings, externalEnabled: enabled } } } as ActionResult;
+      const { settings } = await readFeatureSettings(context);
+      const features = featureRegistry.map((feature) => ({ ...feature, enabled: feature.locality === "local" || settings.externalEnabled[feature.id] === true }));
+      return { ok: true, snapshot: context.reader.snapshot, data: { features, settings } };
     }),
     action("nlp.updateExternalConsent", "propose", { parse: (value) => {
       const input = record(value, "input");
@@ -317,21 +317,15 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       return { externalEnabled: patch as Record<string, boolean> };
     } }, async (value, context) => {
       const input = value as { externalEnabled: Record<string, boolean> };
-      const file = await context.reader.read(FEATURE_SETTINGS_PATH);
-      let current: ObjectValue = {};
-      if (file) {
-        try { current = record(JSON.parse(file.content), "NLP feature settings"); }
-        catch { throw new TypeError("NLP feature settings are invalid JSON"); }
+      if (!context.proposeOwnModuleRecord) {
+        throw Object.assign(new Error("NLP consent proposals are unavailable"), { code: "nlp_consent_proposal_unavailable" });
       }
-      const currentFlags = record(current.externalEnabled ?? {}, "externalEnabled");
-      const next = { ...current, externalEnabled: { ...currentFlags, ...input.externalEnabled } };
-      const content = `${JSON.stringify(next, null, 2)}\n`;
-      const revision = file?.revision ?? null;
-      const proposal = await context.propose([operation(context, FEATURE_SETTINGS_PATH, revision, content, "Update external NLP consent")], [{
-        id: randomUUID(), snapshot: context.reader.snapshot, module: "nlp", kind: "external_nlp_consent_update",
-        paths: [{ path: FEATURE_SETTINGS_PATH, revision }], details: { externalEnabled: input.externalEnabled },
-      }]);
-      return { ok: true, snapshot: context.reader.snapshot, data: { settings: next, proposal } } as ActionResult;
+      const { settings: current, version } = await readFeatureSettings(context);
+      const settings = { ...current, externalEnabled: { ...current.externalEnabled, ...input.externalEnabled } };
+      const changeSet = await context.proposeOwnModuleRecord({
+        key: NLP_FEATURE_SETTINGS_KEY, value: settings, expectedVersion: version, idempotencyKey: randomUUID(),
+      });
+      return { ok: true, snapshot: context.reader.snapshot, data: { settings, changeSet } };
     }),
   ];
 }

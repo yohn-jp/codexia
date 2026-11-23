@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ActionResult, ModuleId } from "@codexia/contracts";
 import type { WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 
@@ -9,11 +10,9 @@ const MAX_RETAINED_JOBS = 500;
 const MAX_RETAINED_INBOX = 200;
 const MAX_STATE_BYTES = 32 * 1024 * 1024;
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
-const MAX_LEGACY_ARCHIVE_BYTES = 128 * 1024 * 1024;
 const JOB_STATUSES = new Set(["queued", "running", "done", "error"]);
 const MODULES = new Set(["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp"]);
 const PUBLIC_JOB_FIELDS = new Set(["id", "type", "status", "progress", "result", "error", "errorCode", "retryable", "createdAt", "updatedAt", "finishedAt"]);
-const LEGACY_JOB_FIELDS = new Set(["id", "type", "status", "progress", "result", "error", "createdAt", "updatedAt", "finishedAt", "projectKey", "userId"]);
 const INBOX_FIELDS = new Set(["id", "kind", "jobId", "jobType", "title", "body", "status", "read", "userId", "projectKey", "createdAt"]);
 
 /** Minimal internal metadata emitted by the runtime; request and result data never enter host history. */
@@ -84,25 +83,6 @@ interface PersistedState {
   legacySources: string[];
 }
 
-export interface LegacyJobHistoryImportOptions {
-  workspaceDataRoot: string;
-  usageDirectory: string;
-  /** Explicit source project key to host-verified stable PostgreSQL project identity mapping. */
-  legacyProjectMappings: Readonly<Record<string, string>>;
-  /** Only source-user to the single current API owner can be adopted. */
-  legacyUserMappings: Readonly<Record<string, "owner">>;
-}
-
-export interface LegacyJobHistoryImportReport {
-  sourceHash: string;
-  bytes: number;
-  archived: true;
-  adoptedJobs: number;
-  adoptedInbox: number;
-  mappingRequired: Array<{ projectKey: string | null; userId: string | null; jobCount: number; inboxCount: number }>;
-  adoptionBlocked?: "adoption_size_limit" | "invalid_json" | "invalid_shape" | "invalid_record" | "history_full";
-}
-
 export class JobHistoryError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -110,22 +90,30 @@ export class JobHistoryError extends Error {
   }
 }
 
+interface JobHistoryPaths {
+  root: string;
+  directory: string;
+  filePath: string;
+}
+
+function jobHistoryPaths(usageDirectory: string): JobHistoryPaths {
+  if (typeof usageDirectory !== "string" || !usageDirectory.trim()) {
+    throw new JobHistoryError("job_history_path_invalid", "A host history directory is required");
+  }
+  const root = resolve(usageDirectory);
+  const directory = join(root, "jobs");
+  return { root, directory, filePath: join(directory, "jobs-state.json") };
+}
+
 /** Durable owner-host history for real module-runtime jobs. Construction performs no I/O. */
 export class JobHistoryStore {
-  private readonly root: string;
-  private readonly directory: string;
-  private readonly filePath: string;
+  private readonly paths: JobHistoryPaths;
   private loaded = false;
   private state: PersistedState = { version: 3, jobs: [], inbox: [], legacySources: [] };
   private serial = Promise.resolve();
 
   constructor(usageDirectory: string) {
-    if (typeof usageDirectory !== "string" || !usageDirectory.trim()) {
-      throw new JobHistoryError("job_history_path_invalid", "A host history directory is required");
-    }
-    this.root = resolve(usageDirectory);
-    this.directory = join(this.root, "jobs");
-    this.filePath = join(this.directory, "jobs-state.json");
+    this.paths = jobHistoryPaths(usageDirectory);
   }
 
   async record(lifecycle: WorkerJobLifecycle): Promise<JobEvent> {
@@ -273,35 +261,35 @@ export class JobHistoryStore {
     });
   }
 
-  async listJobs(projectId?: string): Promise<PublicJob[]> {
+  async listJobs(): Promise<PublicJob[]> {
     return this.exclusive(async () => {
       await this.load();
-      return this.state.jobs.filter((entry) => projectId === undefined || entry.projectKey === projectKeyFor(projectId)).map(({ job }) => clonePublicJob(job)).sort(newestFirst);
+      return this.state.jobs.map(({ job }) => clonePublicJob(job)).sort(newestFirst);
     });
   }
 
-  async getJob(id: string, projectId?: string): Promise<PublicJob | undefined> {
+  async getJob(id: string): Promise<PublicJob | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const record = this.state.jobs.find((entry) => entry.job.id === id && (projectId === undefined || entry.projectKey === projectKeyFor(projectId)));
+      const record = this.state.jobs.find((entry) => entry.job.id === id);
       return record ? clonePublicJob(record.job) : undefined;
     });
   }
 
-  async listInbox(options: { unreadOnly?: boolean; projectId?: string } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
+  async listInbox(options: { unreadOnly?: boolean } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
     return this.exclusive(async () => {
       await this.load();
-      const items = this.state.inbox.filter((item) => (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId)) && (!options.unreadOnly || !item.read))
+      const items = this.state.inbox.filter((item) => !options.unreadOnly || !item.read)
         .map((item) => ({ ...item })).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read && (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId))), 0);
+      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read), 0);
       return { items, unreadCount };
     });
   }
 
-  async markInboxRead(id: string, projectId?: string): Promise<InboxItem | undefined> {
+  async markInboxRead(id: string): Promise<InboxItem | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const index = this.state.inbox.findIndex((item) => item.id === id && (projectId === undefined || item.projectKey === projectKeyFor(projectId)));
+      const index = this.state.inbox.findIndex((item) => item.id === id);
       if (index < 0) return undefined;
       const next = cloneState(this.state);
       const item = next.inbox[index]!;
@@ -312,131 +300,19 @@ export class JobHistoryStore {
     });
   }
 
-  async markAllInboxRead(projectId?: string): Promise<number> {
+  async markAllInboxRead(): Promise<number> {
     return this.exclusive(async () => {
       await this.load();
       const next = cloneState(this.state);
       let marked = 0;
       for (const item of next.inbox) {
-        if (!item.read && (projectId === undefined || item.projectKey === projectKeyFor(projectId))) { item.read = true; marked += 1; }
+        if (!item.read) { item.read = true; marked += 1; }
       }
       if (marked > 0) {
         await this.persist(next);
         this.state = next;
       }
       return marked;
-    });
-  }
-
-  async adoptArchivedLegacyState(
-    sourceHash: string,
-    legacyProjectMappings: Readonly<Record<string, string>>,
-    legacyUserMappings: Readonly<Record<string, "owner">>,
-  ): Promise<LegacyJobHistoryImportReport> {
-    return this.exclusive(async () => {
-      await this.load();
-      if (!/^[a-f0-9]{64}$/u.test(sourceHash)) throw new JobHistoryError("legacy_jobs_source_invalid", "Legacy job archive identity is invalid");
-      const archivePath = join(this.directory, "legacy", `${sourceHash}.json`);
-      const raw = await readPrivateFile(archivePath, MAX_LEGACY_ARCHIVE_BYTES);
-      if (hashBytes(raw) !== sourceHash) throw new JobHistoryError("legacy_jobs_archive_corrupt", "Legacy job archive integrity check failed");
-      const report: LegacyJobHistoryImportReport = {
-        sourceHash, bytes: raw.byteLength, archived: true, adoptedJobs: 0, adoptedInbox: 0, mappingRequired: [],
-      };
-      if (raw.byteLength > MAX_STATE_BYTES) return { ...report, adoptionBlocked: "adoption_size_limit" };
-      let decoded: unknown;
-      try { decoded = JSON.parse(raw.toString("utf8")) as unknown; }
-      catch { return { ...report, adoptionBlocked: "invalid_json" }; }
-      if (!isRecord(decoded) || !hasOnlyKeys(decoded, new Set(["jobs", "inbox"])) ||
-          !Array.isArray(decoded.jobs) || !Array.isArray(decoded.inbox) ||
-          decoded.jobs.length > MAX_RETAINED_JOBS || decoded.inbox.length > MAX_RETAINED_INBOX) {
-        return { ...report, adoptionBlocked: "invalid_shape" };
-      }
-
-      const plannedJobs: StoredJob[] = [];
-      const plannedInbox: InboxItem[] = [];
-      const required = new Map<string, { projectKey: string | null; userId: string | null; jobCount: number; inboxCount: number }>();
-      let invalidRecords = 0;
-      const mapPair = (entry: unknown): { projectKey: string | null; userId: string | null; ownerKey: string; targetProjectKey: string } | undefined => {
-        const projectKey = isRecord(entry) && typeof entry.projectKey === "string" && entry.projectKey.length <= 1024 ? entry.projectKey : null;
-        const userId = isRecord(entry) && typeof entry.userId === "string" && entry.userId.length <= 512 ? entry.userId : null;
-        const repository = projectKey === null ? undefined : ownValue(legacyProjectMappings, projectKey);
-        const ownerMapping = userId === null ? undefined : ownValue(legacyUserMappings, userId);
-        if (!isProjectId(repository) || ownerMapping !== "owner") {
-          const key = JSON.stringify([projectKey, userId]);
-          const row = required.get(key) ?? { projectKey, userId, jobCount: 0, inboxCount: 0 };
-          if (isRecord(entry) && "kind" in entry) row.inboxCount += 1;
-          else row.jobCount += 1;
-          required.set(key, row);
-          return undefined;
-        }
-        return {
-          projectKey, userId, ownerKey: hash("owner"),
-          targetProjectKey: projectKeyFor(repository),
-        };
-      };
-
-      const allJobIds = decoded.jobs.flatMap((entry) => isRecord(entry) && typeof entry.id === "string" ? [entry.id] : []);
-      const ambiguousJobIds = new Set(allJobIds.filter((id, index) => allJobIds.indexOf(id) !== index));
-      const seenJobIds = new Set<string>();
-      for (const entry of decoded.jobs) {
-        if (isRecord(entry) && typeof entry.id === "string" && ambiguousJobIds.has(entry.id)) {
-          invalidRecords += 1;
-          continue;
-        }
-        const mapping = mapPair(entry);
-        if (!mapping) continue;
-        try {
-          const job = normalizeLegacyJob(entry);
-          if (seenJobIds.has(job.id)) throw new JobHistoryError("legacy_job_invalid", "Legacy job IDs must be unique");
-          seenJobIds.add(job.id);
-          const existing = this.state.jobs.find((record) => record.job.id === job.id);
-          const planned = plannedJobs.find((record) => record.job.id === job.id);
-          const duplicate = existing ?? planned;
-          if (duplicate) {
-            if (duplicate.ownerKey !== mapping.ownerKey || duplicate.projectKey !== mapping.targetProjectKey ||
-                JSON.stringify(duplicate.job) !== JSON.stringify(job)) throw new JobHistoryError("legacy_job_conflict", "Legacy job ID conflicts with retained host history");
-          } else plannedJobs.push({ kind: "legacy", ownerKey: mapping.ownerKey, projectKey: mapping.targetProjectKey, job });
-        } catch { invalidRecords += 1; }
-      }
-      const allInboxIds = decoded.inbox.flatMap((entry) => isRecord(entry) && typeof entry.id === "string" ? [entry.id] : []);
-      const ambiguousInboxIds = new Set(allInboxIds.filter((id, index) => allInboxIds.indexOf(id) !== index));
-      const seenInboxIds = new Set<string>();
-      for (const entry of decoded.inbox) {
-        if (isRecord(entry) && typeof entry.id === "string" && ambiguousInboxIds.has(entry.id)) {
-          invalidRecords += 1;
-          continue;
-        }
-        const mapping = mapPair(entry);
-        if (!mapping) continue;
-        try {
-          const item = normalizeLegacyInboxItem(entry, mapping.targetProjectKey);
-          if (seenInboxIds.has(item.id)) throw new JobHistoryError("legacy_inbox_invalid", "Legacy inbox IDs must be unique");
-          seenInboxIds.add(item.id);
-          const existing = this.state.inbox.find(({ id }) => id === item.id);
-          const planned = plannedInbox.find(({ id }) => id === item.id);
-          const duplicate = existing ?? planned;
-          if (duplicate) {
-            if (JSON.stringify(duplicate) !== JSON.stringify(item)) throw new JobHistoryError("legacy_inbox_conflict", "Legacy inbox ID conflicts with retained host history");
-          } else plannedInbox.push(item);
-        } catch { invalidRecords += 1; }
-      }
-      report.mappingRequired = [...required.values()].sort((a, b) =>
-        (a.projectKey ?? "").localeCompare(b.projectKey ?? "") || (a.userId ?? "").localeCompare(b.userId ?? ""));
-      if (invalidRecords > 0) return { ...report, adoptionBlocked: "invalid_record" };
-      const next = cloneState(this.state);
-      next.jobs.push(...plannedJobs);
-      next.inbox.push(...plannedInbox);
-      pruneJobs(next.jobs);
-      if (next.jobs.length > MAX_RETAINED_JOBS || next.inbox.length > MAX_RETAINED_INBOX) {
-        return { ...report, adoptionBlocked: "history_full" };
-      }
-      if (!next.legacySources.includes(sourceHash)) next.legacySources.push(sourceHash);
-      if (Buffer.byteLength(JSON.stringify(next), "utf8") > MAX_STATE_BYTES) return { ...report, adoptionBlocked: "history_full" };
-      if (plannedJobs.length || plannedInbox.length || next.legacySources.length !== this.state.legacySources.length) {
-        await this.persist(next);
-        this.state = next;
-      }
-      return { ...report, adoptedJobs: plannedJobs.length, adoptedInbox: plannedInbox.length };
     });
   }
 
@@ -453,100 +329,112 @@ export class JobHistoryStore {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    let rootExists = false;
-    try { await assertPrivateDirectory(this.root); rootExists = true; }
-    catch (error) { if (!isCode(error, "ENOENT")) throw error; }
-    if (!rootExists) { this.loaded = true; return; }
-    try { await assertPrivateDirectory(this.directory); }
-    catch (error) { if (isCode(error, "ENOENT")) { this.loaded = true; return; } throw error; }
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      handle = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const info = await handle.stat();
-      if (!info.isFile() || info.size > MAX_STATE_BYTES || (info.mode & 0o077) !== 0) historyCorrupt();
-      const decoded: unknown = JSON.parse(await handle.readFile("utf8"));
+    const decoded = await readInstalledState(this.paths);
+    if (decoded !== undefined) {
       const recovered = normalizeState(decoded);
       if (orphanRunningJobs(recovered)) await this.persist(recovered);
       this.state = recovered;
-      this.loaded = true;
-    } catch (error) {
-      if (isCode(error, "ENOENT")) { this.loaded = true; return; }
-      if (error instanceof JobHistoryError) throw error;
-      throw new JobHistoryError("job_history_corrupt", "Host job history cannot be read safely");
-    } finally {
-      await handle?.close().catch(() => undefined);
     }
+    this.loaded = true;
   }
 
   private async persist(next: PersistedState): Promise<void> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    await assertPrivateDirectory(this.root);
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await assertPrivateDirectory(this.directory);
-    await syncDirectory(this.root);
-    const serialized = `${JSON.stringify(next)}\n`;
-    if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) {
-      throw new JobHistoryError("job_history_full", "Host job history exceeds its storage limit");
-    }
-    const temporary = join(this.directory, `.tmp-${randomBytes(16).toString("hex")}`);
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      await handle.writeFile(serialized, "utf8");
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      try {
-        await rename(temporary, this.filePath);
-      } catch (error) {
-        if (!isCode(error, "EEXIST")) throw error;
-        throw new JobHistoryError("job_history_write_failed", "Host job history could not be atomically replaced");
-      }
-      await syncDirectory(this.directory);
-    } finally {
-      await handle?.close().catch(() => undefined);
-      await unlink(temporary).catch(() => undefined);
-    }
+    await writeInstalledState(this.paths, serializeState(next));
   }
 }
 
-/** Archive and selectively adopt the legacy job file without modifying its source. */
-export async function importLegacyJobHistory(options: LegacyJobHistoryImportOptions): Promise<LegacyJobHistoryImportReport> {
-  if (!options.workspaceDataRoot?.trim() || !options.usageDirectory?.trim()) {
-    throw new JobHistoryError("legacy_jobs_path_invalid", "Legacy and host history directories are required");
+/** Readiness check for the installed format. Runtime recovery is deferred to the live store. */
+export async function assertCurrentJobHistory(usageDirectory: string): Promise<void> {
+  const state = await readInstalledState(jobHistoryPaths(usageDirectory));
+  if (state !== undefined) normalizeState(state);
+}
+
+export type JobHistoryMaintenanceReport =
+  | { status: "ready"; version: 3 | null; migrated: boolean }
+  | { status: "maintenance_required"; version: 1 | 2; migrated: false };
+
+/** Convert installed job history while the API is stopped. This never resumes or marks jobs. */
+export async function maintainJobHistory(usageDirectory: string, mode: "check" | "apply"): Promise<JobHistoryMaintenanceReport> {
+  const paths = jobHistoryPaths(usageDirectory);
+  const state = await readInstalledState(paths);
+  if (state === undefined) return { status: "ready", version: null, migrated: false };
+  if (!isRecord(state)) historyCorrupt();
+  const { version } = state;
+  if (version !== 1 && version !== 2) {
+    normalizeState(state);
+    return { status: "ready", version: 3, migrated: false };
   }
-  if (!isRecord(options.legacyProjectMappings) || !isRecord(options.legacyUserMappings)) {
-    throw new JobHistoryError("legacy_jobs_mapping_invalid", "Explicit legacy project and owner mappings are required");
+  if (!hasOnlyKeys(state, new Set(["version", "jobs", "inbox", "legacySources"])) || !Array.isArray(state.jobs) ||
+      state.jobs.length > MAX_RETAINED_JOBS) historyCorrupt();
+  const jobs = state.jobs.map((entry: unknown) => {
+    if (!isRecord(entry) || !hasOnlyKeys(entry, new Set(["ownerKey", "projectKey", "job"]))) historyCorrupt();
+    return { kind: "worker", ...entry };
+  });
+  const migrated = {
+    version: 3, jobs, inbox: state.inbox,
+    legacySources: version === 1 && !Object.hasOwn(state, "legacySources") ? [] : state.legacySources,
+  };
+  normalizeState(migrated);
+  const serialized = serializeState(migrated);
+  if (mode === "check") return { status: "maintenance_required", version, migrated: false };
+  await writeInstalledState(paths, serialized);
+  return { status: "ready", version: 3, migrated: true };
+}
+
+async function readInstalledState({ root, directory, filePath }: JobHistoryPaths): Promise<unknown> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    await assertPrivateDirectory(root);
+    await assertPrivateDirectory(directory);
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_STATE_BYTES || (info.mode & 0o077) !== 0) historyCorrupt();
+    const bytes = await handle.readFile();
+    if (bytes.length > MAX_STATE_BYTES) historyCorrupt();
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)) as unknown;
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return undefined;
+    if (error instanceof JobHistoryError) throw error;
+    throw new JobHistoryError("job_history_corrupt", "Host job history cannot be read safely");
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
-  const workspaceDataRoot = resolve(options.workspaceDataRoot);
-  const usageDirectory = resolve(options.usageDirectory);
-  if (isWithin(workspaceDataRoot, usageDirectory) || isWithin(usageDirectory, workspaceDataRoot)) {
-    throw new JobHistoryError("legacy_jobs_path_invalid", "Legacy jobs must be archived outside the disposable workspace data root");
+}
+
+function serializeState(state: unknown): string {
+  const serialized = `${JSON.stringify(state)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) {
+    throw new JobHistoryError("job_history_full", "Host job history exceeds its storage limit");
   }
-  const workspaceInfo = await lstat(workspaceDataRoot);
-  if (!workspaceInfo.isDirectory() || workspaceInfo.isSymbolicLink()) {
-    throw new JobHistoryError("legacy_jobs_path_invalid", "Legacy workspace data root must be a real directory");
+  return serialized;
+}
+
+async function writeInstalledState({ root, directory, filePath }: JobHistoryPaths, serialized: string): Promise<void> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(root);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(directory);
+  await syncDirectory(root);
+  const temporary = join(directory, `.tmp-${randomBytes(16).toString("hex")}`);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    await handle.chmod(0o600);
+    await handle.writeFile(serialized, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    try {
+      await rename(temporary, filePath);
+    } catch (error) {
+      if (!isCode(error, "EEXIST")) throw error;
+      throw new JobHistoryError("job_history_write_failed", "Host job history could not be atomically replaced");
+    }
+    await syncDirectory(directory);
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
   }
-  const sourceDirectory = join(workspaceDataRoot, "app-state");
-  await assertPrivateDirectory(sourceDirectory);
-  const sourceBytes = await readPrivateFile(join(sourceDirectory, "jobs-state.json"), MAX_LEGACY_ARCHIVE_BYTES);
-  const sourceHash = hashBytes(sourceBytes);
-  const historyRoot = usageDirectory;
-  const jobsDirectory = join(historyRoot, "jobs");
-  const legacyDirectory = join(jobsDirectory, "legacy");
-  await mkdir(historyRoot, { recursive: true, mode: 0o700 });
-  await assertPrivateDirectory(historyRoot);
-  await mkdir(jobsDirectory, { recursive: true, mode: 0o700 });
-  await assertPrivateDirectory(jobsDirectory);
-  await mkdir(legacyDirectory, { recursive: true, mode: 0o700 });
-  await assertPrivateDirectory(legacyDirectory);
-  await syncDirectory(historyRoot);
-  await syncDirectory(jobsDirectory);
-  const targetPath = join(legacyDirectory, `${sourceHash}.json`);
-  await archiveImmutable(targetPath, legacyDirectory, sourceBytes);
-  return new JobHistoryStore(historyRoot).adoptArchivedLegacyState(
-    sourceHash, options.legacyProjectMappings, options.legacyUserMappings,
-  );
 }
 
 function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { projectId: string } {
@@ -572,41 +460,6 @@ function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { projectId: s
   return {
     jobId, module, task, snapshot: normalizedSnapshot, state: value.state, createdAt, updatedAt, startedAt, finishedAt,
     ...(errorCode ? { errorCode } : {}), projectId,
-  };
-}
-
-function normalizeLegacyJob(value: unknown): PublicJob {
-  if (!isRecord(value) || !hasOnlyKeys(value, LEGACY_JOB_FIELDS) ||
-      (value.userId !== null && (typeof value.userId !== "string" || value.userId.length > 512)) ||
-      typeof value.projectKey !== "string" || value.projectKey.length > 1024) historyCorrupt();
-  const { projectKey: _projectKey, userId: _userId, ...publicFields } = value;
-  const job = normalizePublicJob(publicFields);
-  if (job.status === "queued" || job.status === "running") {
-    job.status = "error";
-    job.error ??= "プロセス再起動により中断されました";
-    job.updatedAt = new Date().toISOString();
-    job.finishedAt = job.updatedAt;
-  }
-  return job;
-}
-
-function normalizeLegacyInboxItem(value: unknown, projectKey: string): InboxItem {
-  if (!isRecord(value) || !hasOnlyKeys(value, INBOX_FIELDS) || value.kind !== "job-complete" ||
-      (value.status !== "done" && value.status !== "error") || typeof value.read !== "boolean" ||
-      (value.userId !== null && (typeof value.userId !== "string" || value.userId.length > 512)) ||
-      typeof value.projectKey !== "string" || value.projectKey.length > 1024) historyCorrupt();
-  return {
-    id: boundedText(value.id, 1, 128, /^[A-Za-z0-9_-]+$/u, "legacy inbox ID"),
-    kind: "job-complete",
-    jobId: boundedText(value.jobId, 1, 128, /^[A-Za-z0-9_-]+$/u, "legacy inbox job ID"),
-    jobType: boundedText(value.jobType, 1, 160, /^[A-Za-z0-9._:-]+$/u, "legacy inbox job type"),
-    title: boundedString(value.title, 1, 4_096, "legacy inbox title"),
-    body: boundedString(value.body, 0, 16_384, "legacy inbox body"),
-    status: value.status,
-    read: value.read,
-    userId: "owner",
-    projectKey,
-    createdAt: timestamp(value.createdAt, "legacy inbox createdAt"),
   };
 }
 
@@ -677,17 +530,22 @@ function pruneJobs(jobs: StoredJob[]): void {
 }
 
 function normalizeState(value: unknown): PersistedState {
+  if (isRecord(value) && (value.version === 1 || value.version === 2)) {
+    const tool = fileURLToPath(new URL("./maintain-job-history.js", import.meta.url));
+    throw new JobHistoryError("job_history_maintenance_required",
+      `Host job history requires offline maintenance. Stop the API and run node ${tool} --check with CODEXIA_USAGE_DIR set.`);
+  }
   if (!isRecord(value) || !hasOnlyKeys(value, new Set(["version", "jobs", "inbox", "legacySources"])) ||
-      (value.version !== 1 && value.version !== 2 && value.version !== 3) || !Array.isArray(value.jobs) || !Array.isArray(value.inbox) ||
+      value.version !== 3 || !Array.isArray(value.jobs) || !Array.isArray(value.inbox) ||
       value.jobs.length > MAX_RETAINED_JOBS || value.inbox.length > MAX_RETAINED_INBOX ||
-      (value.version !== 1 && !Array.isArray(value.legacySources))) historyCorrupt();
+      !Array.isArray(value.legacySources)) historyCorrupt();
   const jobs: StoredJob[] = value.jobs.map((entry) => {
-    const fields = value.version === 3 ? new Set(["kind", "ownerKey", "projectKey", "job"]) : new Set(["ownerKey", "projectKey", "job"]);
+    const fields = new Set(["kind", "ownerKey", "projectKey", "job"]);
     if (!isRecord(entry) || !hasOnlyKeys(entry, fields) ||
         typeof entry.ownerKey !== "string" || !/^[a-f0-9]{64}$/u.test(entry.ownerKey) ||
         typeof entry.projectKey !== "string" || !/^[a-f0-9]{64}$/u.test(entry.projectKey) || !isRecord(entry.job) ||
         !hasOnlyKeys(entry.job, PUBLIC_JOB_FIELDS)) historyCorrupt();
-    const kind = value.version === 3 ? entry.kind : "worker";
+    const kind = entry.kind;
     if (kind !== "worker" && kind !== "domain" && kind !== "legacy") historyCorrupt();
     const job = normalizePublicJob(entry.job);
     return { kind, ownerKey: entry.ownerKey, projectKey: entry.projectKey, job };
@@ -699,11 +557,10 @@ function normalizeState(value: unknown): PersistedState {
   }
   const inbox = value.inbox.map((entry) => normalizeInboxItem(entry));
   if (new Set(inbox.map(({ id }) => id)).size !== inbox.length) historyCorrupt();
-  const legacySourcesRaw: unknown[] = value.version !== 1 && Array.isArray(value.legacySources) ? value.legacySources : [];
-  const legacySources = value.version !== 1 ? legacySourcesRaw.map((source) => {
+  const legacySources = value.legacySources.map((source: unknown) => {
     if (typeof source !== "string" || !/^[a-f0-9]{64}$/u.test(source)) historyCorrupt();
     return source;
-  }) : [];
+  });
   if (new Set(legacySources).size !== legacySources.length) historyCorrupt();
   return { version: 3, jobs, inbox, legacySources };
 }
@@ -842,10 +699,6 @@ function isProjectId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(value);
 }
 
-function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
-  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
-}
-
 function projectKeyFor(projectId: string): string {
   return hash(`postgres-project\0${projectId}`);
 }
@@ -859,53 +712,6 @@ function hasOnlyKeys(value: Record<string, unknown>, fields: ReadonlySet<string>
 }
 
 function hash(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
-
-function hashBytes(value: Buffer): string { return createHash("sha256").update(value).digest("hex"); }
-
-function isWithin(base: string, target: string): boolean {
-  const path = relative(base, target);
-  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !/^[A-Za-z]:/u.test(path));
-}
-
-async function readPrivateFile(path: string, maxBytes: number): Promise<Buffer> {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = await handle.stat();
-    if (!info.isFile() || info.size > maxBytes || (info.mode & 0o077) !== 0) {
-      throw new JobHistoryError("legacy_jobs_file_invalid", "Job history file must be a private, bounded regular file");
-    }
-    return await handle.readFile();
-  } catch (error) {
-    if (error instanceof JobHistoryError) throw error;
-    throw new JobHistoryError("legacy_jobs_file_unavailable", "Job history file cannot be read safely");
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-async function archiveImmutable(targetPath: string, directory: string, bytes: Buffer): Promise<void> {
-  const temporary = join(directory, `.legacy-${randomBytes(16).toString("hex")}`);
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    try {
-      await link(temporary, targetPath);
-    } catch (error) {
-      if (!isCode(error, "EEXIST")) throw error;
-      const retained = await readPrivateFile(targetPath, MAX_LEGACY_ARCHIVE_BYTES);
-      if (!retained.equals(bytes)) throw new JobHistoryError("legacy_jobs_archive_conflict", "Immutable job archive identity already contains different bytes");
-    }
-    await syncDirectory(directory);
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporary).catch(() => undefined);
-  }
-}
 
 function historyCorrupt(): never {
   throw new JobHistoryError("job_history_corrupt", "Host job history contains invalid metadata");

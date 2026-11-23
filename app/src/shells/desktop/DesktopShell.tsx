@@ -19,7 +19,7 @@ function describeFailure(reason: unknown): string {
 
 /** Desktop manuscript surface; panels and commands remain owned by the shared workspace. */
 export function DesktopShell({
-  header, desktopActions, documentTitle, documentContext, library, editor, tools, status, renderStatus, hosted,
+  header, desktopActions, documentTitle, documentContext, library, editor, tools, status, renderStatus,
   onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel,
 }: ApplicationShellProps) {
   const [switching, setSwitching] = useState(false);
@@ -61,7 +61,7 @@ export function DesktopShell({
           </div>
           <div className="st-studio-masthead-actions">
             {desktopActions}
-            <IdentityManagementPanel placement="desktop" hosted={hosted} />
+            <IdentityManagementPanel placement="desktop" />
             <div className="st-studio-header-slot">{header}</div>
             <button type="button" className="st-studio-mobile-link" onClick={() => void switchToMobile()} disabled={switching}>
               {switching ? "切替中" : "モバイル ↗"}

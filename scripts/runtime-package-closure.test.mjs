@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, writeFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { productionClosure, pruneToProductionClosure } from './runtime-package-closure.mjs';
+import { productionClosure } from './runtime-package-closure.mjs';
 
-test('hosted pruning retains only the actual transitive package closure and removes excluded native packages', async () => {
+test('runtime dependency audit follows the same transitive symlinks as Node', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codexia-runtime-closure-'));
   const nodeModules = path.join(root, 'node_modules');
   const store = path.join(nodeModules, '.pnpm');
@@ -57,11 +57,6 @@ test('hosted pruning retains only the actual transitive package closure and remo
     assert.deepEqual(new Set([...expected.values()].map(({ name }) => name)), new Set([
       '@codexia/api', 'runtime-leaf', 'runtime-deep',
     ]));
-    await pruneToProductionClosure(nodeModules, expected);
-
-    assert.equal(await lstat(excluded).then(() => true, () => false), false);
-    assert.equal(await lstat(path.join(nodeModules, 'onnxruntime-node')).then(() => true, () => false), false);
-    assert.equal(await lstat(path.join(store, 'onnxruntime-node@1.0.0')).then(() => true, () => false), false);
     const requireFromApplication = createRequire(path.join(root, 'application.cjs'));
     assert.equal(requireFromApplication('@codexia/api'), 'production dependency reached');
   } finally {

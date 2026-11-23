@@ -3,7 +3,7 @@ import test from "node:test";
 import { ApiError } from "../api.js";
 import { messageOf } from "./error-message.js";
 
-test("only Hosted admission 401s are presented as expired browser sessions", () => {
+test("only API admission 401s are presented as expired browser sessions", () => {
   const dependencyFailure = new ApiError("GitHub credential provider is unavailable", 401, "git_credential_unavailable");
   assert.equal(messageOf(dependencyFailure), "GitHub credential provider is unavailable");
 

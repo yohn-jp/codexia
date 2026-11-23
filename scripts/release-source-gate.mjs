@@ -77,10 +77,21 @@ async function readVerifiedPushBase(run, runId, repository, token) {
 
 const main = async () => {
   const [component, ...rest] = process.argv.slice(2);
-  assert.ok(['frontend','backend'].includes(component) && rest.length === 0, 'Specify frontend or backend');
+  assert.ok(['frontend', 'backend', 'backend-deployment'].includes(component) && rest.length === 0, 'Specify a release gate');
   const root = fileURLToPath(new URL('../', import.meta.url));
   const git = (...args) => execFileSync('git', args, { cwd:root, encoding:'utf8', timeout:60_000 });
   const checkoutSha = git('rev-parse','HEAD').trim();
+  if (component === 'backend-deployment') {
+    assert.equal(checkoutSha, process.env.CODEXIA_VERIFIED_MAIN_SHA, 'Deployment checkout differs from the certified main revision');
+    const currentMain = git('rev-parse', 'refs/remotes/origin/main').trim();
+    const current = selectReleaseSource('backend', checkoutSha, currentMain, git, null).affected;
+    appendFileSync(process.env.GITHUB_OUTPUT, `current=${current}\n`);
+    if (!current) {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+        `Skipped certified backend ${checkoutSha} because main ${currentMain} has newer backend inputs.\n`);
+    }
+    return;
+  }
   const run = verifiedReleaseEvent(JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')),process.env,checkoutSha);
   const runId = Number(process.env.CODEXIA_VERIFY_RUN_ID);
   git('fetch', '--no-tags', 'origin', 'refs/heads/main');

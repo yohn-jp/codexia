@@ -1,10 +1,10 @@
 # Headless Tree adoption — Outline integration contract
 
-Status: implementation in progress. This document records the agreed scope; it is not evidence of a working integration.
+Status: accepted feature design / implementation to be verified. This document records the agreed scope, not evidence of working integration. The [user screen transitions](USER-SCREEN-FLOW.md) and [system design](../architecture/SYSTEM-DESIGN.md) govern outline navigation, manuscript protection and scope.
 
 ## Decision
 
-Use Headless Tree as the sole tree interaction engine for the React/TypeScript Outline shared by desktop Web and iOS WebView. Do not mount React Aria Tree in the same hierarchy. Reuse existing Radix primitives for contextual controls.
+Use Headless Tree as the sole tree interaction engine for the Desktop React Web Outline. Do not mount React Aria Tree in the same React hierarchy. Native SwiftUI uses a separate outline UI over the same API document hierarchy; see [iOS design](../architecture/IOS-SWIFTUI-ARCHITECTURE.md).
 
 ## Authority and ownership
 
@@ -20,7 +20,7 @@ Use Headless Tree as the sole tree interaction engine for the React/TypeScript O
 2. Integrate Headless Tree's tree instance and feature configuration into the existing Outline panel. Preserve existing keyboard selection and accessible move controls; add inline rename/search only where consistent with current API contracts.
 3. Adapt move/reorder intent into existing Core/API mutation contracts. The current `editStructure` targets the active document: introduce an explicit target-document command, guarded by version checks, before enabling arbitrary-node DnD. Never treat optimistic UI as committed persistence.
 4. Add derived Markdown heading items under each document only after B-type document hierarchy passes acceptance. Heading activation scrolls within the selected document; it must not invoke document mutation.
-5. Verify mobile touch interactions in Safari/WKWebView (long-press, scroll, drag, software keyboard), iPad pointer/keyboard, desktop keyboard and screen reader behavior.
+5. Verify Desktop keyboard/pointer and screen-reader behavior. SwiftUI outline touch/VoiceOver/keyboard is independently verified on real iOS devices; Mobile React WebView tests are not a release gate.
 
 ## Acceptance
 
@@ -33,4 +33,4 @@ Use Headless Tree as the sole tree interaction engine for the React/TypeScript O
 
 ## Non-goals
 
-No new hierarchy table, no Swift/SwiftUI implementation, no second tree engine, no automatic Markdown section rearrangement, and no replacement of existing editor or persistence contracts.
+No new hierarchy table, no second React tree engine, no automatic Markdown section rearrangement or editor/persistence replacement. This Desktop Web workstream does not implement SwiftUI.

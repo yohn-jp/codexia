@@ -37,7 +37,7 @@ export function resolveTokenCountConfiguration(
   options: { modelId?: string; modelsDir?: string } = {},
 ): TokenCountConfiguration {
   const backend = (environment.ARCADIA_TOKENIZER_BACKEND ?? "").toLowerCase() === "approx" ? "approx" : "auto";
-  const modelId = options.modelId?.trim() || environment.ARCADIA_TOKENIZER_MODEL?.trim() || environment.ARCADIA_LLM_MODEL?.trim();
+  const modelId = options.modelId?.trim() || environment.ARCADIA_TOKENIZER_MODEL?.trim();
   const modelsDir = options.modelsDir ?? environment.CODEXIA_TOKENIZER_MODELS_DIR ?? join(homedir(), ".arcadia", "models");
   const safeModelId = isSafeHuggingFaceModelId(modelId) ? modelId : undefined;
   if (backend === "approx") return { backend, ...(safeModelId ? { modelId: safeModelId } : {}), modelsDir, fallbackReason: "backend_approx" };

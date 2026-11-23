@@ -1,13 +1,13 @@
 # CI Observatory — GitHub Pages timing dashboard
 
-Status: **implemented as read-only observability; the first live Actions collection and Pages deployment require a main-branch run**. This page does not certify, shorten or replace required checks.
+CI Observatory displays a bounded sample of public GitHub Actions metadata inside the development portal. The selected PR, full executed SHA and observation time identify the source of each result. See the [CI screen design](../design/DEVELOPMENT-PAGES-UX.md#5-ci分析のux).
 
 ## Deployment and ownership
 
 - Single publishing authority: [Repository Audit Pages](../../.github/workflows/repository-audit.yml). The CI dashboard is bundled at **/ci/** inside its existing Pages artifact. No second Pages publisher or competing root site.
 - Triggers are unchanged: main push or manual workflow dispatch, plus the existing audit PR preview. **No schedule and no workflow_run trigger.** The static bundle contains no captured run data.
 - Existing Pages upload/deploy actions and the **github-pages** environment are reused. Pages Source must be GitHub Actions.
-- The packaging workflow needs only **contents: read**. The browser requests public Actions metadata directly from GitHub's unauthenticated API; no token or private data is published, and no PR code executes in the workflow.
+- The packaging workflow needs only **contents: read**. The browser requests public Actions metadata directly from GitHub's unauthenticated API.
 - Published URL: the repository's configured Pages base plus **/ci/** (typically https://yohn-jp.github.io/codexia/ci/ unless a custom domain is configured).
 - Data is fetched when a visitor opens **/ci/**, so it reflects current public run metadata without publishing a generated data file. The browser bounds the request to two run-inventory pages and 20 selected workflows; each workflow's job history is capped at two pages.
 
@@ -19,6 +19,8 @@ Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [ana
 2. Group by PR number and executed `run.head_sha`. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound the display to 20 PR revisions and 20 workflow runs to stay within GitHub's unauthenticated API rate limit. If the workflow cap cuts a group, keep Verify visible, mark the group as truncated, and exclude it from comparable history. Mark truncated history.
 3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the view on incomplete job pagination; never infer skipped or cancelled work as successful validation.
 4. Only public run/job/step metadata is held in the browser for display. No downloaded logs, tokens, artifacts or executable PR code.
+
+The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` while it remains in the observation window. Each workflow links to its recorded run. Expanding a job shows its recorded steps, including steps with unavailable timing.
 
 ## Bottleneck attribution (first-attempt successful Verify only)
 
@@ -32,7 +34,7 @@ Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [ana
 
 ## Copyable diagnostic JSON
 
-The sole additional UI action is **診断JSONをコピー**. It copies a complete,
+**診断JSONをコピー** copies a complete,
 source-bound `codexia-ci-diagnostics/v1` JSON document for the selected PR revision
 using the browser's HTTPS clipboard API. It adds no alternate publisher, file export,
 GitHub token, new API fetch, CI task or certification gate. Copy failure is reported,
@@ -91,7 +93,7 @@ The sample does **not** establish all required checks: bounded history can omit 
 
 Pure changes under **scripts/ci-dashboard/**, **scripts/ios/** and **app/native/**, or to the iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
 
-The unsigned IPA workflow runs for native-related PR changes or manual dispatch, and moves to **xcode-27 ARM64** and **iOS 27.0 minimum**. React + Ionic + Capacitor remain the architecture; Swift/SwiftUI do not replace the editor. A native unsigned archive does not prove Simulator acceptance, Apple signing, Keychain or physical installation. See [iOS client contract](../deployment/IOS-CLIENT.md).
+The unsigned IPA workflow runs for native-related PR changes or manual dispatch, and moves to **xcode-27 ARM64** and **iOS 27.0 minimum**. **Adopted target: Desktop React Web + native SwiftUI iOS with UIKit/TextKit editor.** Current Ionic/Capacitor IPA packaging is legacy until SwiftUI-specific CI replaces it; Mobile React viewport E2E is not a native release gate. A native unsigned archive does not prove Simulator acceptance, Apple signing, Keychain or physical installation. See [iOS client contract](../deployment/IOS-CLIENT.md).
 
 ## Local checks
 
@@ -108,4 +110,4 @@ mkdir -p /tmp/codexia-audit-site
 node scripts/ci-dashboard/collect.mjs /tmp/codexia-audit-site --preview
 ~~~
 
-If GitHub's public telemetry API is unavailable or rate-limited, the page displays an unavailable state without affecting the separate audit portal. The browser client renders job names as text and permits only constrained GitHub run URLs.
+If GitHub's public telemetry API is unavailable or rate-limited, the page shows the error with a retry control and a link to GitHub Actions. The browser client renders job names as text and permits only constrained GitHub run URLs.

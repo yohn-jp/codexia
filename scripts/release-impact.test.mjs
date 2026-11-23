@@ -23,6 +23,7 @@ test('lifecycle-only changes do not request a backend production release', () =>
     'docs/deployment/PUSH-DEPLOYMENT.md',
     'docs/deployment/IAC.md',
     'scripts/push-app-lifecycle.mjs',
+    'scripts/oci-better-auth-fixture.sh',
   ]) {
     assert.equal(componentReleaseAffected('backend', [path]), false, path);
   }

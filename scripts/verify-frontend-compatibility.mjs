@@ -4,6 +4,8 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { hasStandaloneOAuthIdentity } from './backend-update-identity.mjs';
+import { compareComponentVersions } from './component-release-version.mjs';
 import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from './identity-probe-client.mjs';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
@@ -37,22 +39,6 @@ export function frontendPreflightOutputs(identity) {
   return {frontendVersion:identity.version,frontendSourceSha:identity.sourceSha,frontendProfile:identity.profile,frontendApiEpoch:String(identity.apiEpoch)};
 }
 
-/** @param {string} version */
-function versionParts(version) {
-  assert.ok(typeof version === 'string' && semver.test(version), 'Frontend version is invalid');
-  return version.split('.').map(BigInt);
-}
-
-/** @param {string} left @param {string} right */
-export function compareFrontendVersions(left, right) {
-  const a = versionParts(left);
-  const b = versionParts(right);
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
-  }
-  return 0;
-}
-
 /**
  * Returns true when this exact release may replace the currently deployed UI.
  * An identical version/source retry is observed and recorded without replacing assets.
@@ -62,7 +48,7 @@ export function compareFrontendVersions(left, right) {
 export function assertFrontendReleaseAdmission(deployed, candidate) {
   assertFrontendIdentity(deployed);
   assertFrontendIdentity(candidate);
-  const order = compareFrontendVersions(candidate.version, deployed.version);
+  const order = compareComponentVersions(candidate.version, deployed.version);
   assert.ok(order >= 0, `Frontend release ${candidate.version} is older than deployed frontend ${deployed.version}`);
   if (order === 0) {
     assert.equal(candidate.sourceSha, deployed.sourceSha, `Frontend version ${candidate.version} is immutable and belongs to a different source`);
@@ -78,7 +64,7 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
 export function assertBackendIdentity(backend) {
   assert.ok(record(backend), 'Live backend identity is invalid');
   if (backend.name !== 'codexia') throw new Error('Live backend identity name is invalid');
-  if (backend.hosted !== false) throw new Error('Live backend must be standalone');
+  if (!hasStandaloneOAuthIdentity(backend)) throw new Error('Live backend must declare standalone OAuth identity');
   assert.ok(typeof backend.version === 'string' && semver.test(backend.version), 'Live backend version is invalid');
   assert.ok(['core', 'full'].includes(backend.profile), 'Live backend profile is invalid');
   assert.ok(Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0, 'Live backend API epoch is missing or invalid');

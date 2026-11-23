@@ -1,5 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
-import { createWritingFixture, expectDeviceDraft, manuscriptEditor, readManuscriptMarkdown, readPersistenceDrafts } from "./postgres-fixture";
+import type { Page } from "@playwright/test";
+import { expect, test, type AuthorizeAuthor } from "./author-oauth-fixture";
+import { expectDeviceDraft, manuscriptEditor, openWritingProject, readManuscriptMarkdown, readPersistenceDrafts, seedWritingProject, type WritingFixture } from "./postgres-fixture";
+
+async function openFixtureScene(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile", fixture: WritingFixture) {
+  const author = await openWritingProject(authorizeAuthor, page, shell, fixture.project, fixture.scene);
+  const pathname = `/${shell}/projects/${fixture.project.id}/scenes/${fixture.scene.id}`;
+  await expect(page).toHaveURL(url => url.pathname === pathname);
+  return author;
+}
 
 function duplicateHeadingManuscript(): string {
   return [
@@ -49,14 +57,15 @@ async function flushDeferredHeadingEffects(page: Page): Promise<void> {
   await page.clock.runFor(5_000);
 }
 
-test("desktop outline keyboard navigation reaches the second duplicate heading without writes", async ({ page }) => {
-  expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
-  await page.clock.install();
+test("desktop outline keyboard navigation reaches the second duplicate heading without writes", async ({ page, authorizeAuthor }) => {
+  const author = await authorizeAuthor("desktop");
   const markdown = duplicateHeadingManuscript();
   const storedMarkdown = markdown.replaceAll("\n", "\r\n");
-  const fixture = await createWritingFixture(page, "desktop", `Outline headings ${crypto.randomUUID()}`, storedMarkdown);
+  const fixture = await seedWritingProject(author.fetch, author.origin, "Outline headings", storedMarkdown);
+  await page.clock.install();
+  const currentAuthor = await openFixtureScene(authorizeAuthor, page, "desktop", fixture);
   const path = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
-  const before = await page.request.get(path);
+  const before = await currentAuthor.fetch(path);
   expect(before.ok()).toBe(true);
   const revisionId = (await before.json()).revision.id;
   const writes = observeWrites(page, fixture.project.id);
@@ -72,19 +81,19 @@ test("desktop outline keyboard navigation reaches the second duplicate heading w
   await page.getByRole("button", { name: "読む", exact: true }).click();
   await expect(page.getByRole("button", { name: "編集へ戻る", exact: true })).toBeVisible();
   await flushDeferredHeadingEffects(page);
-  const after = await page.request.get(path);
+  const after = await currentAuthor.fetch(path);
   expect(after.ok()).toBe(true);
   expect((await after.json()).revision).toMatchObject({ id: revisionId, markdown: storedMarkdown });
 });
 
-test("switching documents protects the draft and derives headings from the newly active document", async ({ page }) => {
-  expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
-  const fixture = await createWritingFixture(page, "desktop", `Outline draft protection ${crypto.randomUUID()}`, "Original first document.");
+test("switching documents protects the draft and derives headings from the newly active document", async ({ page, authorizeAuthor }) => {
+  const author = await authorizeAuthor("desktop");
+  const fixture = await seedWritingProject(author.fetch, author.origin, "Outline draft protection", "Original first document.");
   const markdown = duplicateHeadingManuscript();
-  const created = await page.request.post(
-    new URL(`/api/v1/persistence/projects/${fixture.project.id}/documents`, page.url()).toString(),
+  const created = await author.fetch(
+    `/api/v1/persistence/projects/${fixture.project.id}/documents`,
     {
-      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+      method: "POST", headers: { Origin: author.origin, "Idempotency-Key": crypto.randomUUID() },
       data: { kind: "scene", title: "Another document with headings", orderKey: "c", markdown },
     },
   );
@@ -99,7 +108,7 @@ test("switching documents protects the draft and derives headings from the newly
     }
     return route.continue();
   });
-  await page.goto(new URL(`/desktop/projects/${fixture.project.id}/scenes/${fixture.scene.id}`, page.url()).toString());
+  await openFixtureScene(authorizeAuthor, page, "desktop", fixture);
   const firstDraft = "Unsaved first document draft.";
   await fillExactDraft(page, firstDraft);
   const otherDocumentButton = page.locator(`.pg-outline-item[data-document-id="${other.id}"] > .pg-outline-row > .pg-outline-document`);
@@ -122,11 +131,12 @@ test("switching documents protects the draft and derives headings from the newly
 test.describe("mobile touch outline heading navigation", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
-  test("touch selection reaches the second duplicate heading without writes", async ({ page }) => {
-    expect(process.env.CODEXIA_E2E_DATABASE_URL, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
-    await page.clock.install();
+  test("touch selection reaches the second duplicate heading without writes", async ({ page, authorizeAuthor }) => {
+    const author = await authorizeAuthor("mobile");
     const markdown = duplicateHeadingManuscript();
-    const fixture = await createWritingFixture(page, "mobile", `Outline headings ${crypto.randomUUID()}`, markdown);
+    const fixture = await seedWritingProject(author.fetch, author.origin, "Outline headings", markdown);
+    await page.clock.install();
+    await openFixtureScene(authorizeAuthor, page, "mobile", fixture);
     const writes = observeWrites(page, fixture.project.id);
     await page.getByRole("button", { name: "構成", exact: true }).tap();
     await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeVisible();

@@ -19,7 +19,10 @@ const files = new Map([
   ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml", "id: sc-2\ntitle: 朝の港\norder: 2\nmanuscript: manuscript/vol-1/ch-1/sc-2.md\n"],
   ["manuscript/vol-1/ch-1/sc-1.md", "夜の駅。\n"],
   ["manuscript/vol-1/ch-1/sc-2.md", "朝の港。\n"],
-  ["meta/scriptorium/modules/publishing/episodes.yaml", YAML.stringify({
+]);
+const episodeRecord = {
+  version: 3,
+  value: { version: 1, document: {
     episodes: [{
       id: "episode-1",
       number: 1,
@@ -30,11 +33,31 @@ const files = new Map([
       sceneIds: ["sc-1"],
       futureEpisodeField: { retained: true },
     }],
-  })],
-]);
+  } },
+};
 
 class Reader {
   snapshot = snapshot;
+  nativeStoryDocuments = [
+    ["volume", "plot/volumes/vol-1/volume.yaml"],
+    ["chapter", "plot/volumes/vol-1/chapters/ch-1/chapter.yaml"],
+    ["scene", "plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml"],
+    ["scene", "plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml"],
+  ].map(([kind, metadataPath], documentOrder) => {
+    const metadataContent = files.get(metadataPath);
+    const metadata = YAML.parse(metadataContent);
+    return {
+      id: metadata.id,
+      kind,
+      title: metadata.title,
+      orderKey: String(metadata.order),
+      metadataPath,
+      metadataRevision: createHash("sha256").update(metadataContent).digest("hex"),
+      metadataContent,
+      documentOrder,
+      metadata,
+    };
+  });
   async read(path) {
     const content = files.get(path);
     return content === undefined ? null : {
@@ -80,10 +103,14 @@ const actionContext = {
   listActions: async () => [],
   linkedReader: async () => reader,
   signal: new AbortController().signal,
-  propose: async (operations, evidence) => {
-    const proposal = { id: `proposal-${proposals.length + 1}`, snapshot, operations, source: "module", ...(evidence ? { evidence } : {}) };
+  propose: async () => assert.fail("episode editing should use native proposals"),
+  readOwnModuleRecord: async (key) => {
+    assert.equal(key, "episodes");
+    return episodeRecord;
+  },
+  proposeOwnModuleRecord: async (proposal) => {
     proposals.push(proposal);
-    return proposal;
+    return { id: `proposal-${proposals.length}`, projectId };
   },
   runJob: async () => ({ ok: false, id: "unused", snapshot, error: { code: "unused", message: "unused", retryable: false } }),
 };
@@ -148,8 +175,9 @@ try {
   await page.getByRole("button", { name: "レビューに保存" }).click();
   await page.getByRole("status").waitFor();
   assert.equal(proposals.length, 1, "the browser submitted one real publishing proposal");
-  const write = proposals[0].operations[0].writes[0];
-  const saved = YAML.parse(write.content).episodes[0];
+  assert.equal(proposals[0].key, "episodes");
+  assert.equal(proposals[0].expectedVersion, 3);
+  const saved = proposals[0].value.document.episodes[0];
   assert.equal(Object.hasOwn(saved, "publishedAt"), false, "clearing the date in the rendered UI removes it from metadata");
   assert.equal(Object.hasOwn(saved, "sceneIds"), false, "unchecking the last scene in the rendered UI removes its annotation");
   assert.deepEqual(saved.futureEpisodeField, { retained: true });

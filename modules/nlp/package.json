@@ -18,11 +18,7 @@
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
     },
-    "./worker": "./dist/worker.js",
-    "./migration": {
-      "types": "./dist/migration.d.ts",
-      "import": "./dist/migration.js"
-    }
+    "./worker": "./dist/worker.js"
   },
   "files": [
     "dist"
@@ -34,7 +30,6 @@
   },
   "dependencies": {
     "@codexia/contracts": "workspace:*",
-    "@codexia/migration": "workspace:*",
     "lindera-wasm-nodejs-ipadic": "2.0.0",
     "yaml": "^2.9.1",
     "react": "^19.3.1",

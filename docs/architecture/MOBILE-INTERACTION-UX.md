@@ -1,30 +1,15 @@
-# Mobile writing interactions — Codexia
+# iOS native writing interactions
 
-The Ionic React mobile shell is selected by the explicit `/mobile/` route. Desktop and mobile share PostgreSQL authoring, approval and recovery services.
+**Accepted SwiftUI target; implementation and physical-device acceptance unverified.** This document supersedes Ionic React Mobile Web interactions. See [Native iOS architecture](IOS-SWIFTUI-ARCHITECTURE.md), [User flows](../design/USER-SCREEN-FLOW.md) and [UX contract](../design/UX-CONTRACT.md).
 
-## Intended moment
+| Step | Native interaction and outcome |
+| --- | --- |
+| Resume | Load authorized project/document and reconcile the protected native journal with server Revision/receipt |
+| Write | UIKit UITextView/TextKit 2 owns Japanese marked text, caret, selection, undo, layout and scrolling. SwiftUI updates do not replace pending composition |
+| Refer | Native SwiftUI sheet/popover displays Outline/Knowledge/Save details without destroying the editor buffer; leaving the document requires the protection guard |
+| Return | Back/dismiss preserves the work context and safe focus; closing an animation does not prove save |
+| Change scene | Protect pending local edits first; refuse navigation when protection fails |
+| Background/relaunch | Recover local draft and unknown operation identity, distinguish unsaved from confirmed PostgreSQL revision |
+| Conflict | Preserve draft, base revision and operation identity; explicit author decision, never force-overwrite |
 
-A writer resumes a recoverable Japanese draft, checks which scene comes next, inspects durability state, then continues the same sentence. Supporting information should be available **without first leaving or unmounting the active manuscript**.
-
-| Stage | User action | Interaction and authoritative outcome |
-| --- | --- | --- |
-| Write | Type/convert/select Japanese text | CodeMirror keeps native IME, caret, selection, undo and scrolling. No custom swipe handlers are attached to manuscript content. |
-| Refer | Tap **構成を参照** or **保存状態を参照** above the Mobile bottom navigation | First run the existing `beforeLayoutChange` flush/recovery preflight. Only on success open an Ionic sheet, leaving `Workspace` and `SceneEditor` mounted. |
-| Expand | Swipe the Ionic sheet's handle | Native Ionic breakpoints are 0, 0.56, 0.88 and 1. A visible Close button and tab/keyboard navigation are equivalent access paths. |
-| Inspect | Show the Core-owned Outline or Inspector panel in the sheet | Only registered panels are rendered. Inspector also displays the controller's real journal protection / pending DB write / uncertain result / confirmed PostgreSQL Revision. No false saved state is inferred. |
-| Continue | Close the sheet by button, backdrop, hardware back or dragging to 0 | No document route or editor mount changes. Focus returns to the invoking button if the same scene/view is still active; the editor caret remains with CodeMirror, and the keyboard is not reopened by surprise. |
-| Change scene | Tap a scene in the outline | Reuse existing guarded scene navigation; close the sheet after the actual document route changes. Do not claim success from the sheet animation. |
-| Blocked | Preflight detects incomplete composition or unprotected draft | Keep the sheet closed, preserve the text, show an actionable error on the writing screen, and allow an ordinary retry after the user resolves the condition. |
-
-## Gesture ownership
-
-- **Manuscript:** editing, selection, vertical scroll, IME and existing reader swipe gestures remain with CodeMirror / MobileReadingPager / browser.
-- **Sheet:** Ionic owns drag-to-snap, dismiss, modal focus trap and back-button behavior. The writing screen does not install competing global touch listeners.
-- **Bottom navigation:** ordinary explicit tap targets remain for library, writing, inspection, tools and settings. The sheet is a temporary glance, not a second canonical workspace or persisted panel placement.
-- **Soft keyboard:** Mobile may shrink chrome only when the editor is focused and the visible viewport loses substantial height; tiny browser-bar changes, orientation and pinch zoom do not by themselves select a different frontend. Hiding navigation is visual only; the editor and recovery controller remain mounted.
-
-## Evidence boundaries
-
-Source-level implementation is in `MobileShell.tsx`, `mobile.css` and `mobileKeyboard.ts`. Unit checks cover keyboard-occlusion predicates. Browser acceptance additions cover a real draft across sheet open/tab switch/dismiss, and scene selection through the sheet. A composition-denial scenario checks that the modal does not open while its preflight rejects the transition.
-
-Device acceptance must exercise physical keyboards, IME, long-press, haptics and native gestures as appropriate. Browser automation proves its named browser and viewport cases; source review does not establish physical-device behavior. See [verification](../verification/README.md).
+SwiftUI owns presentation, the native authoring coordinator owns client recovery, and the Fastify/Core/API owns authorization, mutation and canonical storage. Verify physical-iPhone Japanese IME, keyboard, safe area, VoiceOver, long-text typing latency, memory and scroll hitches. Mobile React viewport/Ionic/WKWebView E2E is not accepted native evidence or a future release gate. Retire those legacy tests at the code cutover.

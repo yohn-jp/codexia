@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readCanonicalSnapshotEntities } from "./canonicalSnapshot.js";
 import { aggregateCandidateTerms, extractCompoundNounsWithReading } from "./candidateDiscovery.js";
 import { expandSearchTerms, suggestTermVariants } from "./termVariants.js";
 import type { Token } from "./tokenizer/types.js";
@@ -19,6 +20,67 @@ test("candidate aggregation preserves source reading, per-entity occurrence coun
     { id: "scene-1", tokenizedTexts: [firstText] },
   ], new Set(["大河"]));
   assert.deepEqual(candidates, [{ term: "銀河", reading: "ギンカワ", sourceEntityIds: ["character-1", "scene-1"], occurrenceCount: 3 }]);
+});
+
+test("candidate discovery only reads native manuscript bodies linked by the pinned hierarchy", async () => {
+  const metadataPath = "plot/volumes/root/scenes/scene-a.yaml";
+  const manuscriptPath = "documents/native-a.md";
+  const privateNotePath = "documents/private-note.md";
+  const missingPath = "bible/locations/missing.yaml";
+  const entities = await readCanonicalSnapshotEntities({
+    snapshot: { projectId: "project-a", projectVersion: 8 },
+    nativeStoryDocuments: [{
+      id: "scene-a", kind: "scene", title: "夜更け", orderKey: "01", documentOrder: 0,
+      metadataPath, metadataRevision: "scene-v8", metadataContent: "manuscript: documents/native-a.md\n",
+      metadata: { manuscript: manuscriptPath },
+    }],
+    async list(prefix) {
+      if (prefix === "documents") assert.fail(`do not enumerate unlinked documents such as ${privateNotePath}`);
+      return prefix === "bible" ? [missingPath] : [];
+    },
+    async read() { assert.fail("the pinned file selection uses the available batch reader"); },
+    async readMany(paths: readonly string[]) {
+      assert.deepEqual(paths, [missingPath, manuscriptPath]);
+      return [null, { content: "銀河が見える。", revision: "manuscript-v8", documentKind: "scene" }];
+    },
+  }, new AbortController().signal);
+
+  assert.deepEqual(entities.map(({ id, type, filePath, body }) => ({ id, type, filePath, body })), [
+    { id: "doc-native-a", type: "scene", filePath: manuscriptPath, body: "銀河が見える。" },
+    { id: "scene-a", type: "scene", filePath: metadataPath, body: undefined },
+  ]);
+});
+
+test("candidate discovery stops after an aborted bounded snapshot read", async () => {
+  const controller = new AbortController();
+  const paths = Array.from({ length: 33 }, (_, index) => `bible/lore/record-${String(index).padStart(2, "0")}.yaml`);
+  const fetched: string[][] = [];
+  const request = readCanonicalSnapshotEntities({
+    snapshot: { projectId: "project-a", projectVersion: 8 },
+    async list(prefix) { return prefix === "bible" ? paths : []; },
+    async read() { assert.fail("the scanner must not fall back or start another file after batch cancellation"); },
+    async readMany(selected: readonly string[]) {
+      fetched.push([...selected]);
+      controller.abort();
+      return selected.map(() => null);
+    },
+  }, controller.signal);
+  await assert.rejects(request, { code: "job_cancelled" });
+  assert.deepEqual(fetched, [paths.slice(0, 32)]);
+});
+
+test("candidate discovery does not infer native manuscripts when the pinned hierarchy is empty", async () => {
+  const unexpectedPath = "documents/unlinked.md";
+  const entities = await readCanonicalSnapshotEntities({
+    snapshot: { projectId: "project-a", projectVersion: 9 },
+    async list(prefix) { return prefix === "documents" ? [unexpectedPath] : []; },
+    async read(path) {
+      assert.notEqual(path, unexpectedPath, "an unlinked document is not part of the candidate corpus");
+      return null;
+    },
+  }, new AbortController().signal);
+
+  assert.deepEqual(entities, []);
 });
 
 test("term variants prefer a known canonical term even when an unknown variant is more frequent", () => {

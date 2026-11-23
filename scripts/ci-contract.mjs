@@ -1,12 +1,12 @@
 // Canonical verification inventory: workflow matrices, coverage and release eligibility share these names.
 export const WORKSPACES = [
-  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api'].map(id => ({ id, path: `packages/${id}` })),
+  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].map(id => ({ id, path: `packages/${id}` })),
   { id: 'app', path: 'app' },
   ...['story', 'nlp', 'diagnostics', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'].map(id => ({ id, path: `modules/${id}` })),
 ];
 export const UNIT_TARGETS = [...WORKSPACES, { id: 'root', path: '.' }];
 export const TYPECHECK_TARGETS = [
-  { id: 'foundations', workspaces: ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration'] },
+  { id: 'foundations', workspaces: ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime'] },
   { id: 'core-api', workspaces: ['core', 'api'] },
   { id: 'app', workspaces: ['app'] },
   { id: 'modules-a', workspaces: ['story', 'nlp', 'diagnostics', 'semantic', 'speaker'] },
@@ -21,14 +21,12 @@ export const BROWSER_SHARDS = [
   ...['core', 'outline-headings', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
   { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
-export const NATIVE_SELECTIONS = ['catalog', 'core', 'selected', 'full'];
 export const VERIFICATION_TASKS = [
   ...UNIT_TARGETS.map(({ id }) => `unit-${id}`),
   ...TYPECHECK_TARGETS.map(({ id }) => `typecheck-${id}`),
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
-  ...NATIVE_SELECTIONS.map(id => `hosted-native-${id}`),
   'coverage',
 ];
 // Execution groups batch work without removing any validation obligation.
@@ -36,7 +34,7 @@ export const VERIFICATION_TASKS = [
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
-  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api', 'root'].map(id => `unit-${id}`),
+  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
   'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
@@ -51,14 +49,13 @@ export const VERIFICATION_GROUPS = {
     [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
     [`browser-${profile}-webkit`, ['webkit', 'ui-v1', 'auth-recovery', 'oauth-web', 'passkey-bootstrap'].map(id => `browser-${profile}-${id}`)],
   ])),
-  ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };
 // A single dependency authority for profile artifact consumers and certification.
 /** @param {string} group */
 export function requiredBuildProfile(group) {
   if (group.startsWith('browser-')) return group.split('-')[1];
-  if (NATIVE_SELECTIONS.filter(id => id !== 'catalog').some(id => group === `hosted-native-${id}`)) return 'full';
   return null;
 }
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
+export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'unit', 'types', 'build', 'oci', 'browser']);

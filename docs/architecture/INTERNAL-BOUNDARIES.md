@@ -2,20 +2,24 @@
 
 > This is a normative architecture contract, not an audit log or implementation-status report. It defines the desired responsibility boundaries regardless of branch, release or verification date. Execution evidence belongs in tests, Issues, PRs and verification records.
 
+System-level ownership and authority are defined by [System design](SYSTEM-DESIGN.md) and [Documentation authority](DOCUMENTATION-AUTHORITY.md); implementation is checked against those contracts, not treated as their source.
+
 ## 1. Authority and architectural decision
 
 This contract refines the internal implementation boundaries of [Core](CORE.md), [Codexia reboot](CODEXIA-REBOOT-RFC.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical persistence, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.
 
-**Decision:** retain one PostgreSQL manuscript authority, one browser recovery authority, one HTTP admission boundary and one shared authoring coordinator. Presentation and module algorithms consume these boundaries without owning competing writers.
+**Decision:** retain one PostgreSQL manuscript authority and one HTTP admission boundary. Desktop React Web owns its browser recovery and Web authoring coordinator; SwiftUI iOS owns its protected native draft journal and Swift coordinator. They implement the same API/Revision/receipt invariants **without sharing React state or creating a second server writer**. See [native design](IOS-SWIFTUI-ARCHITECTURE.md).
 
 ### Dependency direction
 
 ```text
-DesktopShell / MobileShell / Workspace
-                 |
-Shared PostgreSQL authoring and recovery coordinator
-       |                         |
-IndexedDB draft journal      typed HTTP client
+DesktopShell / Workspace                 SwiftUI / UIKit TextKit editor
+            |                                        |
+Web authoring coordinator                     Swift authoring coordinator
+       |             |                           |             |
+IndexedDB journal  Web typed client       Native draft journal  Swift typed client
+       |             |                           |             |
+       +-------------+---------------------------+-------------+
                                  |
                       authenticated API admission
                                  |
@@ -26,11 +30,11 @@ IndexedDB draft journal      typed HTTP client
 
 ## 2. Invariants every refactor preserves
 
-1. **Canonical data:** PostgreSQL holds projects, hierarchy, immutable document revisions, Knowledge, Evidence, Text Anchors and module records. IndexedDB holds recoverable local drafts. Layouts, caches and analysis indexes are not manuscript authorities.
+1. **Canonical data:** PostgreSQL holds projects, hierarchy, immutable document revisions, Knowledge, Evidence, Text Anchors and module records. Desktop IndexedDB and iOS protected native files hold recoverable drafts, not authoritative manuscripts. Layouts, caches and analysis indexes are not manuscript authorities.
 2. **Durability:** input, journaled draft, in-flight write and confirmed database revision are distinct. An optimistic UI transition is not a save receipt.
 3. **Concurrency:** mutations require project authorization, exact revision/version preconditions and stable operation identities. Module proposals require authenticated author approval. No automatic prose merge or hidden mutation.
 4. **Recoverability:** retries retain operation identity, generation, project/author scope and proposal bindings. Abort, response loss, conflicts, IndexedDB failure and container replacement never silently discard recovery records.
-5. **Foreground correctness:** CodeMirror input/IME remains immediately authoritative. Slow network, background refresh, deferred rendering and stale navigation responses cannot replace current input.
+5. **Foreground correctness:** Desktop CodeMirror and native iOS TextKit buffers remain immediately authoritative for locally pending edits. Slow network, background refresh, deferred rendering and stale navigation responses cannot replace current input.
 6. **Profiles and trust:** Core authoring has no optional model dependency. Built-in modules remain trusted; worker supervision is not a third-party security sandbox.
 7. **Verification truth:** checks apply to the submitted source revision. Missing, skipped, stale or blocked validation is not passing evidence. Keep the canonical CI inventory, coverage detection, exact-source certification and gated release requirements.
 
@@ -42,11 +46,11 @@ A 409 conflict preserves the current draft for explicit author recovery. A lost 
 
 ## 4. Shared authoring coordinator and presentation
 
-`SharedApplication` is the composition root for authoring behavior, not a place to implement a second copy of each service. It owns only the active author/work/editor session, navigation generation, coordination of recovery, network observation and commands exposed to Desktop and Mobile.
+`SharedApplication` is the Desktop Web React composition root, not a shared runtime for SwiftUI. The independent Swift native authoring coordinator implements the same API save/receipt/recovery contract without importing React state.
 
 - Keep the existing synchronous editor/session reference and bounded deferred React publication: render state is a projection, not a second write authority.
 - Extract **presentation-only** sections (library/outline, document/inspector, status/recovery visibility, and available panels) into small components receiving explicit data and callbacks. A component extracted solely for its line count is not an improvement.
-- Keep the existing Desktop and Mobile entrypoints and distinct Shell implementations. Sharing behavior must not collapse touch/keyboard and desktop interactions into a viewport-switched component.
+- Retain Desktop React Web. Retire the React Mobile entrypoint/Capacitor authoring implementation at the native cutover. Do not introduce viewport-switched React Mobile authoring or require SwiftUI to reuse Web components.
 - Keep journal reconciliation and navigation guards owned once. If a self-contained application hook is extracted, it must not duplicate the session, timers, abort signals, author scope or polling across hooks.
 - Workspace layout and module panels consume permission-checked host contributions; they do not own manuscript durability, write receipts, database transactions or revision authority.
 
@@ -69,9 +73,9 @@ Document and module revisions, project version fences, scope membership guards a
 
 ## 7. API admission stays centralized
 
-Fastify's shared request handler remains the admission boundary for authentication, Hosted authorization, CSRF/origin checks, quiesce/drain, request cancellation, activity accounting and error serialization. Domain handlers may be isolated **inside** this boundary when a specific behavior change is proven; route-table fragmentation or a second authorization adapter is not part of internal maintainability work.
+Fastify's shared request handler remains the admission boundary for Better Auth authentication, author and MCP project authorization, CSRF/origin checks, lifecycle draining, request cancellation, activity accounting and error serialization. Domain handlers may be isolated **inside** this boundary when a specific behavior change is proven; route-table fragmentation or a second authorization adapter is not part of internal maintainability work.
 
-Hosted authorization dependency outages must remain distinguishable from authentication failures (502/503 versus 401/403), and previously successful JSON responses must continue to be validated at the browser boundary. Neither concern warrants weakening authorization or duplicating validators.
+OAuth verification and introspection outages fail closed. The browser continues to validate successful JSON responses at its API boundary.
 
 ## 8. Verification authority
 
@@ -82,12 +86,12 @@ Hosted authorization dependency outages must remain distinguishable from authent
 | Boundary | Executable proof required |
 | --- | --- |
 | Revision protocol | Normal and recovery entrypoints use one effect sequence; injected failures at journal/propose/approve/save/receipt/cleanup preserve recovery, ID and scope; lost response is reconcilable; existing real browser/Core durability tests pass |
-| Shared authoring UI | Desktop and Mobile use the same session and authorized commands without shared layout; editor/IME, scene-navigation generations, replay after reload, panel unmount and error/status visibility retain their behavior in real browser cases |
+| Client authoring split | Desktop Web and native iOS separately prove editing, journal, scope, API receipt and conflict recovery. Desktop browser E2E and iOS physical-device tests are distinct; Mobile React viewport E2E is not a target |
 | Built-in registration | Type derives from one canonical value; Runtime and DTO guard accept exactly the known built-ins; all supported profiles, manifests and CI registrations are checked for omissions and extras; Core-only closure stays clean |
 | Core pure helpers | Golden operation/proposal digests, serialized records, stale preconditions, replay, conflict, path safety and one-writer semantics match the prior behavior and acceptance fixtures |
 | CI workspace preparation | Independent unit-target preparation remains valid if root test orchestration is reordered without semantic change; current CI inventory, all gates, exact-source attestation and release-policy deny cases still pass |
 
-Run focused assertions at each changed boundary before full integrated verification. Report source SHA, commands, test outcomes and conditional skips precisely. A typecheck or a green historical run is not an executed browser, hosted deployment, release or model acceptance.
+Run focused assertions at each changed boundary before full integrated verification. Report source SHA, commands, test outcomes and conditional skips precisely. Browser, deployment, release and model acceptance require their own executed checks.
 
 ## 10. Implementation and evolution rules
 
@@ -99,4 +103,4 @@ Run focused assertions at each changed boundary before full integrated verificat
 
 ## 11. Non-goals
 
-Adding an ORM or a second manuscript authority, automatically approving module proposals, unifying Desktop/Mobile visual shells, creating a new routing framework, introducing a state-management platform, implementing the public third-party Plugin SDK/sandbox/marketplace, re-running completed migration phases, changing production resources or publishing OCI images solely because of this refactor.
+Adding an ORM or a second manuscript authority, automatically approving module proposals, forcing shared React/SwiftUI UI components, creating a new routing framework, introducing a state-management platform, implementing the public third-party Plugin SDK/sandbox/marketplace, re-running completed migration phases, changing production resources or publishing OCI images solely because of this refactor.

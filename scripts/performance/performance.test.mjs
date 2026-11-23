@@ -240,6 +240,8 @@ test('Knowledge-dense PostgreSQL fixture persists exact Knowledge and Evidence c
     assert.equal(result.fixture.persisted.evidence.mentions, 400);
     assert.equal(result.fixture.persisted.evidence.assertions, 100);
     assert.equal(result.fixture.persisted.evidence.assertionLinks, 100);
+    assert.equal(result.projection.kind, 'knowledge-projection');
+    assert.match(result.projection.revision, /^[a-f0-9]{64}$/u);
     assert.ok(result.projection.bytes > 0);
     const projection = result.samples.find(row => row.name === 'knowledge.evidence.projection');
     assert.ok(projection?.status === 'complete' && projection.counters.gitProcesses === 0);
@@ -256,6 +258,9 @@ test('PostgreSQL browser benchmark exercises the current UI and save/receipt pat
     assert.equal(result.status, 'complete', JSON.stringify(result.error));
     assert.equal(result.samples.filter(row => row.name === 'browser.navigation.repeat').length, 1);
     assert.equal(result.samples.filter(row => row.name === 'browser.authoring.save-and-receipt').length, 3);
+    assert.match(result.harness.browserAssets.sha256, /^[a-f0-9]{64}$/u);
+    assert.ok(result.server.requests.some(row => row.method === 'POST' &&
+      row.path === '/api/auth/oauth2/token' && row.status === 200));
     assert.equal(result.server.counts.gitProcesses, 0);
     assert.equal(result.network.failed, 0);
   } finally { await rm(root, { recursive: true, force: true }); }

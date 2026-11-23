@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Codexia
-description: Owner-confirmed visual design targets for Desktop and Mobile Web/PWA, including the Capacitor iOS wrapper that displays the Mobile Web UI.
+description: Owner-confirmed visual design targets for Desktop React Web only; native iOS SwiftUI is specified separately.
 colors:
   light:
     accent: "#70452F"
@@ -39,6 +39,8 @@ spacing:
 
 # Codexia — Design system
 
+The [normative UX contract](../docs/design/UX-CONTRACT.md), [user screen flows](../docs/design/USER-SCREEN-FLOW.md) and [owner security flows](../docs/design/ADMIN-SCREEN-FLOW.md) define behavior and transitions; visual styling does not override them.
+
 <!-- impeccable:design-map -->
 Map: PRODUCT.md
 Full: .impeccable/design-full.md (expanded rationale and requirements; read sections as needed)
@@ -47,13 +49,13 @@ Full: .impeccable/design-full.md (expanded rationale and requirements; read sect
 
 **静かで文学的、明晰。** Writingは本文優先。他作業は情報密度と効率を高め、視認性・発見性・accessibilityを保つ。
 
-Desktop・Mobile Web/PWAとCapacitor Mobile Web UI（`web`）。shell別、意味token共通。native UI対象外。
+**対象はDesktop React Webのみ**（Impeccable platform: `web`）。Mobile Web/PWA・Capacitor authoring UIは採用目標から除外。iOSは独立したSwiftUI設計であり、本WebデザイントークンやReact部品の共通化を要求しない。詳細は[iOS SwiftUI設計](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
 本書の値は目標で実装証拠ではない。[詳細](.impeccable/design-full.md)。UX/a11yは[UX contract](../docs/design/UX-CONTRACT.md)、過去案は[Visual history](../docs/design/VISUAL-SYSTEM.md)、製品目的は[Product](PRODUCT.md)。
 
 ## Colors
 
-YAMLの3テーマを共有。surface/status等は未決定。色変更時に再計算（文字4.5:1、操作表示3:1以上）。色だけで伝えず、飾り線を操作境界にしない。
+Desktop WebでYAMLの3テーマを使用する。surface/status等は未決定。色変更時に再計算（文字4.5:1、操作表示3:1以上）。色だけで伝えず、飾り線を操作境界にしない。iOSネイティブ側の値は独立設計で定める。
 
 ## Typography
 
@@ -61,7 +63,7 @@ UIは和文sans。原稿は明朝／ゴシック選択可（16px・1.8・最大9
 
 ## Layout
 
-WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）。狭幅はタブ等へ適応。余白共通、touch target 44×44 CSS px。幅だけでshellを変えない。
+Desktop WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）。ブラウザーの拡大・リサイズとアクセシビリティを保つが、Mobile React専用レイアウトやモバイルviewportスクリーンショットは本製品の受入対象外。iOSのタッチ目標はネイティブUI契約で検証する。
 
 ## Elevation & Depth
 
@@ -70,6 +72,12 @@ WritingはQuiet Page。他作業は必要面だけ（常時3面にしない）�
 ## Components
 
 選択・状態は色以外でも示す。保存・復旧はUX contract準拠。Focusは**3px solid outline、2px offset**、3:1以上、隠さない。
+
+## Brand icon
+
+The approved Codexia mark represents an **open leather-bound manuscript and a rising writing quill**. It must read as literature and writing even at a 16px favicon size; tiny versions shall retain only strong, aligned book and quill silhouettes instead of shrinking ornamental detail indiscriminately. Use separately optically adjusted masters for 16px, 24px, 32–40px, 41–96px, and 97px-and-above presentations. Small sizes require intentional pixel-grid placement, while larger variants can restore paper, binding and feather details. Maintain light, dark and single-color palettes and usable contrast. The icon does not replace accessible text or convey state by color alone.
+
+The [SVG implementation and regeneration procedure](../scripts/branding/README.md) must conform to this visual contract. Native iOS raster asset creation, PWA installation metadata, ICO support and Apple icon packaging require their own build/acceptance work; the accepted visual design is not evidence those formats are shipped.
 
 ## Do's and Don'ts
 

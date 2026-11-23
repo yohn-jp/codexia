@@ -16,15 +16,17 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
+import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
 export { CODEXIA_OWNER_SCOPE };
 
-export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
 export const CODEXIA_MCP_SCOPES = MCP_OAUTH_SCOPES;
 export const OIDC_PROVIDER_ID = "workspace-oidc";
 
 export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
+  /** Prevent plugin initialization from writing during deployment verification. */
+  readonly readOnlyDatabase?: boolean;
   readonly publicOrigin: string;
   /** Explicit Passkey RP ID for an isolated setup listener on a production-host subdomain. */
   readonly passkeyRpId?: string;
@@ -301,7 +303,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
 
   const pool = new Pool({
     connectionString: config.databaseUrl,
-    options: `-c search_path=${CODEXIA_AUTH_SCHEMA}`,
+    options: `-c search_path=${CODEXIA_AUTH_SCHEMA}${config.readOnlyDatabase ? " -c default_transaction_read_only=on" : ""}`,
   });
   const approvedBootstrapOidcSubject = bootstrap?.ownerOidcSubject;
   const auth = betterAuth({

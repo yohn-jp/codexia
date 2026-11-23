@@ -3,23 +3,23 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import JSZip from "jszip";
 import YAML from "yaml";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@codexia/contracts";
-import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@codexia/migration";
+import { convertPublishingEpisodesYaml, convertPublishingShareGrantJsonl, type ModuleActionContext, type ModuleContext, type NativeStoryDocument, type OwnModuleRecord, type OwnModuleRecordProposal, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport, manuscriptBodyToXhtml } from "./epub.js";
 import { buildPlaintextExport, stripManuscriptMarkup, toNarouDialect } from "./plaintext.js";
 import { composeVerticalPrintText } from "./verticalPrint.js";
-import { createPublishingMigrationProducer } from "./migration.js";
-import { SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js";
+import type { ShareGrant } from "./grants.js";
 import { createPublishingHttpContributions } from "./http.js";
-import { EPISODES_PATH } from "./episodes.js";
 import { readPublishingProject, readPublishingProjectFromCore, type PublishingProject } from "./project.js";
 
 const BASE_VERSION = 1;
 const NEXT_VERSION = 2;
 const repository = "local-publishing-7";
 const fixtureTokenDigest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
+type ShareRecordValue = { version: 1; grants: ShareGrant[] };
+type ShareRecord = { value: ShareRecordValue; version: number };
+type ShareProposal = { key: string; value: ShareRecordValue; expectedVersion: number | null; idempotencyKey: string };
 
 function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): SnapshotId {
   return { projectId: repository, projectVersion, ...(updatedVersion ? { projectVersion: updatedVersion } : {}) };
@@ -27,21 +27,44 @@ function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): S
 
 class MemoryReader implements SnapshotReader {
   readonly files: Map<string, Buffer>;
-  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>()) {
+  readonly batches: string[][] = [];
+  readonly scalarManuscriptReads: string[] = [];
+  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>(), readonly shareRecord?: ShareRecord, readonly episodeRecord?: OwnModuleRecord) {
     this.files = new Map([...files].map(([path, content]) => [path, Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8")]));
   }
-  async read(path: string, encoding: "utf8" | "base64" = "utf8") {
+  get nativeStoryDocuments(): NativeStoryDocument[] {
+    return [...this.files].flatMap(([metadataPath, bytes], documentOrder) => {
+      if (!metadataPath.startsWith("plot/")) return [];
+      const metadataContent = bytes.toString("utf8");
+      const metadata = YAML.parse(metadataContent);
+      const kind = this.documentKinds.get(metadataPath) ?? metadata.kind;
+      if (!["volume", "chapter", "scene"].includes(kind)) return [];
+      return [{
+        id: metadata.id, kind, title: metadata.title,
+        orderKey: String(metadata.order ?? ""), documentOrder,
+        metadataPath, metadataRevision: fixtureTokenDigest(metadataContent), metadataContent, metadata,
+      }];
+    });
+  }
+  private file(path: string, encoding: "utf8" | "base64") {
     const bytes = this.files.get(path);
     if (!bytes) return null;
     const documentKind = this.documentKinds.get(path);
     return { content: encoding === "base64" ? bytes.toString("base64") : bytes.toString("utf8"), revision: createHash("sha256").update(bytes).digest("hex"), ...(documentKind ? { documentKind } : {}) };
+  }
+  async read(path: string, encoding: "utf8" | "base64" = "utf8") {
+    if (path.endsWith(".md")) this.scalarManuscriptReads.push(path);
+    return this.file(path, encoding);
+  }
+  async readMany(paths: readonly string[], encoding: "utf8" | "base64" = "utf8") {
+    this.batches.push([...paths]);
+    return paths.map(path => this.file(path, encoding));
   }
   async list(prefix: string) { return [...this.files.keys()].filter((path) => path.startsWith(prefix)).sort(); }
 }
 
 function fixtureFiles(): Map<string, Buffer | string> {
   return new Map([
-    ["meta/project.yaml", "title: 星の図書館\nsubtitle: 第二巻\n"],
     ["plot/volumes/vol-1/volume.yaml", "kind: volume\nid: vol-1\ntitle: 第一巻\norder: 1\n"],
     ["plot/volumes/vol-1/chapters/ch-1/chapter.yaml", "kind: chapter\nid: ch-1\ntitle: はじまり\nvolume: vol-1\norder: 1\n"],
     ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml", "kind: scene\nid: sc-1\ntitle: 夜の駅\nvolume: vol-1\nchapter: ch-1\norder: 1\nmanuscript: manuscript/vol-1/ch-1/sc-1.md\n"],
@@ -65,8 +88,8 @@ const project: PublishingProject = {
   }],
 };
 
-function actionContext(reader: SnapshotReader, proposals: ChangeProposal[]): ModuleActionContext {
-  return {
+function actionContext(reader: SnapshotReader, proposals: OwnModuleRecordProposal[] = []): ModuleActionContext {
+  const context = {
     projectId: "module-project-1",
     reader,
     invoke: async (actionId) => actionId === "core.tree"
@@ -93,13 +116,19 @@ function actionContext(reader: SnapshotReader, proposals: ChangeProposal[]): Mod
     listActions: async () => [],
     linkedReader: async () => reader,
     signal: new AbortController().signal,
-    propose: async (operations, evidence) => {
-      const proposal = { id: "proposal-" + (proposals.length + 1), snapshot: reader.snapshot, operations, source: "module" as const, ...(evidence ? { evidence } : {}) };
-      proposals.push(proposal);
-      return proposal;
-    },
+    propose: async () => assert.fail("Publishing must use native module records"),
     runJob: async () => ({ ok: false, id: "unused", snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } }),
-  };
+    readOwnModuleRecord: async (key: string) => {
+      assert.ok(key === "share-grants" || key === "episodes");
+      if (!(reader instanceof MemoryReader)) return undefined;
+      return key === "share-grants" ? reader.shareRecord : reader.episodeRecord;
+    },
+    proposeOwnModuleRecord: async (input: OwnModuleRecordProposal) => {
+      proposals.push(input);
+      return { id: `native-${input.key}-${proposals.length}`, projectId: reader.snapshot.projectId };
+    },
+  } satisfies ModuleActionContext & Record<string, unknown>;
+  return context;
 }
 
 function contextWithCoreTree(reader: SnapshotReader, tree: unknown): ModuleActionContext {
@@ -130,13 +159,10 @@ async function invokeAction(definition: Awaited<ReturnType<typeof createModule>>
   return result.data as Record<string, unknown>;
 }
 
-function applyOperation(reader: MemoryReader, operation: ChangeOperation, newCommit: number, overlay = false): MemoryReader {
-  const files = new Map([...reader.files].map(([path, content]) => [path, Buffer.from(content)]));
-  for (const write of operation.writes) {
-    if (write.content === null) files.delete(write.path);
-    else files.set(write.path, write.encoding === "base64" ? Buffer.from(write.content, "base64") : Buffer.from(write.content, "utf8"));
-  }
-  return new MemoryReader(files, makeSnapshot(newCommit), reader.documentKinds);
+function appliedShare(reader: MemoryReader, proposed: ShareProposal, newCommit: number): MemoryReader {
+  assert.equal(proposed.expectedVersion, reader.shareRecord?.version ?? null);
+  return new MemoryReader(reader.files, makeSnapshot(newCommit), reader.documentKinds,
+    { version: (reader.shareRecord?.version ?? 0) + 1, value: proposed.value });
 }
 
 test("source plaintext conversion and vertical print keep Japanese text and scene order", () => {
@@ -154,14 +180,18 @@ test("source plaintext conversion and vertical print keep Japanese text and scen
 
 test("publishing follows Core hierarchy after a scene moves while retaining its manuscript path", async () => {
   const reader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: 移動する作品\n"],
     ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: 章Aの巻\norder: 0000000001\n"],
     ["plot/volumes/vol-a/chapters/ch-a/chapter.yaml", "kind: chapter\nid: ch-a\ntitle: 章A\nvolume: vol-a\norder: 0000000001\n"],
-    ["plot/volumes/vol-a/chapters/ch-a/scenes/sc-moving.yaml", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
+    ["plot/imported/sc-moving.metadata", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
     ["plot/volumes/vol-b/volume.yaml", "kind: volume\nid: vol-b\ntitle: 章Bの巻\norder: 0000000002\n"],
     ["plot/volumes/vol-b/chapters/ch-b/chapter.yaml", "kind: chapter\nid: ch-b\ntitle: 章B\nvolume: vol-b\norder: 0000000001\n"],
     ["manuscript/vol-a/ch-a/sc-moving.md", "元のパスに残る本文。\n"],
   ]));
+  const read = reader.read.bind(reader);
+  reader.read = async (path, encoding) => {
+    assert.ok(!path.startsWith("plot/"), `hierarchy metadata already came from the pinned projection: ${path}`);
+    return read(path, encoding);
+  };
   const tree = {
     title: "移動する作品",
     volumes: [
@@ -239,7 +269,6 @@ test("the canonical full plaintext export includes project root scenes once in s
   assert.equal(chapterZip.file("OEBPS/scene-root-a.xhtml"), null, "chapter scope must omit project root scenes");
 
   const rootOnlyReader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: Root only\n"],
     ["plot/volumes/root/chapters/root/scenes/only.yaml", "kind: scene\nid: only\ntitle: Only scene\norder: 1\nmanuscript: documents/only.md\n"],
     ["documents/only.md", "ONLY ROOT BODY\n"],
   ]));
@@ -266,6 +295,24 @@ test("plaintext export and public reader preserve manuscript horizontal rules", 
   assert.deepEqual(shared.volumes[0]?.chapters[0]?.scenes.map(({ body }) => body), [first, second]);
 });
 
+test("Publishing reads the pinned subtitle and keeps distinct author and reader titles", async () => {
+  const files = fixtureFiles();
+  files.set("meta/project.yaml", "[not the project source]");
+  const reader = Object.assign(new MemoryReader(files, makeSnapshot(48)), {
+    projectPresentation: { title: "読者向けの作品名", subtitle: "公開された副題" },
+  });
+  const context = contextWithCoreTree(reader, { title: "作者向けの作品名", volumes: [] });
+
+  const exported = await invokeAction(await createPublishing(), "publishing.export.epub", { scope: "all" }, context);
+  const epub = await JSZip.loadAsync(Buffer.from(String(exported.contentBase64), "base64"));
+  const titlePage = await epub.file("OEBPS/title.xhtml")!.async("string");
+  assert.match(titlePage, /<h1>作者向けの作品名<\/h1>/u);
+  assert.match(titlePage, /<p>公開された副題<\/p>/u);
+  const publicProject = await readPublishingProject(reader);
+  assert.equal(publicProject.title, "読者向けの作品名");
+  assert.equal(publicProject.subtitle, "公開された副題");
+});
+
 test("the publishing tree exposes titled root scenes without leaking notes or reading manuscript bodies", async () => {
   const files = fixtureFiles();
   files.set("plot/volumes/root/chapters/root/scenes/root.yaml", "kind: scene\nid: root\ntitle: 夜の駅\nmanuscript: documents/root.md\n");
@@ -281,6 +328,7 @@ test("the publishing tree exposes titled root scenes without leaking notes or re
   };
   const tree = await invokeAction(await createPublishing(), "publishing.project.tree", {}, actionContext(reader, []));
   assert.deepEqual(bodyReads, []);
+  assert.deepEqual(reader.batches, []);
   assert.deepEqual(tree, {
     title: project.title, rootSceneCount: 1, rootScenes: [{ id: "root", title: "夜の駅" }], volumes: [{ id: "vol-1", title: "第一巻", chapters: [{
       id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }],
@@ -323,12 +371,12 @@ test("public scene and volume shares follow a chapter moved to a later volume", 
     { scope: { kind: "scene", id: "sc-1" }, revokedAt: "2026-01-02T00:00:00.000Z" },
   ];
   const tokens = grants.map((_, index) => "share_" + String(index).repeat(43));
-  files.set(SHARE_GRANTS_PATH, grants.map((grant, index) => JSON.stringify({
+  const descriptors: ShareGrant[] = grants.map((grant, index) => ({
     version: 1, grantVersion: 2, revocationVersion: grant.revokedAt ? 1 : 0,
     id: "grant-" + index, tokenHash: fixtureTokenDigest(tokens[index]!), label: "fixture",
     createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", ...grant,
-  })).join("\n") + "\n");
-  const reader = new MemoryReader(files);
+  }));
+  const reader = new MemoryReader(files, makeSnapshot(), undefined, { version: 1, value: { version: 1, grants: descriptors } });
   const route = createPublishingHttpContributions().find(({ id }) => id === "publishing.http.public-share-scene")!;
   const context = actionContext(reader, []);
   context.invoke = async () => { throw new Error("Public sharing must use its pinned reader"); };
@@ -341,15 +389,14 @@ test("public scene and volume shares follow a chapter moved to a later volume", 
 
 test("publishing keeps Core's string order-key sequence in volume, chapter, text, and EPUB output", async () => {
   const reader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: 順序の作品\n"],
-    ["plot/volumes/vol-a/volume.yaml", "id: vol-a\ntitle: Alpha volume\norder: 2\n"],
-    ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "id: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
-    ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "id: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
-    ["plot/volumes/vol-z/volume.yaml", 'id: vol-z\ntitle: Zulu volume\norder: "0000000002"\n'],
-    ["plot/volumes/vol-z/chapters/ch-alpha-z/chapter.yaml", 'id: ch-alpha-z\ntitle: Alpha chapter\nvolume: vol-z\norder: "0000000010"\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/chapter.yaml", 'id: ch-z\ntitle: Zulu chapter\nvolume: vol-z\norder: "0000000002"\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-alpha.yaml", 'id: sc-alpha\ntitle: Alpha scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000010"\nmanuscript: manuscript/vol-z/ch-z/sc-alpha.md\n'],
-    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-zulu.yaml", 'id: sc-zulu\ntitle: Zulu scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000002"\nmanuscript: manuscript/vol-z/ch-z/sc-zulu.md\n'],
+    ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: Alpha volume\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "kind: chapter\nid: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "kind: scene\nid: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
+    ["plot/volumes/vol-z/volume.yaml", 'kind: volume\nid: vol-z\ntitle: Zulu volume\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-alpha-z/chapter.yaml", 'kind: chapter\nid: ch-alpha-z\ntitle: Alpha chapter\nvolume: vol-z\norder: "0000000010"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/chapter.yaml", 'kind: chapter\nid: ch-z\ntitle: Zulu chapter\nvolume: vol-z\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-alpha.yaml", 'kind: scene\nid: sc-alpha\ntitle: Alpha scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000010"\nmanuscript: manuscript/vol-z/ch-z/sc-alpha.md\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-zulu.yaml", 'kind: scene\nid: sc-zulu\ntitle: Zulu scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000002"\nmanuscript: manuscript/vol-z/ch-z/sc-zulu.md\n'],
     ["manuscript/vol-a/ch-alpha/sc-a.md", "本文 Alpha。\n"],
     ["manuscript/vol-z/ch-z/sc-alpha.md", "本文 Alpha scene。\n"],
     ["manuscript/vol-z/ch-z/sc-zulu.md", "本文 Zulu。\n"],
@@ -392,6 +439,13 @@ test("publishing keeps Core's string order-key sequence in volume, chapter, text
   const alphaSceneSpine = opf.indexOf('idref="item-sc-alpha"');
   const alphaVolumeSpine = opf.indexOf('idref="item-sc-a"');
   assert.ok(zuluSpine >= 0 && zuluSpine < alphaSceneSpine && alphaSceneSpine < alphaVolumeSpine);
+
+  reader.batches.length = 0;
+  reader.read = async path => assert.fail(`scoped EPUB must not issue a scalar body read for ${path}`);
+  const scoped = await invokeAction(await createPublishing(), "publishing.export.epub", { scope: "chapter", id: "ch-z" }, contextWithCoreTree(reader, tree));
+  const scopedZip = await JSZip.loadAsync(Buffer.from(String(scoped.contentBase64), "base64"));
+  assert.deepEqual(reader.batches, [["manuscript/vol-z/ch-z/sc-zulu.md", "manuscript/vol-z/ch-z/sc-alpha.md"]]);
+  assert.doesNotMatch(await scopedZip.file("OEBPS/content.opf")!.async("string"), /item-sc-a"/u);
 });
 
 test("EPUB keeps distinct scene bodies reachable from the table of contents and spine", async () => {
@@ -482,6 +536,23 @@ test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binar
   assert.deepEqual(await zip.file("OEBPS/images/cover.jpg")!.async("nodebuffer"), cover);
 });
 
+test("EPUB export uses the specified cover path exactly", async () => {
+  const coverPath = "meta/scriptorium/modules/publishing/assets/cover.jpg";
+  const cover = Buffer.from([0xff, 0xd8, 0x81, 0xff, 0xd9]);
+  const files = fixtureFiles();
+  files.set(coverPath, cover);
+  const context = actionContext(new MemoryReader(files), []);
+  const publishing = await createPublishing();
+  const exportWithCover = async (coverPath: string) => {
+    const result = await invokeAction(publishing, "publishing.export.epub", { scope: "all", coverPath }, context);
+    const zip = await JSZip.loadAsync(Buffer.from(String(result.contentBase64), "base64"));
+    return zip.file("OEBPS/images/cover.jpg");
+  };
+
+  assert.deepEqual(await (await exportWithCover(coverPath))?.async("nodebuffer"), cover);
+  assert.equal(await exportWithCover(".arcadia/cover.jpg"), null);
+});
+
 test("EPUB bible reader keeps source flat character entities and typed lore/location YAML", async () => {
   const reader = new MemoryReader(new Map([
     ["bible/characters/char-flat.yaml", "id: char-flat\ntype: character\nname: 古い人物\n"],
@@ -494,34 +565,60 @@ test("EPUB bible reader keeps source flat character entities and typed lore/loca
   assert.equal(entries.find((entry) => entry.id === "char-flat")!.name, "古い人物");
 });
 
-test("episode edits propose metadata operations and preserve unknown YAML and publication dates", async () => {
-  const existingMap = YAML.stringify({
+test("wide plaintext export reads a selected chapter in bounded manuscript batches", async () => {
+  const files = fixtureFiles();
+  const sceneOrder = Array.from({ length: 33 }, (_, index) => 33 - index);
+  const scenes = sceneOrder.map(number => ({ id: `wide-${number}`, title: `Section ${number}` }));
+  for (const number of [...sceneOrder].reverse()) {
+    const id = `wide-${number}`;
+    files.set(`plot/volumes/vol-1/chapters/ch-1/scenes/${id}.yaml`,
+      `kind: scene\nid: ${id}\ntitle: Section ${number}\nvolume: vol-1\nchapter: ch-1\nmanuscript: documents/${id}.md\n`);
+    files.set(`documents/${id}.md`, `BODY-${number}\n`);
+  }
+  const reader = new MemoryReader(files);
+  reader.read = async path => assert.fail(`wide chapter must use batches for ${path}`);
+  const context = contextWithCoreTree(reader, { title: "Wide export", volumes: [
+    { id: "vol-1", title: "Volume", chapters: [{ id: "ch-1", title: "Chapter", scenes }] },
+  ] });
+  const result = await invokeAction(await createPublishing(), "publishing.export.plaintext", { scope: "chapter", id: "ch-1" }, context);
+  const exported = Buffer.from(String(result.contentBase64), "base64").toString("utf8");
+  assert.deepEqual(reader.batches.map(batch => batch.length), [32, 1]);
+  assert.deepEqual(reader.batches.flat(), sceneOrder.map(number => `documents/wide-${number}.md`));
+  assert.deepEqual(exported.match(/BODY-\d+/gu), sceneOrder.map(number => `BODY-${number}`));
+});
+
+test("episode edits propose a record update and preserve unknown fields and publication dates", async () => {
+  const existingMap = {
     episodes: [{
       id: "ep-1", number: 1, title: "第一話", scope: "chapter", scopeId: "ch-1",
       publishedAt: "2025-05-04T03:02:01Z", sceneIds: ["sc-1"], futureEpisodeField: { retain: "yes" },
     }],
     futureMapField: { provider: "legacy", revision: 3 },
-  });
-  const reader = new MemoryReader(new Map([...fixtureFiles(), [EPISODES_PATH, existingMap]]));
+  };
+  const reader = new MemoryReader(fixtureFiles(), makeSnapshot(), undefined, undefined,
+    { value: { version: 1, document: existingMap }, version: 7 });
   const definition = await createPublishing();
-  const proposals: ChangeProposal[] = [];
+  const proposals: OwnModuleRecordProposal[] = [];
   const context = actionContext(reader, proposals);
-  const episodes = (await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes as Array<Record<string, unknown>>;
+  const episodes = (await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes;
+  assert.deepEqual(episodes, existingMap.episodes);
+
   const proposalData = await invokeAction(definition, "publishing.episodes.propose", {
     episodes: [{ id: "ep-1", number: 2, title: "改題", scope: "chapter", scopeId: "ch-1" }],
   }, context);
   assert.equal(proposals.length, 1);
-  const operation = proposals[0]!.operations[0]!;
-  assert.equal(operation.effect, "metadata");
-  assert.deepEqual(operation.writes.map((write) => write.path), [EPISODES_PATH]);
-  const written = YAML.parse(operation.writes[0]!.content!);
-  assert.deepEqual(written.futureMapField, { provider: "legacy", revision: 3 });
-  assert.deepEqual(written.episodes[0].futureEpisodeField, { retain: "yes" });
-  assert.equal(written.episodes[0].publishedAt, "2025-05-04T03:02:01Z");
-  assert.deepEqual(written.episodes[0].sceneIds, ["sc-1"]);
-  assert.equal((proposalData.episodes as unknown[]).length, 1);
-  assert.equal(episodes.length, 1);
-  assert.equal((await reader.read(EPISODES_PATH))!.content, existingMap, "actions never write source files");
+  const operation = proposals[0]!;
+  assert.equal(operation.key, "episodes");
+  assert.equal(operation.expectedVersion, 7);
+  const document = operation.value.document as typeof existingMap;
+  assert.deepEqual(document.futureMapField, { provider: "legacy", revision: 3 });
+  assert.deepEqual(document.episodes[0]!.futureEpisodeField, { retain: "yes" });
+  assert.equal(document.episodes[0]!.publishedAt, "2025-05-04T03:02:01Z");
+  assert.deepEqual(document.episodes[0]!.sceneIds, ["sc-1"]);
+  assert.equal(document.episodes[0]!.title, "改題");
+  assert.deepEqual(proposalData.changeSet, { id: "native-episodes-1", projectId: repository });
+  assert.deepEqual((await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes, existingMap.episodes,
+    "an unapplied proposal does not change the selected record");
 
   const cleared = await invokeAction(definition, "publishing.episodes.propose", {
     episodes: [{
@@ -530,17 +627,35 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
     }],
   }, context);
   const clearedEpisode = (cleared.episodes as Array<Record<string, unknown>>)[0]!;
-  const clearedYaml = YAML.parse(proposals.at(-1)!.operations[0]!.writes[0]!.content!);
+  const proposedEpisode = (proposals[1]!.value.document as typeof existingMap).episodes[0]!;
   assert.ok(!Object.hasOwn(clearedEpisode, "publishedAt"), "explicit null clears the date from the action result");
   assert.ok(!Object.hasOwn(clearedEpisode, "sceneIds"), "explicit null clears scene annotations from the action result");
-  assert.ok(!Object.hasOwn(clearedYaml.episodes[0], "publishedAt"), "explicit null clears the persisted date");
-  assert.ok(!Object.hasOwn(clearedYaml.episodes[0], "sceneIds"), "explicit null clears persisted scene annotations");
-  assert.deepEqual(clearedYaml.episodes[0].futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
+  assert.ok(!Object.hasOwn(proposedEpisode, "publishedAt"), "explicit null clears the persisted date");
+  assert.ok(!Object.hasOwn(proposedEpisode, "sceneIds"), "explicit null clears persisted scene annotations");
+  assert.deepEqual(proposedEpisode.futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
+});
+
+test("episode maintenance conversion preserves the document extension namespace and rejects unsupported YAML values", () => {
+  const source = `version: early-draft
+episodes:
+  - id: pilot
+    number: 1
+    title: 第一話
+    scope: chapter
+    scopeId: ch-1
+    publishedAt: 2026-01-01
+    annotations: { language: ja }
+`;
+  assert.deepEqual(convertPublishingEpisodesYaml(source), { version: 1, document: { version: "early-draft", episodes: [{
+    id: "pilot", number: 1, title: "第一話", scope: "chapter", scopeId: "ch-1", publishedAt: "2026-01-01",
+    annotations: { language: "ja" },
+  }] } });
+  assert.throws(() => convertPublishingEpisodesYaml(source + "extension: !!timestamp 2026-01-01\n"), /non-JSON data/);
 });
 
 test("public read uses only the applied snapshot and rechecks grant revocation", async () => {
   const definition = await createPublishing();
-  const proposals: ChangeProposal[] = [];
+  const proposals: ShareProposal[] = [];
   const files = fixtureFiles();
   const notePath = "plot/volumes/vol-1/chapters/ch-1/scenes/note-1.yaml";
   files.set(notePath, "id: note-1\ntitle: Private Author Note\nvolume: vol-1\nchapter: ch-1\nmanuscript: documents/note-1.md\n");
@@ -551,10 +666,15 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
     kind: "chapter", id: "ch-1", label: "校正用", expiresInHours: 24,
   }, context);
   const token = String(created.token);
-  const createOperation = proposals[0]!.operations[0]!;
-  const createJson = createOperation.writes[0]!.content!;
-  assert.ok(!createJson.includes(token), "raw bearer is never committed");
-  assert.equal(JSON.parse(createJson).tokenHash, fixtureTokenDigest(token));
+  assert.deepEqual(remote.batches, [], "validating a prospective share only needs hierarchy metadata");
+  assert.deepEqual(remote.scalarManuscriptReads, []);
+  const createOperation = proposals[0];
+  assert.ok(createOperation, "the action proposes one native share record update");
+  assert.equal(createOperation.key, "share-grants");
+  assert.equal(createOperation.expectedVersion, null);
+  assert.deepEqual(created.changeSet, { id: "native-share-grants-1", projectId: repository });
+  assert.ok(!JSON.stringify(createOperation).includes(token), "raw bearer is never committed");
+  assert.equal(createOperation.value.grants[0]!.tokenHash, fixtureTokenDigest(token));
 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
@@ -568,8 +688,9 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "proposing a share does not apply it");
+  assert.deepEqual(remote.batches, []);
 
-  remote = applyOperation(remote, createOperation, NEXT_VERSION);
+  remote = appliedShare(remote, createOperation, NEXT_VERSION);
   const metadataResponse = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(metadataResponse.status, 200);
   assert.equal(metadataResponse.headers.get("x-robots-tag"), "noindex, nofollow");
@@ -578,9 +699,28 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.equal(metadata.sceneCount, 2);
   assert.deepEqual(metadata.tree[0]!.chapters[0]!.scenes.map((scene) => scene.id), ["sc-1", "sc-2"]);
   assert.doesNotMatch(JSON.stringify(metadata), /Private Author Note|Private note body/u);
+  assert.deepEqual(remote.batches, [], "a public catalogue returns metadata without loading bodies");
   const sceneUrl = url + "/scenes/sc-1";
   assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(remote))).status, 200);
   assert.equal((await publicScene.handle(new Request(url + "/scenes/out-of-scope"), publicContext(remote))).status, 404);
+  assert.deepEqual(remote.batches, [["manuscript/vol-1/ch-1/sc-1.md"]]);
+  assert.deepEqual(remote.scalarManuscriptReads, []);
+
+  const missingScope = new MemoryReader(files, makeSnapshot(NEXT_VERSION), remote.documentKinds, { version: 1, value: {
+    version: 1, grants: [{ ...createOperation.value.grants[0]!, scope: { kind: "chapter", id: "missing-chapter" } }],
+  } });
+  assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(missingScope))).status, 404);
+  assert.deepEqual(missingScope.batches, []);
+  assert.deepEqual(missingScope.scalarManuscriptReads, []);
+
+  const updatedFiles = new Map<string, Buffer | string>(remote.files);
+  updatedFiles.set("manuscript/vol-1/ch-1/sc-1.md", "次の保存版の本文。\n");
+  remote = new MemoryReader(updatedFiles, makeSnapshot(3), remote.documentKinds, remote.shareRecord);
+  const updatedScene = await publicScene.handle(new Request(sceneUrl), publicContext(remote));
+  assert.equal(updatedScene.status, 200);
+  assert.deepEqual(await updatedScene.json(), {
+    snapshot: makeSnapshot(3), id: "sc-1", title: "夜の駅", body: "次の保存版の本文。\n",
+  });
 
   const listed = await invokeAction(definition, "publishing.shares.list", {}, actionContext(remote, []));
   const safeList = listed.shares as Array<Record<string, unknown>>;
@@ -588,11 +728,16 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.ok(!JSON.stringify(safeList).includes(fixtureTokenDigest(token)));
 
   const revoked = await invokeAction(definition, "publishing.shares.revoke", { id: String((created.share as Record<string, unknown>).id) }, actionContext(remote, proposals));
-  const revokeOperation = proposals.at(-1)!.operations[0]!;
+  const revokeOperation = proposals[1]!;
+  assert.equal(revokeOperation.expectedVersion, 1);
+  assert.equal(revokeOperation.value.grants[0]!.grantVersion, 2);
+  assert.equal(revokeOperation.value.grants[0]!.revocationVersion, 1);
   assert.ok(revoked.proposalId);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "a proposed revocation does not alter the selected snapshot");
-  remote = applyOperation(remote, revokeOperation, 3);
+  remote = appliedShare(remote, revokeOperation, 4);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "an applied revocation blocks the next read");
+  assert.deepEqual(remote.batches, []);
+  assert.deepEqual(remote.scalarManuscriptReads, []);
 
   const expiredToken = "share_" + "x".repeat(43);
   const expired: ShareGrant = {
@@ -600,9 +745,37 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
     tokenHash: fixtureTokenDigest(expiredToken), scope: { kind: "scene", id: "sc-1" },
     label: "期限切れ", createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2024-01-02T00:00:00.000Z",
   };
-  const expiredReader = new MemoryReader(new Map<string, Buffer | string>([...remote.files, [SHARE_GRANTS_PATH, JSON.stringify(expired) + "\n"]]), remote.snapshot);
+  const expiredReader = new MemoryReader(remote.files, remote.snapshot, remote.documentKinds, { version: 3, value: { version: 1, grants: [expired] } });
   const expiredUrl = url.slice(0, url.lastIndexOf("/") + 1) + expiredToken;
   assert.equal((await publicBase.handle(new Request(expiredUrl), publicContext(expiredReader))).status, 404);
+  assert.deepEqual(expiredReader.batches, []);
+  assert.deepEqual(expiredReader.scalarManuscriptReads, []);
+});
+
+test("the one-time share conversion preserves existing link identity, revocation, and extension data", async () => {
+  const token = "share_" + "p".repeat(43);
+  const legacy = JSON.stringify({
+    id: "prior-grant", label: "既存リンク", tokenHash: fixtureTokenDigest(token).toUpperCase(),
+    scope: "ch-1", createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z",
+    revokedAt: "2026-03-01T00:00:00.000Z", grantVersion: 3, revocationVersion: 1,
+    futurePolicy: { retention: "manual" }, rawToken: token,
+  });
+  const converted = convertPublishingShareGrantJsonl(legacy);
+  assert.deepEqual(converted, { version: 1, grants: [{
+    version: 1, id: "prior-grant", label: "既存リンク", tokenHash: fixtureTokenDigest(token),
+    scope: { kind: "chapter", id: "ch-1" }, createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z",
+    revokedAt: "2026-03-01T00:00:00.000Z", grantVersion: 3, revocationVersion: 1, futurePolicy: { retention: "manual" },
+  }] });
+  assert.throws(() => convertPublishingShareGrantJsonl(`${legacy}\n${legacy}`), /Duplicate share grant ID/);
+  assert.throws(() => convertPublishingShareGrantJsonl(legacy.replace('"manual"', '1e999')), /Invalid share grant JSONL/);
+
+  const files = fixtureFiles();
+  files.set("meta/scriptorium/modules/publishing/share-grants.jsonl", JSON.stringify({ ...JSON.parse(legacy), revokedAt: undefined }));
+  const reader = new MemoryReader(files);
+  const [publicBase] = createPublishingHttpContributions();
+  const url = `https://codexia.invalid/share/${token}`;
+  assert.equal((await publicBase!.handle(new Request(url), actionContext(reader, []))).status, 404,
+    "live reads never use the former JSONL storage even when it contains an active link");
 });
 
 test("project-wide public shares include root scenes in their catalogue and scene route", async () => {
@@ -613,15 +786,15 @@ test("project-wide public shares include root scenes in their catalogue and scen
   files.set("manuscript/root-scene.md", "作品直下の本文。\n");
   const token = "share_" + "r".repeat(43);
   const rootSceneToken = "share_" + "s".repeat(43);
-  files.set(SHARE_GRANTS_PATH, [
+  const grants: ShareGrant[] = [
     { version: 1, grantVersion: 1, revocationVersion: 0, id: "project-share",
-      tokenHash: fixtureTokenDigest(token), scope: "", label: "Project preview",
+      tokenHash: fixtureTokenDigest(token), scope: { kind: "project", id: "*" }, label: "Project preview",
       createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
     { version: 1, grantVersion: 1, revocationVersion: 0, id: "root-scene-share",
       tokenHash: fixtureTokenDigest(rootSceneToken), scope: { kind: "scene", id: "root-scene" }, label: "Root scene preview",
       createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
-  ].map((grant) => JSON.stringify(grant)).join("\n") + "\n");
-  const reader = new MemoryReader(files);
+  ];
+  const reader = new MemoryReader(files, makeSnapshot(), undefined, { version: 1, value: { version: 1, grants } });
   const [publicBase, publicScene] = createPublishingHttpContributions();
   const context = actionContext(reader, []);
   const url = `https://codexia.invalid/share/${token}`;
@@ -656,13 +829,13 @@ test("a proposed root-scene share publishes only the selected same-title manuscr
   files.set("documents/root-note.md", "PRIVATE NOTE BODY\n");
   let remote = new MemoryReader(files, makeSnapshot(), new Map([[rootNotePath, "note"]]));
   const definition = await createPublishing();
-  const proposals: ChangeProposal[] = [];
+  const proposals: ShareProposal[] = [];
   const created = await invokeAction(definition, "publishing.shares.create", {
     kind: "scene", id: "root-scene", label: "直下シーンの確認", expiresInHours: 24,
   }, actionContext(remote, proposals));
   const token = String(created.token);
-  const createOperation = proposals[0]!.operations[0]!;
-  assert.deepEqual(JSON.parse(createOperation.writes[0]!.content!).scope, { kind: "scene", id: "root-scene" });
+  const createOperation = proposals[0]!;
+  assert.deepEqual(createOperation.value.grants[0]!.scope, { kind: "scene", id: "root-scene" });
 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
@@ -676,7 +849,7 @@ test("a proposed root-scene share publishes only the selected same-title manuscr
   const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "the proposed share is not public before apply");
 
-  remote = applyOperation(remote, createOperation, NEXT_VERSION);
+  remote = appliedShare(remote, createOperation, NEXT_VERSION);
   const catalogueResponse = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(catalogueResponse.status, 200);
   const catalogue = await catalogueResponse.json() as {
@@ -702,215 +875,17 @@ test("public share refuses a root scene that collides with an existing chapter s
     "kind: scene\\nid: sc-1\\ntitle: Conflicting root\\nmanuscript: documents/conflict.md\\n".replaceAll("\\n", "\n"));
   files.set("documents/conflict.md", "A distinct manuscript must not be exposed.\n");
   const token = "share_" + "d".repeat(43);
-  files.set(SHARE_GRANTS_PATH, JSON.stringify({
+  const grant: ShareGrant = {
     version: 1, grantVersion: 1, revocationVersion: 0, id: "conflict-share",
     tokenHash: fixtureTokenDigest(token), scope: { kind: "scene", id: "sc-1" }, label: "Collision",
     createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z",
-  }) + "\n");
-  const reader = new MemoryReader(files);
+  };
+  const reader = new MemoryReader(files, makeSnapshot(), undefined, { version: 1, value: { version: 1, grants: [grant] } });
   const [publicBase, publicScene] = createPublishingHttpContributions();
   const context = actionContext(reader, []);
   const url = `https://codexia.invalid/share/${token}`;
   assert.equal((await publicBase!.handle(new Request(url), context)).status, 404);
   assert.equal((await publicScene!.handle(new Request(`${url}/scenes/sc-1`), context)).status, 404);
-});
-
-test("publishing migration hook validates the exact-byte episode map and selected hashed share records without duplicate writes", async () => {
-  const map = "episodes:\n  - id: ep-old\n    number: 3\n    title: 古い話\n    publishedAt: 2024-02-03\n    scope: chapter\n    scopeId: ch-1\n    legacyNote: keep-me\n";
-  const workspace = JSON.stringify([
-    { id: "share-1", ownerId: "host-user", projectId: "legacy-project", scope: "ch-1", label: "校正", tokenHash: "d".repeat(64), tokenPrefix: "share_secret", createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", revokedAt: "2024-02-01T00:00:00.000Z" },
-    { id: "share-nested", ownerId: "host-user", projectId: "legacy-project", scope: { kind: "scene", id: "sc-1", token: "nested-source-scope-secret" }, label: "nested", tokenHash: "c".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
-    { id: "other-project", ownerId: "host-user", projectId: "other", scope: "ch-9", label: "other", tokenHash: "e".repeat(64), createdAt: "2024-01-01", expiresAt: "2030-01-01" },
-  ]);
-  const projectFiles = new Map([["meta/publish-episodes.yaml", Buffer.from(map)]]);
-  const workspaceFiles = new Map([["app-state/share-tokens.json", Buffer.from(workspace)]]);
-  const source = {
-    projectRoot: "/synthetic/legacy-project",
-    workspaceDataRoot: "/synthetic/workspace",
-    readProjectFile: async (path: string) => projectFiles.get(path) ?? null,
-    listProjectFiles: async (prefix: string) => [...projectFiles.keys()].filter((path) => path.startsWith(prefix)),
-    readWorkspaceFile: async (path: string) => workspaceFiles.get(path) ?? null,
-    listWorkspaceFiles: async (prefix: string) => [...workspaceFiles.keys()].filter((path) => path.startsWith(prefix)),
-  } as unknown as LegacySourceReader;
-  const target = new MemoryReader(new Map());
-  const migrationContext: MigrationContext = {
-    source,
-    target,
-    projectId: repository,
-    snapshot: target.snapshot,
-    enabledModules: new Set(["publishing"]),
-    workspaceProjectId: "legacy-project",
-  };
-
-  const semantic = await createPublishingMigrationProducer().inspect(migrationContext);
-  assert.equal(semantic.operations.length, 0);
-  assert.ok(semantic.entries.some((entry) => entry.source === "meta/publish-episodes.yaml" && entry.disposition === "planned"));
-  assert.ok(semantic.entries.some((entry) => entry.source === "app-state/share-tokens.json" && entry.recordCount === 1));
-  assert.ok(semantic.entries.some((entry) => entry.source === "app-state/share-tokens.json" && entry.disposition === "blocked" && entry.recordCount === 1), "Publishing inspection withholds unsupported nested source scopes");
-
-  const generic = await createWorkspaceProducer().inspect(migrationContext);
-  assert.equal(generic.operations.length, 1);
-  const migrated = JSON.parse(generic.operations[0]!.writes[0]!.content!.trim());
-  assert.equal(migrated.id, "share-1");
-  assert.equal(migrated.tokenHash, "d".repeat(64));
-  assert.equal(migrated.createdAt, "2024-01-01T00:00:00.000Z");
-  assert.equal(migrated.expiresAt, "2030-01-01T00:00:00.000Z");
-  assert.equal(migrated.revokedAt, "2024-02-01T00:00:00.000Z");
-  assert.ok(!JSON.stringify(migrated).includes("host-user"));
-  assert.ok(!JSON.stringify(migrated).includes("share_secret"));
-  assert.ok(!JSON.stringify(generic).includes("nested-source-scope-secret"), "unsupported nested legacy scopes are withheld without leaking their fields");
-  assert.equal(generic.operations[0]!.writes[0]!.path, SHARE_GRANTS_PATH);
-
-  const exactTarget = new MemoryReader(new Map([[EPISODES_PATH, map]]));
-  const roundTrip = await createPublishingMigrationProducer().inspect({ ...migrationContext, target: exactTarget });
-  assert.ok(roundTrip.entries.some((entry) => entry.source === "meta/publish-episodes.yaml" && entry.disposition === "unchanged"));
-  const module = await createPublishing();
-  const episodes = await invokeAction(module, "publishing.episodes.read", {}, actionContext(exactTarget, []));
-  const first = (episodes.episodes as Array<Record<string, unknown>>)[0]!;
-  assert.equal(first.publishedAt, "2024-02-03");
-  assert.equal(first.legacyNote, "keep-me");
-});
-
-test("publishing reactivation proposes retained episode bytes and safely merges hashed grants", async () => {
-  const episodeBytes = "# author comment stays byte-for-byte\nepisodes:\n  - id: ep-kept\n    number: 4\n    title: 保存された話\n    publishedAt: 2024-05-06\n    scope: chapter\n    scopeId: ch-1\n    vendorField: keep-me\n";
-  const grantRows = [
-    { id: "grant-z", projectId: repository, scope: { kind: "scene", id: "sc-1", token: "nested-reactivation-scope-secret" }, label: "scene", tokenHash: "f".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", revokedAt: "2024-02-01T00:00:00.000Z", ownerId: "must-not-return", tokenPrefix: "share_never-return", token: "raw-bearer-never-return" },
-    { id: "grant-a", projectId: repository, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-03-01T00:00:00.000Z", expiresAt: "2030-03-01T00:00:00.000Z", lastUsedAt: "2024-04-01T00:00:00.000Z" },
-  ];
-  const retainedEpisodePath = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
-  const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
-  const retainedGrants = grantRows.map((grant) => JSON.stringify(grant)).join("\n") + "\n";
-  const target = new MemoryReader(new Map([
-    [retainedEpisodePath, episodeBytes],
-    [retainedGrantPath, retainedGrants],
-  ]));
-  const source = {
-    projectRoot: "/synthetic/legacy-project-gone",
-    workspaceDataRoot: "/synthetic/workspace-gone",
-    readProjectFile: async () => null,
-    listProjectFiles: async () => [],
-    readWorkspaceFile: async () => null,
-    listWorkspaceFiles: async () => [],
-  } as unknown as LegacySourceReader;
-  const migrationContext: MigrationContext = {
-    source,
-    target,
-    projectId: repository,
-    snapshot: target.snapshot,
-    enabledModules: new Set(["publishing"]),
-  };
-
-  const producer = createPublishingMigrationProducer();
-  const inspection = await producer.inspect(migrationContext);
-  assert.equal(inspection.operations.length, 2);
-  const episodeOperation = inspection.operations.find((operation) => operation.writes[0]?.path === EPISODES_PATH)!;
-  const grantsOperation = inspection.operations.find((operation) => operation.writes[0]?.path === SHARE_GRANTS_PATH)!;
-  assert.equal(episodeOperation.writes[0]!.content, episodeBytes, "episode YAML comments and unknown fields are restored as exact bytes");
-  for (const [operation, targetPath, retainedPath] of [
-    [episodeOperation, EPISODES_PATH, retainedEpisodePath],
-    [grantsOperation, SHARE_GRANTS_PATH, retainedGrantPath],
-  ] as const) {
-    assert.ok(operation.reads.some((read) => read.path === targetPath && read.revision === null), "new canonical file is guarded as absent");
-    assert.equal(operation.reads.find((read) => read.path === retainedPath)?.revision, (await target.read(retainedPath))!.revision, "retained source revision is part of the proposal precondition");
-  }
-  const mergedRows = grantsOperation.writes[0]!.content!.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-  assert.deepEqual(mergedRows.map((grant) => grant.id), ["grant-a", "grant-z"], "new grants are appended in stable ID order");
-  assert.equal(mergedRows[0]!.projectId, repository);
-  assert.equal(mergedRows[0]!.lastUsedAt, "2024-04-01T00:00:00.000Z");
-  assert.equal(mergedRows[1]!.revokedAt, "2024-02-01T00:00:00.000Z");
-  assert.deepEqual(mergedRows[1]!.scope, { kind: "scene", id: "sc-1" }, "reactivated object scopes retain only the supported kind and ID");
-  const proposalJson = JSON.stringify(inspection);
-  for (const secret of ["must-not-return", "share_never-return", "raw-bearer-never-return", "nested-reactivation-scope-secret"]) {
-    assert.ok(!proposalJson.includes(secret), `reactivation proposal excludes ${secret}`);
-  }
-  const repeatedPlan = await producer.inspect(migrationContext);
-  assert.deepEqual(repeatedPlan.operations.map((operation) => operation.id), inspection.operations.map((operation) => operation.id), "same retained revisions produce stable operation identities");
-
-  const coreProposal: MigrationInspection = {
-    snapshot: target.snapshot,
-    entries: inspection.entries,
-    operations: inspection.operations,
-    recovery: [],
-    pendingWorkspace: { repository: false, pendingCommitCount: 0, workingTreePaths: [], untrackedPaths: [], stagedPaths: [], blockers: [] },
-  };
-  let submitted: ChangeProposal | undefined;
-  await proposeMigrationImport({
-    async propose(projectId, proposal) {
-      assert.equal(projectId, "module-project-1");
-      submitted = proposal;
-      return proposal;
-    },
-  }, "module-project-1", coreProposal);
-  assert.equal(submitted?.source, "author");
-  assert.deepEqual(submitted?.operations.map((operation) => operation.id), inspection.operations.map((operation) => operation.id));
-  assert.ok(!JSON.stringify(submitted).includes("nested-reactivation-scope-secret"), "Core proposal payload excludes nested scope secrets");
-
-  const appliedEpisodes = applyOperation(target, episodeOperation, NEXT_VERSION);
-  const appliedAll = applyOperation(appliedEpisodes, grantsOperation, NEXT_VERSION);
-  const alreadyRestored = await producer.inspect({ ...migrationContext, target: appliedAll, snapshot: appliedAll.snapshot });
-  assert.deepEqual(alreadyRestored.operations, [], "reinspection after applying the proposal is idempotent");
-  assert.ok(alreadyRestored.entries.some((entry) => entry.target === EPISODES_PATH && entry.disposition === "unchanged"));
-  assert.ok(alreadyRestored.entries.some((entry) => entry.target === SHARE_GRANTS_PATH && entry.disposition === "unchanged"));
-
-  const existingGrant = grantRows[0]!;
-  const existingContent = JSON.stringify({
-    id: existingGrant.id,
-    projectId: existingGrant.projectId,
-    scope: existingGrant.scope,
-    label: existingGrant.label,
-    tokenHash: existingGrant.tokenHash,
-    createdAt: existingGrant.createdAt,
-    expiresAt: existingGrant.expiresAt,
-    revokedAt: existingGrant.revokedAt,
-  }) + "\n";
-  const conflictTarget = new MemoryReader(new Map([
-    [retainedGrantPath, retainedGrants],
-    [SHARE_GRANTS_PATH, existingContent.replace('"label":"scene"', '"label":"edited"')],
-  ]));
-  const grantConflict = await producer.inspect({ ...migrationContext, target: conflictTarget, snapshot: conflictTarget.snapshot });
-  assert.ok(grantConflict.entries.some((entry) => entry.target === SHARE_GRANTS_PATH && entry.disposition === "conflict"));
-  assert.ok(!grantConflict.operations.some((operation) => operation.writes.some((write) => write.path === SHARE_GRANTS_PATH)), "divergent same-ID metadata is never overwritten");
-
-  const episodeConflictTarget = new MemoryReader(new Map([
-    [retainedEpisodePath, episodeBytes],
-    [EPISODES_PATH, "episodes: []\n"],
-  ]));
-  const episodeConflict = await producer.inspect({ ...migrationContext, target: episodeConflictTarget, snapshot: episodeConflictTarget.snapshot });
-  assert.ok(episodeConflict.entries.some((entry) => entry.target === EPISODES_PATH && entry.disposition === "conflict"));
-  assert.ok(!episodeConflict.operations.some((operation) => operation.writes.some((write) => write.path === EPISODES_PATH)), "different canonical episode bytes are never overwritten");
-});
-
-test("publishing reactivation defers to live stores and does nothing while disabled", async () => {
-  const retainedEpisodePath = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
-  const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
-  const target = new MemoryReader(new Map([
-    [retainedEpisodePath, "episodes: []\n"],
-    [retainedGrantPath, JSON.stringify({ id: "grant-1", projectId: repository, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" }) + "\n"],
-  ]));
-  const projectFiles = new Map([["meta/publish-episodes.yaml", Buffer.from("episodes: []\n")]]);
-  const workspaceFiles = new Map([["share-tokens.json", Buffer.from("[]")]]);
-  const source = {
-    projectRoot: "/synthetic/live-source",
-    workspaceDataRoot: "/synthetic/live-workspace",
-    readProjectFile: async (path: string) => projectFiles.get(path) ?? null,
-    listProjectFiles: async () => [...projectFiles.keys()],
-    readWorkspaceFile: async (path: string) => workspaceFiles.get(path) ?? null,
-    listWorkspaceFiles: async () => [...workspaceFiles.keys()],
-  } as unknown as LegacySourceReader;
-  const producer = createPublishingMigrationProducer();
-  const live = await producer.inspect({ source, target, projectId: repository, snapshot: target.snapshot, enabledModules: new Set(["publishing"]) });
-  assert.ok(!live.operations.some((operation) => operation.writes.some((write) => write.path === EPISODES_PATH || write.path === SHARE_GRANTS_PATH)));
-  assert.ok(!live.entries.some((entry) => entry.source.startsWith("meta/scriptorium/modules/publishing/legacy/")), "live source keeps ownership with its importer");
-
-  const disabled = await producer.inspect({
-    source: { ...source, workspaceDataRoot: undefined, readProjectFile: async () => null, readWorkspaceFile: async () => null, listWorkspaceFiles: async () => [] } as LegacySourceReader,
-    target,
-    projectId: repository,
-    snapshot: target.snapshot,
-    enabledModules: new Set(),
-  });
-  assert.deepEqual(disabled.operations, [], "retained values stay unreadable until Publishing is enabled");
-  assert.deepEqual(disabled.entries, []);
 });
 
 test("EPUB preserves literal placeholder-shaped manuscript text alongside ruby and emphasis", () => {

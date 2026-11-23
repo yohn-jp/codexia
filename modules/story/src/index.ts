@@ -33,5 +33,4 @@ export function createModule(context: ModuleContext): ModuleDefinition {
 
 export { createStoryActions } from "./actions.js";
 export { readStorySnapshot } from "./snapshot.js";
-export { createStoryMigrationProducer } from "./migration/index.js";
 export * from "./domain/index.js";

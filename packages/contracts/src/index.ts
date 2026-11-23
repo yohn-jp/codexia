@@ -1,4 +1,7 @@
 /** Public, transport-neutral campaign contract v1. No platform or domain dependencies. */
+import { PUBLISHING_EPISODES_KEY } from "./publishing-episodes.js";
+import { PUBLISHING_SHARE_GRANTS_KEY } from "./publishing-share-grants.js";
+
 export const CONTRACT_VERSION = 1 as const;
 export const MAX_JOB_INPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_JOB_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -18,34 +21,18 @@ export interface SnapshotId {
   projectId: string;
   projectVersion: number;
 }
-/** Optional host-owned historical records; never a project mutation or disposable model cache. */
-export const MODEL_USAGE_CAPABILITY = "host.model-usage";
-export interface ModelUsageEvent {
-  id: string;
-  projectId: string;
-  feature: string;
-  provider: string;
-  model: string;
-  startedAt: string;
-  completedAt: string;
-  state: "completed" | "aborted" | "failed";
-  inputTokens?: number;
-  outputTokens?: number;
-  cost?: number;
-  cacheHit?: boolean;
-  promptVersion?: string;
-  durationMs?: number;
-  queueWaitMs?: number;
-  errorCode?: string;
-}
-export interface ModelUsageStore {
-  append(event: ModelUsageEvent): Promise<void>;
-  list(projectId: string, query?: { from?: string; to?: string; limit?: number; cursor?: string }): Promise<{
-    events: ModelUsageEvent[];
-    nextCursor?: string;
-  }>;
-}
 export interface FileRevision { path: string; revision: string | null }
+export const PRIVATE_PUBLISHING_PATHS = Object.freeze([
+  "meta/scriptorium/modules/publishing/episodes.yaml",
+  "meta/scriptorium/modules/publishing/share-grants.jsonl",
+]);
+export function isPrivatePublishingPath(path: string): boolean {
+  return PRIVATE_PUBLISHING_PATHS.includes(path);
+}
+/** Identifies module data retained for preservation outside live authoring. */
+export function isModulePreservationArchivePath(path: string): boolean {
+  return /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u.test(path);
+}
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
 /** Return a decimal order key after every existing text-ordered key without rewriting them. */
@@ -81,6 +68,8 @@ export interface ChangeOperation {
   reads: FileRevision[];
   readScopes?: ScopeRevision[];
   readDocumentSets?: DocumentSetRevision[];
+  /** Exact Knowledge projection observed by this operation. */
+  readKnowledgeRevision?: string;
   writes: FileChange[];
   message: string;
   evidenceIds?: string[];
@@ -96,18 +85,62 @@ export interface ProjectObservation {
   observedAt: string;
   state: "fresh" | "failed" | "unknown";
 }
+/** Presentation fields from the project record at the enclosing snapshot. */
+export interface SnapshotProjectPresentation {
+  /** Reader-facing title after applying the project's display settings. */
+  readonly title: string;
+  readonly subtitle?: string;
+}
+export interface KnowledgeProjectionRef {
+  readonly kind: "knowledge-projection";
+  readonly snapshot: Readonly<SnapshotId>;
+  readonly revision: string;
+}
+export interface KnowledgeProjectionEvidence {
+  readonly anchor: Readonly<{ id: string; documentId: string; revisionId: string; status: string }>;
+  readonly mention: Readonly<{ status: string }>;
+  readonly current: boolean;
+  readonly storySceneId: string | null;
+  /** Verified quote at the anchor's immutable revision, if it fits the projection budget. */
+  readonly quote: string | null;
+  readonly quoteOmission?: "projection-budget";
+  readonly assertions: readonly Readonly<{ assertion: Readonly<{ status: string }>; role: string }>[];
+  readonly assertionLimitReached: boolean;
+}
+export interface KnowledgeProjectionEntry {
+  readonly node: Readonly<{ id: string; name: string; type: string; status: string; attributes: Readonly<Record<string, unknown>>; deletedAt: string | null }>;
+  readonly aliases: readonly Readonly<{ nodeId: string; surface: string; status: string; scope: string | null }>[];
+  readonly relations: readonly Readonly<{ sourceId: string; targetId: string; status: string }>[];
+  readonly evidence: readonly KnowledgeProjectionEvidence[];
+  readonly evidenceLimitReached: boolean;
+  readonly aliasLimitReached: boolean;
+  readonly relationLimitReached: boolean;
+}
+export interface KnowledgeProjectionData {
+  readonly documentMappings: readonly Readonly<{ documentId: string; storySceneId: string; mapping: "explicit" | "ambiguous" }>[];
+  readonly entries: readonly KnowledgeProjectionEntry[];
+  readonly nodeLimitReached: boolean;
+}
+export interface SnapshotKnowledgeProjection extends KnowledgeProjectionData {
+  readonly source: KnowledgeProjectionRef;
+}
+export interface SnapshotFile {
+  content: string;
+  revision: string;
+  /** Canonical PostgreSQL kind for projected metadata and body files, even when bytes omit it. */
+  documentKind?: string;
+  /** Snapshot-local PostgreSQL document sequence, consistent with sibling order. */
+  documentOrder?: number;
+}
 export interface SnapshotReader {
   snapshot: SnapshotId;
+  readonly knowledge?: SnapshotKnowledgeProjection;
+  projectPresentation?: SnapshotProjectPresentation;
   /** Typed projection of canonical PostgreSQL Story documents for native readers. */
   nativeStoryDocuments?: readonly NativeStoryDocument[];
-  /** Canonical PostgreSQL kind for projected metadata and body files, even when the bytes omit it. */
-  read(path: string, encoding?: "utf8" | "base64"): Promise<{
-    content: string;
-    revision: string;
-    documentKind?: string;
-    /** Snapshot-local PostgreSQL document sequence; sibling-relative order matches `listDocuments`. */
-    documentOrder?: number;
-  } | null>;
+  read(path: string, encoding?: "utf8" | "base64"): Promise<SnapshotFile | null>;
+  /** Read up to SNAPSHOT_READ_MANY_LIMIT files at this snapshot, in input order with null for absent paths. */
+  readMany?(paths: readonly string[], encoding?: "utf8" | "base64"): Promise<readonly (SnapshotFile | null)[]>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
@@ -120,6 +153,8 @@ export interface NativeStoryDocument {
   orderKey: string;
   metadataPath: string;
   metadataRevision: string;
+  /** Exact UTF-8 content of metadataPath at metadataRevision. */
+  metadataContent: string;
   documentOrder: number;
   metadata: Record<string, unknown>;
 }
@@ -203,9 +238,28 @@ export type ActionResult<T = unknown> = { ok: true; snapshot: SnapshotId; data: 
 /** Optional host-owned history for a source domain task; never grants author approval. */
 export interface DomainJobDescriptor { type: string }
 export interface ActionDescriptor { id: string; module: ModuleId | "core"; effect: "read" | "propose" | "compute"; job?: DomainJobDescriptor }
+export type ModuleRecordJsonValue = null | string | number | boolean | ModuleRecordJsonValue[] | ModuleRecordJsonObject;
+export type ModuleRecordJsonObject = { [key: string]: ModuleRecordJsonValue };
+export { NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, type NlpFeatureSettings } from "./nlp-feature-settings.js";
+export interface OwnModuleRecord { value: ModuleRecordJsonObject; version: number }
+export interface OwnModuleRecordProposal {
+  key: string;
+  value: ModuleRecordJsonObject;
+  expectedVersion: number | null;
+  idempotencyKey: string;
+}
+export interface NativeChangeSetReference { id: string; projectId: string }
+export { PUBLISHING_SHARE_GRANTS_KEY, parsePublishingShareGrantIndex, convertPublishingShareGrantJsonl, type PublishingShareGrant } from "./publishing-share-grants.js";
+export { PUBLISHING_EPISODES_KEY, parsePublishingEpisodesRecord, parsePublishingEpisodeUpdate, convertPublishingEpisodesYaml, type PublishingEpisodeDocument, type PublishingEpisode } from "./publishing-episodes.js";
+export const PUBLISHING_RECORD_KEYS = [PUBLISHING_EPISODES_KEY, PUBLISHING_SHARE_GRANTS_KEY] as const;
+export function isPublishingRecordKey(key: string): key is (typeof PUBLISHING_RECORD_KEYS)[number] {
+  return PUBLISHING_RECORD_KEYS.some(candidate => candidate === key);
+}
 export interface ModuleActionContext {
   projectId: string;
   reader: SnapshotReader;
+  /** Host-verified identity binding for an MCP HTTP session. */
+  mcpSessionIdentity?: string;
   /** Same authenticated project/snapshot; never exposes author mutation ports. */
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
   listActions(): Promise<ActionDescriptor[]>;
@@ -216,6 +270,10 @@ export interface ModuleActionContext {
   reportProgress?(progress: number): Promise<void>;
   /** Only proposes; approval remains an authenticated author action. */
   propose(operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, signal?: AbortSignal): Promise<ChangeProposal>;
+  /** Read a record owned by this module at the enclosing snapshot. */
+  readOwnModuleRecord?(key: string): Promise<OwnModuleRecord | undefined>;
+  /** Propose an update to this module's own record under the existing author approval boundary. */
+  proposeOwnModuleRecord?(input: OwnModuleRecordProposal): Promise<NativeChangeSetReference>;
   runJob<T = unknown>(request: JobRequest, signal?: AbortSignal): Promise<JobOutcome<T>>;
 }
 export interface ModuleAction {
@@ -303,7 +361,7 @@ export function assertProjectPath(value: unknown): asserts value is string {
     throw new ContractError("Unsafe project path");
   }
 }
-const DOCUMENT_READ_BATCH_SIZE = 32;
+export const SNAPSHOT_READ_MANY_LIMIT = 32;
 
 function documentPrefix(prefix: string | undefined): string | undefined {
   if (prefix === undefined) return undefined;
@@ -326,8 +384,8 @@ function assertDocumentPath(path: unknown, prefix?: string): asserts path is str
 
 async function inBatches<T, R>(values: readonly T[], action: (value: T) => Promise<R>): Promise<R[]> {
   const output: R[] = [];
-  for (let offset = 0; offset < values.length; offset += DOCUMENT_READ_BATCH_SIZE) {
-    output.push(...await Promise.all(values.slice(offset, offset + DOCUMENT_READ_BATCH_SIZE).map(action)));
+  for (let offset = 0; offset < values.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
+    output.push(...await Promise.all(values.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT).map(action)));
   }
   return output;
 }
@@ -366,12 +424,21 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
         if (seen.has(path)) throw new ContractError("Snapshot document read contains duplicate paths");
         seen.add(path);
       }
-      return inBatches(paths, async path => {
-        const file = await reader.read(path);
+      function documentFile(path: string, file: SnapshotFile | null | undefined) {
         if (!file) throw new ContractError("Snapshot document is unavailable");
         assertDocumentRevision(file.revision);
         return { path, content: file.content, revision: file.revision };
-      });
+      }
+      if (!reader.readMany) return inBatches(paths, async path => documentFile(path, await reader.read(path)));
+
+      const result: Array<{ path: string; content: string; revision: string }> = [];
+      for (let offset = 0; offset < paths.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
+        const batch = paths.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT);
+        const files = await reader.readMany(batch);
+        if (files.length !== batch.length) throw new ContractError("Invalid snapshot document batch");
+        result.push(...batch.map((path, index) => documentFile(path, files[index])));
+      }
+      return result;
     },
     async changes(previous, prefix) {
       const scope = documentPrefix(prefix);
@@ -401,18 +468,24 @@ export function snapshotKey(snapshot: SnapshotId): string {
 /** Content-neutral semantic read-set guard; callers choose the relevant project subtree. */
 export async function snapshotScopeRevision(reader: SnapshotReader, prefix: string): Promise<string> {
   assertProjectPath(prefix);
-  const paths = await reader.list(prefix);
+  const files = reader.listRevisions
+    ? await reader.listRevisions(prefix)
+    : (await reader.list(prefix)).map(path => ({ path }));
   const seen = new Set<string>();
   const entries: Array<[string, string]> = [];
-  for (const path of paths) {
+  for (const file of files) {
+    if (!file || typeof file !== "object") throw new ContractError("Invalid snapshot scope listing");
+    const { path } = file;
     assertProjectPath(path);
     if ((path !== prefix && !path.startsWith(`${prefix}/`)) || seen.has(path)) {
       throw new ContractError("Invalid snapshot scope listing");
     }
     seen.add(path);
-    const file = await reader.read(path);
-    if (!file || !/^[a-f0-9]{64}$/.test(file.revision)) throw new ContractError("Snapshot scope contains an unavailable file");
-    entries.push([path, file.revision]);
+    const revision = "revision" in file ? file.revision : (await reader.read(path))?.revision;
+    if (typeof revision !== "string" || !/^[a-f0-9]{64}$/.test(revision)) {
+      throw new ContractError("Snapshot scope contains an unavailable file");
+    }
+    entries.push([path, revision]);
   }
   entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(entries)));
@@ -440,6 +513,9 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
       }
       prefixes.add(scope.prefix);
     }
+  }
+  if (v.readKnowledgeRevision !== undefined && (typeof v.readKnowledgeRevision !== "string" || !/^[a-f0-9]{64}$/u.test(v.readKnowledgeRevision))) {
+    throw new ContractError("Invalid Knowledge projection revision");
   }
   if (v.readDocumentSets !== undefined) {
     if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError("Invalid document-set preconditions");

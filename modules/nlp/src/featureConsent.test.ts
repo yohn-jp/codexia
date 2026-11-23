@@ -1,92 +1,88 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
+import type { ModuleActionContext, ModuleContext, OwnModuleRecord, OwnModuleRecordProposal, SnapshotId } from "@codexia/contracts";
 import { createModule } from "./index.js";
 
-const snapshot: SnapshotId = {
-  projectId: "nlp-feature-consent",
-  projectVersion: 13,
-};
+const snapshot: SnapshotId = { projectId: "nlp-feature-consent", projectVersion: 13 };
+const featureSettingsKey = "feature-settings";
 
-test("source LLM reactions are external features with deny-by-default and explicit proposal consent", async () => {
-  const moduleContext = {
+test("external consent reads the bound record and proposes a CAS without applying it", async () => {
+  const moduleContext: ModuleContext = {
     cacheDirectory: "/tmp/codexia-nlp-feature-consent-test",
     signal: new AbortController().signal,
-    async acquireCapability() { throw new Error("tokenizer is not used by feature-consent actions"); },
-    async createWorkerService() { throw new Error("tokenizer worker is not used by feature-consent actions"); },
-  } as unknown as ModuleContext;
+    async acquireCapability() { assert.fail("consent does not acquire a model"); },
+    async createWorkerService() { assert.fail("consent does not start a worker"); },
+  };
   const definition = await createModule(moduleContext);
   const featuresAction = definition.actions?.find((item) => item.id === "nlp.features");
   const consentAction = definition.actions?.find((item) => item.id === "nlp.updateExternalConsent");
   assert.ok(featuresAction);
   assert.ok(consentAction);
 
-  let selectedSnapshot = snapshot;
-  let settingsContent = `${JSON.stringify({ externalEnabled: { "setting-qa": false } })}\n`;
-  const reader = {
-    get snapshot() { return selectedSnapshot; },
-    async read(path: string) { return path === "meta/scriptorium/modules/nlp/feature-settings.json" ? { content: settingsContent, revision: `revision-${selectedSnapshot.projectVersion}` } : null; },
-    async list() { return []; },
-  };
-  const proposals: ChangeProposal[] = [];
-  const context = {
-    projectId: "nlp-feature-consent",
-    reader,
-    signal: new AbortController().signal,
-    async invoke() { throw new Error("feature-consent actions do not compose other actions"); },
-    async listActions() { return []; },
-    async linkedReader() { throw new Error("feature-consent actions do not read linked projects"); },
-    async runJob() { throw new Error("feature-consent actions do not run model jobs"); },
-    async propose(operations: ChangeOperation[], evidence?: ChangeProposal["evidence"], proposalId?: string) {
-      const proposal: ChangeProposal = { id: proposalId ?? "feature-consent", snapshot: reader.snapshot, operations, source: "module", ...(evidence ? { evidence } : {}) };
-      proposals.push(proposal);
-      return proposal;
+  let selectedRecord: OwnModuleRecord | undefined;
+  const proposals: OwnModuleRecordProposal[] = [];
+  const context: ModuleActionContext = {
+    projectId: snapshot.projectId,
+    reader: {
+      snapshot,
+      async read() { return { content: '{"externalEnabled":{"first-read-reaction":true}}', revision: "old-file" }; },
+      async list() { assert.fail("consent does not enumerate files"); },
     },
-  } as unknown as ModuleActionContext;
+    signal: new AbortController().signal,
+    async invoke() { assert.fail("consent does not invoke other actions"); },
+    async listActions() { return []; },
+    async linkedReader() { assert.fail("consent does not read linked projects"); },
+    async reportProgress() { assert.fail("consent does not start a job"); },
+    async runJob() { assert.fail("consent does not start a job"); },
+    async propose() { assert.fail("consent does not propose file writes"); },
+    async readOwnModuleRecord(key) {
+      assert.equal(key, featureSettingsKey);
+      return selectedRecord;
+    },
+    async proposeOwnModuleRecord(proposal) {
+      proposals.push(proposal);
+      return { id: "native-consent-proposal", projectId: snapshot.projectId };
+    },
+  };
 
-  const initial = await featuresAction.invoke(featuresAction.inputSchema.parse({}), context);
-  assert.equal(initial.ok, true);
-  if (!initial.ok) return;
-  const listed = initial.data as { features: Array<{ id: string; label: string; locality: "local" | "external"; enabled: boolean }> };
+  type Features = { features: Array<{ id: string; label: string; locality: "local" | "external"; enabled: boolean }> };
+  async function readFeatures() {
+    const result = await featuresAction!.invoke({}, context);
+    assert.equal(result.ok, true);
+    return (result.data as Features).features;
+  }
+
+  const initial = await readFeatures();
   for (const [id, label] of [["first-read-reaction", "初読リアクション"], ["state-event-draft", "状態イベント草案"]] as const) {
-    const feature = listed.features.find((item) => item.id === id);
-    assert.deepEqual(feature, { id, label, locality: "external", enabled: false }, `${id} has no implicit external-send consent`);
+    assert.deepEqual(initial.find((item) => item.id === id), { id, label, locality: "external", enabled: false });
   }
+  assert.equal(initial.find((feature) => feature.id === "hybrid-search")?.enabled, true);
 
-  assert.throws(
-    () => consentAction.inputSchema.parse({ externalEnabled: { "unmapped-feature": true } }),
-    /unsupported feature flag/u,
-    "only declared external feature IDs are accepted",
-  );
-  const consent = await consentAction.invoke(consentAction.inputSchema.parse({
-    externalEnabled: { "first-read-reaction": true, "state-event-draft": true },
-  }), context);
+  const input = { externalEnabled: { "first-read-reaction": true, "state-event-draft": false } };
+  assert.throws(() => consentAction.inputSchema.parse({ externalEnabled: { "unmapped-feature": true } }), /unsupported feature flag/u);
+  assert.throws(() => consentAction.inputSchema.parse({ externalEnabled: { "first-read-reaction": "true" } }), /unsupported feature flag/u);
+
+  const consent = await consentAction.invoke(consentAction.inputSchema.parse(input), context);
   assert.equal(consent.ok, true);
-  assert.equal(proposals.length, 1);
-  const write = proposals[0]?.operations[0]?.writes[0];
-  assert.equal(write?.path, "meta/scriptorium/modules/nlp/feature-settings.json");
-  const proposedSettings = JSON.parse(write?.content ?? "{}") as { externalEnabled: Record<string, boolean> };
-  assert.deepEqual(proposedSettings.externalEnabled, {
-    "setting-qa": false,
-    "first-read-reaction": true,
-    "state-event-draft": true,
+  assert.deepEqual((consent.data as { changeSet: unknown }).changeSet, { id: "native-consent-proposal", projectId: snapshot.projectId });
+  assert.equal(proposals[0]?.expectedVersion, null);
+  assert.equal((await readFeatures()).find((feature) => feature.id === "first-read-reaction")?.enabled, false);
+
+  selectedRecord = {
+    version: 7,
+    value: { externalEnabled: { "setting-qa": "true", rewrite: true, "future-flag": { pending: true } }, ownerNote: { kept: "yes" } },
+  };
+  const committed = await readFeatures();
+  assert.equal(committed.find((feature) => feature.id === "setting-qa")?.enabled, false);
+  assert.equal(committed.find((feature) => feature.id === "rewrite")?.enabled, true);
+  const update = await consentAction.invoke(consentAction.inputSchema.parse(input), context);
+  assert.equal(update.ok, true);
+  assert.equal(proposals.length, 2);
+  assert.equal(proposals[1]?.key, featureSettingsKey);
+  assert.equal(proposals[1]?.expectedVersion, 7);
+  assert.ok(proposals[1]?.idempotencyKey);
+  assert.deepEqual(proposals[1]?.value, {
+    externalEnabled: { "setting-qa": "true", rewrite: true, "future-flag": { pending: true }, "first-read-reaction": true, "state-event-draft": false },
+    ownerNote: { kept: "yes" },
   });
-
-  const beforeApproval = await featuresAction.invoke(featuresAction.inputSchema.parse({}), context);
-  assert.equal(beforeApproval.ok, true);
-  if (beforeApproval.ok) {
-    const features = (beforeApproval.data as typeof listed).features;
-    assert.equal(features.find((item) => item.id === "first-read-reaction")?.enabled, false, "a proposal does not activate consent before the selected snapshot changes");
-    assert.equal(features.find((item) => item.id === "state-event-draft")?.enabled, false);
-  }
-
-  settingsContent = write?.content ?? settingsContent;
-  selectedSnapshot = { ...snapshot, projectVersion: 14 };
-  const afterApproval = await featuresAction.invoke(featuresAction.inputSchema.parse({}), context);
-  assert.equal(afterApproval.ok, true);
-  if (afterApproval.ok) {
-    const features = (afterApproval.data as typeof listed).features;
-    assert.equal(features.find((item) => item.id === "first-read-reaction")?.enabled, true);
-    assert.equal(features.find((item) => item.id === "state-event-draft")?.enabled, true);
-  }
 });

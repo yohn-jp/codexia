@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -11,30 +11,31 @@ import { readComponentVersion } from './component-release-version.mjs';
 const sha=char=>char.repeat(40),image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
 const compatibility={apiEpoch:1,persistenceFormat:1};
 
-test('resolves the historical Git tree bound to a release even after a newer checkout', async t => {
+test('resolves the published Git tree and API epoch after a newer checkout', async t => {
   const repository = await mkdtemp(path.join(tmpdir(), 'codexia-release-tree-'));
   t.after(() => rm(repository, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
   git('init', '-q');
   git('config', 'user.name', 'Release Test');
   git('config', 'user.email', 'release-test@example.invalid');
-  const file = path.join(repository, 'artifact-input.txt');
-  await writeFile(file, 'certified source\n');
-  git('add', 'artifact-input.txt');
+  await mkdir(path.join(repository, 'deploy'));
+  const file = path.join(repository, 'deploy/update-compatibility.json');
+  await writeFile(file, '{"apiEpoch":1,"persistenceFormat":1}\n');
+  git('add', 'deploy/update-compatibility.json');
   const certifiedTree = git('write-tree');
   git('commit', '-qm', 'Certified source');
   const certifiedSha = git('rev-parse', 'HEAD');
-  await writeFile(file, 'newer source\n');
-  git('add', 'artifact-input.txt');
+  await writeFile(file, '{"apiEpoch":2,"persistenceFormat":1}\n');
+  git('add', 'deploy/update-compatibility.json');
   assert.notEqual(git('write-tree'), certifiedTree);
   git('commit', '-qm', 'Newer source');
 
   const module = new URL('./verify-existing-backend-release.mjs', import.meta.url);
   const result = execFileSync(process.execPath, ['--input-type=module', '-e', `
-    import { backendReleaseSourceTree } from ${JSON.stringify(module.href)};
-    console.log(backendReleaseSourceTree(process.argv[1]));
+    import { backendReleaseSourceTree, publishedBackendCompatibility } from ${JSON.stringify(module.href)};
+    console.log(JSON.stringify({ tree: backendReleaseSourceTree(process.argv[1]), compatibility: publishedBackendCompatibility(process.argv[1]) }));
   `, certifiedSha], { cwd: repository, encoding: 'utf8' });
-  assert.equal(result.trim(), certifiedTree);
+  assert.deepEqual(JSON.parse(result), { tree: certifiedTree, compatibility: { apiEpoch: 1, persistenceFormat: 1 } });
   assert.throws(() => backendReleaseSourceTree('HEAD'), /source SHA is invalid/u);
 });
 
@@ -73,6 +74,8 @@ test('main fallback digest retry requires the exact build artifact receipt',()=>
   const release={tag_name:record.tag,draft:false,prerelease:false,body:record.body},tagRef={object:{type:'commit',sha:mainSha}};
   const expected={image:core,mainSha,producerSha:mainSha,version,profile:'core',event:'push',receipt,mainTree:tree,compatibility};
   assert.deepEqual(assertExistingBackendReleaseBinding(release,tagRef,expected),record.metadata);
+  assert.throws(() => assertExistingBackendReleaseBinding(release, tagRef, { ...expected, compatibility: { apiEpoch: 2, persistenceFormat: 1 } }),
+    /does not bind this exact main build receipt/u);
   const completedReceipt={...receipt,event:'workflow_run'};
   const completedRecord=buildComponentReleaseRecord('backend',mainSha,null,{core,full,compatibility,event:'workflow_run',receipt:completedReceipt,mainTree:tree});
   const completedRelease={...release,body:completedRecord.body};

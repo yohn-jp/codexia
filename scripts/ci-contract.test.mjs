@@ -15,12 +15,12 @@ const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', i
 const fullModelWorkflow = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
 test('the certified graph covers every declared obligation within the twenty-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
-  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted', 'certification']);
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
   assert.deepEqual(REQUIRED_VERIFICATION_JOBS, ['plan', ...Object.keys(VERIFICATION_GROUPS), 'certification']);
-  for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile'], ['hosted', 'selection']]) {
+  for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile']]) {
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');
   }
   assert.equal(workflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
@@ -71,17 +71,16 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci'].includes(id))) {
-    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','build','hosted_catalog'] : ['plan'], id);
+    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
-    if (id === 'hosted_catalog') assert.equal(job.name,'hosted-native-catalog');
-    else assert.equal(job.strategy['fail-fast'], false, id);
+    assert.equal(job.strategy['fail-fast'], false, id);
     assert.ok(job.steps.some(step => step.run?.includes('ci-group.mjs')));
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.if === 'always()'));
   }
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, '${{ always() && !cancelled() }}');
-  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].toSorted());
+  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-plan');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
@@ -252,28 +251,6 @@ test('every default browser spec is assigned a Chromium shard and WebKit UI is p
   assert.match(config, /workers: 1/);
 });
 
-test('Hosted Native keeps one verified producer and three independent composition consumers',()=>{
-  const producer=workflow.jobs.hosted_catalog;
-  const consumers=workflow.jobs.hosted;
-  assert.match(producer.if,/hosted_catalog == 'true'/);
-  assert.equal(producer.name,'hosted-native-catalog');
-  assert.ok(producer.steps.some(step=>step.run?.includes('ci-native-producer.mjs seal')));
-  assert.deepEqual(consumers.needs,['plan','build','hosted_catalog']);
-  assert.match(consumers.if,/always\(\)/);
-  assert.equal(consumers.permissions.actions,'read');
-  assert.ok(!consumers.steps.some(step=>step.uses==='docker/setup-buildx-action@v3'));
-  const restore=consumers.steps.find(step=>step.id==='restore-native');
-  assert.match(restore.run,/ci-native-producer\.mjs restore/);
-  const execution=consumers.steps.find(step=>step.run?.includes('ci-group.mjs'));
-  assert.equal(execution.env.CODEXIA_CI_NATIVE_RESTORE,'${{ steps.restore-native.outcome }}');
-  const profileRestore=consumers.steps.find(step=>step.id==='restore-profile');
-  assert.match(profileRestore.run,/ci-profile-artifact\.mjs restore full/);
-  assert.equal(execution.env.CODEXIA_CI_PROFILE_RESTORE,'${{ steps.restore-profile.outcome }}');
-  assert.ok(consumers.steps.indexOf(profileRestore)<consumers.steps.indexOf(execution));
-  const runner=readFileSync(new URL('./ci-group.mjs',import.meta.url),'utf8');
-  assert.doesNotMatch(runner,/build:workspace/);
-});
-
 test('browser lanes cover each profile and use compatible browser images', () => {
   for (const profile of PROFILES) {
     const prefix = `browser-${profile}-`;
@@ -300,7 +277,7 @@ test('compact main proof is resolved only on main push, skips all heavy families
   assert.equal(reuse.run, 'node scripts/reuse-pr-verification.mjs plan');
   assert.equal(plan.permissions.actions, 'read');
   assert.equal(plan.permissions['pull-requests'], 'read');
-  const families = ['unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'];
+  const families = ['unit', 'types', 'build', 'oci', 'browser'];
   for (const name of families) assert.match(workflow.jobs[name].if, /needs\.plan\.outputs\.reuse != 'true'/);
   assert.deepEqual(REUSED_MAIN_SKIPPED_JOBS, ['full_model_oci', ...families].map(name => workflow.jobs[name].name));
   const gate = workflow.jobs.certification;

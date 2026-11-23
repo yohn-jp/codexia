@@ -82,6 +82,7 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
         kind, parentId, documentIds: [...documentIds].sort(),
       })),
     }),
+    ...(operation.readKnowledgeRevision === undefined ? {} : { readKnowledgeRevision: operation.readKnowledgeRevision }),
     writes: operation.writes.map((change) => ({
       path: change.path,
       revision: change.revision,

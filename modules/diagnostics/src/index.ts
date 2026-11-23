@@ -23,7 +23,6 @@ import { checkDeclaredVoiceConsistency, type DeclaredVoiceAttribution } from "./
 import { composeSceneDiagnostics } from "./fullDiagnostics.js";
 
 export * from "./analysis.js";
-export { createDiagnosticsMigrationProducer } from "./migration.js";
 export * from "./textAnalysis.js";
 export * from "./config.js";
 export * from "./linter/types.js";
@@ -53,6 +52,7 @@ const MAX_VOICE_CORPUS_CHARACTERS = 20_000;
 const MAX_VOICE_ATTRIBUTIONS = 100;
 const LINT_PATH_PREFIX = "manuscript/";
 const NATIVE_SCENE_BODY_PATH = /^documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.md$/u;
+const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_WORKER_TIME_MS = 120_000;
 const LINT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
 const TONE_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml";
@@ -646,12 +646,16 @@ function makeActions(moduleContext: ModuleContext): ModuleAction[] {
       const { path, baseRevision, operationId } = value as ReturnType<typeof parseFix>;
       const file = await context.reader.read(path);
       if (!file) throw Object.assign(new Error(`Manuscript not found: ${path}`), { code: "not_found" });
-      if (!isCanonicalSceneBodyDocument(path, file)) {
+      if (file.documentKind !== "scene") {
         throw Object.assign(new Error("Only canonical scene manuscript bodies can receive lint-fix proposals"), { code: "invalid_path" });
       }
       if (baseRevision !== undefined && baseRevision !== file.revision) throw Object.assign(new Error("Manuscript revision changed; reload before formatting"), { code: "revision_conflict" });
-      const entities = await readSnapshotAnalysisEntities(context);
-      const linkedScene = entities.find((entity) => entity.kind === "scene" && entity.data.manuscript === path);
+      if (context.signal.aborted) throw Object.assign(new Error("Snapshot entity read was cancelled"), { code: "job_cancelled" });
+      const linkedScene = context.reader.nativeStoryDocuments?.some((document) => {
+        const { type, manuscript } = document.metadata;
+        return document.kind === "scene" && manuscript === path &&
+          (typeof type !== "string" || type === "scene") && !PRESERVATION_ARCHIVE_PATH.test(document.metadataPath);
+      });
       if (!linkedScene) {
         throw Object.assign(new Error("Lint-fix path is not the manuscript body of a canonical scene"), { code: "invalid_path" });
       }

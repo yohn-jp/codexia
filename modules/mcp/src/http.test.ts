@@ -208,13 +208,14 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
     const names = new Set(tools.map((tool) => tool.name));
     const sourceTools = [
       "get_entity", "get_scene_context", "list_entities", "search", "get_volume_tree",
-      "reload", "analyze_manuscript", "check_stylometric_deviations", "check_plot_semantics", "get_diagnostics",
+      "analyze_manuscript", "check_stylometric_deviations", "check_plot_semantics", "get_diagnostics",
       "get_thread_status", "get_dialogue", "format_manuscript", "create_scene", "update_entity",
       "check_consistency", "check_continuity", "compute_cooccurrence", "check_voice_consistency",
       "check_style_deviations", "get_writing_context", "get_context_manifest", "lint_manuscript",
       "submit_change_set", "get_change_set", "list_change_sets",
     ];
     assert.equal(names.has("suggest_rewrite"), false);
+    assert.equal(names.has("reload"), false);
     assert.ok(sourceTools.every((name) => names.has(name)));
     assert.ok(names.has("discover_actions"));
     assert.ok(names.has("get_status"));
@@ -236,7 +237,7 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
   }
 });
 
-test("reload delegates to Story's pinned canonical snapshot materializer", async () => {
+test("the canonical Story materializer is discoverable and reads the selected snapshot", async () => {
   const calls: string[] = [];
   const host = actionContext(calls);
   const contribution = createMcpHttpContribution(new Map());
@@ -249,7 +250,13 @@ test("reload delegates to Story's pinned canonical snapshot materializer", async
 
   try {
     await client.connect(transport);
-    const result = await client.callTool({ name: "reload", arguments: { project_id: "project-one" } });
+    const catalog = await client.callTool({ name: "discover_actions", arguments: { project_id: "project-one" } });
+    const discovered = catalog.structuredContent as { data: { actions: ActionDescriptor[] } };
+    assert.ok(discovered.data.actions.some(action => action.id === "story.snapshot.materialize" && action.effect === "read"));
+
+    const result = await client.callTool({ name: "invoke_action", arguments: {
+      project_id: "project-one", action_id: "story.snapshot.materialize", input: {},
+    } });
     assert.deepEqual(result.structuredContent, {
       snapshot,
       data: { entities: 7, links: 11 },
@@ -905,6 +912,36 @@ test("audit MCP expires idle SDK sessions and cannot allocate after disposal", a
   const stopped = await contribution.handle(initialize(), host);
   assert.equal(stopped.status, 503);
   await stopped.text();
+});
+
+test("an MCP session continues only for its authenticated principal and project", async () => {
+  const sessions = new Map<string, import("./http.js").McpSession>();
+  const contribution = createMcpHttpContribution(sessions);
+  const firstClient = { ...actionContext([]), mcpSessionIdentity: "verified-client-one" };
+  const otherClient = { ...firstClient, mcpSessionIdentity: "verified-client-two" };
+  const send = (method: string, id: number, sessionId?: string) => new Request("http://codexia.test/streamable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream",
+      ...(sessionId ? { "Mcp-Session-Id": sessionId, "MCP-Protocol-Version": "2025-03-26" } : {}) },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params: method === "initialize"
+      ? { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "authenticated-client", version: "1" } }
+      : {} }),
+  });
+  try {
+    const initialized = await contribution.handle(send("initialize", 1), firstClient);
+    assert.equal(initialized.status, 200);
+    const id = initialized.headers.get("mcp-session-id");
+    assert.ok(id);
+    await initialized.text();
+    for (const context of [otherClient, actionContext([]), { ...firstClient, projectId: "another-project" }]) {
+      const refused = await contribution.handle(send("ping", 2, id), context);
+      assert.equal(refused.status, 404);
+      await refused.text();
+    }
+    const resumed = await contribution.handle(send("ping", 3, id), firstClient);
+    assert.equal(resumed.status, 200);
+    assert.match(await resumed.text(), /"id":3/u);
+  } finally { await closeMcpSessions(sessions); }
 });
 
 test("audit actual SDK event stream reserves capacity past idle expiry and releases on cancel", async () => {

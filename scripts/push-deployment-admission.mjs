@@ -1,3 +1,4 @@
+import { compareComponentVersions } from './component-release-version.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { readFileSync } from 'node:fs';
@@ -110,6 +111,10 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   }
   if (candidate.sourceSha === installed.sourceSha) {
     throw new Error('Push deployment candidate must differ from the installed release');
+  }
+
+  if (compareComponentVersions(candidate.version, installed.version) <= 0) {
+    throw new Error('Push deployment requires a newer backend version for a different image');
   }
 
   return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }),

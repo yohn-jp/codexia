@@ -17,10 +17,6 @@
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
-    },
-    "./migration": {
-      "types": "./dist/migration.d.ts",
-      "import": "./dist/migration.js"
     }
   },
   "files": [
@@ -33,7 +29,6 @@
   },
   "dependencies": {
     "@codexia/contracts": "workspace:*",
-    "@codexia/migration": "workspace:*",
     "yaml": "^2.9.1",
     "jszip": "^3.10.2"
   },

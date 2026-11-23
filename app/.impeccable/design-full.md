@@ -21,15 +21,15 @@ Quiet Page を Writing の基本とする。Folio Atlas の考え方は、構成
 
 ## プラットフォームとシェル
 
-Web/PWA と、同じ Mobile Web UI を表示する Capacitor iOS wrapper を一つのデザインシステムで扱う。Impeccable の Platform は `web` とする。wrapper 内でWeb UIを表示する構成はWebであり、この記録はnative iOS UIやAndroid対応を意味しない。意味トークン、テーマ、余白、状態表現は共有し、各シェルの情報量と操作方法は画面特性に合わせる。
+このImpeccable Webデザインシステムの対象はDesktop React Webのみ。iOSは独立SwiftUI Nativeアプリで、Mobile Web/PWA・Capacitor WebView authoringは撤去対象。WebとiOSのReact部品・CSS・デザイントークンの共用は要求しない。Native詳細は[SwiftUI設計](../../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
-Desktop と Mobile は異なる presentation として保つ。共通の原稿・保護・認可境界を見た目の都合で分けたり、書き換えたりしない。狭い画面では原稿の読みやすさを守り、必要な補助面をタブ、ドロワー、シートなどで呼び出せるようにする。幅だけを理由に作業中の shell を勝手に切り替えない。
+Desktop WebとNative iOSは独立UIを持つ。原稿・Revision・保護・認可のCore/API契約は同じだが、画面・操作・クライアント状態のコード共有は不要。Desktop Webのズーム・リサイズには配慮し、React Mobile専用viewport受入は行わない。
 
 ## 色とテーマ
 
 ### 合意済みの方向
 
-Desktop 由来の **ココア／ティール／墨** を共通paletteの方向とする。Desktop と Mobile で同じセマンティックな色の役割を共有し、Light、Dark、Paper の3テーマを維持する。次表の色値は両シェルで共通とする。
+Desktop 由来の **ココア／ティール／墨** を共通paletteの方向とする。Desktop Webで同じセマンティック色の役割を共有し、Light/Dark/Paperを維持する。次表はWebの値でありiOS Nativeには強制しない。
 
 | Theme | Accent / On-accent | Secondary text | Interaction boundary | Selected boundary | Focus |
 | --- | --- | --- | --- | --- | --- |
@@ -37,7 +37,7 @@ Desktop 由来の **ココア／ティール／墨** を共通paletteの方向�
 | Dark | `#7DAF9F` / `#08120F` | `#93A0AE` | `#687583` | `#7DAF9F` | `#7DAF9F` |
 | Paper | `#3D3429` / `#FFFFFF` | `#605B53` | `#817462` | `#75644F` | `#3D3429` |
 
-同じ意味のtokenにDesktop／Mobile別の値を持たせない。Paper の原稿面とLight canvas等、ここに挙げていない背景・surface・状態色の具体値は本表では新たに決めない。コントラスト値は現行Desktopの面色を比較基準に算出しているため、背景または状態色を変える時はDesktop・Mobileの実際の隣接色で再計算する。
+Webの同じ意味tokenを二重化しない。Paper の原稿面とLight canvas等、ここに挙げていない背景・surface・状態色の具体値は本表では新たに決めない。コントラスト値は現行Desktopの面色を比較基準に算出しているため、背景または状態色を変える時はDesktop Webの実際の隣接色で再計算する。
 
 ### セマンティックな役割
 
@@ -54,7 +54,7 @@ Desktop 由来の **ココア／ティール／墨** を共通paletteの方向�
 | Status | error、warning、success とその文字・記号 |
 | Difference | 追加・削除・変更の区別。色だけを意味の手掛かりにしない |
 
-Desktop と Mobile は同じ役割を同じ意味で使う。装飾的な区切り線と操作・選択状態を示す境界は別の役割とし、薄い区切り線を操作状態の唯一の手掛かりにしない。
+Desktop Web内では同じ役割を同じ意味で使う。装飾的な区切り線と操作・選択状態を示す境界は別の役割とし、薄い区切り線を操作状態の唯一の手掛かりにしない。
 
 ### 色値の採用条件と保留
 
@@ -93,7 +93,7 @@ Writing は Quiet Page を基調とし、本文と現在の執筆文脈へ視線
 - keyboard focus は `:focus-visible` で **3px solid outline、2px offset** を基本形とする。色だけ、または影だけの表示にしない。
 - Focus token は隣接色に対して3:1以上を確保し、選択中の背景上でも焦点の輪郭を見分けられること。
 - outline をclipせず、固定bar、sheet、画面端に隠さない。focus が移動・復帰した後も表示が明瞭であること。
-- Desktop と Mobile で同じfocus tokenと基本形を使う。シェル固有の都合で形状を変える場合も太さと視認性を保つ。
+- Desktop Webでfocus tokenと基本形を使う。Native iOSはSwiftUI固有のfocus/VoiceOverで実機検証する。
 
 コントラストの計算だけで画面適合を宣言しない。最終値の評価は、実際の前景・背景の組み合わせと操作状態を確認し、視認性、focus の発見可能性、文字拡大や狭幅での表示も含める。視覚上の受入と操作・原稿保護の受入は別に扱う。
 

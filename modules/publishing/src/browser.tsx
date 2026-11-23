@@ -347,7 +347,7 @@ function EpisodeMapPanel({ context, tree }: { context: BrowserModuleContext; tre
     try {
       const data = await invoke(context, "publishing.episodes.propose", { episodes });
       if (Array.isArray(data.episodes)) setEpisodes(data.episodes as Episode[]);
-      setStatus("変更をレビューに追加しました。承認・チェックポイント・公開後に反映されます。");
+      setStatus("変更をレビューに追加しました。作者が承認して適用すると反映されます。");
     } catch (cause) { setError(messageOf(cause)); }
     finally { setBusy(false); }
   }

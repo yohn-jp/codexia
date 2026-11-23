@@ -177,12 +177,13 @@ test("document head revisions are fetched as an ordered exact-key set within pro
   const first = await createDocument(firstProject.id, "First head");
   const second = await createDocument(firstProject.id, "Second head");
 
-  const lookups = await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [
+  const keys = [
     { documentId: second.document.id, revisionId: second.revision.id },
     { documentId: first.document.id, revisionId: second.revision.id },
     { documentId: first.document.id, revisionId: first.revision.id },
     { documentId: second.document.id, revisionId: second.revision.id },
-  ]));
+  ];
+  const lookups = await persistence.read(reader => reader.getDocumentHeadRevisions(firstProject.id, keys));
 
   assert.deepEqual(lookups.map(({ documentId, revisionId, revision }) => ({
     documentId,
@@ -198,6 +199,14 @@ test("document head revisions are fetched as an ordered exact-key set within pro
     { documentId: first.document.id, revisionId: first.revision.id },
   ])), [{ documentId: first.document.id, revisionId: first.revision.id, revision: null }]);
   assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [])), []);
+  assert.deepEqual(await persistence.read(reader => reader.getDocumentHeadRevisionHashes(firstProject.id, keys)), [
+    { ...keys[0], sha256: sha256("Second head") },
+    { ...keys[1], sha256: null },
+    { ...keys[2], sha256: sha256("First head") },
+    { ...keys[3], sha256: sha256("Second head") },
+  ]);
+  assert.deepEqual(await persistence.read(reader => reader.getDocumentHeadRevisionHashes(secondProject.id, [keys[0]!])),
+    [{ ...keys[0], sha256: null }]);
 });
 
 test("project revision history is globally bounded, metadata only and pinned to exact heads", async () => {
@@ -1174,24 +1183,6 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
   assert.equal(rejectedUpdate.reason.code, "conflict");
 });
 
-test("startup project inventory uses bounded stable keyset pages", async () => {
-  const first = await createProject(`project-page-a-${randomUUID()}`);
-  const second = await createProject(`project-page-b-${randomUUID()}`);
-  await persistence.read(async reader => {
-    const ids = [];
-    let after: typeof first.id | undefined;
-    for (;;) {
-      const page = await reader.listProjectIds(2,after);
-      assert.ok(page.length <= 2);
-      ids.push(...page);
-      if (page.length < 2) break;
-      after = page[page.length-1]!;
-    }
-    assert.ok(ids.includes(first.id) && ids.includes(second.id));
-    assert.deepEqual(ids,[...new Set(ids)].sort());
-  });
-});
-
 test("project page preserves deterministic keyset order across more than 200 projects", async (t) => {
   const prefix = `pagination-${randomUUID()}-`;
   const rows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `${prefix}${index}` }));
@@ -1259,6 +1250,28 @@ test("proposal review queue counts unresolved records without returning the unbo
     assert.ok(standalone.unresolvedCount >= 1004);
     assert.equal(standalone.records.length,1000);
     assert.ok(standalone.records.some(({record})=>record.projectId===outside.id));
+
+    await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value)
+      SELECT $1,$2,'proposal:' || item.key,
+        jsonb_build_object('state', 'approved', 'proposal', jsonb_build_object('operations', jsonb_build_array(
+          jsonb_build_object('writes', jsonb_build_array(
+            jsonb_build_object('path', 'bible/public.yaml'),
+            jsonb_build_object('path', item.path, 'content', 'synthetic review content')
+          ))
+        )))
+      FROM (VALUES
+        ('0000-episodes', 'meta/scriptorium/modules/publishing/episodes.yaml'),
+        ('0000-grants', 'meta/scriptorium/modules/publishing/share-grants.jsonl'),
+        ('0000-visible', 'meta/scriptorium/modules/publishing/share-grants.jsonl.example')
+      ) AS item(key,path)`, [second.id, moduleId]);
+    const visible = await persistence.read(reader => reader.listProposalReviewQueue([second.id,first.id], moduleId, 2, {
+      excludePrivateProposals: true,
+    }));
+    assert.equal(visible.unresolvedCount, 1004);
+    assert.deepEqual(visible.records.map(({record}) => record.key), ["proposal:0000-visible", "proposal:0001"]);
+    const author = await persistence.read(reader => reader.listProposalReviewQueue([second.id,first.id], moduleId, 2));
+    assert.equal(author.unresolvedCount, 1006);
+    assert.deepEqual(author.records.map(({record}) => record.key), ["proposal:0000-episodes", "proposal:0000-grants"]);
 
   } finally {
     await directPool.query("DELETE FROM module_record WHERE project_id = ANY($1::uuid[])", [[first.id,second.id,outside.id]]);

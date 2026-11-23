@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { resolveBetterAuthOidcSettings, resolveStandaloneAuthMode } from "./auth-mode.js";
+import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
 
 test("Better Auth OIDC provider settings may be omitted as one tuple", () => {
   assert.deepEqual(resolveBetterAuthOidcSettings({}), {});
@@ -28,24 +29,18 @@ test("partial Better Auth OIDC provider settings fail closed", () => {
   }
 });
 
-test("Better Auth settings require an explicit Better Auth mode", () => {
-  assert.throws(
-    () => resolveStandaloneAuthMode(undefined, true),
-    /CODEXIA_AUTH_MODE=better-auth is required/u,
-  );
-});
-
-test("token mode refuses configured Better Auth inputs instead of falling back", () => {
-  assert.throws(
-    () => resolveStandaloneAuthMode("token", true),
-    /refusing implicit token fallback/u,
-  );
-});
-
-test("only the supported standalone modes are accepted", () => {
-  assert.equal(resolveStandaloneAuthMode("token", false), "token");
-  assert.equal(resolveStandaloneAuthMode("better-auth", true), "better-auth");
-  assert.equal(resolveStandaloneAuthMode(undefined, false), "token");
-  assert.throws(() => resolveStandaloneAuthMode("legacy", false), /must be token or better-auth/u);
-  assert.throws(() => resolveStandaloneAuthMode("better-auth", false), /requires complete Better Auth settings/u);
+test("standalone startup rejects retired credentials without connecting to PostgreSQL", () => {
+  const server = new URL("./server.js", import.meta.url);
+  for (const [settings, expectedError] of [
+    [{ CODEXIA_AUTH_MODE: "token" }, /CODEXIA_AUTH_MODE must be better-auth/u],
+    [{ CODEXIA_AUTH_TOKEN: "retired-fixture-value" }, /Standalone authentication supports only Better Auth settings/u],
+    [{ CODEXIA_BROWSER_AUTH: "cloudflare-access" }, /Standalone authentication supports only Better Auth settings/u],
+    [{}, /Standalone Better Auth requires AUTH_DATABASE_URL/u],
+  ] as const) {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `import { start } from "${server.href}"; await start()`], {
+      env: { ...settings }, encoding: "utf8",
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, expectedError);
+  }
 });

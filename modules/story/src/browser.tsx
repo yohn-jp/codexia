@@ -27,6 +27,9 @@ type SceneContext = {
   manuscriptBody?: string;
 };
 type VolumeTree = Array<{ volume: Entity; chapters: Array<{ chapter: Entity; scenes: Entity[] }> }>;
+type ReorderTarget =
+  | { kind: "chapter"; volumeId: string }
+  | { kind: "scene"; volumeId: string; chapterId: string };
 type ThreadLifecycleResult = {
   snapshots: Array<{
     threadId: string;
@@ -192,14 +195,13 @@ function useAction(context: BrowserModuleContext) {
 function StoryNavigator({ context }: { context: BrowserModuleContext }) {
   const { invoke, busy, status, setMessage } = useAction(context);
   const [tree, setTree] = useState<VolumeTree>([]);
-  const [treeRevision, setTreeRevision] = useState("");
   const [sceneId, setSceneId] = useState("");
   const [scene, setScene] = useState<SceneContext | null>(null);
   const [metadata, setMetadata] = useState<Record<string, string>>({});
+  const pendingReorder = useRef<{ intent: string; idempotencyKey: string } | null>(null);
   const refresh = async () => {
-    const result = await invoke<{ tree: VolumeTree; revision: string }>("story.volumes.tree", {});
+    const result = await invoke<{ tree: VolumeTree }>("story.volumes.tree", {});
     setTree(result.tree);
-    setTreeRevision(result.revision);
   };
   useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const selectScene = async (id: string) => {
@@ -229,14 +231,22 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
       setMessage(`Proposed metadata update for ${scene.scene.id}.`);
     } catch { /* The panel displays the machine error. */ }
   };
-  const moveSibling = async (type: "chapter" | "scene", parentId: string, siblings: Entity[], index: number, delta: -1 | 1) => {
+  const moveSibling = async (target: ReorderTarget, siblings: Entity[], index: number, delta: -1 | 1) => {
     const nextIndex = index + delta;
     if (nextIndex < 0 || nextIndex >= siblings.length) return;
     const orderedIds = siblings.map((item) => item.id);
     [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex]!, orderedIds[index]!];
+    const input = { ...target, orderedIds };
+    const intent = JSON.stringify(input);
+    if (pendingReorder.current?.intent !== intent) {
+      pendingReorder.current = { intent, idempotencyKey: globalThis.crypto.randomUUID() };
+    }
+    const submission = pendingReorder.current;
     try {
-      await invoke("story.entities.reorder", { type, parentId, orderedIds, base_revision: treeRevision, operation_id: operationId() });
-      setMessage(`Proposed ${type} order change. The outline updates after the proposal is accepted and applied.`);
+      // The host remounts this panel when the snapshot changes and pins both actions to its snapshot.
+      await invoke("core.hierarchy.reorder", { ...input, idempotencyKey: submission.idempotencyKey });
+      if (pendingReorder.current === submission) pendingReorder.current = null;
+      setMessage(`Proposed ${target.kind} order change. Approve and apply it in Proposal Review to update the outline.`);
     } catch { /* The panel displays the machine error. */ }
   };
   return <section style={panelStyle} aria-label="Story navigator">
@@ -246,13 +256,13 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
       <h3>{volume.name ?? String(volume.raw.title ?? volume.id)}</h3>
       {chapters.map(({ chapter, scenes }, chapterIndex) => <div key={chapter.id}>
         <div style={rowStyle}><h4>{chapter.name ?? String(chapter.raw.title ?? chapter.id)}</h4>
-          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === 0} aria-label={`Move chapter ${chapter.id} up`} onClick={() => void moveSibling("chapter", volume.id, chapters.map((item) => item.chapter), chapterIndex, -1)}>Move up</button>
-          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === chapters.length - 1} aria-label={`Move chapter ${chapter.id} down`} onClick={() => void moveSibling("chapter", volume.id, chapters.map((item) => item.chapter), chapterIndex, 1)}>Move down</button>
+          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === 0} aria-label={`Move chapter ${chapter.id} up`} onClick={() => void moveSibling({ kind: "chapter", volumeId: volume.id }, chapters.map((item) => item.chapter), chapterIndex, -1)}>Move up</button>
+          <button type="button" style={buttonStyle} disabled={busy || chapterIndex === chapters.length - 1} aria-label={`Move chapter ${chapter.id} down`} onClick={() => void moveSibling({ kind: "chapter", volumeId: volume.id }, chapters.map((item) => item.chapter), chapterIndex, 1)}>Move down</button>
         </div>
         <ol>{scenes.map((item, sceneIndex) => <li key={item.id}>
           <button type="button" aria-pressed={sceneId === item.id} onClick={() => void selectScene(item.id)}>{item.name ?? String(item.raw.title ?? item.id)}</button>
-          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === 0} aria-label={`Move scene ${item.id} up`} onClick={() => void moveSibling("scene", chapter.id, scenes, sceneIndex, -1)}>↑</button>
-          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === scenes.length - 1} aria-label={`Move scene ${item.id} down`} onClick={() => void moveSibling("scene", chapter.id, scenes, sceneIndex, 1)}>↓</button>
+          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === 0} aria-label={`Move scene ${item.id} up`} onClick={() => void moveSibling({ kind: "scene", volumeId: volume.id, chapterId: chapter.id }, scenes, sceneIndex, -1)}>↑</button>
+          <button type="button" style={buttonStyle} disabled={busy || sceneIndex === scenes.length - 1} aria-label={`Move scene ${item.id} down`} onClick={() => void moveSibling({ kind: "scene", volumeId: volume.id, chapterId: chapter.id }, scenes, sceneIndex, 1)}>↓</button>
         </li>)}</ol>
       </div>)}
     </section>)}
@@ -677,31 +687,24 @@ function SavedScenariosPanel({context}:{context:BrowserModuleContext}){
   </section>;
 }
 function SharedContextExecution({context,sceneId,characterId}:{context:BrowserModuleContext;sceneId:string;characterId:string}){
-  const {invoke,busy,status,setMessage}=useAction(context);
+  const {invoke,busy,status}=useAction(context);
   const [scope,setScope]=useState<"author"|"character"|"reader">("author");
   const [purpose,setPurpose]=useState("setting-qa");
   const [question,setQuestion]=useState("");
-  const [preview,setPreview]=useState<{system:string;prompt:string;provider:string;model:string;previewDigest:string;tokenCount:number;tokenExact:boolean}|null>(null);
-  const [answer,setAnswer]=useState<string|null>(null);
-  const [consent,setConsent]=useState(false);
+  const [preview,setPreview]=useState<{system:string;prompt:string;previewDigest:string;tokenCount:number;tokenExact:boolean}|null>(null);
   const generation=useRef(0);
-  const clear=()=>{generation.current++;setPreview(null);setConsent(false);setAnswer(null);};
-  useEffect(clear,[context.snapshot.projectId,context.snapshot.projectVersion,sceneId,characterId,scope,purpose,question]);
+  useEffect(()=>{generation.current++;setPreview(null)},[context.snapshot.projectId,context.snapshot.projectVersion,sceneId,characterId,scope,purpose,question]);
   const input=()=>({sceneId,scope,purpose,question,...(scope==="character"?{characterId}:{}),maxTokens:4096});
-  const inspect=async()=>{const id=++generation.current;setPreview(null);setConsent(false);setAnswer(null);try{
+  const inspect=async()=>{const id=++generation.current;setPreview(null);try{
     const result=await invoke<NonNullable<typeof preview>>("assistant.context.prompt.preview",input());if(id===generation.current)setPreview(result);
   }catch{}};
-  const send=async()=>{if(!preview||!consent)return;const id=++generation.current;setConsent(false);try{
-    const result=await invoke<{text:string}>("assistant.context.generate",{...input(),previewDigest:preview.previewDigest,externalConsent:true});if(id===generation.current){setAnswer(result.text);setMessage("Generated suggestion; canonical work is unchanged.")}
-  }catch{}};
-  return <section aria-label="Shared context Assistant execution" style={panelStyle}><h3>Assistant context execution</h3>
+  return <section aria-label="Shared context preview" style={panelStyle}><h3>Source-bound Assistant context</h3>
+    <p>Prepare local context for an external MCP client. Codexia does not invoke a model provider.</p>
     <label>Scope <select value={scope} onChange={e=>setScope(e.target.value as typeof scope)}><option value="author">Author</option><option value="character">Character</option><option value="reader">Reader</option></select></label>
     <label>Purpose <select value={purpose} onChange={e=>setPurpose(e.target.value)}><option value="setting-qa">Setting Q&amp;A</option><option value="continuation-options">Continuation</option><option value="first-read-reaction">Reader reaction</option></select></label>
     <label>Question<textarea value={question} maxLength={4000} onChange={e=>setQuestion(e.target.value)}/></label>
     <button type="button" disabled={busy||!sceneId||!question.trim()||(scope==="character"&&!characterId)} onClick={()=>void inspect()}>Preview exact request locally</button>
-    {preview&&<><p>Destination: {preview.provider} / {preview.model} · {preview.tokenCount} tokens ({preview.tokenExact?"exact":"estimated"})</p><details open><summary>Content to send externally</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{preview.system+"\n"+preview.prompt}</pre></details>
-      <label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>I authorize sending this displayed content to the displayed model.</label><button type="button" disabled={busy||!consent} onClick={()=>void send()}>Send approved request</button></>}
-    {answer!==null&&<article><h4>Generated suggestion (not canon)</h4><p style={{whiteSpace:"pre-wrap"}}>{answer}</p></article>}
+    {preview&&<><p>Prepared locally · {preview.tokenCount} tokens ({preview.tokenExact?"exact":"estimated"})</p><details open><summary>Source-bound context and prompt</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{preview.system+"\n"+preview.prompt}</pre></details></>}
     {status}
   </section>;
 }

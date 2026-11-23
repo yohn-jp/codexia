@@ -23,7 +23,6 @@ esac
 SH
 chmod 700 "$tmp/bin/podman"
 export PATH="$tmp/bin:$PATH"
-printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
 printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"
@@ -36,7 +35,6 @@ cat > "$tmp/test.yml" <<YAML
     codexia_service_uid: $service_uid
     codexia_service_home: "$service_home"
     codexia_secrets_approved: true
-    codexia_auth_token_file: "$tmp/auth"
     codexia_tunnel_token_file: "$tmp/tunnel"
     codexia_postgres_admin_password_file: "$tmp/admin"
     codexia_postgres_app_password_file: "$tmp/app"
@@ -48,21 +46,21 @@ expect_fail() {
   if apply "$@" > "$tmp/fail.log"; then
     echo 'Unsafe base secret operation accepted' >&2; exit 1
   fi
-  if grep -Eq 'fixture-auth-token|fixture-tunnel-token|0{63}[12]' "$tmp/fail.log"; then
+  if grep -Eq 'fixture-tunnel-token|0{63}[123]' "$tmp/fail.log"; then
     echo 'Credential appeared in Ansible output' >&2; exit 1
   fi
 }
 # Invalid input or reused DB password must fail before any creation.
-printf 'fixture-auth-token\n' > "$tmp/auth"
+printf 'fixture tunnel with spaces\n' > "$tmp/tunnel"
 expect_fail
 test -z "$(ls -A "$tmp/store")"
-printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
-chmod 0644 "$tmp/auth"
+printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
+chmod 0644 "$tmp/tunnel"
 expect_fail
 test -z "$(ls -A "$tmp/store")"
-chmod 0600 "$tmp/auth"
-ln -s "$tmp/auth" "$tmp/auth-link"
-sed "s#$tmp/auth#$tmp/auth-link#" "$tmp/test.yml" > "$tmp/link.yml"
+chmod 0600 "$tmp/tunnel"
+ln -s "$tmp/tunnel" "$tmp/tunnel-link"
+sed "s#$tmp/tunnel#$tmp/tunnel-link#" "$tmp/test.yml" > "$tmp/link.yml"
 if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/link.yml" > "$tmp/link.log"; then
   echo 'Symlink secret input accepted' >&2; exit 1
 fi
@@ -76,9 +74,8 @@ expect_fail
 test -z "$(ls -A "$tmp/store")"
 mv "$tmp/app.original" "$tmp/app"
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
-for name in auth tunnel admin app; do
+for name in tunnel admin app; do
   case "$name" in
-    auth) target=codexia-auth-token;;
     tunnel) target=codexia-tunnel-token;;
     admin) target=codexia-postgres-admin-password;;
     app) target=codexia-postgres-app-password;;
@@ -89,16 +86,17 @@ apply > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
 # Mismatch of one existing secret must not create another missing secret.
 mv "$tmp/store/codexia-tunnel-token" "$tmp/missing"
-printf 'fixture-auth-token-different-0123456789\n' > "$tmp/auth"
+cp "$tmp/admin" "$tmp/admin.original"
+printf '%064d' 3 > "$tmp/admin"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"
-printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
+mv "$tmp/admin.original" "$tmp/admin"
 touch "$BASE_SECRET_EXISTING"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"
 mv "$tmp/missing" "$tmp/store/codexia-tunnel-token"
 apply > "$tmp/adopt.log" || { cat "$tmp/adopt.log"; exit 1; }
 grep -q 'changed=0' "$tmp/adopt.log"
-if grep -Eq 'fixture-auth-token|fixture-tunnel-token|0{63}[12]' "$tmp/first.log" "$tmp/second.log" "$tmp/adopt.log"; then
+if grep -Eq 'fixture-tunnel-token|0{63}[123]' "$tmp/first.log" "$tmp/second.log" "$tmp/adopt.log"; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
 fi

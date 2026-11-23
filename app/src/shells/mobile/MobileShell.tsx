@@ -104,7 +104,7 @@ function errorMessage(error: unknown): string {
  * Ionic page navigation for the shared application controller.
  * The mobile entry supplies the React Router browser context around the controller.
  */
-export function MobileShell({ header, documentTitle, documentContext, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel, onReferenceSheetDismissed, hosted }: ApplicationShellProps) {
+export function MobileShell({ header, documentTitle, documentContext, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel, onReferenceSheetDismissed }: ApplicationShellProps) {
   const location = useLocation();
   const navigateRoute = useNavigate();
   const activeView = readViewFromSearch(location.search);
@@ -489,7 +489,7 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
                   {switchError ? <p className="mobile-shell-switch-error" role="alert">{switchError}</p> : null}
                 </section>
               ) : null}
-              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" hosted={hosted} /> : null}
+              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" /> : null}
               <Workspace
                 scope={workspaceScope}
                 mode="mobile"
@@ -545,7 +545,7 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
                 </IonButton>
                 {switchError ? <p className="mobile-shell-switch-error" role="alert">{switchError}</p> : null}
               </section>
-              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" hosted={hosted} /> : null}
+              {activeView === "settings" ? <IdentityManagementPanel placement="mobile" /> : null}
             </section>
           </div>}
         </IonContent>

@@ -120,8 +120,10 @@ FAILURE
 }
 run_playbook() {
   local vars=$1 name=$2 status=0
+  local -a shared_vars=()
+  if [[ -n ${3:-} ]]; then shared_vars=(--extra-vars "@$3"); fi
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
-    "$repo_root/deploy/ansible/site.yml" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
+    "$repo_root/deploy/ansible/site.yml" "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   return "$status"
 }
@@ -135,7 +137,7 @@ rootless_podman() { rootless /usr/bin/podman "$@"; }
 rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
-  local log_name=${4:-deploy-$key-$RANDOM} auth_mode=${5:-token} activation_approved=${6:-false}
+  local log_name=${4:-deploy-$key-$RANDOM}
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -147,8 +149,6 @@ codexia_backup_destination: "$fixture_home/.local/state/codexia-backup-mount"
 codexia_backup_recipient: "$backup_recipient"
 codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
-codexia_auth_mode: $auth_mode
-codexia_better_auth_activation_approved: $activation_approved
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
   run_playbook "$tmp/deploy-vars.yml" "$log_name"
@@ -159,6 +159,12 @@ observe_runtime() {
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
+  local history_permissions
+  history_permissions=$(rootless_podman exec codexia-api stat -c '%u:%g:%a' /history)
+  [[ "$history_permissions" == '1000:1000:700' ]] || {
+    echo "The mounted API history directory has unexpected owner, group or mode: $history_permissions" >&2
+    return 1
+  }
   api_unit=$(rootless_systemctl show --property=ActiveState --value codexia-api.service)
   quadlet_sha=$(rootless sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
   release_sha=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
@@ -237,7 +243,7 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+    for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
       codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
@@ -369,25 +375,6 @@ Environment=HOME=$fixture_home
 Environment=XDG_CONFIG_HOME=$fixture_home/.config
 Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
 MANAGER_CONF
-sudo systemctl daemon-reload
-cat > "$tmp/host.yml" <<YAML
-codexia_stage: host
-codexia_host_approved: true
-codexia_create_service_account: true
-YAML
-user_created=true
-if ! run_playbook "$tmp/host.yml" host; then set_state fixture_cleanup NOT_CHECKED 'host stage failed before application fixture creation'; exit 1; fi
-service_uid=$(id -u codexia)
-[[ "$service_uid" == "$fixture_uid" ]]
-for _ in $(seq 1 30); do
-  if rootless_systemctl show --property=Version >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
-  mark_fixture_unavailable 'user systemd manager is unavailable for the configured service identity'
-  exit 78
-fi
-rootless_systemctl import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
 # Quadlet's user generator reads the manager's generated environment, not
 # just this shell's imported values. Reuse the Base Runtime CI fixture contract.
 if [[ ! -d "$environment_generator_dir" ]]; then
@@ -402,6 +389,43 @@ if [ "\$(id -u)" = "$fixture_uid" ]; then
   printf '%s\\n' 'XDG_CONFIG_HOME=$fixture_home/.config' 'XDG_RUNTIME_DIR=/run/user/$fixture_uid'
 fi
 ENV_GENERATOR
+sudo systemctl daemon-reload
+# The service receives synthetic credentials only; all secret-bearing output is suppressed.
+mkdir -p "$tmp/secrets"
+printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
+printf '%064d' 1 > "$tmp/secrets/admin"
+printf '%064d\n' 2 > "$tmp/secrets/app"
+chmod 0600 "$tmp/secrets"/*
+ssh-keygen -q -t ed25519 -N '' -f "$tmp/deploy_key"
+deploy_public_key=$(cut -d' ' -f1,2 "$tmp/deploy_key.pub")
+cat > "$tmp/bootstrap.yml" <<YAML
+codexia_stage: bootstrap
+codexia_host_approved: true
+codexia_create_service_account: true
+codexia_deploy_ssh_public_key: "$deploy_public_key"
+codexia_secrets_approved: true
+codexia_tunnel_token_file: "$tmp/secrets/tunnel"
+codexia_postgres_admin_password_file: "$tmp/secrets/admin"
+codexia_postgres_app_password_file: "$tmp/secrets/app"
+codexia_base_approved: true
+codexia_database_initialization_approved: true
+YAML
+system_config_created=true
+user_created=true
+runtime_ready=true
+run_playbook "$tmp/bootstrap.yml" bootstrap
+rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
+service_uid=$(id -u codexia)
+[[ "$service_uid" == "$fixture_uid" ]]
+for _ in $(seq 1 30); do
+  if rootless_systemctl show --property=Version >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
+  mark_fixture_unavailable 'user systemd manager is unavailable for the configured service identity'
+  exit 78
+fi
+rootless_systemctl import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
 rootless_systemctl daemon-reload
 for expected in "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
   if ! rootless_systemctl show-environment | grep -Fxq "$expected"; then
@@ -413,41 +437,7 @@ if ! rootless_podman info --format '{{.Host.Security.Rootless}}' | grep -Fxq tru
   mark_fixture_unavailable 'rootless Podman is unavailable for the configured service identity'
   exit 78
 fi
-runtime_ready=true
 
-# The service receives synthetic credentials only; all secret-bearing output is suppressed.
-mkdir -p "$tmp/secrets"
-rootless mkdir -p "$fixture_home/.config/containers" "$fixture_home/.local/state"
-printf 'fixture-auth-token-0123456789abcdef0123456789abcdef\n' > "$tmp/secrets/auth"
-printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
-printf '%064d' 1 > "$tmp/secrets/admin"
-printf '%064d\n' 2 > "$tmp/secrets/app"
-chmod 0600 "$tmp/secrets"/*
-cat > "$tmp/secrets.yml" <<YAML
-codexia_stage: secrets
-codexia_secrets_approved: true
-codexia_auth_token_file: "$tmp/secrets/auth"
-codexia_tunnel_token_file: "$tmp/secrets/tunnel"
-codexia_postgres_admin_password_file: "$tmp/secrets/admin"
-codexia_postgres_app_password_file: "$tmp/secrets/app"
-YAML
-run_playbook "$tmp/secrets.yml" secrets
-cat > "$tmp/base.yml" <<YAML
-codexia_stage: base
-codexia_base_approved: true
-codexia_database_initialization_approved: true
-YAML
-system_config_created=true
-run_playbook "$tmp/base.yml" base
-# Base installs the canonical Tunnel Quadlet but does not start it. Remove that
-# external-service unit only inside this disposable fixture; the app transaction
-# then exercises the same optional-Tunnel branch without contacting Cloudflare.
-rootless rm -f "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
-rootless_systemctl daemon-reload
-if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
-  echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
-  exit 1
-fi
 podman_version=$(rootless_podman --version | awk '{print $3}')
 podman_rootless=$(rootless_podman info --format '{{.Host.Security.Rootless}}')
 systemd_version=$(rootless_systemctl --version | head -n 1)
@@ -605,11 +595,34 @@ node - "$report" "$database_image_name" "$database_image_id" "$database_repo_dig
 const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',builder:'host Docker; archive loaded into rootless Podman',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY
 
+disable_fixture_tunnel() {
+  # Base installs the canonical Tunnel Quadlet but does not start it. Remove that
+  # external-service unit only inside this disposable fixture; the app transaction
+  # then exercises the same optional-Tunnel branch without contacting Cloudflare.
+  rootless rm -f "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
+  rootless_systemctl daemon-reload
+  if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
+    echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
+    exit 1
+  fi
+}
+
+run_application_lifecycle() {
+  local initial_key update_key update_image failed_image
+  read -r initial_key update_key update_image < <(node - "$evidence" <<'TRANSITION'
+const fs = require('node:fs');
+const { transition, candidates } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { from, to } = transition;
+if (candidates[from].image === candidates[to].image) throw new Error('The update requires two distinct OCI digests');
+console.log(from, to, candidates[to].image);
+TRANSITION
+  )
+  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:auth-update ]]
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
-run_deploy head true
-observe_runtime first-activation head
+run_deploy "$initial_key" true
+observe_runtime first-activation "$initial_key"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
@@ -619,17 +632,17 @@ const fs=require('node:fs');const [path,artifact,validation,checksum]=process.ar
 BACKUP_EVIDENCE
 set_state first_activation PASS 'fresh schema and API readiness verified on real rootless Podman and PostgreSQL'
 
-run_deploy head false
-observe_runtime same-digest-reapply head
+run_deploy "$initial_key" false
+observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
 CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT NULL);
 INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
 SENTINEL_SQL
-run_deploy compatible false
-observe_runtime compatible-update compatible
-set_state compatible_update PASS 'certified compatible Full image became the sole healthy API writer'
+run_deploy "$update_key" false
+observe_runtime compatible-update "$update_key"
+set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
 failed_context="$build_context/failed"
@@ -640,8 +653,7 @@ FROM ${BASE_IMAGE}
 ENTRYPOINT ["/bin/false"]
 DOCKERFILE
 sudo install -o codexia -g codexia -m 0644 "$tmp/failed.Dockerfile" "$failed_context/Dockerfile"
-compatible_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates.compatible.image')
-rootless_podman build --build-arg "BASE_IMAGE=$compatible_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
+rootless_podman build --build-arg "BASE_IMAGE=$update_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
 failed_tag="localhost:5000/yohn-jp/codexia-backend:lifecycle-failed-$source_sha"
 rootless_podman tag codexia-backend-lifecycle-fail "$failed_tag"
 failed_digest_file="$fixture_home/.local/state/codexia-lifecycle-build/failed.digest"
@@ -660,7 +672,7 @@ if ! grep -Eq 'Deployment transaction failed during candidate API (startup|readi
   exit 1
 fi
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-observe_runtime failed-candidate-rollback compatible
+observe_runtime failed-candidate-rollback "$update_key"
 [[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'
 
@@ -678,13 +690,14 @@ fi
 exit "$status"
 FAULT_SYSTEMCTL
 sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/systemctl"
-if run_deploy head false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
+if run_deploy auth-primary false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
 rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-run_deploy compatible false
-observe_runtime interrupted-recovery compatible
+run_deploy "$update_key" false
+observe_runtime interrupted-recovery "$update_key"
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
+}
 source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
 run_better_auth_lifecycle
 node - "$report" <<'REPORT_COMPLETE'

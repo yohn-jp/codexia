@@ -1,39 +1,33 @@
 import { counts, gitCommands, startLockSampler } from './instrument-node.mjs';
-import { io } from './common.mjs';
+import { hashTree, io } from './common.mjs';
 import { postgresFixture } from './postgres-fixture.mjs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from '../../packages/api/dist/server.js';
+import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from '../../packages/api/test/fixtures/better-auth-server.ts';
+import { buildAuthorBrowserAssets } from '../../tests/e2e/author-oauth-server.ts';
+import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { resolve, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 
-const token = 'synthetic-benchmark-local-token-000000';
-const datasetPath = resolve(process.argv[2]);
-const dataset = JSON.parse(await readFile(join(datasetPath, 'dataset.json'), 'utf8'));
-const fixture = await postgresFixture(datasetPath);
-const lockSampler = await startLockSampler(process.env.CODEXIA_TEST_DATABASE_URL,
-  Number(process.env.CODEXIA_PERF_LOCK_POLL_MS ?? 25));
 const requests = [];
-const serverStart = performance.now();
-const server = createServer({ store: fixture.store, persistence: fixture.persistence, authToken: token,
-  profile: 'core', staticDir: resolve('app/dist'), usageDirectory: join(resolve(process.argv[2]), `browser-usage-${randomUUID()}`) });
+let fixture, lockSampler, author, assets;
 let stopped = false;
 
-server.prependListener('request', (request, response) => {
-  const at = performance.now();
-  let responseBytes = 0;
-  const addBytes = chunk => {
-    if (chunk === undefined || chunk === null) return;
-    responseBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : Buffer.byteLength(chunk);
-  };
-  const write = response.write;
-  const end = response.end;
-  response.write = function(chunk, ...args) { addBytes(chunk); return Reflect.apply(write, this, [chunk, ...args]); };
-  response.end = function(chunk, ...args) { addBytes(chunk); return Reflect.apply(end, this, [chunk, ...args]); };
-  response.once('finish', () => requests.push({ method: request.method, path: request.url.split('?')[0],
-    startMs: at, ms: performance.now() - at, status: response.statusCode,
-    responseBytes }));
-});
+function observeRequests(server) {
+  server.prependListener('request', (request, response) => {
+    const at = performance.now();
+    let responseBytes = 0;
+    const addBytes = chunk => {
+      if (chunk !== undefined && chunk !== null && typeof chunk !== 'function') responseBytes += Buffer.byteLength(chunk);
+    };
+    const write = response.write;
+    const end = response.end;
+    response.write = function(chunk, ...args) { addBytes(chunk); return Reflect.apply(write, this, [chunk, ...args]); };
+    response.end = function(chunk, ...args) { addBytes(chunk); return Reflect.apply(end, this, [chunk, ...args]); };
+    response.once('finish', () => requests.push({ method: request.method, path: request.url.split('?')[0],
+      startMs: at, ms: performance.now() - at, status: response.statusCode, responseBytes }));
+  });
+}
 
 function snapshot() {
   return { requests: [...requests], counts: { ...counts }, gitCommands: [...gitCommands],
@@ -43,24 +37,53 @@ function snapshot() {
 async function shutdown() {
   if (stopped) return;
   stopped = true;
-  await new Promise((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
-  await lockSampler.stop();
-  await fixture.persistence.close();
+  try {
+    await author?.close();
+  } finally {
+    const results = await Promise.allSettled([
+      lockSampler?.stop(), fixture?.persistence.close(), assets && rm(assets, { recursive: true, force: true }),
+    ]);
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+  }
 }
 
 try {
-  server.listen(0, '127.0.0.1', () => {
-    const sceneSummaries = fixture.sceneRecords.map(row => ({ id: row.document.id, title: row.title,
-      revisionId: row.revision.id, bytes: Buffer.byteLength(row.revision.markdown) }));
-    process.send({ ready: true, port: server.address().port, startupMs: performance.now() - serverStart,
-      fixtureSetupMs: fixture.setupMs, profile: dataset.datasetId,
-      fixture: { project: { id: fixture.project.id, title: fixture.project.title }, scenes: sceneSummaries,
-        persisted: fixture.inventory, database: fixture.database, knowledgeSeed: fixture.knowledgeSeed ?? null } });
+  const datasetPath = resolve(process.argv[2]);
+  const dataset = JSON.parse(await readFile(join(datasetPath, 'dataset.json'), 'utf8'));
+  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
+  assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+  fixture = await postgresFixture(datasetPath);
+  lockSampler = await startLockSampler(databaseUrl, Number(process.env.CODEXIA_PERF_LOCK_POLL_MS ?? 25));
+  assets = await mkdtemp(join(tmpdir(), 'codexia-perf-browser-'));
+  const authStart = performance.now();
+  let serverStart;
+  author = await startBetterAuthFixture({
+    databaseUrl,
+    domain: fixture,
+    staticDirectory: assets,
+    createApiServer(options) {
+      serverStart = performance.now();
+      return createServer(options);
+    },
+    observeApiServer: observeRequests,
   });
+  const buildStart = performance.now();
+  buildAuthorBrowserAssets(author, 'core', assets);
+  const browserAssetBuildMs = performance.now() - buildStart;
+  const { files, sha256 } = await hashTree(assets);
+  const sceneSummaries = fixture.sceneRecords.map(row => ({ id: row.document.id, title: row.title,
+    revisionId: row.revision.id, bytes: Buffer.byteLength(row.revision.markdown) }));
+  process.send({ ready: true, origin: author.apiOrigin, startupMs: buildStart - serverStart,
+    authFixtureSetupMs: serverStart - authStart, browserAssetBuildMs, browserAssets: { files, sha256 },
+    fixtureSetupMs: fixture.setupMs, profile: dataset.datasetId,
+    fixture: { project: { id: fixture.project.id, title: fixture.project.title }, scenes: sceneSummaries,
+      persisted: fixture.inventory, database: fixture.database, knowledgeSeed: fixture.knowledgeSeed ?? null } });
 } catch (error) {
   process.send({ ready: false, error: error.stack ?? error.message });
   await shutdown().catch(() => undefined);
   process.exitCode = 1;
+  process.disconnect();
 }
 
 process.on('message', async message => {

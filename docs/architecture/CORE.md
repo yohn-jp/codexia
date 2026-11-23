@@ -1,12 +1,14 @@
 # Core architecture
 
+**Normative Core contract.** [System design](SYSTEM-DESIGN.md) is the overall architecture authority, [Data model](DATA-MODEL.md) owns canonical entity relationships, and [Documentation authority](DOCUMENTATION-AUTHORITY.md) governs design changes. Current code is implementation evidence, not a replacement for these decisions.
+
 PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodies, immutable revisions, Knowledge, Evidence, Text Anchors and module-owned records. Core authoring works without optional modules or model credentials. A missing or unavailable database fails closed; no Git workspace or filesystem manuscript fallback is available.
 
 ## Ownership and dependency direction
 
-The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines standalone OAuth admission and object-level authorization. The Fastify API supports Better Auth as an explicit alternative to token mode. [Push deployment](../deployment/PUSH-DEPLOYMENT.md) describes first activation in token mode and the approved transition to Better Auth.
+The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines standalone Better Auth OAuth admission and object-level authorization. [Push deployment](../deployment/PUSH-DEPLOYMENT.md) describes owner enrollment and approved activation.
 
-Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Dedicated standalone deployments may verify Cloudflare Access browser identity directly; the configured single author retains the same owner scope. Explicit MCP bearer credentials retain their restricted authority and cannot acquire browser author privileges from an Access assertion. Local standalone token sessions and Hosted grants remain separate modes. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
+Desktop React Web and native SwiftUI iOS are separate UI implementations using the same authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Cloudflare Access can restrict entry to the static UI. Better Auth provides author identity and issues OAuth access tokens to registered MCP clients. The API enforces each MCP client's project assignments and operation scopes. Core coordinates module snapshots and approved mutations through Persistence, and the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |
 | --- | --- |
@@ -16,7 +18,6 @@ Desktop and Mobile shells use the authenticated API. API admission owns authenti
 | Project read models and module proposal coordination | `packages/core` |
 | Authentication, API admission and host integration | `packages/api` |
 | Lazy module activation and supervised workers | `packages/module-runtime` |
-| Read-only legacy inspection and import proposals | `packages/migration` |
 | Authoring, browser recovery and separate shells | `app` |
 
 ## Canonical state and snapshots
@@ -28,6 +29,7 @@ A module `SnapshotId` contains `projectId` and `projectVersion`. The Core materi
 [Backend read model](BACKEND-READ-MODEL.md) specifies snapshot reuse, bounded set-oriented persistence reads, internal indexes, resource envelopes and performance acceptance without changing this authority.
 
 The module file-shaped reader is a projection over PostgreSQL records. Stable manuscript, hierarchy and `meta/scriptorium/modules/<module-id>/` paths are domain identifiers, not checkout locations. They preserve existing module formats and unknown data without introducing another authority. Search indexes, model artifacts and caches remain reconstructible derivatives keyed by source revision and model/schema identity.
+Story reads hierarchy identity and order from the typed projection of the same pinned snapshot.
 
 ## Mutation and recovery
 
@@ -41,6 +43,6 @@ Browser IndexedDB stores recoverable drafts and pending proposals separately fro
 
 The standard product exchange is a versioned `codexia-work/v1` JSON current-state archive. Export reads one consistent PostgreSQL snapshot of work metadata, Markdown, Knowledge, supported Evidence and author-owned module records. Import validates references and hashes, creates a fresh project atomically, and never overwrites an existing project. Stale Evidence is retained explicitly without forging a current anchor. Historical revisions, credentials, approval state and browser drafts are not silently presented as portable content; see [Portable works](../authoring-portable.md).
 
-Legacy inspection reads explicitly selected source directories without modifying files, SQLite sidecars or Git metadata. Git source inspection is restricted to offline migration recovery; it never serves as application persistence, synchronization or runtime fallback. The one-time source conversion is an operator task external to the normal product importer. Existing read-only migration inspection capabilities do not act as a second manuscript authority; author-approved import operations remain subject to Core permissions. Secrets are excluded, unresolved records are reported, and source data remains intact.
+For one-time conversion of older Git, SQLite or workspace data, use the [archived converter and its operator instructions](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/packages/migration/README.md) from an isolated checkout of that revision. Keep source backups and use a disposable PostgreSQL database for conversion and author review. Export the converted work as `codexia-work/v1` for import into the current release.
 
 Publishing exports read pinned PostgreSQL projections. Operational recovery uses protected PostgreSQL backups plus private host-history backups; see [deployment](../deployment/README.md). Rehearse restoration into an isolated replacement database before changing service routing. Do not restore over the only copy or operate on production data during verification.

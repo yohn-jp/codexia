@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertProjectPath, snapshotKey, type ActionResult, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotReader, type ValueSchema } from "@codexia/contracts";
-import { nativeTerms, combineTerms, searchableTerms, KNOWLEDGE_PATH } from "./native-terms.js";
+import { nativeTerms, combineTerms, searchableTerms } from "./native-terms.js";
 import { SnapshotIndexCache } from "./index-cache.js";
 import { normalizeSearchText, searchDocuments, searchTerms, type SearchMode } from "./search-ranking.js";
 import { normalizeTerm, parseTermRegistry, resolveTermSpans, TERM_REGISTRY_PATH, type SearchTerm, type TermRegistry } from "./terminology.js";
@@ -207,16 +207,21 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       return {knowledgeId:input.knowledgeId,targetPath:input.targetPath};
     },async(raw,context)=>{
       const input=raw as {knowledgeId:string;targetPath:string};
+      if (!context.reader.knowledge) {
+        return { ok: false, snapshot: context.reader.snapshot, error: {
+          code: "snapshot_unavailable", message: "Knowledge terminology is unavailable for this snapshot", retryable: false,
+        } };
+      }
       const {registry,revision}=await readRegistry(context.reader);
       const native=await nativeTerms(context.reader,registry);
-      if(!native.available||native.nodeTruncated||!native.terms.some(term=>term.knowledgeId===input.knowledgeId))throw new TypeError("Confirmed Knowledge unavailable");
+      if(!native.revision||native.nodeTruncated||!native.terms.some(term=>term.knowledgeId===input.knowledgeId))throw new TypeError("Confirmed Knowledge unavailable");
       if(!(await indexes.documentPaths(context.reader,context.signal)).has(input.targetPath))throw new TypeError("Target document unavailable");
       const target=await context.reader.read(input.targetPath);
       if(!target)throw new TypeError("Target document unavailable");
       const next=parseTermRegistry({...registry,knowledgeReferences:[...(registry.knowledgeReferences??[]).filter(ref=>ref.knowledgeId!==input.knowledgeId),input]});
-      const reads=[{path:TERM_REGISTRY_PATH,revision},{path:KNOWLEDGE_PATH,revision:native.revision},{path:input.targetPath,revision:target.revision}];
+      const reads=[{path:TERM_REGISTRY_PATH,revision},{path:input.targetPath,revision:target.revision}];
       const operation:ChangeOperation={id:"search-"+randomUUID(),generation:0,projectId:context.reader.snapshot.projectId,baseProjectVersion:context.reader.snapshot.projectVersion,
-        effect:"settings",reads,writes:[{path:TERM_REGISTRY_PATH,revision,content:JSON.stringify(next,null,2)+"\n"}],message:"Link Knowledge terminology to document"};
+        effect:"settings",reads,readKnowledgeRevision:native.revision,writes:[{path:TERM_REGISTRY_PATH,revision,content:JSON.stringify(next,null,2)+"\n"}],message:"Link Knowledge terminology to document"};
       const proposal=await context.propose([operation]);
       return {ok:true,snapshot:context.reader.snapshot,data:{reference:input,proposal}} as ActionResult;
     }),

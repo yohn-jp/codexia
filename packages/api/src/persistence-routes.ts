@@ -24,12 +24,12 @@ import {
 
 export interface PersistenceRouteInput {
   persistence?: Persistence;
-  /** Hosted instances may access only the project assigned to that runtime. */
-  assignedProjectId?: string;
   method: string;
   url: string;
   body: unknown;
   requestHeaders: import("node:http").IncomingHttpHeaders;
+  /** Derived by the host from the authenticated review authority. */
+  canReviewPrivateChangeSets?: boolean;
   /** Resolve an authenticated human author and enforce the existing write policy. */
   requireAuthor: () => Promise<string>;
 }
@@ -154,41 +154,25 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
   try {
     if (url.pathname === "/api/v1/persistence/import") {
       if (input.method !== "POST") return { status: 405, body: { error: "Method not allowed", code: "METHOD_NOT_ALLOWED" } };
-      if (input.assignedProjectId) failure(403, "ASSIGNED_PROJECT_ONLY", "Hosted runtimes cannot import new projects");
       const authorId = await input.requireAuthor();
       return { status: 201, body: await importWorkArchive(persistence, input.body, authorId) };
     }
     if (url.pathname === "/api/v1/persistence/projects") {
       if (input.method === "GET") {
-        const pageRequested = url.searchParams.get("page") === "1" || url.searchParams.has("cursor");
-        if (url.searchParams.has("page") && url.searchParams.get("page") !== "1") failure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
-        if (pageRequested) {
-          const limit = requestLimit(url.searchParams.get("limit"), 200, 200);
-          let cursor;
-          try { cursor = decodeProjectPageCursor(url.searchParams.get("cursor")); }
-          catch { failure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
-          if (input.assignedProjectId) {
-            const project = await persistence.read((reader) => reader.getProject(input.assignedProjectId! as ProjectId));
-            return { status: 200, body: { projects: project ? [project] : [], nextCursor: null } };
-          }
-          const rows = await persistence.read((reader) => {
-            if (!reader.listProjectPage) failure(503, "PROJECT_PAGINATION_UNAVAILABLE", "Project pagination is unavailable");
-            return reader.listProjectPage(limit + 1, cursor);
-          });
-          const hasMore = rows.length > limit;
-          const projects = rows.slice(0, limit);
-          const last = projects.at(-1);
-          return { status: 200, body: { projects, nextCursor: hasMore && last ? encodeProjectPageCursor({ updatedAt: last.updatedAt, id: last.id }) : null } };
-        }
-        const limit = requestLimit(url.searchParams.get("limit"), 100, 200);
-        if (input.assignedProjectId) {
-          const project = await persistence.read((reader) => reader.getProject(input.assignedProjectId! as ProjectId));
-          return { status: 200, body: project ? [project] : [] };
-        }
-        return { status: 200, body: await persistence.read((reader) => reader.listProjects(limit)) };
+        const limit = requestLimit(url.searchParams.get("limit"), 200, 200);
+        let cursor;
+        try { cursor = decodeProjectPageCursor(url.searchParams.get("cursor")); }
+        catch { failure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+        const rows = await persistence.read((reader) => {
+          if (!reader.listProjectPage) failure(503, "PROJECT_PAGINATION_UNAVAILABLE", "Project pagination is unavailable");
+          return reader.listProjectPage(limit + 1, cursor);
+        });
+        const projects = rows.slice(0, limit);
+        const last = projects.at(-1);
+        const nextCursor = rows.length > limit && last ? encodeProjectPageCursor({ updatedAt: last.updatedAt, id: last.id }) : null;
+        return { status: 200, body: { projects, nextCursor } };
       }
       if (input.method === "POST") {
-        if (input.assignedProjectId) failure(403, "ASSIGNED_PROJECT_ONLY", "Hosted runtimes cannot create projects");
         await input.requireAuthor();
         const body = bodyRecord(input.body);
         const title = requiredString(body.title, "title", 256);
@@ -206,9 +190,6 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     const projectPath = url.pathname.match(/^\/api\/v1\/persistence\/projects\/([^/]+)(?:\/(.*))?$/u);
     if (!projectPath) return { status: 404, body: { error: "Persistence route not found", code: "NOT_FOUND" } };
     const projectId = decoded(projectPath[1]!, "Project id") as ProjectId;
-    if (input.assignedProjectId && projectId !== input.assignedProjectId) {
-      return { status: 404, body: { error: "Project was not found", code: "PERSISTENCE_NOT_FOUND" } };
-    }
     const nativeRead = <T>(read: (reader: PersistenceReader) => Promise<T>) => {
       const selected = url.searchParams.get("projectVersion");
       if (selected === null) return readCurrentNativeKnowledge(persistence, projectId, read);
@@ -236,7 +217,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       const action = changeSetPath[2];
       if (!changeSetId && input.method === "GET") {
         const limit = requestLimit(url.searchParams.get("limit"), 50, 200);
-        return { status: 200, body: { changeSets: await listNativeChangeSets(persistence, projectId, limit) } };
+        return { status: 200, body: { changeSets: await listNativeChangeSets(persistence, projectId, limit, input.canReviewPrivateChangeSets) } };
       }
       if (!changeSetId && input.method === "POST") {
         const actorId = await input.requireAuthor();
@@ -248,7 +229,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         return { status: 201, body: result };
       }
       if (changeSetId && !action && input.method === "GET") {
-        const result = await getNativeChangeSet(persistence, projectId, changeSetId);
+        const result = await getNativeChangeSet(persistence, projectId, changeSetId, input.canReviewPrivateChangeSets);
         return result ? { status: 200, body: result } : { status: 404, body: { error: "ChangeSet was not found", code: "PERSISTENCE_NOT_FOUND" } };
       }
       if (changeSetId && action && input.method === "POST") {

@@ -174,6 +174,10 @@ export interface DocumentHeadRevisionLookup extends DocumentRevisionKey {
   revision: DocumentRevision | null;
 }
 
+export interface DocumentHeadRevisionHash extends DocumentRevisionKey {
+  sha256: string | null;
+}
+
 export type KnowledgeNodeStatus = "proposed" | "confirmed" | "retired";
 export type KnowledgeAliasStatus = "proposed" | "confirmed" | "ambiguous" | "retired";
 export type KnowledgeRelationStatus = "proposed" | "confirmed" | "rejected" | "retired";
@@ -400,11 +404,40 @@ export interface ChangeSetProvenance {
   details: JsonObject;
 }
 
+export const HIERARCHY_REORDER_SOURCE = "native-hierarchy-reorder";
+export const HIERARCHY_DELETE_SOURCE = "native-hierarchy-delete";
+export const HIERARCHY_CREATE_SOURCE = "native-hierarchy-create";
+export const CORE_DOCUMENT_PATHS = "core.document-paths";
+export const PUBLISHING_CHANGESET_SOURCE = "publishing.native";
+export const NLP_FEATURE_SETTINGS_CHANGESET_SOURCE = "nlp.feature-settings.native";
+
+interface HierarchyParentReference {
+  readonly documentId: DocumentId;
+  readonly lookupId: string;
+}
+
+/** Fixed parent identities and the author-facing ID for an approved hierarchy create. */
+export type HierarchyDocumentCreate =
+  | { kind: "volume"; logicalId: string }
+  | { kind: "chapter"; logicalId: string; volume: HierarchyParentReference }
+  | { kind: "scene"; logicalId: string; volume: HierarchyParentReference; chapter: HierarchyParentReference };
+
+export function hierarchyDocumentPaths(scope: HierarchyDocumentCreate): { metadataPath: string; manuscriptPath?: string } {
+  if (scope.kind === "volume") return { metadataPath: `plot/volumes/${scope.logicalId}/volume.yaml` };
+  const volumePath = `plot/volumes/${scope.volume.lookupId}`;
+  if (scope.kind === "chapter") return { metadataPath: `${volumePath}/chapters/${scope.logicalId}/chapter.yaml` };
+  const { lookupId: chapter } = scope.chapter;
+  return {
+    metadataPath: `${volumePath}/chapters/${chapter}/scenes/${scope.logicalId}.yaml`,
+    manuscriptPath: `manuscript/${scope.volume.lookupId}/${chapter}/${scope.logicalId}.md`,
+  };
+}
+
 export type ChangeSetOperation =
   | { type: "document.update"; command: UpdateDocumentCommand }
   | { type: "document.delete"; command: DeleteDocumentCommand }
   | { type: "module.record.save"; command: SaveModuleRecordCommand }
-  | { type: "document.create"; command: CreateDocumentCommand }
+  | { type: "document.create"; command: CreateDocumentCommand; hierarchy?: HierarchyDocumentCreate }
   | { type: "document.save"; command: SaveDocumentCommand }
   | { type: "document.restore"; command: RestoreDocumentRevisionCommand }
   | { type: "knowledge.node.save"; command: SaveKnowledgeNodeCommand }
@@ -520,11 +553,16 @@ export interface KnowledgeProjectionBatch {
   assertions: readonly Assertion[];
 }
 
+export interface ProposalReviewQueueOptions {
+  /** Omit proposals whose write payload is only visible to an author. */
+  excludePrivateProposals?: boolean;
+}
+
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   /** Count unresolved proposals in explicit project order, or all standalone projects in recent-project order when null; return only the bounded prefix. */
-  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
+  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, options?: ProposalReviewQueueOptions): Promise<{
     unresolvedCount: number;
     records: readonly { record: ModuleRecord; projectVersion: number }[];
   }>;
@@ -534,13 +572,13 @@ export interface PersistenceReader {
   listProjects(limit?: number): Promise<readonly Project[]>;
   /** Recent-project keyset page; `limit` includes the optional lookahead row. */
   listProjectPage?(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]>;
-  /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
-  listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined>;
   /** Resolve exact document/revision pairs in input order within the project scope. */
   getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
+  /** Resolve the hashes of exact pairs in input order without requesting revision bodies. */
+  getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]>;
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage>;
   /** Globally bounded metadata from the ancestry of the supplied immutable heads, in input-document order for timestamp ties. */
   listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;
@@ -554,8 +592,8 @@ export interface PersistenceReader {
   listAssertions(projectId: ProjectId, limit?: number): Promise<readonly Assertion[]>;
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeRelation[]>;
-  /** Optional bounded set read for the immutable Knowledge/Evidence snapshot projection. */
-  readKnowledgeProjectionBatch?(
+  /** Bounded set read for the immutable Knowledge/Evidence snapshot projection. */
+  readKnowledgeProjectionBatch(
     projectId: ProjectId,
     nodeIds: readonly KnowledgeNodeId[],
     limits: KnowledgeProjectionBatchLimits,
@@ -572,7 +610,8 @@ export interface PersistenceReader {
   listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId, limit?: number): Promise<readonly AssertionEvidence[]>;
   listEvidenceAssertions(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly AssertionEvidence[]>;
   getChangeSet(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSet | undefined>;
-  listChangeSets(projectId: ProjectId, limit?: number): Promise<readonly ChangeSet[]>;
+  getChangeSetByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<ChangeSet | undefined>;
+  listChangeSets(projectId: ProjectId, limit?: number, options?: { excludeSources?: readonly string[] }): Promise<readonly ChangeSet[]>;
   getChangeSetReceipt(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSetApplicationResult | undefined>;
 }
 

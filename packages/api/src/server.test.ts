@@ -1,100 +1,23 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
-import { request as httpRequest } from "node:http";
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
 import { fromNodeHeaders } from "better-auth/node";
-import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import type { Persistence, PersistenceReader } from "@codexia/persistence-contracts";
+import type { ChangeSetApplicationResult, ChangeSetId, ChangeSetResult, JsonObject, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
-import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
-import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
+import { ModuleRuntime, type ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
-import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
-import { createServer, importLegacyJobHistory, type ApiServerOptions, type HostedAuthorizationPolicy, type HostedPrincipal } from "./server.js";
-import { RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_STATUS_PATH, sha256Digest, type RuntimeAssignment } from "./platform-runtime.js";
+import { createServer, start, type ApiServerOptions } from "./server.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
 
 const ACCESS_TOKEN = "test-access-token-which-is-longer-than-32-characters";
 const SNAPSHOT: SnapshotId = { projectId: "project-1", projectVersion: 1 };
-const HOSTED_ASSIGNMENT: RuntimeAssignment = {
-  contractVersion: "scriptorium-platform/v1",
-  instanceId: "instance-1",
-  repositoryId: 123,
-  repositoryLocator: "https://github.com/owner/work",
-  defaultBranchPolicy: "repository-default",
-  runtimeEpoch: 3,
-  imageDigest: `sha256:${"a".repeat(64)}`,
-  compositionManifestDigest: `sha256:${"b".repeat(64)}`,
-  enabledModuleIds: ["story", "mcp"],
-  credentialBrokerLocator: "https://praetorium.example/internal/github/credential",
-  controlServicePolicy: {
-    issuer: "https://praetorium.example",
-    jwksUrl: "https://praetorium.example/.well-known/control-jwks.json",
-    audience: "praetorium-runtime-control",
-  },
-  grantPolicy: {
-    issuer: "https://praetorium.example",
-    jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json",
-    audience: "https://instance-1.instances.example",
-  },
-};
-const RUNTIME_CONTROL_KEY = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-const RUNTIME_CONTROL_PUBLIC_JWK = {
-  ...RUNTIME_CONTROL_KEY.publicKey.export({ format: "jwk" }),
-  use: "sig",
-  alg: "ES256",
-  kid: "runtime-control-test-key",
-};
-const HOSTED_GRANT_KEY = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-const HOSTED_GRANT_PUBLIC_JWK = {
-  ...HOSTED_GRANT_KEY.publicKey.export({ format: "jwk" }),
-  use: "sig",
-  alg: "ES256",
-  kid: "hosted-grant-test-key",
-};
-
-function hostedGrantToken(expired = false, lifetimeSeconds = 120): string {
-  const now = Math.floor(Date.now() / 1000);
-  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const issuedAt = expired ? now - 120 : now;
-  const unsigned = `${encode({ alg: "ES256", kid: "hosted-grant-test-key", typ: "JWT" })}.${encode({
-    iss: HOSTED_ASSIGNMENT.grantPolicy.issuer,
-    sub: "hosted-user-1",
-    aud: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    instanceId: HOSTED_ASSIGNMENT.instanceId,
-    repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-    runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-    permissions: ["read", "write"],
-    sessionRevision: 2,
-    authorizationRevision: 3,
-    iat: issuedAt,
-    nbf: issuedAt,
-    exp: expired ? now - 1 : now + lifetimeSeconds,
-    jti: expired ? "expired-browser-grant" : "valid-browser-grant",
-  })}`;
-  const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
-    key: HOSTED_GRANT_KEY.privateKey,
-    dsaEncoding: "ieee-p1363",
-  });
-  return `${unsigned}.${signature.toString("base64url")}`;
-}
-
-function realHostedGrantPolicy(): HostedAuthorizationPolicy {
-  return createHostedAuthorizationPolicy({
-    assignment: HOSTED_ASSIGNMENT,
-    fetch: async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.grantPolicy.jwksUrl);
-      return Response.json({ keys: [HOSTED_GRANT_PUBLIC_JWK] });
-    },
-  });
-}
-
 async function nativePersistence(t: { after(callback: () => Promise<void>): void }) {
   const url = process.env.CODEXIA_TEST_DATABASE_URL;
   if (!url) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database for native Core API recovery tests");
@@ -143,6 +66,7 @@ function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
   const project = { id: "project-1", title: "A Work", version: 1 };
   return {
     listProjects: async () => [project],
+    listProjectsPage: async () => ({ projects: [project], nextCursor: null }),
     createProject: async ({ title }: { title: string }) => ({ id: "project-2", title, version: 1 }),
     status: async () => ({ ...SNAPSHOT, state: "durable" as const }),
     observe: async () => ({ snapshot: SNAPSHOT, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" }),
@@ -179,8 +103,8 @@ function makeSnapshotStore() {
           return { content: encoding === "base64" ? Buffer.from(document.content).toString("base64") : document.content, revision: document.revision };
         }, async list(prefix: string) { return prefix === "manuscript/" ? [document.path] : []; } };
     },
-    async resolveDocumentScene(_projectId: string, path: string, pinned?: SnapshotId) {
-      return { snapshot: pinned ?? SNAPSHOT, sceneId: path === document.path ? "scene-one" : null };
+    async resolveSnapshotDocument(_projectId: string, path: string, pinned?: SnapshotId) {
+      return { snapshot: pinned ?? SNAPSHOT, documentId: path === document.path ? "74182b28-459c-4bf1-b9bd-0ec48917ad4e" : null };
     },
     async readTreeSnapshot(_projectId: string, pinned?: SnapshotId) {
       snapshotReads.push({ kind: "tree", pinned }); return { snapshot: pinned ?? SNAPSHOT, tree: { title: "A Work", volumes: [] } };
@@ -287,10 +211,14 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
       },
     }, {
       id: "streamable", path: "streamable", methods: ["GET"], access: "owner", effect: "propose",
-      async handle() {
+      async handle(_request, context) {
         return new Response(new ReadableStream({
           start(controller) { controller.enqueue(new TextEncoder().encode("data: ready\n\n")); },
-        }), { headers: { "Content-Type": "text/event-stream" } });
+        }), { headers: {
+          "Content-Type": "text/event-stream",
+          "X-Test-MCP-Project": context.projectId,
+          ...(context.mcpSessionIdentity ? { "X-Test-MCP-Identity": context.mcpSessionIdentity } : {}),
+        } });
       },
     }, {
       id: "native-propose", path: "native-propose", methods: ["POST"], access: "owner", effect: "propose",
@@ -324,7 +252,7 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
     actions: [{
       id: "analyze", effect: "compute", inputSchema: schema, outputSchema: schema,
       async invoke(_input, context): Promise<ActionResult> {
-        const nested = await context.invoke("core.hierarchy.create", { kind: "volume", id: "blocked", title: "Blocked" });
+        const nested = await context.invoke("core.hierarchy.create", { kind: "volume", id: "blocked", title: "Blocked", idempotencyKey: "blocked-action" });
         return { ok: true, snapshot: context.reader.snapshot, data: { nested } };
       },
     }],
@@ -434,10 +362,15 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "oauthOwner" | "oauthMcp" | "betterAuth" | "closeBetterAuthOnShutdown" | "corsAllowedOrigins">> = {},
 ) {
-  const server = createServer({ store, ...(options.betterAuth ? {} : { authToken: ACCESS_TOKEN }),
-    staticDir, persistence: admissionPersistence(store), ...options });
+  const defaults = testClientSettings("project-1", signedRequests.publicJwks, signedRequests.isActive);
+  const explicitIdentity = options.betterAuth || options.oauthOwner || options.oauthMcp;
+  const server = createServer({
+    store, staticDir, persistence: admissionPersistence(store),
+    ...(explicitIdentity ? { betterAuth: defaults.betterAuth } : defaults),
+    ...options,
+  });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
@@ -448,182 +381,103 @@ async function startCustomApi(
   return { server, base, close };
 }
 
-function hostedTestPolicy(): HostedAuthorizationPolicy {
-  const principals = new Map<string, HostedPrincipal>([
-    ["read-grant", {
-      userId: "reader-1", permissions: ["read"], repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-      instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000,
-    }],
-    ["write-grant", {
-      userId: "writer-1", permissions: ["read", "write"], repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-      instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000,
-    }],
-  ]);
+it("refuses to listen with old job history and leaves the offline input intact", async (t) => {
+  const usageDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-history-startup-"));
+  t.after(() => rm(usageDirectory, { recursive: true, force: true }));
+  const jobsDirectory = resolve(usageDirectory, "jobs");
+  const statePath = resolve(jobsDirectory, "jobs-state.json");
+  const state = '{ "version": 2, "jobs": [], "inbox": [], "legacySources": [] }\n';
+  await mkdir(jobsDirectory, { mode: 0o700 });
+  await writeFile(statePath, state, { mode: 0o600 });
+  const store = makeStore();
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings("project-1", client.publicJwks, client.isActive);
+  const cli = fileURLToPath(new URL("./maintain-job-history.js", import.meta.url));
+  await assert.rejects(async () => {
+    const server = await start({ store, persistence: admissionPersistence(store), usageDirectory, ...settings });
+    await new Promise<void>((close) => server.close(() => close()));
+  }, (error: unknown) => error instanceof JobHistoryError && error.code === "job_history_maintenance_required" &&
+    error.message.includes(`node ${cli} --check`) && error.message.includes("CODEXIA_USAGE_DIR"));
+  assert.equal(await readFile(statePath, "utf8"), state);
+});
+
+const TEST_ISSUER = "https://auth.codexia.test/api/auth";
+const TEST_AUDIENCE = "https://auth.codexia.test/api";
+const TEST_OWNER_SUBJECT = "owner";
+const TEST_WEB_CLIENT = "codexia-web";
+const TEST_MCP_CLIENT = "codexia-mcp";
+
+function createSignedRequestFixture() {
+  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const jwk = { ...publicKey.export({ format: "jwk" }), kid: "codexia-fixture-key", alg: "ES256", use: "sig" };
+  const active = new Set<string>();
+  function requestHeaders(clientId: string, scope: string) {
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = encode({ alg: "ES256", typ: "at+jwt", kid: jwk.kid }) + "." + encode({
+      iss: TEST_ISSUER, aud: TEST_AUDIENCE, sub: TEST_OWNER_SUBJECT, client_id: clientId, azp: clientId,
+      iat: now, exp: now + 300, jti: randomUUID(), scope,
+    });
+    const signature = signJwt("sha256", Buffer.from(unsigned), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    const token = unsigned + "." + signature;
+    active.add(token);
+    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  }
   return {
-    async authenticate(token, requiredPermission = "read") {
-      const principal = principals.get(token);
-      if (!principal) throw Object.assign(new Error("grant invalid"), { status: 401 });
-      if (!principal.permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
-      return principal;
-    },
+    publicJwks: { keys: [jwk] },
+    isActive: async (token: string) => active.has(token),
+    ownerHeaders: () => requestHeaders(TEST_WEB_CLIENT, "codexia:api"),
+    mcpHeaders: (scope = "mcp:read mcp:compute mcp:propose") => requestHeaders(TEST_MCP_CLIENT, scope),
   };
 }
 
-class InterleavingLifecycleRuntime extends ModuleRuntime {
-  private lifecycleListener: WorkerJobLifecycleListener | undefined;
-
-  override subscribeJobLifecycle(listener: WorkerJobLifecycleListener): () => void {
-    this.lifecycleListener = listener;
-    return () => { if (this.lifecycleListener === listener) this.lifecycleListener = undefined; };
-  }
-
-  async emitLifecycle(snapshot: WorkerJobLifecycleSnapshot): Promise<void> {
-    await this.lifecycleListener?.(snapshot);
-  }
+function testClientSettings(projectId: string, publicJwks: object, isActive: (token: string) => Promise<boolean>) {
+  const verifier = {
+    issuer: TEST_ISSUER, audience: TEST_AUDIENCE, ownerSubject: TEST_OWNER_SUBJECT, jwksUrl: TEST_ISSUER + "/jwks",
+    fetch: async () => Response.json(publicJwks), verifyActiveToken: isActive,
+  };
+  return {
+    // These API contracts exercise bearer verification and do not call the OAuth provider routes.
+    betterAuth: { issuer: TEST_ISSUER, audience: TEST_AUDIENCE } as NonNullable<ApiServerOptions["betterAuth"]>,
+    oauthOwner: { ...verifier, requiredScopes: ["codexia:api"], allowedClientIds: [TEST_WEB_CLIENT] },
+    oauthMcp: { ...verifier, allowedClientIds: [TEST_MCP_CLIENT], ownerClientIds: [TEST_WEB_CLIENT], projectIdsByClient: { [TEST_MCP_CLIENT]: [projectId] } },
+  };
 }
 
-async function startHostedApi(
-  store: CoreStore,
-  staticDir: string,
-  authorization: HostedAuthorizationPolicy,
-  controlFetch?: typeof fetch,
-  runtime?: ModuleRuntime,
-  usageDirectory?: string,
-  persistence: ApiServerOptions["persistence"] = admissionPersistence(store),
-  projectId = "project-1",
-) {
-  const server = createServer({
-    store, staticDir, persistence,
-    trustProxy: true,
-    ...(runtime ? { runtime } : {}),
-    ...(usageDirectory ? { usageDirectory } : {}),
-    hosted: { assignment: HOSTED_ASSIGNMENT, projectId, authorization, ...(controlFetch ? { controlFetch } : {}) },
-  });
-  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const base = `http://127.0.0.1:${address.port}`;
-  const close = () => new Promise<void>((resolveClose, reject) => {
-    server.close((error) => error ? reject(error) : resolveClose());
-  });
-  return { server, base, close };
-}
+const signedRequests = createSignedRequestFixture();
 
-function rawHostedRequest(urlValue: string, headers: Record<string, string>, body?: string): Promise<{ status: number; body: string }> {
-  const url = new URL(urlValue);
-  return new Promise((resolveResponse, reject) => {
-    const request = httpRequest({
-      hostname: "127.0.0.1",
-      port: Number(url.port),
-      path: `${url.pathname}${url.search}`,
-      method: "POST",
-      headers,
-    }, (response) => {
-      const chunks: Buffer[] = [];
-      response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.once("end", () => resolveResponse({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    request.once("error", reject);
-    request.end(body);
-  });
-}
-
-async function rawHostedRequestStatus(urlValue: string, headers: Record<string, string>, body?: string): Promise<number> {
-  return (await rawHostedRequest(urlValue, headers, body)).status;
-}
-
-function runtimeControlToken(action: "status" | "quiesce" | "resume", operationId: string, payloadDigest: string, signingKey = RUNTIME_CONTROL_KEY.privateKey, kid = "runtime-control-test-key"): string {
-  const now = Math.floor(Date.now() / 1000);
-  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const unsigned = `${encode({ alg: "ES256", kid, typ: "JWT" })}.${encode({
-    contractVersion: "praetorium-runtime-control/v1",
-    iss: HOSTED_ASSIGNMENT.controlServicePolicy.issuer,
-    sub: "test-control-plane",
-    aud: HOSTED_ASSIGNMENT.controlServicePolicy.audience,
-    instanceId: HOSTED_ASSIGNMENT.instanceId,
-    repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-    runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-    operationId,
-    action,
-    payloadDigest,
-    iat: now,
-    nbf: now,
-    exp: now + 30,
-    jti: `${action}-${operationId}`,
-  })}`;
-  const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
-    key: signingKey,
-    dsaEncoding: "ieee-p1363",
-  });
-  return `${unsigned}.${signature.toString("base64url")}`;
-}
+it("starts standalone API only with Better Auth and exposes no static session mutation routes", async (t) => {
+  const store = makeStore();
+  const persistence = admissionPersistence(store);
+  assert.throws(() => createServer({ store, persistence }), /Standalone authentication requires Better Auth/u);
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-canonical-auth-only-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const instance = await startCustomApi(store, staticDir);
+  const owner = signedRequests.ownerHeaders();
+  t.after(instance.close);
+  const version = await fetch(instance.base + "/api/browser/version");
+  assert.equal(version.status, 200);
+  const identity = await version.json();
+  assert.deepEqual(identity.auth, ["oauth-owner", "oauth-mcp"]);
+  assert.equal("hosted" in identity, false);
+  assert.equal((await fetch(instance.base + "/api/platform/v1/metadata", { headers: owner })).status, 404);
+  const oldLogin = await fetch(instance.base + "/api/login", { method: "POST", headers: owner, body: "{}" });
+  assert.equal(oldLogin.status, 404);
+  assert.equal(oldLogin.headers.get("set-cookie"), null);
+  const session = await fetch(instance.base + "/api/session", { headers: owner });
+  assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
+  const retiredLogout = await fetch(instance.base + "/api/logout", { method: "POST", headers: owner, body: "{}" });
+  assert.equal(retiredLogout.status, 404);
+  assert.equal(retiredLogout.headers.get("set-cookie"), null);
+});
 
 async function startApi(staticDir: string, trustProxy = false) {
   return startCustomApi(makeStore(), staticDir, { trustProxy });
 }
 
-function usageEvent(projectId: string, id: string, startedAt: string, options: Partial<ModelUsageEvent> = {}): ModelUsageEvent {
-  return {
-    id, projectId, feature: "assistant.story-draft", provider: "openai", model: "gpt-4o-mini",
-    startedAt, completedAt: new Date(Date.parse(startedAt) + 1_000).toISOString(), state: "completed",
-    inputTokens: 12, outputTokens: 8, cost: 0.00002, ...options,
-  };
-}
-
-function modelUsageRuntimeOptions(cacheDirectory: string): Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string } {
-  const manifest: ModuleManifest = {
-    id: "assistant", version: "0.1.0", contractVersion: 1,
-    dependencies: [], provides: [], requires: [], optionalRequires: [MODEL_USAGE_CAPABILITY], statePaths: [], locality: "optional-external",
-  };
-  const schema: ValueSchema = { parse(value) { return value; } };
-  const loader: ModuleLoader = async (moduleContext: ModuleContext) => ({
-    manifest,
-    actions: [{
-      id: "assistant.model-usage-history", effect: "compute", inputSchema: schema, outputSchema: schema,
-      async invoke(rawInput, context): Promise<ActionResult> {
-        const input = rawInput as { event?: ModelUsageEvent; query?: { from?: string; to?: string; limit?: number; cursor?: string } };
-        const lease = await moduleContext.acquireCapability<ModelUsageStore>(MODEL_USAGE_CAPABILITY);
-        try {
-          if (input.event) await lease.value.append(input.event);
-          const history = await lease.value.list(context.reader.snapshot.projectId, input.query);
-          return { ok: true, snapshot: context.reader.snapshot, data: history };
-        } catch (error) {
-          const candidate = error as { code?: unknown; message?: unknown };
-          return { ok: false, snapshot: context.reader.snapshot, error: {
-            code: typeof candidate?.code === "string" ? candidate.code : "model_usage_test_failed",
-            message: typeof candidate?.message === "string" ? candidate.message : "Model usage test action failed",
-            retryable: false,
-          } };
-        } finally {
-          await lease.release();
-        }
-      },
-    }],
-    ui: [],
-    async dispose() {},
-  });
-  return {
-    manifests: [manifest], enabled: ["assistant"], loaders: { assistant: loader }, cacheDirectory,
-  };
-}
-
-async function login(base: string): Promise<{ cookie: string; setCookie: string; body: unknown }> {
-  const response = await fetch(`${base}/api/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: base },
-    body: JSON.stringify({ token: ACCESS_TOKEN }),
-  });
-  assert.equal(response.status, 200);
-  const setCookie = response.headers.get("set-cookie");
-  assert.ok(setCookie);
-  return { cookie: setCookie.split(";", 1)[0]!, setCookie, body: await response.json() };
-}
-
-async function waitForJob(base: string, cookie: string, id: string): Promise<{ status: string; result: unknown }> {
+async function waitForJob(base: string, ownerAuthorization: string, id: string): Promise<{ status: string; result: unknown }> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const response = await fetch(`${base}/api/jobs/${encodeURIComponent(id)}`, { headers: { Cookie: cookie } });
+    const response = await fetch(`${base}/api/jobs/${encodeURIComponent(id)}`, { headers: { Authorization: ownerAuthorization } });
     assert.equal(response.status, 200);
     const job = await response.json() as { status: string; result: unknown };
     if (job.status === "done" || job.status === "error") return job;
@@ -647,6 +501,8 @@ describe("Codexia HTTP boundary", () => {
       token_endpoint_auth_methods_supported: ["client_secret_post"],
     });
     const fake = {
+      issuer: "https://api.example.test/api/auth",
+      audience: "https://api.example.test/api",
       handler: async (request: Request) => {
         const body = request.method === "GET" ? "" : await request.text();
         delegated.push({ method: request.method, path: new URL(request.url).pathname, body });
@@ -666,6 +522,15 @@ describe("Codexia HTTP boundary", () => {
       const document = await response.json() as { token_endpoint_auth_methods_supported: string[] };
       assert.ok(document.token_endpoint_auth_methods_supported.includes("none"));
     }
+    const mcp = await fetch(`${api.base}/mcp`, { method: "POST" });
+    assert.equal(mcp.status, 401);
+    assert.match(mcp.headers.get("www-authenticate") ?? "", /resource_metadata="https:\/\/api\.example\.test\/\.well-known\/oauth-protected-resource\/api"/u);
+    const resource = await fetch(`${api.base}/.well-known/oauth-protected-resource/api`);
+    assert.equal(resource.status, 200);
+    assert.deepEqual(await resource.json(), {
+      resource: fake.audience, authorization_servers: [fake.issuer],
+      scopes_supported: ["mcp:read", "mcp:compute", "mcp:propose"], bearer_methods_supported: ["header"],
+    });
     const token = await fetch(`${api.base}/api/auth/oauth2/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -686,627 +551,6 @@ describe("Codexia HTTP boundary", () => {
       await api.close();
       assert.equal(closedPools, apiOwned ? 1 : 0, "Only a pool owned by the API lifecycle is released");
     }
-  });
-
-  it("distinguishes runtime-control key outages from invalid credentials and reuses verified JWKS", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-control-jwks-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted control JWKS");
-    let unavailable = true;
-    let requests = 0;
-    const rotated = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-    const rotatedKid = "runtime-control-rotated-key";
-    const rotatedJwk = { ...RUNTIME_CONTROL_PUBLIC_JWK, ...rotated.publicKey.export({ format: "jwk" }), kid: rotatedKid };
-    let keys = [RUNTIME_CONTROL_PUBLIC_JWK];
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      requests++;
-      if (unavailable) throw new Error("private upstream failure");
-      return Response.json({ keys });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, native.persistence, native.project.id);
-    t.after(apiServer.close);
-    const operationId = "control-key-outage";
-    const body = JSON.stringify({ operationId, instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy", contractVersion: "scriptorium-platform/v1", deadline: new Date(Date.now() + 60_000).toISOString() });
-    const statusToken = runtimeControlToken("status", operationId, sha256Digest(""));
-    const status = (token = statusToken) => fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${token}` } });
-    for (const action of ["status", "quiesce", "resume"] as const) {
-      const response = action === "status" ? await status() : await fetch(`${apiServer.base}${action === "quiesce" ? RUNTIME_QUIESCE_PATH : RUNTIME_RESUME_PATH}`, {
-        method: "POST", headers: { Authorization: `Bearer ${runtimeControlToken(action, operationId, sha256Digest(body))}`, "Content-Type": "application/json" }, body,
-      });
-      assert.equal(response.status, 503, action);
-      const failure = await response.json() as { code: string; message: string };
-      assert.equal(failure.code, "AUTHORIZATION_UNAVAILABLE");
-      assert.doesNotMatch(JSON.stringify(failure), /private upstream failure/u);
-    }
-    assert.equal((await status("invalid.token.value")).status, 401);
-    unavailable = false;
-    assert.equal((await status()).status, 200);
-    const afterFetch = requests;
-    unavailable = true;
-    assert.equal((await status()).status, 200, "a valid cached key survives a temporary upstream outage");
-    const signature = statusToken.split(".")[2]!;
-    const tampered = statusToken.slice(0, statusToken.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
-    assert.equal((await status(tampered)).status, 401);
-    assert.equal(requests, afterFetch, "verified JWKS is reused without relaxing credential validation");
-
-    unavailable = false;
-    keys = [rotatedJwk];
-    const rotatedToken = runtimeControlToken("status", operationId, sha256Digest(""), rotated.privateKey, rotatedKid);
-    assert.equal((await status(rotatedToken)).status, 200, "a previously unknown signing key triggers JWKS refresh");
-    assert.equal(requests, afterFetch + 1);
-    unavailable = true;
-    assert.equal((await status(rotatedToken)).status, 200, "the refreshed key is cached");
-    assert.equal(requests, afterFetch + 1);
-    assert.equal((await status(statusToken)).status, 401, "the replaced key is not accepted after refresh");
-  });
-
-  it("binds hosted API access and signed lifecycle controls to one PostgreSQL project and runtime epoch", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-api-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted API");
-    let projectReads = 0;
-    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    let delayNextProposal = false;
-    let announceProposalStarted!: () => void;
-    let releaseProposal!: () => void;
-    const proposalStarted = new Promise<void>((resolveStarted) => { announceProposalStarted = resolveStarted; });
-    const proposalGate = new Promise<void>((resolveGate) => { releaseProposal = resolveGate; });
-    const store = native.store;
-    const originalPropose = store.propose.bind(store);
-    store.propose = async (projectId, proposal) => {
-      if (delayNextProposal) {
-        delayNextProposal = false;
-        announceProposalStarted();
-        await proposalGate;
-      }
-      return originalPropose(projectId, proposal);
-    };
-    const operation: ChangeOperation = {
-      id: "hosted-api-proposal-op", generation: 0, projectId: native.project.id,
-      baseProjectVersion: native.project.version, effect: "metadata", reads: [],
-      writes: [{ path: "meta/hosted-api-test.md", revision: null, content: "A durable proposal.\n" }],
-      message: "Propose a bounded metadata update",
-    };
-    const proposalBody = JSON.stringify({ id: "hosted-api-proposal", snapshot: projectSnapshot, operations: [operation] });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(async () => { releaseProposal(); await apiServer.close(); });
-
-    const noGrant = await fetch(`${apiServer.base}/api/projects`);
-    assert.equal(noGrant.status, 401);
-    for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
-      const discovery = await fetch(`${apiServer.base}${path}`);
-      assert.equal(discovery.status, 200, `${path} must be public without a grant`);
-      assert.deepEqual(await discovery.json(), {
-        resource: HOSTED_ASSIGNMENT.grantPolicy.audience,
-        authorization_servers: [HOSTED_ASSIGNMENT.grantPolicy.issuer],
-        scopes_supported: ["read", "write"],
-      });
-    }
-    const mcpChallenge = await fetch(`${apiServer.base}/mcp`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
-    });
-    assert.equal(mcpChallenge.status, 401);
-    assert.match(mcpChallenge.headers.get("www-authenticate") ?? "", /oauth-protected-resource/u);
-    const readerHeaders = { Authorization: "Bearer read-grant" };
-    const mcpReader = await fetch(`${apiServer.base}/mcp`, { headers: readerHeaders });
-    assert.equal(mcpReader.status, 404, "a read grant must pass auth even if MCP was not packaged");
-    const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
-    assert.equal(projects.status, 200);
-    assert.deepEqual(await projects.json(), [native.project]);
-    const projectPage = await fetch(`${apiServer.base}/api/projects?page=1&limit=20`, { headers: readerHeaders });
-    assert.equal(projectPage.status, 200);
-    assert.deepEqual(await projectPage.json(), { projects: [native.project], nextCursor: null });
-    const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
-    assert.equal(otherRepository.status, 404);
-    const ambiguous = await fetch(`${apiServer.base}/api/projects`, {
-      headers: { Authorization: "Bearer read-grant", Cookie: "__Host-praetorium_access=write-grant" },
-    });
-    assert.equal(ambiguous.status, 400);
-
-    const readAction = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/core.status`, {
-      method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
-    });
-    assert.equal(readAction.status, 200, "read-only MCP grants may invoke POST actions whose declared effect is read");
-    const deniedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(deniedProposal.status, 403);
-    assert.equal((await deniedProposal.json() as { code: string }).code, "WRITE_PERMISSION_REQUIRED");
-    const cookieHeaders = {
-      Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-      Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=csrf-value",
-    };
-    const missingCsrf = await rawHostedRequestStatus(`${apiServer.base}/api/inbox/read-all`, cookieHeaders);
-    assert.equal(missingCsrf, 403);
-    const cookieWrite = await rawHostedRequestStatus(`${apiServer.base}/api/inbox/read-all`, {
-      ...cookieHeaders, "X-CSRF-Token": "csrf-value",
-    });
-    assert.equal(cookieWrite, 200);
-
-    const statusWithoutControl = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`);
-    assert.equal(statusWithoutControl.status, 401);
-    const statusToken = runtimeControlToken("status", "status-operation", sha256Digest(""));
-    const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
-    assert.equal(statusResponse.status, 200);
-    const status = await statusResponse.json() as {
-      instanceId: string; projectId: string; runtimeEpoch: number;
-      persistence: { state: string; provider: string; projectVersion: number | null };
-    };
-    assert.deepEqual([status.instanceId, status.projectId, status.runtimeEpoch], ["instance-1", native.project.id, 3]);
-    assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.provider, "postgres");
-    assert.equal(status.persistence.projectVersion, native.project.version);
-    const readsBeforePreflight = projectReads;
-    assert.ok(readsBeforePreflight > 0, "hosted persistence status must read the assigned project through Persistence.read/getProject");
-
-    const quiesceRequest = {
-      operationId: "quiesce-safe",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const exactQuiesceBody = JSON.stringify(quiesceRequest);
-    const quiesceToken = runtimeControlToken("quiesce", quiesceRequest.operationId, sha256Digest(exactQuiesceBody));
-    const quiesceResponse = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(quiesceResponse.status, 200);
-    const safeReceipt = await quiesceResponse.json() as { disposition: string; activeMutations: number; projectVersion: number | null };
-    assert.equal(safeReceipt.disposition, "safe");
-    assert.equal(safeReceipt.activeMutations, 0);
-    assert.equal(safeReceipt.projectVersion, native.project.version);
-    assert.ok(projectReads > readsBeforePreflight, "quiesce performs a fresh PostgreSQL census after closing admission");
-    const blockedByGate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(blockedByGate.status, 503);
-    assert.equal((await blockedByGate.json() as { code: string }).code, "RUNTIME_QUIESCED");
-
-    const resumeToken = runtimeControlToken("resume", quiesceRequest.operationId, sha256Digest(exactQuiesceBody));
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(resumed.status, 204);
-    const resumedAgain = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(resumedAgain.status, 204, "the same epoch and completed operation may resume idempotently");
-    const unrelatedResumeBody = JSON.stringify({ ...quiesceRequest, operationId: "unrelated-resume" });
-    const unrelatedResumeToken = runtimeControlToken("resume", "unrelated-resume", sha256Digest(unrelatedResumeBody));
-    const unrelatedResume = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${unrelatedResumeToken}`, "Content-Type": "application/json" }, body: unrelatedResumeBody,
-    });
-    assert.equal(unrelatedResume.status, 409);
-    const allowedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(allowedProposal.status, 201);
-
-    delayNextProposal = true;
-    const inFlightProposal = fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    await proposalStarted;
-    const blockedRequest = {
-      ...quiesceRequest,
-      operationId: "quiesce-blocked",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const exactBlockedBody = JSON.stringify(blockedRequest);
-    const blockedToken = runtimeControlToken("quiesce", blockedRequest.operationId, sha256Digest(exactBlockedBody));
-    const blockedResponse = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${blockedToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
-    });
-    assert.equal(blockedResponse.status, 200);
-    const blockedReceipt = await blockedResponse.json() as { disposition: string; activeMutations: number; reasonCodes: string[] };
-    assert.equal(blockedReceipt.disposition, "blocked");
-    assert.equal(blockedReceipt.activeMutations, 1);
-    assert.ok(blockedReceipt.reasonCodes.includes("ACTIVE_MUTATIONS"));
-    const blockedResumeToken = runtimeControlToken("resume", blockedRequest.operationId, sha256Digest(exactBlockedBody));
-    const blockedResume = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${blockedResumeToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
-    });
-    assert.equal(blockedResume.status, 204, "resuming the exact blocked operation is an idempotent no-op");
-    releaseProposal();
-    assert.equal((await inFlightProposal).status, 201, "the active mutation may finish after quiesce reports blocked and reopens admission");
-  });
-
-  it("keeps a quiesce census unverified when a worker job starts and finishes during its local scan, then permits a stable retry", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-activity-race-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted activity race");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    let projectReads = 0;
-    let interleaveNextProjectRead = false;
-    const lifecycleCreatedAt = new Date().toISOString();
-    let lifecycleUpdatedAt = lifecycleCreatedAt;
-    let lifecycleStartedAt: string | null = null;
-    const lifecycle = async (state: WorkerJobLifecycleSnapshot["state"]): Promise<void> => {
-      lifecycleUpdatedAt = new Date(Date.parse(lifecycleUpdatedAt) + 1).toISOString();
-      if (state === "running") lifecycleStartedAt = lifecycleUpdatedAt;
-      await runtime.emitLifecycle({
-        jobId: "job-interleaving", module: "story", task: "runtime-activity-interleaving", snapshot: projectSnapshot,
-        state, createdAt: lifecycleCreatedAt, updatedAt: lifecycleUpdatedAt,
-        startedAt: lifecycleStartedAt,
-        finishedAt: state === "succeeded" || state === "failed" || state === "cancelled" ? lifecycleUpdatedAt : null,
-      });
-    };
-    const persistence = instrumentPersistence(native.persistence, {
-      async beforeProjectRead() {
-        if (!interleaveNextProjectRead) return;
-        interleaveNextProjectRead = false;
-        await lifecycle("queued");
-        await lifecycle("running");
-        await lifecycle("succeeded");
-      },
-      onProjectRead: () => { projectReads++; },
-    });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, resolve(staticDir, "usage"), persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const preflight = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-preflight", sha256Digest(""))}` },
-    });
-    assert.equal(preflight.status, 200);
-    const preflightStatus = await preflight.json() as { persistence: { state: string; projectVersion: number | null } };
-    assert.equal(preflightStatus.persistence.state, "verified");
-    assert.equal(preflightStatus.persistence.projectVersion, native.project.version);
-    const projectReadsAfterPreflight = projectReads;
-    assert.ok(projectReadsAfterPreflight > 0, "the signed preflight reads the assigned project from PostgreSQL");
-
-    const request = {
-      operationId: "quiesce-activity-race",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const body = JSON.stringify(request);
-    const quiesceHeaders = {
-      Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-      "Content-Type": "application/json",
-    };
-    interleaveNextProjectRead = true;
-    const first = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
-    assert.equal(first.status, 200);
-    const firstReceipt = await first.json() as { disposition: string; activeJobs: number; reasonCodes: string[] };
-    assert.equal(firstReceipt.activeJobs, 0, "the worker has already finished by the time the census returns");
-    assert.equal(firstReceipt.disposition, "unknown", "the monotonic activity version detects the completed job");
-    assert.ok(firstReceipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-    assert.ok(projectReads > projectReadsAfterPreflight, "the closed-admission census re-reads its PostgreSQL project version");
-
-    const stableStatus = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-stable-status", sha256Digest(""))}` },
-    });
-    assert.equal(stableStatus.status, 200);
-    assert.equal((await stableStatus.json() as { persistence: { state: string } }).persistence.state, "verified");
-
-    const retry = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
-    assert.equal(retry.status, 200);
-    const retryReceipt = await retry.json() as { disposition: string; projectVersion: number | null };
-    assert.equal(retryReceipt.disposition, "safe");
-    assert.equal(retryReceipt.projectVersion, native.project.version);
-
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${runtimeControlToken("resume", request.operationId, sha256Digest(body))}`, "Content-Type": "application/json" },
-      body,
-    });
-    assert.equal(resumed.status, 204);
-  });
-
-  it("waits for accepted private job-history writes before certifying safe quiesce", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-quiesce-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted history quiesce");
-    const usageDirectory = resolve(staticDir, "usage");
-    const migratedDirectory = resolve(staticDir, "migrated-usage");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const createdAt = new Date().toISOString();
-    const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
-    const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
-    const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-quiesce-race", module: "story", task: "history-quiesce-race", snapshot: projectSnapshot,
-      state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
-    });
-    await runtime.emitLifecycle(lifecycle("running", runningAt));
-    const historyPath = resolve(usageDirectory, "jobs", "jobs-state.json");
-    assert.equal(((JSON.parse(await readFile(historyPath, "utf8")) as { jobs: Array<{ job: { status: string } }> }).jobs[0]?.job.status), "running");
-
-    let releaseTerminal!: () => void;
-    const terminalGate = new Promise<void>((resolveGate) => { releaseTerminal = resolveGate; });
-    let terminalPersistStarted!: () => void;
-    const terminalStarted = new Promise<void>((resolveStarted) => { terminalPersistStarted = resolveStarted; });
-    let historyBarrierStarted!: () => void;
-    const historyBarrier = new Promise<void>((resolveStarted) => { historyBarrierStarted = resolveStarted; });
-    const prototype = JobHistoryStore.prototype as unknown as {
-      persist: (state: unknown) => Promise<void>;
-      listJobs: () => Promise<unknown[]>;
-    };
-    const originalPersist = prototype.persist;
-    const originalListJobs = prototype.listJobs;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ job?: { id?: string; status?: string } }> }).jobs ?? [];
-      if (jobs.some((record) => record.job?.id === "job-history-quiesce-race" && record.job.status === "done")) {
-        terminalPersistStarted();
-        return terminalGate.then(() => originalPersist.call(this, state));
-      }
-      return originalPersist.call(this, state);
-    };
-    prototype.listJobs = function (): Promise<unknown[]> {
-      historyBarrierStarted();
-      return originalListJobs.call(this);
-    };
-
-    let terminalCallback: Promise<void> | undefined;
-    try {
-      terminalCallback = runtime.emitLifecycle(lifecycle("succeeded", finishedAt, finishedAt));
-      await terminalStarted;
-      const request = {
-        operationId: "quiesce-history-write",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 60_000).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const quiesce = fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      let barrierTimeout: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          historyBarrier,
-          new Promise<never>((_resolve, reject) => {
-            barrierTimeout = setTimeout(() => reject(new Error("quiesce did not warm private job history")), 1_000);
-          }),
-        ]);
-      } finally { if (barrierTimeout) clearTimeout(barrierTimeout); }
-      const earlyResponse = await Promise.race([
-        quiesce.then(() => true),
-        new Promise<boolean>((resolveDelay) => setTimeout(() => resolveDelay(false), 25)),
-      ]);
-      assert.equal(earlyResponse, false, "quiesce must await the accepted terminal history write");
-
-      releaseTerminal();
-      const response = await quiesce;
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "safe");
-      assert.ok(!receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-
-      await cp(usageDirectory, migratedDirectory, { recursive: true });
-      const migrated = await new JobHistoryStore(migratedDirectory).listJobs();
-      assert.equal(migrated[0]?.status, "done");
-      assert.equal(migrated[0]?.errorCode, undefined, "first read after migration must not orphan a completed worker");
-    } finally {
-      releaseTerminal();
-      prototype.persist = originalPersist;
-      prototype.listJobs = originalListJobs;
-      await terminalCallback?.catch(() => undefined);
-    }
-  });
-
-  it("does not certify safe quiesce when a domain job terminal history write and fallback both fail", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-hosted-domain-history-quiesce-"));
-    tempDirs.push(root);
-    const staticDir = resolve(root, "static");
-    await mkdir(staticDir);
-    const native = await nativeProject(t, "Hosted domain history failure");
-    const usageDirectory = resolve(root, "usage");
-    const domain = sourceDomainJobRuntime(resolve(root, "module-cache"));
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, domain.runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(async () => { domain.releaseAsync(); await apiServer.close(); });
-    const prototype = JobHistoryStore.prototype as unknown as { persist: (state: unknown) => Promise<void> };
-    const originalPersist = prototype.persist;
-    let failedTerminalWrites = 0;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ kind?: string; job?: { status?: string } }> }).jobs ?? [];
-      if (jobs.some((entry) => entry.kind === "domain" && (entry.job?.status === "done" || entry.job?.status === "error"))) {
-        failedTerminalWrites += 1;
-        return Promise.reject(new Error("injected private history terminal write failure"));
-      }
-      return originalPersist.call(this, state);
-    };
-    try {
-      const action = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/speaker.evaluation.run`, {
-        method: "POST",
-        headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" },
-        body: JSON.stringify({ input: {} }),
-      });
-      assert.equal(action.status, 200);
-      assert.ok(action.headers.get("x-codexia-job-id"));
-      assert.equal(failedTerminalWrites, 2, "both the result and explicit retention-failure fallback writes must be exercised");
-      const request = {
-        operationId: "quiesce-domain-history-failure",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private domain history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 60_000).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const response = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "unknown");
-      assert.ok(receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-    } finally {
-      prototype.persist = originalPersist;
-    }
-  });
-
-  it("reports unknown when accepted private job history cannot drain before the quiesce deadline", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-deadline-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted history deadline");
-    const usageDirectory = resolve(staticDir, "usage");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(apiServer.close);
-    const createdAt = new Date().toISOString();
-    const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
-    const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
-    const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-deadline", module: "story", task: "history-deadline", snapshot: { projectId: native.project.id, projectVersion: native.project.version },
-      state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
-    });
-    await runtime.emitLifecycle(lifecycle("running", runningAt));
-    let releaseTerminal!: () => void;
-    const terminalGate = new Promise<void>((resolveGate) => { releaseTerminal = resolveGate; });
-    let terminalPersistStarted!: () => void;
-    const terminalStarted = new Promise<void>((resolveStarted) => { terminalPersistStarted = resolveStarted; });
-    let barrierStarted!: () => void;
-    const barrier = new Promise<void>((resolveStarted) => { barrierStarted = resolveStarted; });
-    const prototype = JobHistoryStore.prototype as unknown as {
-      persist: (state: unknown) => Promise<void>;
-      listJobs: () => Promise<unknown[]>;
-    };
-    const originalPersist = prototype.persist;
-    const originalListJobs = prototype.listJobs;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ job?: { id?: string; status?: string } }> }).jobs ?? [];
-      if (jobs.some((record) => record.job?.id === "job-history-deadline" && record.job.status === "done")) {
-        terminalPersistStarted();
-        return terminalGate.then(() => originalPersist.call(this, state));
-      }
-      return originalPersist.call(this, state);
-    };
-    prototype.listJobs = function (): Promise<unknown[]> {
-      barrierStarted();
-      return originalListJobs.call(this);
-    };
-    let terminalCallback: Promise<void> | undefined;
-    try {
-      terminalCallback = runtime.emitLifecycle(lifecycle("succeeded", finishedAt, finishedAt));
-      await terminalStarted;
-      const request = {
-        operationId: "quiesce-history-deadline",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 100).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const startedAt = Date.now();
-      const quiesce = fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      await barrier;
-      const response = await quiesce;
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "unknown");
-      assert.ok(receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-      assert.ok(Date.now() - startedAt < 2_000, "private-history drain must honor the signed quiesce deadline");
-    } finally {
-      releaseTerminal();
-      prototype.persist = originalPersist;
-      prototype.listJobs = originalListJobs;
-      await terminalCallback?.catch(() => undefined);
-    }
-  });
-
-  it("safely quiesces an untouched empty PostgreSQL project using the lifecycle request property order", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-empty-project-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Empty hosted project");
-    assert.deepEqual((await native.store.readTreeSnapshot(native.project.id)).tree.volumes, [], "the project has no manuscript hierarchy");
-    let projectReads = 0;
-    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const statusToken = runtimeControlToken("status", "empty-status", sha256Digest(""));
-    const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
-    assert.equal(statusResponse.status, 200);
-    const status = await statusResponse.json() as { projectId: string; persistence: { state: string; provider: string; projectVersion: number | null } };
-    assert.equal(status.projectId, native.project.id);
-    assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.provider, "postgres");
-    assert.equal(status.persistence.projectVersion, native.project.version);
-    const projectReadsAfterPreflight = projectReads;
-
-    // This matches Praetorium ControlHttpClient's insertion order exactly.
-    const request = {
-      operationId: "empty-quiesce",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const body = JSON.stringify(request);
-    const quiesceToken = runtimeControlToken("quiesce", request.operationId, sha256Digest(body));
-    const quiesced = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body,
-    });
-    assert.equal(quiesced.status, 200);
-    const receipt = await quiesced.json() as { disposition: string; projectVersion: number | null };
-    assert.equal(receipt.disposition, "safe");
-    assert.equal(receipt.projectVersion, native.project.version);
-    assert.ok(projectReads > projectReadsAfterPreflight, "quiesce verifies the empty project's PostgreSQL version after closing admission");
-
-    const resumeToken = runtimeControlToken("resume", request.operationId, sha256Digest(body));
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body,
-    });
-    assert.equal(resumed.status, 204);
   });
 
   it("keeps health public, protects project data, and serves the app shell", async (t) => {
@@ -1439,8 +683,8 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await fetch(`${apiServer.base}/r/publishing/not-numeric/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token/extra`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`)).status, 404);
-    const owner = await login(apiServer.base);
-    assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Cookie: owner.cookie } })).status, 404,
+    const owner = signedRequests.ownerHeaders();
+    assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Authorization: owner.Authorization } })).status, 404,
       "the SPA fallback must not turn missing API routes into index.html");
     for (const name of ["main.js", "api.js", "drafts.js", "styles.css"]) {
       assert.equal((await fetch(`${apiServer.base}/${name}`)).status, 200);
@@ -1555,83 +799,6 @@ describe("Codexia HTTP boundary", () => {
     const rollbackAlias = await fetch(`${apiServer.base}/main.js`);
     assert.equal(await rollbackAlias.text(), "launcher legacy bundle", "a legacy manifest remains usable after rollback");
     assert.equal(rollbackAlias.headers.get("cache-control"), "no-store");
-  });
-
-  it("stores bounded immutable model usage with complete paginated history and no symlink traversal", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-"));
-    tempDirs.push(root);
-    const usageDirectory = resolve(root, "host-history");
-    const unusedDirectory = resolve(root, "unused-history");
-    assert.deepEqual(await new HistoricalModelUsageStore(unusedDirectory).list(SNAPSHOT.projectId), { events: [] });
-    await assert.rejects(lstat(unusedDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "an empty history read must not create host storage");
-    const store = new HistoricalModelUsageStore(usageDirectory);
-    const first = usageEvent(SNAPSHOT.projectId, "usage-1", "2026-10-17T00:00:00.000Z", {
-      cacheHit: true, promptVersion: "rewrite@1", durationMs: 217, queueWaitMs: 18,
-    });
-    const second = usageEvent(SNAPSHOT.projectId, "usage-2", "2026-10-17T00:00:02.000Z", { state: "aborted", errorCode: "request_cancelled" });
-    const third = usageEvent(SNAPSHOT.projectId, "usage-3", "2026-10-17T00:00:04.000Z");
-    await Promise.all([store.append(first), store.append(first), store.append(second), store.append(third)]);
-
-    const pageOne = await store.list(SNAPSHOT.projectId, { limit: 2 });
-    assert.deepEqual(pageOne.events.map(({ id }) => id), [first.id, second.id]);
-    assert.deepEqual(pageOne.events[0], first, "source cache and prompt/timing metadata survive append and list");
-    assert.ok(pageOne.nextCursor);
-    const pageTwo = await store.list(SNAPSHOT.projectId, { limit: 2, cursor: pageOne.nextCursor });
-    assert.deepEqual(pageTwo.events.map(({ id }) => id), [third.id]);
-    assert.equal(pageTwo.nextCursor, undefined);
-    const ranged = await store.list(SNAPSHOT.projectId, { from: second.startedAt, to: third.startedAt, limit: 10 });
-    assert.deepEqual(ranged.events.map(({ id }) => id), [second.id, third.id]);
-    await assert.rejects(store.list(SNAPSHOT.projectId, { limit: 1_001 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_query_invalid");
-    await assert.rejects(store.append({ ...first, outputTokens: 9 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
-    await assert.rejects(store.append({ ...first, cacheHit: false }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
-    for (const invalid of [
-      { cacheHit: "true" },
-      { promptVersion: "v1\nprivate prompt" },
-      { promptVersion: "v".repeat(129) },
-      { durationMs: Number.POSITIVE_INFINITY },
-      { durationMs: -1 },
-      { durationMs: 86_400_001 },
-      { queueWaitMs: Number.NaN },
-      { queueWaitMs: -1 },
-      { queueWaitMs: 86_400_001 },
-    ]) {
-      await assert.rejects(store.append({ ...first, id: `invalid-${Object.keys(invalid)[0]}`, ...invalid } as ModelUsageEvent),
-        (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    }
-    await assert.rejects(store.append({
-      ...first, prompt: "private prompt", headers: { Authorization: "secret" }, key: "private key", body: "private body",
-    } as ModelUsageEvent), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-
-    const reopened = new HistoricalModelUsageStore(usageDirectory);
-    assert.deepEqual((await reopened.list(SNAPSHOT.projectId, { limit: 10 })).events, [first, second, third],
-      "source cache and prompt/timing metadata survive reopening the host-owned store");
-
-    const alias = resolve(root, "history-alias");
-    await symlink(usageDirectory, alias, "dir");
-    await assert.rejects(new HistoricalModelUsageStore(alias).list(SNAPSHOT.projectId), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_path_invalid");
-  });
-
-  it("keeps accepted offset timestamps readable and rejects normalized dates outside the stored format", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-offsets-"));
-    tempDirs.push(root);
-    const store = new HistoricalModelUsageStore(resolve(root, "host-history"));
-    const offsetEvent = usageEvent(SNAPSHOT.projectId, "offset-event", "2026-10-17T01:00:00+01:00");
-    await store.append({ ...offsetEvent, completedAt: "2026-10-17T01:00:01+01:00" });
-    assert.deepEqual((await store.list(SNAPSHOT.projectId)).events, [{
-      ...offsetEvent,
-      startedAt: "2026-10-17T00:00:00.000Z",
-      completedAt: "2026-10-17T00:00:01.000Z",
-    }]);
-
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "year-underflow", startedAt: "0000-01-01T00:00:00+01:00", completedAt: "0000-01-01T00:00:01+01:00",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "year-overflow", startedAt: "9999-12-31T23:59:59-01:00", completedAt: "9999-12-31T23:59:59-01:00",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "invalid-calendar-day", startedAt: "2026-02-30T00:00:00Z", completedAt: "2026-02-30T00:00:01Z",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
   });
 
   it("stores only bounded worker lifecycle metadata and durable completion inbox state", async () => {
@@ -1759,8 +926,8 @@ describe("Codexia HTTP boundary", () => {
       runtime: domain.runtime,
       usageDirectory,
     });
-    const owner = await login(api.base);
-    const ownerHeaders = { Cookie: owner.cookie, Origin: api.base, "Content-Type": "application/json" };
+    const owner = signedRequests.ownerHeaders();
+    const ownerHeaders = { Authorization: owner.Authorization, Origin: api.base, "Content-Type": "application/json" };
     const expectedData = { report: { examples: 3, accuracy: 0.75 }, version: "synthetic-v1" };
     let progressAbort: AbortController | undefined;
     let progressReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -1774,7 +941,7 @@ describe("Codexia HTTP boundary", () => {
     });
     progressAbort = new AbortController();
     const progressResponse = await fetch(`${api.base}/api/jobs/events`, {
-      headers: { Cookie: owner.cookie }, signal: progressAbort.signal,
+      headers: { Authorization: owner.Authorization }, signal: progressAbort.signal,
     });
     assert.equal(progressResponse.status, 200);
     assert.ok(progressResponse.body);
@@ -1807,7 +974,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(directJobId);
     const directResult = await directResponse.json() as ActionResult;
     assert.deepEqual(directResult, { ok: true, snapshot: SNAPSHOT, data: expectedData });
-    const directJobResponse = await fetch(`${api.base}/api/jobs/${directJobId}`, { headers: { Cookie: owner.cookie } });
+    const directJobResponse = await fetch(`${api.base}/api/jobs/${directJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.equal(directJobResponse.status, 200);
     const directJob = await directJobResponse.json() as { status: string; result: unknown };
     assert.equal(directJob.status, "done");
@@ -1821,7 +988,7 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(nestedJobId);
     assert.notEqual(nestedJobId, directJobId);
     assert.deepEqual(await nestedResponse.json(), { ok: true, snapshot: SNAPSHOT, data: expectedData });
-    const nestedJobResponse = await fetch(`${api.base}/api/jobs/${nestedJobId}`, { headers: { Cookie: owner.cookie } });
+    const nestedJobResponse = await fetch(`${api.base}/api/jobs/${nestedJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.deepEqual((await nestedJobResponse.json() as { result: unknown }).result, expectedData);
 
     const failedResponse = await fetch(`${api.base}/api/projects/project-1/actions/speaker.evaluation.run`, {
@@ -1831,7 +998,7 @@ describe("Codexia HTTP boundary", () => {
     const failedJobId = failedResponse.headers.get("x-codexia-job-id");
     assert.ok(failedJobId);
     const failedResult = await failedResponse.json() as Extract<ActionResult, { ok: false }>;
-    const failedJobResponse = await fetch(`${api.base}/api/jobs/${failedJobId}`, { headers: { Cookie: owner.cookie } });
+    const failedJobResponse = await fetch(`${api.base}/api/jobs/${failedJobId}`, { headers: { Authorization: owner.Authorization } });
     const failedJob = await failedJobResponse.json() as { status: string; result: unknown; error: string; errorCode?: string; retryable?: boolean };
     assert.equal(failedJob.status, "error");
     assert.equal(failedJob.result, null);
@@ -1857,11 +1024,11 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(progressEvents.every(({ type, jobType, status, at }) => type === "job-progress" && jobType === "speaker-eval" && status === "running" && Date.parse(at) > 0));
     progressAbort.abort();
     await progressReader.cancel().catch(() => undefined);
-    const runningJobResponse = await fetch(`${api.base}/api/jobs/${asyncJobId}`, { headers: { Cookie: owner.cookie } });
+    const runningJobResponse = await fetch(`${api.base}/api/jobs/${asyncJobId}`, { headers: { Authorization: owner.Authorization } });
     assert.equal(runningJobResponse.status, 200);
     assert.equal((await runningJobResponse.json() as { status: string }).status, "running");
     domain.releaseAsync();
-    const completedAsync = await waitForJob(api.base, owner.cookie, asyncJobId);
+    const completedAsync = await waitForJob(api.base, owner.Authorization, asyncJobId);
     assert.equal(completedAsync.status, "done");
     assert.deepEqual(completedAsync.result, expectedData);
 
@@ -1877,118 +1044,41 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(historyBytes.includes("must-not-be-captured"), false, "action input is not retained as job history");
   });
 
-  it("archives exact legacy jobs outside Core data and exposes only explicitly mapped owner history", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-"));
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-app-"));
-    tempDirs.push(root, staticDir);
-    const workspaceDataRoot = resolve(root, "core-data");
-    const appState = resolve(workspaceDataRoot, "app-state");
+  it("reads retained v3 jobs and persists the owner's inbox update without losing their history", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-retained-jobs-"));
+    tempDirs.push(root);
     const usageDirectory = resolve(root, "history");
-    await mkdir(appState, { recursive: true, mode: 0o700 });
-    const legacyState = {
-      jobs: [
-        {
-          id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-          result: { report: "explicitly mapped result" }, error: null,
-          projectKey: "legacy-project-id", userId: "legacy-owner-id",
-          createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-        },
-        {
-          id: "unmapped-job", type: "zukan-proposal", status: "error", progress: null,
-          result: { secretBody: "unmapped result stays private" }, error: "unmapped error stays private",
-          projectKey: "unknown-project-id", userId: "unknown-user-id",
-          createdAt: "2026-10-16T01:00:00.000Z", updatedAt: "2026-10-16T01:01:00.000Z", finishedAt: "2026-10-16T01:01:00.000Z",
-        },
-      ],
-      inbox: [
-        {
-          id: "mapped-inbox", kind: "job-complete", jobId: "mapped-job", jobType: "speaker-eval",
-          title: "Mapped report", body: "Mapped inbox result body", status: "done", read: false,
-          userId: "legacy-owner-id", projectKey: "legacy-project-id", createdAt: "2026-10-16T00:01:00.000Z",
-        },
-        {
-          id: "unmapped-inbox", kind: "job-complete", jobId: "unmapped-job", jobType: "zukan-proposal",
-          title: "Unmapped title", body: "unmapped inbox body stays private", status: "error", read: false,
-          userId: "unknown-user-id", projectKey: "unknown-project-id", createdAt: "2026-10-16T01:01:00.000Z",
-        },
-      ],
+    const jobs = resolve(usageDirectory, "jobs");
+    await mkdir(jobs, { recursive: true, mode: 0o700 });
+    const statePath = resolve(jobs, "jobs-state.json");
+    const now = "2026-10-16T00:01:00.000Z";
+    const job = {
+      id: "retained-job", type: "speaker-eval", status: "done", progress: 1,
+      result: { report: "retained" }, error: null, createdAt: now, updatedAt: now, finishedAt: now,
     };
-    const sourcePath = resolve(appState, "jobs-state.json");
-    const sourceBytes = Buffer.from(JSON.stringify(legacyState), "utf8");
-    await writeFile(sourcePath, sourceBytes, { mode: 0o600 });
-    const report = await importLegacyJobHistory({
-      workspaceDataRoot,
-      usageDirectory,
-      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
-      legacyUserMappings: { "legacy-owner-id": "owner" },
-    });
-    assert.equal(report.archived, true);
-    assert.equal(report.adoptedJobs, 1);
-    assert.equal(report.adoptedInbox, 1);
-    assert.deepEqual(report.mappingRequired, [{
-      projectKey: "unknown-project-id", userId: "unknown-user-id", jobCount: 1, inboxCount: 1,
-    }]);
-    assert.equal(JSON.stringify(report).includes("unmapped result stays private"), false);
-    const archivePath = resolve(usageDirectory, "jobs", "legacy", `${report.sourceHash}.json`);
-    assert.deepEqual(await readFile(archivePath), sourceBytes, "the hash-addressed host archive retains the exact source bytes");
-    assert.deepEqual(await readFile(sourcePath), sourceBytes, "migration leaves the source jobs file untouched");
-    const retry = await importLegacyJobHistory({
-      workspaceDataRoot,
-      usageDirectory,
-      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
-      legacyUserMappings: { "legacy-owner-id": "owner" },
-    });
-    assert.equal(retry.sourceHash, report.sourceHash);
-    assert.equal(retry.adoptedJobs, 0, "a repeated import must not duplicate mapped jobs");
-    assert.equal(retry.adoptedInbox, 0, "a repeated import must not duplicate inbox entries");
-
-    await rm(workspaceDataRoot, { recursive: true, force: true });
-    const apiServer = await startCustomApi(makeStore(), staticDir, { usageDirectory });
-    t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const bearer = { Authorization: `Bearer ${ACCESS_TOKEN}` };
-    assert.equal((await fetch(`${apiServer.base}/api/jobs`, { headers: bearer })).status, 403,
-      "legacy private history is cookie-owner-only");
-    const jobListResponse = await fetch(`${apiServer.base}/api/jobs`, { headers: { Cookie: owner.cookie } });
-    assert.equal(jobListResponse.status, 200);
-    assert.deepEqual(await jobListResponse.json(), [{
-      id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-      result: { report: "explicitly mapped result" }, error: null,
-      createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-    }]);
-    const mappedJob = await fetch(`${apiServer.base}/api/jobs/mapped-job`, { headers: { Cookie: owner.cookie } });
-    assert.equal(mappedJob.status, 200);
-    assert.deepEqual(await mappedJob.json(), {
-      id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-      result: { report: "explicitly mapped result" }, error: null,
-      createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-    });
-    assert.equal((await fetch(`${apiServer.base}/api/jobs/unmapped-job`, { headers: { Cookie: owner.cookie } })).status, 404);
-    const inbox = await fetch(`${apiServer.base}/api/inbox`, { headers: { Cookie: owner.cookie } });
-    const inboxBody = await inbox.json() as { items: Array<Record<string, unknown>>; unreadCount: number };
-    assert.equal(inboxBody.unreadCount, 1);
-    assert.equal(inboxBody.items.length, 1);
-    assert.deepEqual(inboxBody.items[0], {
-      id: "mapped-inbox", kind: "job-complete", jobId: "mapped-job", jobType: "speaker-eval",
-      title: "Mapped report", body: "Mapped inbox result body", status: "done", read: false,
-      userId: "owner",
-      projectKey: createHash("sha256").update(`postgres-project\0${SNAPSHOT.projectId}`).digest("hex"),
-      createdAt: "2026-10-16T00:01:00.000Z",
-    });
-    assert.equal(JSON.stringify(inboxBody).includes("unmapped inbox body stays private"), false);
-    const markRead = await fetch(`${apiServer.base}/api/inbox/mapped-inbox/read`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
-    });
-    assert.equal(markRead.status, 200);
-    assert.equal(((await markRead.json() as { item: { read: boolean } }).item).read, true);
-    const readAll = await fetch(`${apiServer.base}/api/inbox/read-all`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
-    });
-    assert.deepEqual(await readAll.json(), { marked: 0 });
-    assert.equal((await fetch(`${apiServer.base}/api/inbox/unmapped-inbox/read`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base },
-    })).status, 404);
-    assert.deepEqual(await readFile(archivePath), sourceBytes, "removing the Core data root cannot remove or mutate the legacy archive");
+    const projectKey = "a".repeat(64);
+    const item = {
+      id: "retained-inbox", kind: "job-complete", jobId: job.id, jobType: job.type, title: "Saved report",
+      body: "Evaluation complete", status: "done", read: false, userId: "owner", projectKey, createdAt: now,
+    };
+    const state = {
+      version: 3, jobs: [{ kind: "legacy", ownerKey: "b".repeat(64), projectKey, job }],
+      inbox: [item], legacySources: ["c".repeat(64)],
+    };
+    await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+    const api = await startCustomApi(makeStore(), resolve(root, "app"), { usageDirectory });
+    t.after(api.close);
+    const headers = { Authorization: signedRequests.ownerHeaders().Authorization };
+    const retained = await fetch(`${api.base}/api/jobs/${job.id}`, { headers });
+    assert.equal(retained.status, 200);
+    assert.deepEqual(await retained.json(), job);
+    const write = { method: "POST", headers: { ...headers, Origin: api.base } };
+    const marked = await fetch(`${api.base}/api/inbox/${item.id}/read`, write);
+    assert.equal(marked.status, 200);
+    assert.deepEqual(await marked.json(), { item: { ...item, read: true } });
+    const all = await fetch(`${api.base}/api/inbox/read-all`, write);
+    assert.deepEqual(await all.json(), { marked: 0 });
+    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { ...state, inbox: [{ ...item, read: true }] });
   });
 
   it("publishes real supervised worker jobs through owner-only history routes and SSE", async (t) => {
@@ -1999,9 +1089,9 @@ describe("Codexia HTTP boundary", () => {
     const runtime = jobHistoryRuntime(cacheDirectory);
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime, usageDirectory });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const streamAbort = new AbortController();
-    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Cookie: owner.cookie }, signal: streamAbort.signal });
+    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Authorization: owner.Authorization }, signal: streamAbort.signal });
     assert.equal(stream.status, 200);
     assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/u);
     assert.ok(stream.body);
@@ -2028,7 +1118,7 @@ describe("Codexia HTTP boundary", () => {
     })();
     const invocation = await fetch(`${apiServer.base}/api/projects/project-1/actions/speaker.test-worker`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { jobId: "real-worker-job" } }),
     });
     assert.equal(invocation.status, 200);
@@ -2040,7 +1130,7 @@ describe("Codexia HTTP boundary", () => {
     streamAbort.abort();
     await reader.cancel().catch(() => undefined);
     assert.deepEqual(events.map(({ status }) => status), ["queued", "running", "done"]);
-    const jobResponse = await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Cookie: owner.cookie } });
+    const jobResponse = await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: owner.Authorization } });
     assert.equal(jobResponse.status, 200);
     const job = await jobResponse.json() as { id: string; type: string; status: string; progress: unknown; result: unknown; error: unknown; createdAt: string; updatedAt: string; finishedAt: string };
     assert.deepEqual({ ...job, createdAt: "", updatedAt: "", finishedAt: "" }, {
@@ -2051,8 +1141,8 @@ describe("Codexia HTTP boundary", () => {
     const privateState = await readFile(resolve(usageDirectory, "jobs", "jobs-state.json"), "utf8");
     assert.equal(privateState.includes("worker-input-must-not-enter-owner-history"), false);
     assert.equal(privateState.includes("worker-input"), false);
-    assert.equal((await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } })).status, 403);
-    const inboxResponse = await fetch(`${apiServer.base}/api/inbox`, { headers: { Cookie: owner.cookie } });
+    assert.equal((await fetch(`${apiServer.base}/api/jobs/real-worker-job`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } })).status, 403);
+    const inboxResponse = await fetch(`${apiServer.base}/api/inbox`, { headers: { Authorization: owner.Authorization } });
     assert.equal((await inboxResponse.json() as { unreadCount: number }).unreadCount, 1);
   });
 
@@ -2065,9 +1155,9 @@ describe("Codexia HTTP boundary", () => {
       runtime: jobHistoryRuntime(cacheDirectory), usageDirectory,
     });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const streamAbort = new AbortController();
-    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Cookie: owner.cookie }, signal: streamAbort.signal });
+    const stream = await fetch(`${apiServer.base}/api/jobs/events`, { headers: { Authorization: owner.Authorization }, signal: streamAbort.signal });
     assert.equal(stream.status, 200);
     assert.ok(stream.body);
     const reader = stream.body.getReader();
@@ -2100,7 +1190,7 @@ describe("Codexia HTTP boundary", () => {
     const actionAbort = new AbortController();
     const request = fetch(`${apiServer.base}/api/projects/project-1/actions/speaker.test-worker`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { jobId: "cancelled-worker-job", task: "hold" } }),
       signal: actionAbort.signal,
     }).catch((error: unknown) => error);
@@ -2113,333 +1203,54 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(await request instanceof Error, "the client request should be cancelled while its worker is running");
     streamAbort.abort();
     await reader.cancel().catch(() => undefined);
-    const statusResponse = await fetch(`${apiServer.base}/api/jobs/cancelled-worker-job`, { headers: { Cookie: owner.cookie } });
+    const statusResponse = await fetch(`${apiServer.base}/api/jobs/cancelled-worker-job`, { headers: { Authorization: owner.Authorization } });
     assert.equal(statusResponse.status, 200);
     const job = await statusResponse.json() as { status: string; error: string };
     assert.equal(job.status, "error");
     assert.equal(job.error, "job_cancelled");
   });
 
-  it("wires model usage lazily into the host and retains it after Core reconstruction", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-native-core-api-"));
-    const persistence = await nativePersistence(t);
-    tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-app-"));
-    tempDirs.push(staticDir);
-    const usageDirectory = resolve(root, "history");
-    const cacheDirectory = resolve(root, "module-cache");
-    let coreStore = new CoreStore({ persistence });
-    let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
-    t.after(async () => { if (apiServer) await apiServer.close(); });
-    const openApi = (store: CoreStore) => startCustomApi(store, staticDir, {
-      usageDirectory, persistence,
-      runtimeOptions: modelUsageRuntimeOptions(cacheDirectory),
-    });
-    apiServer = await openApi(coreStore);
-    let owner = await login(apiServer.base);
-    const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
-    const register = async () => {
-      const response = await fetch(`${apiServer!.base}/api/projects`, { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }) });
-      assert.equal(response.status, 201);
-      return response.json() as Promise<{ id: string }>;
-    };
-    const invokeHistory = async (projectId: string, input: unknown) => fetch(
-      `${apiServer!.base}/api/projects/${projectId}/actions/assistant.model-usage-history`,
-      { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ input }) },
-    );
-
-    assert.equal((await fetch(`${apiServer.base}/api/health`)).status, 200);
-    await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "server startup must not touch unused usage history");
-    const project = await register();
-    const identity = (await coreStore.observe(project.id)).snapshot.projectId;
-    const event = usageEvent(identity, "host-usage-1", "2026-10-17T01:00:00.000Z", {
-      cacheHit: true, promptVersion: "assistant-story-v2", durationMs: 1_842, queueWaitMs: 73,
-    });
-    const descriptors = await fetch(`${apiServer.base}/api/projects/${project.id}/actions`, { headers: { Cookie: owner.cookie } });
-    assert.equal(descriptors.status, 200);
-    assert.ok((await descriptors.json() as { actions: Array<{ id: string }> }).actions.some(({ id }) => id === "assistant.model-usage-history"));
-    await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "module activation alone must not create the history directory");
-    const saved = await invokeHistory(project.id, { event });
-    assert.equal(saved.status, 200);
-    const savedResult = await saved.json() as ActionResult<{ events: ModelUsageEvent[] }>;
-    assert.equal(savedResult.ok, true, JSON.stringify(savedResult));
-    if (!savedResult.ok) return;
-    assert.deepEqual(savedResult.data.events, [event]);
-    assert.ok((await lstat(usageDirectory)).isDirectory());
-
-    await apiServer.close();
-    apiServer = undefined;
-    coreStore = new CoreStore({ persistence });
-    apiServer = await openApi(coreStore);
-    owner = await login(apiServer.base);
-    const reconstructed = (await coreStore.listProjects()).find((item) => item.id === project.id)!;
-    const newIdentity = (await coreStore.observe(reconstructed.id)).snapshot.projectId;
-    assert.equal(newIdentity, identity, "reopening Core retains the native project identity");
-    const restored = await invokeHistory(reconstructed.id, { query: { limit: 10 } });
-    assert.equal(restored.status, 200);
-    const restoredResult = await restored.json() as ActionResult<{ events: ModelUsageEvent[] }>;
-    assert.equal(restoredResult.ok, true, JSON.stringify(restoredResult));
-    if (!restoredResult.ok) return;
-    assert.deepEqual(restoredResult.data.events, [event]);
-    assert.ok((await lstat(usageDirectory)).isDirectory(), "host history remains available in its separately configured directory");
-  });
-
-  it("uses an HttpOnly same-site session and enforces same-origin writes", async (t) => {
+  it("keeps direct manuscript writes retired for the OAuth author", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
     tempDirs.push(staticDir);
     let directSaveCalls = 0;
     const apiServer = await startCustomApi(makeStore(() => { directSaveCalls += 1; }), staticDir);
     t.after(apiServer.close);
-
-    const crossOrigin = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://attacker.example" },
-      body: JSON.stringify({ token: ACCESS_TOKEN }),
+    const author = signedRequests.ownerHeaders();
+    const projectCollection = await fetch(apiServer.base + "/api/projects", { headers: author });
+    assert.equal(projectCollection.status, 200);
+    assert.deepEqual(await projectCollection.json(), {
+      projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null,
     });
-    assert.equal(crossOrigin.status, 403);
-
-    const invalid = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ token: "wrong" }),
+    const scene = apiServer.base + "/api/projects/project-1/scenes/scene-1";
+    const save = (revision: string, origin: string) => fetch(scene, {
+      method: "PUT", headers: { ...author, Origin: origin }, body: JSON.stringify({ text: "new draft", revision }),
     });
-    assert.equal(invalid.status, 401);
-
-    const session = await login(apiServer.base);
-    assert.deepEqual(session.body, { authenticated: true });
-    assert.match(session.setCookie, /HttpOnly/u);
-    assert.match(session.setCookie, /SameSite=Strict/u);
-    assert.doesNotMatch(session.setCookie, /Secure/u);
-    const cookie = session.cookie;
-    const loginResponse = await fetch(`${apiServer.base}/api/session`, { headers: { Cookie: cookie } });
-    assert.equal(loginResponse.status, 200);
-    const projects = await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } });
-    assert.deepEqual(await projects.json(), [
-      { id: "project-1", title: "A Work", version: 1 },
-    ]);
-
-    const mutation = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
-      method: "PUT",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ text: "new draft", revision: "revision-1" }),
-    });
-    assert.equal(mutation.status, 410);
-    assert.equal((await mutation.json() as { code: string }).code, "SCENE_PROPOSAL_REQUIRED");
-    assert.equal(directSaveCalls, 0);
-
-    const stale = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
-      method: "PUT",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: JSON.stringify({ text: "must not overwrite", revision: "revision-old" }),
-    });
-    assert.equal(stale.status, 410);
-    assert.equal(directSaveCalls, 0);
-
-    const logout = await fetch(`${apiServer.base}/api/logout`, {
-      method: "POST",
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: apiServer.base },
-      body: "{}",
-    });
-    assert.equal(logout.status, 200);
-    assert.equal((await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } })).status, 401);
-  });
-
-  it("keeps PostgreSQL availability separate from an expired hosted Browser Grant", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-auth-boundary-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted readiness");
-    let failHealthCheck = true;
-    const persistence = new Proxy(native.persistence, {
-      get(target, property, receiver) {
-        if (property === "checkHealth") {
-          return async () => {
-            if (failHealthCheck) {
-              failHealthCheck = false;
-              throw new Error("simulated PostgreSQL availability failure");
-            }
-            await target.checkHealth?.();
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const status = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "postgres-unavailable", sha256Digest(""))}` },
-    });
-    assert.equal(status.status, 200);
-    assert.equal((await status.json() as { persistence: { state: string } }).persistence.state, "unknown",
-      "a database health failure is reported as unavailable persistence, not as a rejected browser grant");
-
-    const session = await fetch(`${apiServer.base}/api/session`, {
-      headers: { Authorization: `Bearer ${hostedGrantToken()}` },
-    });
-    assert.equal(session.status, 200);
-    assert.deepEqual(await session.json(), {
-      authenticated: true,
-      authorScope: "hosted:hosted-user-1",
-      permissions: ["read", "write"],
-    });
-
-    const expiredGrant = await fetch(`${apiServer.base}/api/session`, {
-      headers: { Authorization: `Bearer ${hostedGrantToken(true)}` },
-    });
-    assert.equal(expiredGrant.status, 401);
-    assert.equal((await expiredGrant.json() as { code: string }).code, "UNAUTHORIZED");
-  });
-
-  it("closes Hosted project, job and MCP event streams at the admitting grant deadline", { timeout: 20000 }, async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-stream-expiry-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted stream expiry");
-    const api = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), undefined,
-      actionBoundaryRuntime(resolve(staticDir, "module-cache")), undefined, native.persistence, native.project.id);
-    t.after(api.close);
-    const abort = new AbortController();
-    t.after(() => abort.abort());
-    const endpoints = ["/api/projects/events", "/api/jobs/events", "/mcp"];
-    const headersFor = (path: string, token: string): Record<string, string> => path === "/mcp"
-      ? { Authorization: `Bearer ${token}` }
-      : { Cookie: `__Host-praetorium_access=${token}` };
-    const token = hostedGrantToken(false, 4);
-    const expiresAt = (JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8")) as { exp: number }).exp * 1000;
-    const deadline = setTimeout(() => abort.abort(), 10000);
-    try {
-      const responses = await Promise.all(endpoints.map(path => fetch(api.base + path, {
-        headers: headersFor(path, token), signal: abort.signal,
-      })));
-      for (const response of responses) {
-        assert.equal(response.status, 200);
-        assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/u);
-      }
-      const closedAt: number[] = [];
-      const results = await Promise.allSettled(responses.map(async (response, index) => {
-        try { return await response.text(); }
-        finally { closedAt[index] = Date.now(); }
-      }));
-      assert.ok(closedAt.every(at => at >= expiresAt), "streams must not close before the admitting grant deadline");
-      assert.equal(closedAt.length, endpoints.length);
-      assert.equal(abort.signal.aborted, false, "the server must close the streams, not the test timeout");
-      assert.equal(results[0]?.status, "fulfilled");
-      assert.deepEqual(results[1], { status: "fulfilled", value: ": ok\n\n" });
-      // Node pipeline abort terminates the module stream's socket at expiry.
-      assert.equal(results[2]?.status, "rejected");
-      for (const path of endpoints) {
-        const expired = await fetch(api.base + path, { headers: headersFor(path, token) });
-        assert.equal(expired.status, 401);
-        await expired.arrayBuffer();
-        const fresh = await fetch(api.base + path, { headers: headersFor(path, hostedGrantToken()) });
-        assert.equal(fresh.status, 200);
-        await fresh.body!.cancel();
-      }
-    } finally { clearTimeout(deadline); abort.abort(); }
-  });
-
-  it("admits only the verified Cloudflare browser owner, never upgrades a bearer and preserves same-origin writes", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-access-"));
-    tempDirs.push(staticDir);
-    const issuer = "https://test.cloudflareaccess.com";
-    const audience = "a".repeat(64);
-    const origin = "https://codexia.example";
-    const email = "owner@example.com";
-    const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const jwk = { ...key.publicKey.export({ format: "jwk" }), kid: "access-key", alg: "RS256", use: "sig" };
-    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-    const now = Math.floor(Date.now() / 1000);
-    const token = (overrides: Record<string, unknown> = {}, header: Record<string, unknown> = {}) => {
-      const unsigned = encode({ alg: "RS256", typ: "JWT", kid: jwk.kid, ...header }) + "." + encode({
-        iss: issuer, aud: [audience], type: "app", sub: "owner-id", email,
-        iat: now - 1, nbf: now - 1, exp: now + 300, ...overrides,
-      });
-      return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
-    };
-    let jwksRequests = 0;
-    const persistence = await nativePersistence(t);
-    const apiServer = await startCustomApi(new CoreStore({ persistence }), staticDir, {
-      trustProxy: true, usageDirectory: staticDir, persistence,
-      cloudflareAccess: { issuer, audience, origin, ownerEmail: email, fetch: async (input) => {
-        assert.equal(String(input), issuer + "/cdn-cgi/access/certs");
-        jwksRequests++;
-        return Response.json({ keys: [jwk] });
-      } },
-    });
-    t.after(apiServer.close);
-    // Fetch normalizes Host to the loopback URL. Send the actual HTTP headers a
-    // TLS-terminating proxy would forward, while keeping the socket local.
-    const send = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
-      new Promise<Response>((resolveResponse, reject) => {
-        const request = httpRequest(apiServer.base + path, {
-          method: init.method ?? "GET",
-          headers: { Host: "codexia.example", "X-Forwarded-Proto": "https", ...headers },
-        }, incoming => {
-          const chunks: Buffer[] = [];
-          incoming.on("data", chunk => chunks.push(Buffer.from(chunk)));
-          incoming.on("error", reject);
-          incoming.on("end", () => {
-            const responseHeaders = new Headers();
-            for (const [name, value] of Object.entries(incoming.headers)) {
-              if (typeof value === "string") responseHeaders.set(name, value);
-              else if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
-            }
-            resolveResponse(new Response(Buffer.concat(chunks), { status: incoming.statusCode!, headers: responseHeaders }));
-          });
-        });
-        request.on("error", reject);
-        request.end(typeof init.body === "string" ? init.body : undefined);
-      });
-    const valid = token();
-    const browser = { "Cf-Access-Jwt-Assertion": valid };
-    const releaseVersion = await send("/api/version");
-    const browserVersion = await send("/api/browser/version");
-    assert.equal(releaseVersion.status, 200);
-    assert.equal(browserVersion.status, 200);
-    const identity = await releaseVersion.json() as { browserAuth: string };
-    assert.equal(identity.browserAuth, "cloudflare-access");
-    assert.deepEqual(await browserVersion.json(), identity);
-    const session = await send("/api/session", browser);
-    assert.equal(session.status, 200);
-    assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
-    assert.equal(session.headers.get("set-cookie"), null);
-    assert.equal((await send("/api/session", { "Cf-Access-Authenticated-User-Email": email })).status, 401);
-    assert.equal((await send("/api/session", { Cookie: "scriptorium_session=legacy" })).status, 401);
-    const signature = valid.split(".")[2]!;
-    const tampered = valid.slice(0, valid.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
-    for (const invalid of [
-      tampered, token({ iss: "https://other.cloudflareaccess.com" }), token({ aud: ["b".repeat(64)] }),
-      token({ email: "other@example.com" }), token({ exp: now - 1 }), token({ nbf: now + 100 }),
-      token({ sub: "", common_name: "service-token" }), token({ type: "org" }),
-      token({}, { alg: "none" }), token({}, { kid: "unknown" }),
-    ]) {
-      assert.equal((await send("/api/session", { "Cf-Access-Jwt-Assertion": invalid })).status, 401);
+    assert.equal((await save("revision-1", "https://unlisted.example")).status, 403);
+    for (const revision of ["revision-1", "revision-old"]) {
+      const mutation = await save(revision, apiServer.base);
+      assert.equal(mutation.status, 404);
     }
-    assert.equal(jwksRequests, 1, "cache and unknown-kid refresh throttling");
-    assert.equal((await send("/api/session", { ...browser, Host: "wrong.example" })).status, 401);
-    assert.equal((await send("/api/session", { ...browser, Authorization: "Bearer invalid" })).status, 401);
-    const bearer = { ...browser, Authorization: "Bearer " + ACCESS_TOKEN };
-    const bearerSession = await send("/api/session", bearer);
-    assert.equal(bearerSession.status, 200);
-    assert.deepEqual(await bearerSession.json(), { authenticated: true, authorScope: "" });
-    assert.equal((await send("/api/jobs", bearer)).status, 403);
-    assert.equal((await send("/api/jobs", browser)).status, 200);
-    const mutation = { method: "POST", body: JSON.stringify({ title: "must not be created" }) };
-    assert.equal((await send("/api/v1/persistence/projects", { ...browser, Origin: "https://evil.example", "Content-Type": "application/json" }, mutation)).status, 403);
-    assert.equal((await send("/api/v1/persistence/projects", { ...bearer, Origin: origin, "Content-Type": "application/json" }, mutation)).status, 403);
-    const created = await send("/api/v1/persistence/projects", { ...browser, Origin: origin, "Content-Type": "application/json" }, {
-      method: "POST", body: JSON.stringify({ title: "Access owner " + randomUUID() }),
-    });
-    assert.equal(created.status, 201);
-    const createdProject = await created.json() as { project: { id: string } };
-    assert.ok(await persistence.read(reader => reader.getProject(createdProject.project.id as import("@codexia/persistence-contracts").ProjectId)));
+    assert.equal(directSaveCalls, 0);
+  });
 
-    assert.equal((await send("/api/login", { Origin: origin, "Content-Type": "application/json" }, { method: "POST", body: JSON.stringify({ token: ACCESS_TOKEN }) })).status, 410);
-    assert.equal((await send("/api/logout", { ...browser, Origin: origin }, { method: "POST" })).status, 410);
+  it("does not admit standalone Access assertions or legacy bearer credentials", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-retired-browser-identity-"));
+    tempDirs.push(staticDir);
+    const api = await startApi(staticDir, true);
+    t.after(api.close);
+    const retired: Record<string, string>[] = [
+      { Cookie: "__Host-praetorium_access=retired-fixture-grant" },
+      { "CF-Access-Jwt-Assertion": "retired-fixture-assertion", "X-Forwarded-Proto": "https" },
+      { Cookie: "scriptorium_session=retired-fixture-session" },
+      { Authorization: `Bearer ${ACCESS_TOKEN}` },
+    ];
+    for (const headers of retired) {
+      const response = await fetch(api.base + "/api/session", { headers });
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("set-cookie"), null);
+    }
+    assert.equal((await fetch(api.base + "/api/session", { headers: signedRequests.ownerHeaders() })).status, 200);
   });
 
   it("authorizes standalone owner writes only with a verified API-audience OAuth access token", async (t) => {
@@ -2514,7 +1325,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(write.headers.get("access-control-allow-origin"), webOrigin);
     const list = await fetch(api.base + "/api/projects", { headers: browserHeaders(valid) });
     assert.equal(list.status, 200);
-    const projects = await list.json() as { id: string; title: string; version: number }[];
+    const { projects } = await list.json() as { projects: Array<{ id: string; title: string; version: number }> };
     const project = projects.find((item) => item.title === "OAuth owner project");
     assert.ok(project);
 
@@ -2562,10 +1373,6 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(apply.status, 200, await apply.text());
     assert.ok(await persistence.read((reader) => reader.getKnowledgeNode(projectId, nodeId)));
 
-    const nonOwnerRoute = await fetch(api.base + "/api/logout", {
-      method: "POST", headers: browserHeaders(valid),
-    });
-    assert.equal(nonOwnerRoute.status, 403, "OAuth author access does not stand in for a browser session logout");
     const unknownRoute = await fetch(api.base + "/api/non-allowlisted", { headers: browserHeaders(valid) });
     assert.equal(unknownRoute.status, 404);
     const unlistedOrigin = await fetch(api.base + "/api/session", {
@@ -2598,7 +1405,7 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { ...headers(ACCESS_TOKEN), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Legacy bearer cannot author" }),
     });
-    assert.equal(legacyBearerWrite.status, 403);
+    assert.equal(legacyBearerWrite.status, 401);
     const bothCredentials = await fetch(api.base + "/api/projects", {
       headers: { ...browserHeaders(valid), Cookie: "scriptorium_session=present" },
     });
@@ -2633,13 +1440,19 @@ describe("Codexia HTTP boundary", () => {
       const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), { key: key.privateKey, dsaEncoding: "ieee-p1363" });
       return `${unsigned}.${signature.toString("base64url")}`;
     };
+    const firstAssignedId = "00000000-0000-4000-8000-000000000001";
+    const missingAssignedId = "00000000-0000-4000-8000-000000000003";
+    const unassignedId = "00000000-0000-4000-8000-000000000002";
     let onlineChecks = 0;
     const oauthMcp = {
       issuer, audience, jwksUrl: `${issuer}/jwks`,
       ownerSubject: "owner-subject",
       ownerClientIds: ["codexia-web", "codexia-ios"],
-      allowedClientIds: ["codexia-mcp-client"],
-      projectIdsByClient: { "codexia-mcp-client": ["project-1"] },
+      allowedClientIds: ["codexia-mcp-client", "single-project-client"],
+      projectIdsByClient: {
+        "codexia-mcp-client": ["project-1", missingAssignedId, firstAssignedId],
+        "single-project-client": [firstAssignedId],
+      },
       verifyActiveToken: async () => { onlineChecks += 1; return true; },
       fetch: async (input: string | URL | Request) => {
         assert.equal(String(input), `${issuer}/jwks`);
@@ -2648,11 +1461,20 @@ describe("Codexia HTTP boundary", () => {
     } satisfies Parameters<typeof createOAuthMcpAuthenticator>[0];
     const storeFixture = makeSnapshotStore();
     const assignedProject = { id: "project-1", title: "Assigned MCP project", version: 1 };
-    const unassignedProject = { id: "project-2", title: "Other disposable project", version: 1 };
-    Object.assign(storeFixture.store, { listProjects: async () => [assignedProject, unassignedProject] });
+    const firstAssignedProject = { id: firstAssignedId, title: "Previous MCP project", version: 1, updatedAt: "2026-10-17T00:00:00.000Z" };
+    const unassignedProject = { id: unassignedId, title: "Other disposable project", version: 1 };
+    Object.assign(storeFixture.store, {
+      listProjects: async () => [firstAssignedProject, unassignedProject, assignedProject],
+    });
     const api = await startCustomApi(storeFixture.store, staticDir, {
       usageDirectory: staticDir,
       runtime: actionBoundaryRuntime(staticDir),
+      corsAllowedOrigins: ["https://mcp-client.example.test"],
+      oauthOwner: {
+        issuer, audience, jwksUrl: oauthMcp.jwksUrl, ownerSubject: oauthMcp.ownerSubject,
+        allowedClientIds: oauthMcp.ownerClientIds, requiredScopes: ["codexia:api"],
+        verifyActiveToken: oauthMcp.verifyActiveToken, fetch: oauthMcp.fetch,
+      },
       oauthMcp,
     });
     t.after(api.close);
@@ -2673,15 +1495,67 @@ describe("Codexia HTTP boundary", () => {
     const readToken = makeToken("openid mcp:read");
     const computeToken = makeToken("openid mcp:compute");
     const proposeToken = makeToken("openid mcp:propose");
+    const singleProjectToken = makeToken("mcp:read", { client_id: "single-project-client", azp: "single-project-client" });
+    const ownerToken = makeToken("codexia:api", { client_id: "codexia-web", azp: "codexia-web" });
+
+    const initialize = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }) };
+    const standaloneChallenge = await fetch(api.base + "/mcp", initialize);
+    assert.equal(standaloneChallenge.status, 401);
+    assert.equal(standaloneChallenge.headers.get("www-authenticate"),
+      'Bearer resource_metadata="https://api.codexia.example/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"');
+    const preflight = await fetch(api.base + "/mcp", { method: "OPTIONS", headers: {
+      Origin: "https://mcp-client.example.test",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "authorization, mcp-session-id, mcp-protocol-version",
+    } });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-headers"), "Authorization, Mcp-Session-Id, MCP-Protocol-Version");
+    const corsChallenge = await fetch(api.base + "/mcp", { ...initialize, headers: { ...initialize.headers, Origin: "https://mcp-client.example.test" } });
+    assert.equal(corsChallenge.status, 401);
+    assert.equal(corsChallenge.headers.get("access-control-expose-headers"), "Mcp-Session-Id, WWW-Authenticate");
+    assert.equal((await send("/mcp", ACCESS_TOKEN, initialize)).status, 401);
+    const cookie = "scriptorium_session=retired-fixture-value";
+    assert.equal((await fetch(api.base + "/mcp", { ...initialize, headers: { ...initialize.headers, Cookie: cookie, Origin: api.base } })).status, 401);
+    assert.equal((await send("/api/session", ownerToken)).status, 200);
+    assert.equal((await send("/mcp", ownerToken, initialize)).status, 403);
+    const selectProject = await send("/mcp", readToken);
+    assert.equal(selectProject.status, 400);
+    assert.equal((await selectProject.json() as { code: string }).code, "MCP_PROJECT_REQUIRED");
+    assert.equal((await send("/mcp?projectId=project-1&projectId=project-1", readToken)).status, 400);
+    assert.equal((await send(`/mcp?projectId=${unassignedId}`, readToken)).status, 404);
+    assert.equal((await send(`/mcp?projectId=${missingAssignedId}`, readToken)).status, 404);
+    const sessionIdentity = async (path: string, token: string): Promise<string> => {
+      const response = await send(path, token);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-test-mcp-project"), firstAssignedId);
+      const identity = response.headers.get("x-test-mcp-identity");
+      assert.ok(identity);
+      await response.body?.cancel();
+      return identity;
+    };
+    const explicitProject = `/mcp?projectId=${firstAssignedId}`;
+    const multiClientIdentity = await sessionIdentity(explicitProject, readToken);
+    assert.equal(await sessionIdentity(explicitProject, makeToken("mcp:read")), multiClientIdentity);
+    assert.notEqual(await sessionIdentity("/mcp", singleProjectToken), multiClientIdentity);
 
     const projects = await send("/api/projects", readToken);
     assert.equal(projects.status, 200);
-    assert.deepEqual((await projects.json() as Array<{ id: string }>).map(({ id }) => id), ["project-1"],
-      "MCP project enumeration returns only this client's configured resource assignment");
-    const pagedProjects = await send("/api/projects?page=1", readToken);
+    const firstPage = await projects.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(firstPage.projects.map(({ id }) => id), [firstAssignedId, "project-1"],
+      "MCP project enumeration returns only existing assigned resources in canonical order");
+    assert.equal(firstPage.nextCursor, null);
+
+    const pagedProjects = await send("/api/projects?limit=1", readToken);
     assert.equal(pagedProjects.status, 200);
-    assert.deepEqual((await pagedProjects.json() as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
-      "paged MCP project enumeration cannot reveal other owner projects");
+    const page = await pagedProjects.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(page.projects.map(({ id }) => id), [firstAssignedId]);
+    assert.ok(typeof page.nextCursor === "string" && page.nextCursor, "scoped projects use the same opaque cursor as owner projects");
+    const tail = await send(`/api/projects?limit=1&cursor=${encodeURIComponent(page.nextCursor)}`, readToken);
+    assert.equal(tail.status, 200);
+    const lastPage = await tail.json() as { projects: Array<{ id: string }>; nextCursor: unknown };
+    assert.deepEqual(lastPage.projects.map(({ id }) => id), ["project-1"]);
+    assert.equal(lastPage.nextCursor, null, "a later unassigned project must not produce another page");
+
     const nestedProjectList = await send("/api/projects/project-1/actions/core.projects.list", readToken, {
       method: "POST", body: JSON.stringify({ input: {} }),
     });
@@ -2689,15 +1563,15 @@ describe("Codexia HTTP boundary", () => {
     const nestedProjectListResult = await nestedProjectList.json() as ActionResult;
     assert.equal(nestedProjectListResult.ok, true);
     if (nestedProjectListResult.ok) {
-      assert.deepEqual((nestedProjectListResult.data as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
+      assert.deepEqual((nestedProjectListResult.data as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), [firstAssignedId, "project-1"],
         "nested core project enumeration observes the same client assignment");
     }
-    const unassignedProjectRead = await send("/api/projects/project-2/snapshot", readToken);
+    const unassignedProjectRead = await send(`/api/projects/${unassignedId}/snapshot?projection=editor`, readToken);
     assert.equal(unassignedProjectRead.status, 404);
     assert.equal((await unassignedProjectRead.json() as { code: string }).code, "PROJECT_NOT_FOUND");
     for (const path of [
       "/api/v1/persistence/projects",
-      "/api/v1/persistence/projects?page=1",
+      "/api/v1/persistence/projects?limit=1",
       "/api/v1/persistence/projects/project-1/archive",
       "/api/v1/persistence/projects/project-2/archive",
     ]) {
@@ -2707,7 +1581,7 @@ describe("Codexia HTTP boundary", () => {
     }
     for (const path of [
       "/api/v1/persistence/projects",
-      "/api/v1/persistence/projects?page=1",
+      "/api/v1/persistence/projects?limit=1",
       "/api/v1/persistence/projects/project-1/archive",
       "/api/v1/persistence/projects/project-2/archive",
     ]) {
@@ -2732,8 +1606,14 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(actions.some((action) => action.effect === "read"));
     assert.equal(actions.some((action) => action.id === "mcp.propose" || action.id === "nlp.analyze"), false,
       "read scope must not disclose compute or proposal action capabilities");
+    assert.equal(actions.some(action => action.id === "core.hierarchy.reorder"), false);
+    const reorderWithoutProposalScope = await send("/api/projects/project-1/actions/core.hierarchy.reorder", readToken, {
+      method: "POST", body: JSON.stringify({ input: { kind: "volume", orderedIds: ["one"], idempotencyKey: "read-only" } }),
+    });
+    assert.equal(reorderWithoutProposalScope.status, 403);
+    assert.equal((await reorderWithoutProposalScope.json() as { code: string }).code, "OAUTH_MCP_SCOPE_REQUIRED");
 
-    const computeTokenCannotRead = await send("/api/projects/project-1/snapshot", computeToken);
+    const computeTokenCannotRead = await send("/api/projects/project-1/snapshot?projection=editor", computeToken);
     assert.equal(computeTokenCannotRead.status, 403);
     assert.equal((await computeTokenCannotRead.json() as { code: string }).code, "OAUTH_MCP_SCOPE_REQUIRED");
     assert.equal(computeTokenCannotRead.headers.get("www-authenticate"),
@@ -2805,30 +1685,6 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(onlineChecks >= 6, "every admitted or scope-bearing MCP API request checks online token activity");
   });
 
-  it("marks a session cookie Secure when HTTPS is asserted by a trusted proxy", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
-    tempDirs.push(staticDir);
-    const apiServer = await startApi(staticDir, true);
-    t.after(apiServer.close);
-    const origin = apiServer.base.replace(/^http:/u, "https:");
-    const response = await fetch(`${apiServer.base}/api/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: origin,
-        "X-Forwarded-Proto": "https",
-      },
-      body: JSON.stringify({ token: ACCESS_TOKEN }),
-    });
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get("set-cookie") ?? "", /; Secure(?:;|$)/u);
-  });
-
-  it("rejects short access tokens before opening a listener", () => {
-    const store = makeStore();
-    assert.throws(() => createServer({ store, authToken: "too-short", persistence: admissionPersistence(store) }), /at least 32/u);
-  });
-
   it("rejects invalid browser CORS origins before opening a listener", () => {
     const store = makeStore();
     const persistence = admissionPersistence(store);
@@ -2839,7 +1695,7 @@ describe("Codexia HTTP boundary", () => {
       ["https://web.example.test", "https://web.example.test"],
     ]) {
       assert.throws(
-        () => createServer({ store, authToken: ACCESS_TOKEN, persistence, corsAllowedOrigins: origins }),
+        () => createServer({ store, persistence, corsAllowedOrigins: origins, ...testClientSettings("project-1", signedRequests.publicJwks, signedRequests.isActive) }),
         /exact normalized HTTPS origins/u,
         origins.join(", "),
       );
@@ -2860,36 +1716,10 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await readiness.json() as { ok: boolean }).ok, false);
 
     const status = await fetch(`${apiServer.base}/api/v1/persistence/status`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.ownerHeaders().Authorization },
     });
     assert.equal(status.status, 503);
     assert.deepEqual(await status.json(), { error: "PostgreSQL persistence is not ready", code: "PERSISTENCE_UNAVAILABLE" });
-  });
-
-  it("serves immutable runtime metadata publicly in standalone mode", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-metadata-"));
-    tempDirs.push(staticDir);
-    const previousRevision = process.env.CODEXIA_PRODUCER_REVISION;
-    process.env.CODEXIA_PRODUCER_REVISION = "a".repeat(40);
-    const apiServer = await startCustomApi(makeStore(), staticDir);
-    t.after(async () => {
-      await apiServer.close();
-      if (previousRevision === undefined) delete process.env.CODEXIA_PRODUCER_REVISION;
-      else process.env.CODEXIA_PRODUCER_REVISION = previousRevision;
-    });
-    const response = await fetch(`${apiServer.base}/api/platform/v1/metadata`);
-    assert.equal(response.status, 200);
-    const metadata = await response.json() as {
-      contractVersion: string; producerRevision: string; listener: { port: number };
-      paths: { metadata: string; shutdown: string; status: string; quiesce: string; resume: string };
-    };
-    assert.equal(metadata.producerRevision, "a".repeat(40));
-    assert.ok(metadata.listener.port > 0 && metadata.listener.port <= 65_535);
-    assert.deepEqual(metadata.paths, {
-      liveness: "/health/live", readiness: "/health/ready", metadata: "/api/platform/v1/metadata",
-      shutdown: "/api/platform/v1/quiesce", status: "/api/platform/v1/status",
-      quiesce: "/api/platform/v1/quiesce", resume: "/api/platform/v1/resume",
-    });
   });
 
   it("exposes the source Core read surface through pinned routes and composed host actions", async (t) => {
@@ -2898,10 +1728,10 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
+    const auth = { Authorization: signedRequests.ownerHeaders().Authorization };
 
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: auth });
-    assert.deepEqual(await projects.json(), [{ id: "project-1", title: "A Work", version: 1 }]);
+    assert.deepEqual(await projects.json(), { projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/project-1`, { headers: auth });
     const detailBody = await detail.json() as { project: { id: string; title: string; version: number }; observation: { snapshot: SnapshotId; state: string } };
     assert.equal(detail.status, 200);
@@ -2926,9 +1756,6 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await legacyGitView.json() as { code: string }).code, "INVALID_SNAPSHOT");
     const retiredSceneViews = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one/views?projectVersion=1`, { headers: auth });
     assert.equal(retiredSceneViews.status, 404, "the two-view Git reader route has been retired");
-    assert.equal((await fetch(`${apiServer.base}/api/nlp/features`)).status, 401);
-    const providerNone = await fetch(`${apiServer.base}/api/nlp/features`, { headers: auth });
-    assert.equal((await providerNone.json() as { providerKind: string }).providerKind, "none");
     const modules = await fetch(`${apiServer.base}/api/projects/project-1/modules`, { headers: auth });
     assert.equal(modules.status, 200);
     assert.ok((await modules.json() as Array<{ id: string; availability: string }>).some(({ id, availability }) => id === "mcp" && availability === "not-included"));
@@ -2978,7 +1805,7 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { path: "manuscript/ms-one/scene-one.md" }, snapshot: overlay }),
     });
-    assert.deepEqual(await resolveResponse.json(), { ok: true, snapshot: overlay, data: { sceneId: "scene-one" } });
+    assert.deepEqual(await resolveResponse.json(), { ok: true, snapshot: overlay, data: { documentId: "74182b28-459c-4bf1-b9bd-0ec48917ad4e" } });
     const unsafeResolve = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.document.resolve`, {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ input: { path: "../secret" }, snapshot: overlay }),
     });
@@ -3004,7 +1831,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(statsBody.stats.totalPages400, 1);
   });
 
-  it("assigns proposal source at the host and keeps approval exclusive to same-origin owner sessions", async (t) => {
+  it("assigns proposal source at the host and keeps approval exclusive to the verified OAuth owner", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-proposals-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
@@ -3015,7 +1842,7 @@ describe("Codexia HTTP boundary", () => {
       effect: "metadata", reads: [], writes: [], message: "propose a bounded metadata update",
     };
     const proposal = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ id: "mcp-batch-1", source: "author", snapshot: SNAPSHOT, operations: [operation] }),
     });
     assert.equal(proposal.status, 201);
@@ -3024,15 +1851,15 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed[0]?.source, "mcp");
 
     const mcpApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ proposalId: "mcp-batch-1", operationIds: [operation.id], authorScope: "forged" }),
     });
     assert.equal(mcpApproval.status, 403);
     assert.deepEqual(fixture.approvals, []);
 
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const authorApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ proposalId: "mcp-batch-1", operationIds: [operation.id], authorScope: "forged" }),
     });
     assert.equal(authorApproval.status, 204);
@@ -3049,8 +1876,8 @@ describe("Codexia HTTP boundary", () => {
     const store = new CoreStore({ persistence });
     const apiServer = await startCustomApi(store, staticDir, { persistence });
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+    const owner = signedRequests.ownerHeaders();
+    const headers = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
       method: "POST", headers, body: JSON.stringify({ title: "Native API test project" }),
     });
@@ -3107,14 +1934,11 @@ describe("Codexia HTTP boundary", () => {
     let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
     t.after(async () => { if (apiServer) await apiServer.close(); });
 
-    apiServer = await startCustomApi(store, staticDir, { persistence });
-    let owner = await login(apiServer.base);
-    const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
-    const registration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }),
-    });
-    assert.equal(registration.status, 201);
-    const project = await registration.json() as { id: string; title: string; version: number };
+    const project = await store.createProject({ title: "Native API test project" });
+    const settings = testClientSettings(project.id, signedRequests.publicJwks, signedRequests.isActive);
+    apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
+    let owner = signedRequests.ownerHeaders();
+    const ownerHeaders = () => ({ ...owner, Origin: apiServer!.base });
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation = (id: string, path: string, content: string): ChangeOperation => ({
       id, generation: 1, projectId: snapshot.projectId, baseProjectVersion: snapshot.projectVersion,
@@ -3134,20 +1958,28 @@ describe("Codexia HTTP boundary", () => {
       }],
     };
 
+    const legacyId = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
+      method: "POST", headers: ownerHeaders(),
+      body: JSON.stringify({ proposalId: proposal.id, snapshot, operations: [selected] }),
+    });
+    assert.equal(legacyId.status, 400);
+    assert.equal((await legacyId.json() as { code: string }).code, "INVALID_PROPOSAL");
+    assert.equal(await store.getProposal(project.id, proposal.id), null);
+
     const initial = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ ...proposal, source: "author" }),
     });
     assert.equal(initial.status, 201);
     assert.deepEqual(await initial.json(), proposal, "new bearer submissions are attributed to MCP regardless of request source");
 
-    const cookieOperation = operation("cookie_author_source_op", "meta/recovery/cookie-author.md", "Created by the owner session.\n");
-    const cookieCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
+    const authorOperation = operation("oauth_author_source_op", "meta/recovery/oauth-author.md", "Created by the owner session.\n");
+    const authorCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
-      body: JSON.stringify({ id: "cookie_author_source", snapshot, operations: [cookieOperation], source: "mcp" }),
+      body: JSON.stringify({ id: "oauth_author_source", snapshot, operations: [authorOperation], source: "mcp" }),
     });
-    assert.equal(cookieCreated.status, 201);
-    assert.equal((await cookieCreated.json() as ChangeProposal).source, "author", "new cookie submissions cannot claim MCP provenance");
+    assert.equal(authorCreated.status, 201);
+    assert.equal((await authorCreated.json() as ChangeProposal).source, "author", "new OAuth author submissions cannot claim MCP provenance");
 
     const approval = await fetch(`${apiServer.base}/api/projects/${project.id}/approvals`, {
       method: "POST", headers: ownerHeaders(),
@@ -3164,13 +1996,13 @@ describe("Codexia HTTP boundary", () => {
     await apiServer.close();
     apiServer = undefined;
     store = new CoreStore({ persistence });
-    apiServer = await startCustomApi(store, staticDir, { persistence });
-    owner = await login(apiServer.base);
+    apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
+    owner = signedRequests.ownerHeaders();
     const recoveredProject = (await store.listProjects()).find((item) => item.id === project.id)!;
     assert.equal(recoveredProject.id, project.id, "PostgreSQL project identity survives host replacement");
 
     const statusPath = `${apiServer.base}/api/projects/${recoveredProject.id}/proposals/${proposal.id}`;
-    const partialResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
+    const partialResponse = await fetch(statusPath, { headers: { Authorization: owner.Authorization } });
     assert.equal(partialResponse.status, 200);
     const partial = await partialResponse.json() as ProposalStatus;
     assert.equal(partial.proposal.source, "mcp");
@@ -3184,7 +2016,7 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(retry.status, 201);
     assert.deepEqual(await retry.json(), proposal, "the owner retry restores the exact original MCP payload and source");
-    const restoredResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
+    const restoredResponse = await fetch(statusPath, { headers: { Authorization: owner.Authorization } });
     const restored = await restoredResponse.json() as ProposalStatus;
     assert.deepEqual(restored.proposal, proposal);
     assert.deepEqual(restored.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
@@ -3210,90 +2042,108 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await unapprovedApply.json() as { code: string }).code, "operation_not_approved");
 
     const currentSnapshot = (await store.observe(recoveredProject.id)).snapshot;
-    const newCookieOperation = {
-      ...cookieOperation,
+    const newAuthorOperation = {
+      ...authorOperation,
       projectId: currentSnapshot.projectId,
       baseProjectVersion: currentSnapshot.projectVersion,
     };
-    const newCookieProposal = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
+    const newAuthorProposal = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
-      body: JSON.stringify({ id: "new_cookie_after_recovery", snapshot: currentSnapshot, operations: [newCookieOperation], source: "mcp" }),
+      body: JSON.stringify({ id: "new_oauth_after_recovery", snapshot: currentSnapshot, operations: [newAuthorOperation], source: "mcp" }),
     });
-    assert.equal(newCookieProposal.status, 201);
-    assert.equal((await newCookieProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new cookie proposals after recovery");
+    assert.equal(newAuthorProposal.status, 201);
+    assert.equal((await newAuthorProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new OAuth author proposals after recovery");
   });
 
   it("opens an existing PostgreSQL project outside the bounded project listing", async (t) => {
     const native = await nativeProject(t, "Outside project page");
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-page-"));
     tempDirs.push(staticDir);
-    native.store.listProjects = async () => [];
+    native.store.listProjectsPage = async () => ({ projects: [], nextCursor: null });
     const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
     t.after(apiServer.close);
-    const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
-    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), []);
+    const auth = { Authorization: signedRequests.ownerHeaders().Authorization };
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), { projects: [], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/${native.project.id}`, { headers: auth });
     assert.equal(detail.status, 200);
     assert.equal((await detail.json() as { project: { id: string } }).project.id, native.project.id);
     assert.equal((await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth })).status, 404);
   });
 
-  it("serves the editor snapshot revision independently of bulk file limits", async (t) => {
+  it("serves only the selected editor document revision from the current or pinned snapshot", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-editor-snapshot-"));
     tempDirs.push(staticDir);
-    for (const fixture of [
-      { name: "file count", count: 1000, content: "small" },
-      { name: "UTF-8 bytes", count: 1, content: "字".repeat(3 * 1024 * 1024) },
-    ]) {
-      await t.test(fixture.name, async (t) => {
-        const native = await nativeProject(t, `Editor snapshot ${fixture.name}`);
-        const created = await native.persistence.transaction(async (tx) => {
-          const document = await tx.createDocument({
-            projectId: native.project.id, kind: "scene", title: "Opening", orderKey: "0001",
-            markdown: "First revision", authorId: "owner", idempotencyKey: randomUUID(),
-          });
-          for (let index = 0; index < fixture.count; index++) {
-            await tx.saveModuleRecord({
-              projectId: native.project.id, moduleId: "core.artifacts", key: `bible/artifact-${index}.txt`,
-              value: { content: fixture.content }, expectedVersion: null,
-            });
-          }
-          return document;
-        });
-        const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
-        t.after(apiServer.close);
-        const endpoint = `${apiServer.base}/api/projects/${native.project.id}/snapshot`;
-        const selector = `projection=editor&documentId=${created.document.id}`;
-        const auth = { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } };
-        assert.equal((await fetch(`${endpoint}?${selector}`)).status, 401);
-        const bulk = await fetch(endpoint, auth);
-        assert.equal(bulk.status, 413);
-        assert.match((await bulk.json()).error, fixture.name === "file count" ? /1000 files/u : /response size/u);
-
-        const exact = await fetch(`${endpoint}?${selector}`, auth);
-        assert.equal(exact.status, 200);
-        const expectedSnapshot = (await native.store.observe(native.project.id)).snapshot;
-        const expectedDocument = { path: `documents/${created.document.id}.md`, revision: created.revision.sha256 };
-        assert.deepEqual(await exact.json(), { snapshot: expectedSnapshot, document: expectedDocument });
-
-        if (fixture.name === "file count") {
-          const identity = await fetch(`${endpoint}?projection=editor`, auth);
-          assert.deepEqual(await identity.json(), { snapshot: expectedSnapshot, document: null });
-          await native.persistence.transaction((tx) => tx.saveDocument({
-            projectId: native.project.id, documentId: created.document.id, baseRevisionId: created.revision.id,
-            changes: [{ fromUtf16: 0, toUtf16: 5, insert: "Second" }],
-            resultingSha256: createHash("sha256").update("Second revision").digest("hex"),
-            authorId: "owner", clientId: "test", idempotencyKey: randomUUID(),
-          }));
-          const historical = await fetch(`${endpoint}?${selector}&projectVersion=${expectedSnapshot.projectVersion}`, auth);
-          assert.deepEqual(await historical.json(), { snapshot: expectedSnapshot, document: expectedDocument });
-          const missing = await fetch(`${endpoint}?projection=editor&documentId=${randomUUID()}`, auth);
-          assert.equal(missing.status, 200);
-          assert.equal((await missing.json()).document, null);
-          assert.equal((await fetch(`${endpoint}?projection=editor&documentId=../meta/project.yaml`, auth)).status, 400);
-        }
-      });
+    const { persistence, store, project } = await nativeProject(t, "Editor snapshot");
+    const created = await persistence.transaction((tx) => tx.createDocument({
+      projectId: project.id, kind: "scene", title: "Opening", orderKey: "0001",
+      markdown: "First revision", authorId: "owner", idempotencyKey: randomUUID(),
+    }));
+    const missingDocumentId = randomUUID();
+    const missingPath = `documents/${missingDocumentId}.md`;
+    const nestedAssetPath = missingPath + "/preview.txt";
+    await persistence.transaction(tx => tx.saveModuleRecord({
+      projectId: project.id, moduleId: "core.artifacts", key: nestedAssetPath,
+      value: { content: "An asset under the same prefix is not the requested document." }, expectedVersion: null,
+    }));
+    const openSnapshot = store.reader.bind(store);
+    store.reader = async (...args) => {
+      const reader = await openSnapshot(...args);
+      const listRevisions = reader.listRevisions?.bind(reader);
+      assert.ok(listRevisions, "the PostgreSQL reader exposes revision-only lookup");
+      return {
+        ...reader,
+        read: async () => assert.fail("Editor snapshots must avoid fetching document contents"),
+        list: async () => assert.fail("Editor snapshots must avoid project-wide file enumeration"),
+        listRevisions: async (prefix) => {
+          assert.ok([`documents/${created.document.id}.md`, missingPath].includes(prefix));
+          const revisions = await listRevisions(prefix);
+          if (prefix === missingPath) assert.deepEqual(revisions.map(({ path }) => path), [nestedAssetPath]);
+          return revisions;
+        },
+      };
+    };
+    const apiServer = await startCustomApi(store, staticDir, { persistence });
+    t.after(apiServer.close);
+    const endpoint = `${apiServer.base}/api/projects/${project.id}/snapshot`;
+    const selector = `projection=editor&documentId=${created.document.id}`;
+    const auth = { headers: { Authorization: signedRequests.ownerHeaders().Authorization } };
+    assert.equal((await fetch(`${endpoint}?${selector}`)).status, 401);
+    for (const query of ["", "?projection=bulk", "?projection=editor&projection=bulk"]) {
+      const invalid = await fetch(endpoint + query, auth);
+      assert.equal(invalid.status, 400);
+      assert.equal((await invalid.json()).code, "INVALID_PROJECTION");
     }
+    const malformed = await fetch(`${endpoint}?projection=editor&documentId=../meta/project.yaml`, auth);
+    assert.equal(malformed.status, 400);
+    assert.equal((await malformed.json()).code, "INVALID_ID");
+
+    const snapshot = (await store.observe(project.id)).snapshot;
+    const path = `documents/${created.document.id}.md`;
+    const first = await fetch(`${endpoint}?${selector}`, auth);
+    assert.equal(first.status, 200);
+    assert.deepEqual(await first.json(), { snapshot, document: { path, revision: created.revision.sha256 } });
+    const noDocument = await fetch(`${endpoint}?projection=editor`, auth);
+    assert.equal(noDocument.status, 200);
+    assert.deepEqual(await noDocument.json(), { snapshot, document: null });
+    const missing = await fetch(`${endpoint}?projection=editor&documentId=${missingDocumentId}`, auth);
+    assert.equal(missing.status, 200);
+    assert.deepEqual(await missing.json(), { snapshot, document: null });
+
+    const resultingSha256 = createHash("sha256").update("Second revision").digest("hex");
+    await persistence.transaction((tx) => tx.saveDocument({
+      projectId: project.id, documentId: created.document.id, baseRevisionId: created.revision.id,
+      changes: [{ fromUtf16: 0, toUtf16: 5, insert: "Second" }], resultingSha256,
+      authorId: "owner", clientId: "test", idempotencyKey: randomUUID(),
+    }));
+    const latest = await fetch(`${endpoint}?${selector}`, auth);
+    assert.equal(latest.status, 200);
+    assert.deepEqual(await latest.json(), {
+      snapshot: { projectId: project.id, projectVersion: snapshot.projectVersion + 1 },
+      document: { path, revision: resultingSha256 },
+    });
+    const pinned = await fetch(`${endpoint}?${selector}&projectVersion=${snapshot.projectVersion}`, auth);
+    assert.equal(pinned.status, 200);
+    assert.deepEqual(await pinned.json(), { snapshot, document: { path, revision: created.revision.sha256 } });
   });
 
   it("keeps review-queue projectVersion and stale status on one PostgreSQL snapshot", async (t) => {
@@ -3328,7 +2178,7 @@ describe("Codexia HTTP boundary", () => {
     };
 
     const responsePromise = fetch(`${apiServer.base}/api/projects/${native.project.id}/review-queue`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.ownerHeaders().Authorization },
     });
     try {
       const responseBeforeRead = await Promise.race([
@@ -3367,8 +2217,8 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(store, staticDir);
     t.after(() => apiServer.close());
     assert.equal((await fetch(`${apiServer.base}/api/review-queue`)).status, 401);
-    const owner = await login(apiServer.base);
-    const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Cookie: owner.cookie } });
+    const owner = signedRequests.ownerHeaders();
+    const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Authorization: owner.Authorization } });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { unresolvedCount: 1234, items: [] });
     assert.deepEqual(calls, [null]);
@@ -3384,14 +2234,14 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(store, staticDir);
     let closed = false;
     t.after(async () => { if (!closed) await apiServer.close(); });
-    const owner = await login(apiServer.base);
-    const stream = await fetch(`${apiServer.base}/api/projects/events`, { headers: { Cookie: owner.cookie } });
+    const owner = signedRequests.ownerHeaders();
+    const stream = await fetch(`${apiServer.base}/api/projects/events`, { headers: { Authorization: owner.Authorization } });
     assert.equal(stream.status, 200);
     assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/u);
     assert.equal((await fetch(`${apiServer.base}/api/projects/events`)).status, 401);
     for (const suffix of ["sync", "reconcile", "publish", "checkpoints"]) {
       const response = await fetch(`${apiServer.base}/api/projects/project-1/${suffix}`, {
-        method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" }, body: "{}",
+        method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" }, body: "{}",
       });
       assert.equal(response.status, 404, `${suffix} must not retain a Git fallback`);
     }
@@ -3412,10 +2262,10 @@ describe("Codexia HTTP boundary", () => {
       async reconstructProject() { retiredCalls++; }, async detachProject() { retiredCalls++; },
     });
     const apiServer = await startCustomApi(store, staticDir); t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const routeAuthHeaders: Record<string, string>[] = [
-      { Authorization: `Bearer ${ACCESS_TOKEN}` },
-      { Cookie: owner.cookie, Origin: apiServer.base },
+      { Authorization: signedRequests.mcpHeaders().Authorization },
+      { Authorization: owner.Authorization, Origin: apiServer.base },
     ];
     for (const method of ["PUT", "PATCH", "DELETE"]) {
       for (const auth of routeAuthHeaders) {
@@ -3429,7 +2279,7 @@ describe("Codexia HTTP boundary", () => {
       }
     }
     const legacyRegistration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" },
       body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo" }),
     });
     assert.equal(legacyRegistration.status, 400);
@@ -3443,8 +2293,8 @@ describe("Codexia HTTP boundary", () => {
     const store = new CoreStore({ persistence });
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-project-")); tempDirs.push(staticDir);
     const apiServer = await startCustomApi(store, staticDir, { persistence }); t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base };
+    const owner = signedRequests.ownerHeaders();
+    const headers = { Authorization: owner.Authorization, Origin: apiServer.base };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
       method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Native project" }),
     });
@@ -3479,10 +2329,10 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir, { runtime: actionBoundaryRuntime(cacheDir) });
     t.after(apiServer.close);
-    const bearer = { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" };
+    const bearer = { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" };
 
     const version = await fetch(`${apiServer.base}/api/version`);
-    assert.deepEqual((await version.json() as { auth: string[] }).auth, ["cookie-owner", "bearer-read-compute-propose"]);
+    assert.deepEqual((await version.json() as { auth: string[] }).auth, ["oauth-owner", "oauth-mcp"]);
     const computed = await fetch(`${apiServer.base}/api/projects/project-1/actions/nlp.analyze`, {
       method: "POST", headers: bearer, body: JSON.stringify({ input: {} }),
     });
@@ -3509,13 +2359,13 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed.length, 0, "bearer HTTP compute must not reach the proposal coordinator");
 
     const operation: ChangeOperation = {
-      id: "mcp-cookie-operation", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
+      id: "mcp-owner-operation", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
       effect: "metadata", reads: [], writes: [], message: "MCP contribution proposal",
     };
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const actionProposal = await fetch(`${apiServer.base}/api/projects/project-1/actions/mcp.propose`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ input: operation }),
     });
     assert.equal(actionProposal.status, 200);
@@ -3524,44 +2374,12 @@ describe("Codexia HTTP boundary", () => {
 
     const httpProposal = await fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/propose`, {
       method: "POST",
-      headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify(operation),
     });
     assert.equal(httpProposal.status, 200);
     assert.deepEqual(await httpProposal.json(), { source: "mcp" });
     assert.equal(fixture.proposed[1]?.source, "mcp");
-  });
-
-  it("denies hosted read grants native proposals through direct and nested MCP calls", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-"));
-    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-cache-"));
-    tempDirs.push(staticDir, cacheDir);
-    const fixture = makeSnapshotStore();
-    const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir));
-    t.after(apiServer.close);
-    const input = { projectVersion: 1, idempotencyKey: "native-denied", operations: [] };
-    const direct = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.knowledge.propose`, {
-      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify({ input }),
-    });
-    assert.equal(direct.status, 403, "direct action admission requires a current Hosted write grant");
-
-    const nested = await fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
-      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify(input),
-    });
-    assert.equal(nested.status, 200);
-    const nestedResult = await nested.json() as ActionResult;
-    assert.equal(nestedResult.ok, false);
-    if (!nestedResult.ok) assert.equal(nestedResult.error.code, "WRITE_PERMISSION_REQUIRED");
-
-    const cookieMcp = await rawHostedRequest(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
-      Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-      Cookie: "__Host-praetorium_access=read-grant; __Host-praetorium_csrf=csrf-value", "X-CSRF-Token": "csrf-value", "Content-Type": "application/json",
-    }, JSON.stringify(input));
-    assert.equal(cookieMcp.status, 200);
-    const cookieResult = JSON.parse(cookieMcp.body) as ActionResult;
-    assert.equal(cookieResult.ok, false, "cookie-authenticated MCP still uses the host write authorization callback");
-    if (!cookieResult.ok) assert.equal(cookieResult.error.code, "WRITE_PERMISSION_REQUIRED");
-    assert.equal(fixture.proposed.length, 0, "native ChangeSet proposals never use the path-based proposal store");
   });
 
   it("passes public module requests through the registered relative route with a fresh remote reader", async (t) => {
@@ -3573,22 +2391,21 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime });
     t.after(apiServer.close);
 
-    const descriptors = await fetch(`${apiServer.base}/api/projects/project-1/actions`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    const descriptors = await fetch(`${apiServer.base}/api/projects/project-1/actions`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } });
     const actions = (await descriptors.json() as { actions: Array<{ id: string }> }).actions;
     assert.ok(actions.some(({ id }) => id === "publishing.read-core"));
     const invoked = await fetch(`${apiServer.base}/api/projects/project-1/actions/publishing.read-core`, {
-      method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
+      method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
     });
     const invokedBody = await invoked.json() as { ok: boolean; data: unknown };
     assert.equal(invokedBody.ok, true, JSON.stringify(invokedBody));
 
     const ownerRoute = await fetch(`${apiServer.base}/api/projects/project-1/modules/publishing/share/secret`);
     assert.equal(ownerRoute.status, 401);
-    const owner = await login(apiServer.base);
     const publicResponse = await fetch(`${apiServer.base}/api/public/projects/project-1/modules/publishing/share/secret?lang=en`, {
       headers: {
-        Authorization: `Bearer ${ACCESS_TOKEN}`,
-        Cookie: owner.cookie,
+        Authorization: signedRequests.mcpHeaders().Authorization,
+        Cookie: "ambient-browser-cookie=fixture-value",
         "Proxy-Authorization": "Basic ambient-proxy-secret",
         "Mcp-Session-Id": "mcp-session-123",
       },
@@ -3640,7 +2457,7 @@ describe("Codexia HTTP boundary", () => {
     let closeCalled = false;
     t.after(async () => { if (!closeCalled) await apiServer.close().catch(() => undefined); });
     const request = fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/hang`, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      headers: { Authorization: signedRequests.mcpHeaders().Authorization },
     }).catch((error: unknown) => error);
     await entered;
     const startedAt = Date.now();
@@ -3657,10 +2474,10 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const raw = Buffer.from([0, 1, 2, 250]);
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ text: "", source: "camera", sceneId: "scene-one", attachments: [{ filename: "../../note.png", mimeType: "image/png", dataBase64: raw.toString("base64") }] }),
     });
     assert.equal(response.status, 201);
@@ -3681,12 +2498,12 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const raw = Buffer.alloc(6 * 1024 * 1024 + 2, 0x5a);
     const dataBase64 = raw.toString("base64");
     assert.ok(dataBase64.endsWith("=") && !dataBase64.endsWith("=="), "large one-byte-padding input exercises canonical final-group validation");
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
       body: JSON.stringify({ text: "Large canonical attachment", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64 }] }),
     });
     assert.equal(response.status, 201);
@@ -3705,7 +2522,7 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const dataBase64 = Buffer.alloc(6 * 1024 * 1024, 0x5a).toString("base64");
     const malformedEncodings = [
       `${dataBase64.slice(0, -1)}!`,
@@ -3715,7 +2532,7 @@ describe("Codexia HTTP boundary", () => {
     ];
     for (const malformedBase64 of malformedEncodings) {
       const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-        method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base },
+        method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base },
         body: JSON.stringify({ text: "Malformed attachment", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64: malformedBase64 }] }),
       });
       assert.equal(response.status, 400);
@@ -3731,12 +2548,12 @@ describe("Codexia HTTP boundary", () => {
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
-    const owner = await login(apiServer.base);
+    const owner = signedRequests.ownerHeaders();
     const dataBase64 = Buffer.alloc(8 * 1024 * 1024 + 1, 0x5a).toString("base64");
     const requestBody = JSON.stringify({ text: "Over the raw attachment cap", attachments: [{ filename: "large.bin", mimeType: "application/octet-stream", dataBase64 }] });
     assert.ok(Buffer.byteLength(requestBody) < 12 * 1024 * 1024, "the request remains within the existing JSON parser cap");
     const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: "POST", headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: apiServer.base }, body: requestBody,
+      method: "POST", headers: { Authorization: owner.Authorization, "Content-Type": "application/json", Origin: apiServer.base }, body: requestBody,
     });
     assert.equal(response.status, 413);
     assert.equal((await response.json() as { code?: string }).code, "SCRATCH_ATTACHMENT_TOO_LARGE");
@@ -3744,7 +2561,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.approvals.length, 0);
   });
 
-  it("stores project recent activity for cookie owners across API restarts and rejects bearer or cross-origin writes", async (t) => {
+  it("stores project recent activity for OAuth authors across API restarts and rejects MCP or cross-origin access", async (t) => {
     const root = await mkdtemp(resolve(tmpdir(), "codexia-api-recent-activity-"));
     const staticDir = resolve(root, "static");
     const usageDirectory = resolve(root, "host-history");
@@ -3757,14 +2574,15 @@ describe("Codexia HTTP boundary", () => {
       observeCalls += 1;
       throw new Error("simulated unavailable project observation");
     };
-    let apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
+    const settings = testClientSettings(native.project.id, signedRequests.publicJwks, signedRequests.isActive);
+    let apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence, ...settings });
     t.after(() => apiServer.close().catch(() => undefined));
-    let owner = await login(apiServer.base);
-    const ownerJson = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+    let owner = signedRequests.ownerHeaders();
+    const ownerJson = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
 
-    const empty = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const empty = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     assert.deepEqual(await empty.json(), { items: [] });
-    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } })).json(), { items: [] });
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Authorization: owner.Authorization } })).json(), { items: [] });
     assert.equal(observeCalls, 0, "project activity reads do not require a Core observation");
     const desktopFirst = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
@@ -3802,8 +2620,8 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal((await secondProjectActivity.json() as { items: unknown[] }).items.length, 1);
 
-    const bearerRead = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-    assert.equal(bearerRead.status, 403, "recent activity is owner-cookie state, not bearer project data");
+    const bearerRead = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: signedRequests.mcpHeaders().Authorization } });
+    assert.equal(bearerRead.status, 403, "MCP credentials cannot read author activity for their assigned project");
     const crossOriginWrite = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: { ...ownerJson, Origin: "https://foreign.example" },
       body: JSON.stringify({ sceneId: "foreign", sentenceOffset: 0, deviceType: "mobile" }),
@@ -3817,17 +2635,17 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(observeCalls, 0, "cursor writes do not depend on project observation availability");
 
     await apiServer.close();
-    apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
-    owner = await login(apiServer.base);
+    apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence, ...settings });
+    owner = signedRequests.ownerHeaders();
     observeCalls = 0;
-    const afterRestart = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const afterRestart = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     const restored = await afterRestart.json() as { items: Array<{ sceneId: string; pageIndex: number | null; deviceType: string }> };
     assert.equal(restored.items.length, 2);
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.sceneId, "scene-two");
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
     assert.equal(restored.items.find((item) => item.deviceType === "mobile")?.sceneId, "scene-mobile");
     const stale = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
-      method: "PUT", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json",
+      method: "PUT", headers: { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json",
         "X-Codexia-Recent-Activity-Order": `${writer}:1` },
       body: JSON.stringify({ sceneId: "older", sentenceOffset: 1, deviceType: "desktop" }),
     });
@@ -3835,129 +2653,14 @@ describe("Codexia HTTP boundary", () => {
     const staleItems = await stale.json() as typeof restored;
     assert.deepEqual(staleItems, restored, "a delayed request after restart cannot rewind the accepted cursor");
     assert.equal(observeCalls, 0, "persisted cursors remain available while Core observation is unavailable after restart");
-    const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Authorization: owner.Authorization } });
     const secondRestored = await secondAfterRestart.json() as { items: Array<{ sceneId: string }> };
     assert.deepEqual(secondRestored.items.map((item) => item.sceneId), ["second-project-scene"], "recent activity stays scoped to its PostgreSQL project identity");
   });
 });
 
 
-for (const phase of ["read", "write"] as const) {
-  it(`Hosted ${phase} reports credential denial, permission denial, and provider outages distinctly`, async (t) => {
-    const directory = await mkdtemp(resolve(tmpdir(), "codexia-auth-outage-"));
-    const normal = hostedTestPolicy();
-    const privateDetail = "private upstream detail";
-    let upstreamFailure: Error;
-    const policy: HostedAuthorizationPolicy = {
-      ...normal,
-      async authenticate(token, permission = "read") {
-        if (permission === phase) throw upstreamFailure;
-        return normal.authenticate(token, permission);
-      },
-    };
-    const apiServer = await startHostedApi(makeStore(), directory, policy, undefined, undefined, resolve(directory, "history"));
-    t.after(async () => {
-      await apiServer.close();
-      await rm(directory, { recursive: true, force: true });
-    });
-    const permissionDenial = phase === "read" ? "FORBIDDEN" : "WRITE_PERMISSION_REQUIRED";
-    const cases = [
-      { upstreamStatus: 401, status: 401, code: "UNAUTHORIZED" },
-      { upstreamStatus: 403, status: 403, code: permissionDenial },
-      { upstreamStatus: 502, status: 502, code: "AUTHORIZATION_UNAVAILABLE" },
-      { upstreamStatus: 503, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
-      { upstreamStatus: undefined, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
-    ];
-    for (const { upstreamStatus, status, code } of cases) {
-      upstreamFailure = new Error(privateDetail);
-      if (upstreamStatus !== undefined) Object.assign(upstreamFailure, { status: upstreamStatus });
-      const path = phase === "read" ? "/api/session" : "/api/inbox/read-all";
-      const response = await fetch(`${apiServer.base}${path}`, {
-        method: phase === "read" ? "GET" : "POST", headers: { Authorization: "Bearer write-grant" },
-      });
-      assert.equal(response.status, status, `upstream status ${upstreamStatus}`);
-      assert.equal(response.headers.has("www-authenticate"), false);
-      const body = await response.json() as { code: string; error: string };
-      assert.equal(body.code, code);
-      assert.doesNotMatch(body.error, /private upstream detail/u);
-    }
-  });
-}
-
-
-it("Hosted Bearer write grants can propose but cannot perform author-only persistence, approval, or apply", async (t) => {
-  const fixture = makeSnapshotStore();
-  let documentWrites = 0;
-  const persistence = {
-    ...admissionPersistence(fixture.store),
-    async transaction<T>(work: (transaction: { createDocument(input: unknown): Promise<unknown> }) => Promise<T>): Promise<T> {
-      documentWrites += 1;
-      return work({ async createDocument(input) { return { id: "author-document", input }; } });
-    },
-  } as unknown as Persistence;
-  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-author-session-"));
-  const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, persistence);
-  t.after(async () => { await apiServer.close(); await rm(staticDir, { recursive: true, force: true }); });
-
-  const bearerHeaders = { Authorization: "Bearer write-grant", "Content-Type": "application/json" };
-  const documentPath = `${apiServer.base}/api/v1/persistence/projects/project-1/documents`;
-  const bearerDocument = await fetch(documentPath, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ kind: "scene", title: "Bearer document", markdown: "Denied." }),
-  });
-  assert.equal(bearerDocument.status, 403);
-  assert.equal((await bearerDocument.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  assert.equal(documentWrites, 0, "a bearer grant must be rejected before native Persistence.transaction");
-
-  const operation: ChangeOperation = {
-    id: "hosted-review-operation", generation: 0, projectId: "project-1", baseProjectVersion: 1,
-    effect: "metadata", reads: [], writes: [], message: "Reviewable hosted proposal",
-  };
-  const proposalResponse = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ id: "hosted-review-proposal", snapshot: SNAPSHOT, operations: [operation] }),
-  });
-  assert.equal(proposalResponse.status, 201, "a Hosted write grant may submit an MCP proposal");
-
-  const bearerApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }),
-  });
-  assert.equal(bearerApproval.status, 403);
-  assert.equal((await bearerApproval.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  const bearerApply = await fetch(`${apiServer.base}/api/projects/project-1/apply`, {
-    method: "POST", headers: bearerHeaders, body: JSON.stringify(operation),
-  });
-  assert.equal(bearerApply.status, 403);
-  assert.equal((await bearerApply.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  for (const scratchPath of ["/api/projects/project-1/scratch", "/api/scratch?projectId=project-1"]) {
-    const denied = await fetch(`${apiServer.base}${scratchPath}`, {
-      method: "POST", headers: bearerHeaders, body: JSON.stringify({ text: "Bearer scratch" }),
-    });
-    assert.equal(denied.status, 403);
-    assert.equal((await denied.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  }
-  assert.equal(fixture.approvals.length, 0);
-  assert.equal(fixture.proposed.length, 1);
-
-  const cookieHeaders = {
-    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=csrf-value",
-    "X-CSRF-Token": "csrf-value", "Content-Type": "application/json", "Idempotency-Key": "hosted-author-document-1",
-  };
-  const authorDocument = await rawHostedRequest(documentPath, cookieHeaders,
-    JSON.stringify({ kind: "scene", title: "Author document", markdown: "Saved by author." }));
-  assert.equal(authorDocument.status, 201, authorDocument.body);
-  assert.equal(documentWrites, 1);
-  const authorApproval = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/approvals`, cookieHeaders,
-    JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }));
-  assert.equal(authorApproval, 204);
-  assert.equal(fixture.approvals[0]?.authorScope, "hosted:writer-1");
-  const authorApply = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/apply`, cookieHeaders, JSON.stringify(operation));
-  assert.equal(authorApply, 201);
-});
-
-it("portable work API enforces authentication, author writes, origin, hosted assignment and replay", async (t) => {
+it("portable work API enforces authentication, author writes, origin, and replay", async (t) => {
   const native = await nativeProject(t, "Portable HTTP");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-archive-http-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
@@ -3965,8 +2668,8 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   t.after(apiServer.close);
   const url = apiServer.base + "/api/v1/persistence/projects/" + native.project.id + "/archive";
   assert.equal((await fetch(url)).status, 401);
-  const owner = await login(apiServer.base);
-  const exported = await fetch(url, { headers: { Cookie: owner.cookie } });
+  const owner = signedRequests.ownerHeaders();
+  const exported = await fetch(url, { headers: { Authorization: owner.Authorization } });
   assert.equal(exported.status, 200);
   const archive = await exported.json() as { format: string; documents: unknown[] };
   assert.equal(archive.format, "codexia-work/v1");
@@ -3974,14 +2677,14 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   const endpoint = apiServer.base + "/api/v1/persistence/import";
   const requestBody = JSON.stringify(archive);
   const bearer = await fetch(endpoint, { method: "POST", headers: {
-    Authorization: "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json"
+    Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json"
   }, body: requestBody });
   assert.equal(bearer.status, 403, "Bearer read access must not create works");
   const forbiddenOrigin = await fetch(endpoint, { method: "POST", headers: {
-    Cookie: owner.cookie, Origin: "https://other.example", "Content-Type": "application/json"
+    Authorization: owner.Authorization, Origin: "https://other.example", "Content-Type": "application/json"
   }, body: requestBody });
-  assert.equal(forbiddenOrigin.status, 403, "Cookie writes require same origin");
-  const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+  assert.equal(forbiddenOrigin.status, 403, "Author writes honor browser origin policy");
+  const headers = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
   const importResponse = await fetch(endpoint, { method: "POST", headers, body: requestBody });
   assert.equal(importResponse.status, 201);
   const imported = await importResponse.json() as { project: { id: string }; replayed: boolean };
@@ -3992,37 +2695,28 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   const replay = await repeated.json() as { project: { id: string }; replayed: boolean };
   assert.equal(replay.replayed, true);
   assert.equal(replay.project.id, imported.project.id);
-  const importedExport = await fetch(apiServer.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", { headers: { Cookie: owner.cookie } });
+  const importedExport = await fetch(apiServer.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", { headers: { Authorization: owner.Authorization } });
   assert.equal(importedExport.status, 200);
   assert.equal((await importedExport.json() as { project: { title: string } }).project.title, native.project.title);
 
-  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
-  t.after(hosted.close);
-  const hostedImport = await fetch(hosted.base + "/api/v1/persistence/import", { method: "POST", headers: {
-    Authorization: "Bearer write-grant", "Content-Type": "application/json"
-  }, body: requestBody });
-  assert.equal(hostedImport.status, 403);
-  const hostedOtherWork = await fetch(hosted.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", {
-    headers: { Authorization: "Bearer read-grant" }
-  });
-  assert.equal(hostedOtherWork.status, 404);
+
 });
 
-it("native actions use real PostgreSQL through standalone and Hosted composed admission", async (t) => {
+it("native actions use real PostgreSQL through direct and composed OAuth admission", async (t) => {
   const native = await nativeProject(t, "Native action review");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-action-real-"));
   const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-native-action-cache-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
-  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings(native.project.id, client.publicJwks, client.isActive);
+  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence, runtime: actionBoundaryRuntime(cacheDir), ...settings });
   t.after(standalone.close);
-  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir), undefined, native.persistence, native.project.id);
-  t.after(hosted.close);
   const projectId = native.project.id as import("@codexia/persistence-contracts").ProjectId;
   const nodeId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId;
   const projectVersion = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const payload = { projectVersion, idempotencyKey: "action-real", operations: [{ type: "knowledge.node.save", command: { projectId, id: nodeId, type: "person", name: "Native action", attributes: {}, status: "confirmed", expectedVersion: null } }] };
-  const headers = { Authorization: "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json" };
+  const headers = client.mcpHeaders();
   const actionPath = "/api/projects/" + projectId + "/actions/";
   const response = await fetch(standalone.base + actionPath + "core.knowledge.propose", { method: "POST", headers, body: JSON.stringify({ input: payload }) });
   const result = await response.json() as ActionResult;
@@ -4033,9 +2727,10 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.equal(proposed.provenance.details.origin, "external-agent");
   assert.equal(await native.persistence.read(reader => reader.getKnowledgeNode(projectId, nodeId)), undefined);
   const approvalPath = "/api/v1/persistence/projects/" + projectId + "/changesets/" + proposed.id;
-  assert.equal((await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers, body: JSON.stringify({ expectedVersion: proposed.version }) })).status, 403);
-  const owner = await login(standalone.base);
-  const ownerHeaders = { Cookie: owner.cookie, Origin: standalone.base, "Content-Type": "application/json" };
+  const deniedApproval = await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers, body: JSON.stringify({ expectedVersion: proposed.version }) });
+  assert.equal(deniedApproval.status, 403);
+  assert.equal((await deniedApproval.json() as { code: string }).code, "OAUTH_MCP_PERSISTENCE_DENIED");
+  const ownerHeaders = client.ownerHeaders();
   const approval = await fetch(standalone.base + approvalPath + "/approve", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: proposed.version }) });
   assert.equal(approval.status, 200, await approval.text());
   const applied = await fetch(standalone.base + approvalPath + "/apply", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: proposed.version + 1 }) });
@@ -4048,177 +2743,686 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.ok(list.ok && (list.data as Array<{ id: string }>).some(node => node.id === nodeId));
   const current = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const nestedId = randomUUID();
-  const nested = await fetch(hosted.base + "/api/projects/" + projectId + "/modules/mcp/native-propose", { method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, projectVersion: current, idempotencyKey: "nested-real", operations: [{ ...payload.operations[0], command: { ...payload.operations[0]!.command, id: nestedId } }] }) });
+  const nested = await fetch(standalone.base + "/api/projects/" + projectId + "/modules/mcp/native-propose", { method: "POST", headers, body: JSON.stringify({ ...payload, projectVersion: current, idempotencyKey: "nested-real", operations: [{ ...payload.operations[0], command: { ...payload.operations[0]!.command, id: nestedId } }] }) });
   const nestedResult = await nested.json() as ActionResult;
   assert.ok(nestedResult.ok, JSON.stringify(nestedResult));
   if (!nestedResult.ok) throw new Error("Nested proposal failed");
   const nestedChange = (nestedResult.data as { changeSet: import("@codexia/persistence-contracts").ChangeSet }).changeSet;
-  assert.equal(nestedChange.authorId, "writer-1");
+  assert.equal(nestedChange.authorId, "owner");
   assert.equal(nestedChange.provenance.details.origin, "external-agent");
   assert.equal(nestedChange.status, "proposed");
 });
 
-it("replays built-in Core proposal actions with their original operation IDs through authenticated PostgreSQL HTTP", async (t) => {
-  const native = await nativeProject(t, "Core proposal action replay");
-  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
+it("excludes preserved module files from live resolution while retaining portable bytes", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Preserved module files");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-preserved-module-files-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
-  const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
-  t.after(apiServer.close);
-  const projectId = native.project.id;
+  const archivePath = "meta/scriptorium/modules/story/legacy/files/notes.md";
+  const currentPath = "meta/scriptorium/modules/story/legacy-notes.md";
+  const archived = { content: "Preserved author notes.\n", encoding: "utf8" };
+  const current = { content: "Current module notes.\n", encoding: "utf8" };
+  await persistence.transaction(async tx => {
+    for (const [key, value] of [[archivePath, archived], [currentPath, current]] as const) {
+      await tx.saveModuleRecord({ projectId: project.id, moduleId: "core.artifacts", key, value, expectedVersion: null });
+    }
+  });
+  const pinned = (await store.reader(project.id)).snapshot;
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, staticDir, { persistence, ...testClientSettings(project.id, client.publicJwks, client.isActive) });
+  t.after(api.close);
+  for (const headers of [client.ownerHeaders(), client.mcpHeaders()]) {
+    const resolvePath = async (path: string) => {
+      const response = await fetch(`${api.base}/api/projects/${project.id}/actions/core.document.resolve`, {
+        method: "POST", headers, body: JSON.stringify({ input: { path }, snapshot: pinned }),
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json() as ActionResult<{ documentId: null; document: { path: string; content: string } | null }>;
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.deepEqual(result.snapshot, pinned);
+      return result.data;
+    };
+    assert.deepEqual(await resolvePath(archivePath), { documentId: null, document: null });
+    assert.deepEqual(await resolvePath("meta/scriptorium/modules/story/missing.md"), { documentId: null, document: null });
+    assert.equal((await resolvePath(currentPath)).document?.content, current.content);
+  }
+  const response = await fetch(`${api.base}/api/v1/persistence/projects/${project.id}/archive`, {
+    headers: { Authorization: client.ownerHeaders().Authorization },
+  });
+  assert.equal(response.status, 200);
+  const exported = await response.json() as { moduleRecords: Array<{ moduleId: string; key: string; value: unknown }> };
+  assert.deepEqual(exported.moduleRecords.find(({ key }) => key === archivePath), {
+    moduleId: "core.artifacts", key: archivePath, value: archived,
+  });
+});
 
-  const seedHierarchy = async (input: Parameters<typeof native.store.buildCreateHierarchyOperation>[1]) => {
-    const built = await native.store.buildCreateHierarchyOperation(projectId, input);
-    const proposal = await native.store.propose(projectId, {
-      id: randomUUID(), snapshot: built.snapshot, operations: [built.operation], source: "author",
+it("restricts Publishing review payloads and legacy files to authenticated authors", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Private Publishing review");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-publishing-review-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const projectId = project.id;
+  const grantsPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+  const episodesPath = "meta/scriptorium/modules/publishing/episodes.yaml";
+  const grantBody = '{"tokenHash":"fixture-private-digest","label":"Proofreader"}';
+  const legacyProject = await persistence.read(reader => reader.getProject(projectId));
+  assert.ok(legacyProject);
+  const legacySnapshot = { projectId, projectVersion: legacyProject.version };
+  await persistence.transaction(async tx => {
+    await tx.saveModuleRecord({
+      projectId, moduleId: "core.authority.snapshots", key: "snapshot:" + legacyProject.version, expectedVersion: null,
+      value: { snapshot: legacySnapshot, project: legacyProject, documents: [], files: {
+        [grantsPath]: { content: grantBody, encoding: "utf8", revision: createHash("sha256").update(grantBody).digest("hex") },
+      } } as unknown as JsonObject,
     });
-    await native.store.approve(projectId, { proposalId: proposal.id, operationIds: [built.operation.id], authorScope: "owner" });
-    await native.store.apply(projectId, built.operation);
+    await tx.updateProject({ projectId, expectedVersion: legacyProject.version });
+  });
+  const snapshot = (await store.observe(projectId)).snapshot;
+  const ordinaryId = randomUUID();
+  const privateIds = [randomUUID(), randomUUID()] as const;
+  for (const [id, privatePath] of [[ordinaryId], [privateIds[0], grantsPath], [privateIds[1], episodesPath]] as const) {
+    const operation: ChangeOperation = {
+      id: randomUUID(), projectId, baseProjectVersion: snapshot.projectVersion, generation: 0,
+      effect: "metadata", reads: [], message: "Update fixture metadata",
+      writes: [
+        { path: "meta/review-notes.md", revision: null, content: "Public review notes" },
+        ...(privatePath ? [{ path: privatePath, revision: null, content: "Author draft" }] : []),
+      ],
+    };
+    const proposal: ChangeProposal = { id, snapshot, operations: [operation], source: "author" };
+    if (privatePath) {
+      const status: ProposalStatus = {
+        proposal, state: "proposed", approvedOperationIds: [], appliedOperationIds: [], applications: [], stale: false,
+      };
+      await persistence.transaction(tx => tx.saveModuleRecord({
+        projectId, moduleId: "core.authority.proposals", key: "proposal:" + id, expectedVersion: null,
+        value: status as unknown as JsonObject,
+      }));
+    } else {
+      await store.propose(projectId, proposal);
+    }
+  }
+  const native = await persistence.transaction(tx => tx.createChangeSet({
+    projectId, authorId: "owner", idempotencyKey: "private-publishing",
+    operations: [{
+      type: "module.record.save",
+      command: { projectId, moduleId: "publishing", key: "share-grants", expectedVersion: null, value: { version: 1, grants: [] } },
+    }],
+    readSet: [{ resource: "module_record", id: '["publishing","share-grants"]', expectedVersion: null }],
+    writeSet: [{ resource: "module_record", id: '["publishing","share-grants"]' }],
+    provenance: { source: "publishing.native", actorId: "owner", details: { projectVersion: snapshot.projectVersion } },
+  }));
+  const client = createSignedRequestFixture();
+  const standalone = await startCustomApi(store, staticDir, {
+    persistence, ...testClientSettings(projectId, client.publicJwks, client.isActive),
+  });
+  t.after(standalone.close);
+  const projectPath = "/api/projects/" + projectId;
+  const nativePath = "/api/v1/persistence/projects/" + projectId + "/changesets";
+  const readers: Array<{ name: string; base: string; headers: Record<string, string>; author: boolean; directPersistence: boolean }> = [
+    { name: "OAuth author", base: standalone.base, headers: client.ownerHeaders(), author: true, directPersistence: true },
+    { name: "OAuth MCP reader", base: standalone.base, headers: client.mcpHeaders(), author: false, directPersistence: false },
+  ];
+  for (const { name, base, headers, author, directPersistence } of readers) {
+    await t.test(name, async () => {
+      const invoke = async <Data>(action: string, input: unknown, selected?: SnapshotId): Promise<ActionResult<Data>> => {
+        const url = base + projectPath + "/actions/" + action;
+        const body = JSON.stringify({ input, snapshot: selected });
+        const response = await fetch(url, { method: "POST", headers, body });
+        assert.equal(response.status, 200);
+        return await response.json() as ActionResult<Data>;
+      };
+      // A browser does not attach Origin to these same-origin GET requests.
+      const getHeaders = new Headers(headers);
+      getHeaders.delete("origin");
+      const expectedIds = (author ? [ordinaryId, ...privateIds] : [ordinaryId]).sort();
+      for (const path of ["/proposals", "/review-queue"]) {
+        const response = await fetch(base + projectPath + path, { headers: getHeaders });
+        assert.equal(response.status, 200);
+        const { proposals } = await response.json() as { proposals: ProposalStatus[] };
+        assert.deepEqual(proposals.map(status => status.proposal.id).sort(), expectedIds);
+      }
+      if (!author) {
+        const globalQueue = await fetch(base + "/api/review-queue", { headers: getHeaders });
+        assert.equal(globalQueue.status, 200);
+        const queue = await globalQueue.json() as { unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> };
+        assert.ok(queue.items.every(item => item.projectId === projectId));
+        assert.deepEqual(queue.items.map(item => item.proposal.proposal.id).sort(), expectedIds);
+        assert.equal(queue.unresolvedCount, expectedIds.length);
+      }
+      for (const id of [ordinaryId, ...privateIds]) {
+        const response = await fetch(base + projectPath + "/proposals/" + id, { headers: getHeaders });
+        assert.equal(response.status, author || id === ordinaryId ? 200 : 404);
+        if (!author && id !== ordinaryId) assert.equal((await response.json()).code, "PROPOSAL_NOT_FOUND");
+      }
+      const list = await invoke<{ proposals: ProposalStatus[] }>("core.proposals.list", {});
+      assert.ok(list.ok, JSON.stringify(list));
+      assert.deepEqual(list.data.proposals.map(({ proposal }) => proposal.id).sort(), expectedIds);
+      const detail = await invoke<{ proposal: ProposalStatus }>("core.proposals.get", { proposalId: privateIds[0] });
+      if (author) assert.ok(detail.ok && detail.data.proposal.proposal.id === privateIds[0], JSON.stringify(detail));
+      else assert.ok(!detail.ok && detail.error.code === "PROPOSAL_NOT_FOUND", JSON.stringify(detail));
+
+      const resolved = await invoke<{ documentId: null; document: { path: string; content: string } | null }>(
+        "core.document.resolve", { path: grantsPath }, legacySnapshot,
+      );
+      assert.ok(resolved.ok, JSON.stringify(resolved));
+      assert.equal(resolved.data.documentId, null);
+      if (author) assert.equal(resolved.data.document?.content, grantBody);
+      else assert.equal(resolved.data.document, null);
+
+      const nativeDetail = await invoke<{ changeSet: { id: string } } | null>("core.changeset.get", { changeSetId: native.changeSet.id });
+      assert.ok(nativeDetail.ok, JSON.stringify(nativeDetail));
+      assert.equal(nativeDetail.data?.changeSet.id, author ? native.changeSet.id : undefined);
+      if (directPersistence) {
+        const response = await fetch(base + nativePath + "/" + native.changeSet.id, { headers: getHeaders });
+        assert.equal(response.status, author ? 200 : 404);
+      }
+    });
+  }
+});
+
+it("binds Publishing record ports to the requested snapshot and authenticated author", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Publishing port");
+  const directory = await mkdtemp(resolve(tmpdir(), "codexia-publishing-port-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = "share-grants";
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "publishing", key, value: { version: 1, grants: [] }, expectedVersion: null,
+  }));
+  const pinned = (await store.reader(project.id)).snapshot;
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "publishing", key, value: { version: 1, grants: [] }, expectedVersion: 1,
+  }));
+
+  const fixtureRuntime = () => {
+    const manifest: ModuleManifest = {
+      id: "publishing", version: "0.1.0", contractVersion: 1,
+      dependencies: [], provides: [], requires: [], statePaths: [], locality: "local",
+    };
+    const schema: ValueSchema = { parse: value => value };
+    const definition: ModuleDefinition = {
+      manifest, ui: [],
+      actions: [{
+        id: "publishing.fixture-read", effect: "read", inputSchema: schema, outputSchema: schema,
+        async invoke(input, context) {
+          const record = await context.readOwnModuleRecord?.((input as { key: string }).key);
+          return { ok: true, snapshot: context.reader.snapshot, data: { version: record?.version ?? null } };
+        },
+      }, {
+        id: "publishing.fixture-propose", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const changeSet = await context.proposeOwnModuleRecord?.({
+            key, value: { version: 1, grants: [] }, expectedVersion: 2, idempotencyKey: randomUUID(),
+          });
+          return { ok: true, snapshot: context.reader.snapshot, data: { changeSet: changeSet ?? null } };
+        },
+      }],
+      http: [{
+        id: "fixture-public", path: "fixture-public", methods: ["GET"], access: "public", effect: "read",
+        async handle(_request, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          return Response.json({ version: record?.version ?? null, write: Boolean(context.proposeOwnModuleRecord) });
+        },
+      }],
+      async dispose() {},
+    };
+    return new ModuleRuntime({
+      manifests: [manifest], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory: directory,
+    });
   };
-  await seedHierarchy({ kind: "volume", id: "v1", title: "Volume 1" });
-  await seedHierarchy({ kind: "chapter", id: "c1", title: "Chapter 1", volumeId: "v1" });
-  await seedHierarchy({ kind: "scene", id: "s1", title: "Scene 1", volumeId: "v1", chapterId: "c1", manuscriptBody: "Original text" });
-  await seedHierarchy({ kind: "scene", id: "s2", title: "Scene 2", volumeId: "v1", chapterId: "c1", manuscriptBody: "Second text" });
-
-  const owner = await login(apiServer.base);
-  const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
-  const invoke = async (actionId: string, input: unknown, snapshot: SnapshotId): Promise<ActionResult> => {
-    const response = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${actionId}`, {
-      method: "POST", headers, body: JSON.stringify({ input, snapshot }),
-    });
+  const client = createSignedRequestFixture();
+  const standalone = await startCustomApi(store, directory, {
+    persistence, runtime: fixtureRuntime(), ...testClientSettings(project.id, client.publicJwks, client.isActive),
+  });
+  t.after(standalone.close);
+  const base = "/api/projects/" + project.id;
+  const actionUrl = (origin: string, action: string) => origin + base + "/actions/publishing.fixture-" + action;
+  const body = (input: unknown = {}, snapshot?: SnapshotId) => JSON.stringify({ input, snapshot });
+  const invoke = async (origin: string, action: string, headers: Record<string, string>, input?: unknown, snapshot?: SnapshotId) => {
+    const response = await fetch(actionUrl(origin, action), { method: "POST", headers, body: body(input, snapshot) });
     assert.equal(response.status, 200);
     return await response.json() as ActionResult;
   };
-  const concurrentInput = { kind: "volume", id: "parallel-volume", title: "Parallel volume", proposalId: randomUUID() };
-  const concurrentSnapshot = (await native.store.observe(projectId)).snapshot;
-  const originalGetProposal = native.store.getProposal.bind(native.store);
-  let proposalLookups = 0;
-  let releaseProposalLookups!: () => void;
-  const bothProposalLookups = new Promise<void>((resolveLookups) => { releaseProposalLookups = resolveLookups; });
-  native.store.getProposal = async (selectedProjectId, proposalId) => {
-    const existing = await originalGetProposal(selectedProjectId, proposalId);
-    if (proposalId === concurrentInput.proposalId) {
-      proposalLookups += 1;
-      if (proposalLookups === 2) releaseProposalLookups();
-      await bothProposalLookups;
-    }
-    return existing;
+  const owner = client.ownerHeaders();
+  const admitted = await invoke(standalone.base, "read", owner, { key }, pinned);
+  assert.ok(admitted.ok, JSON.stringify(admitted));
+  assert.deepEqual(admitted.data, { version: 1 });
+  const current = await invoke(standalone.base, "read", owner, { key });
+  assert.ok(current.ok, JSON.stringify(current));
+  assert.deepEqual(current.data, { version: 2 });
+  const unknown = await invoke(standalone.base, "read", owner, { key: "not-a-publishing-record" });
+  assert.equal(unknown.ok, false);
+  const external = await invoke(standalone.base, "read", client.mcpHeaders(), { key });
+  assert.equal(external.ok, false);
+
+  const anon = await fetch(standalone.base + "/api/public/projects/" + project.id + "/modules/publishing/fixture-public");
+  assert.equal(anon.status, 200);
+  assert.deepEqual(await anon.json(), { version: 2, write: false });
+  const proposed = await invoke(standalone.base, "propose", owner) as ActionResult<{ changeSet: { id: string; projectId: string } }>;
+  assert.ok(proposed.ok, JSON.stringify(proposed));
+  assert.equal(proposed.data.changeSet?.projectId, project.id);
+  const changeSet = await persistence.read(reader => reader.getChangeSet(project.id, proposed.data.changeSet.id as ChangeSetId));
+  assert.equal(changeSet?.authorId, "owner");
+  assert.equal(changeSet?.status, "proposed");
+  assert.equal((await persistence.read(reader => reader.getModuleRecord(project.id, "publishing", key)))?.version, 2);
+  const mcpWrite = await invoke(standalone.base, "propose", client.mcpHeaders());
+  assert.ok(!mcpWrite.ok || (mcpWrite.data as { changeSet: unknown }).changeSet === null);
+  assert.equal((await persistence.read(reader => reader.listChangeSets(project.id, 20))).length, 1);
+});
+
+it("allows scoped NLP settings proposals while reserving application for the author", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "NLP settings admission");
+  const directory = await mkdtemp(resolve(tmpdir(), "codexia-nlp-settings-admission-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = "feature-settings";
+  const moduleMetadata: ModuleManifest = {
+    id: "nlp", version: "0.1.0", contractVersion: 1,
+    dependencies: [], provides: [], requires: [], statePaths: [], locality: "local",
   };
-  let concurrentResults: ActionResult[];
-  try {
-    concurrentResults = await Promise.all([
-      invoke("core.hierarchy.create", concurrentInput, concurrentSnapshot),
-      invoke("core.hierarchy.create", concurrentInput, concurrentSnapshot),
-    ]);
-  } finally {
-    native.store.getProposal = originalGetProposal;
+  const schema: ValueSchema = { parse: value => value };
+  const runtime = new ModuleRuntime({
+    manifests: [moduleMetadata], enabled: ["nlp"], cacheDirectory: directory,
+    loaders: { nlp: async () => ({
+      manifest: moduleMetadata, ui: [], async dispose() {},
+      actions: [{
+        id: "nlp.fixture-read-settings", effect: "read", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          return { ok: true, snapshot: context.reader.snapshot, data: record?.value ?? null };
+        },
+      }, {
+        id: "nlp.fixture-propose-settings", effect: "propose", inputSchema: schema, outputSchema: schema,
+        async invoke(input, context) {
+          const record = await context.readOwnModuleRecord?.(key);
+          const changeSet = await context.proposeOwnModuleRecord?.({
+            key: (input as { key: string }).key, value: { externalEnabled: { rewrite: true } },
+            expectedVersion: record?.version ?? null, idempotencyKey: randomUUID(),
+          });
+          return { ok: true, snapshot: context.reader.snapshot, data: { changeSet: changeSet ?? null } };
+        },
+      }],
+    }) },
+  });
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, directory, {
+    persistence, runtime, ...testClientSettings(project.id, client.publicJwks, client.isActive),
+  });
+  t.after(api.close);
+  const snapshot = (await store.reader(project.id)).snapshot;
+  const actionBase = api.base + "/api/projects/" + project.id + "/actions/nlp.fixture-";
+  const owner = client.ownerHeaders();
+  const mcp = client.mcpHeaders("mcp:propose");
+  const invoke = (action: string, headers: Record<string, string>, input: unknown = {}, selected?: SnapshotId) =>
+    fetch(actionBase + action, { method: "POST", headers, body: JSON.stringify({ input, snapshot: selected }) });
+
+  const insufficient = await invoke("propose-settings", client.mcpHeaders("mcp:read"), { key }, snapshot);
+  assert.equal(insufficient.status, 403);
+  assert.equal((await insufficient.json()).code, "OAUTH_MCP_SCOPE_REQUIRED");
+  const proposed = await invoke("propose-settings", mcp, { key }, snapshot);
+  assert.equal(proposed.status, 200);
+  const result = await proposed.json() as ActionResult<{ changeSet: { id: ChangeSetId; projectId: string } }>;
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.equal(result.data.changeSet?.projectId, project.id);
+  const stored = await persistence.read(reader => reader.getChangeSet(project.id, result.data.changeSet.id));
+  assert.equal(stored?.status, "proposed");
+  assert.equal(stored?.provenance.details.origin, "external-agent");
+  assert.equal(stored?.authorId, "owner");
+  assert.equal(await persistence.read(reader => reader.getModuleRecord(project.id, "nlp", key)), undefined);
+
+  const otherKey = await invoke("propose-settings", mcp, { key: "share-grants" }, snapshot);
+  assert.equal(otherKey.status, 200);
+  const denied = await otherKey.json() as ActionResult;
+  assert.ok(!denied.ok, JSON.stringify(denied));
+  assert.equal(denied.error.code, "NLP_RECORD_SCOPE_DENIED");
+  assert.deepEqual((await persistence.read(reader => reader.listChangeSets(project.id, 10))).map(change => change.id), [result.data.changeSet.id]);
+
+  const review = api.base + "/api/v1/persistence/projects/" + project.id + "/changesets/" + result.data.changeSet.id;
+  const transition = (action: string, headers: Record<string, string>, expectedVersion: number) =>
+    fetch(review + "/" + action, { method: "POST", headers, body: JSON.stringify({ expectedVersion }) });
+  for (const action of ["approve", "apply"]) {
+    assert.equal((await transition(action, mcp, 1)).status, 403);
   }
-  assert.ok(concurrentResults[0]?.ok && concurrentResults[1]?.ok, JSON.stringify(concurrentResults));
-  assert.deepEqual(concurrentResults[1], concurrentResults[0], "overlapping first POSTs return the same proposal");
-  const proposalOf = (result: ActionResult): ChangeProposal => {
-    if (!result.ok) throw new Error(`Expected proposal action success, received ${JSON.stringify(result.error)}`);
-    return (result.data as { proposal: ChangeProposal }).proposal;
-  };
-  const approveApplyAndReplay = async (actionId: string, input: Record<string, unknown>, snapshot: SnapshotId, result: ActionResult) => {
-    const proposal = proposalOf(result);
-    assert.equal(proposal.operations.length, 1);
-    const operation = proposal.operations[0]!;
-    const approval = await fetch(`${apiServer.base}/api/projects/${projectId}/approvals`, {
-      method: "POST", headers, body: JSON.stringify({ proposalId: proposal.id, operationIds: [operation.id] }),
+  const approved = await transition("approve", owner, 1);
+  assert.equal(approved.status, 200, await approved.text());
+  const applied = await transition("apply", owner, 2);
+  assert.equal(applied.status, 200, await applied.text());
+  const historical = await invoke("read-settings", owner, {}, snapshot);
+  assert.deepEqual(await historical.json(), { ok: true, snapshot, data: null });
+  const current = await invoke("read-settings", owner);
+  assert.deepEqual(await current.json(), {
+    ok: true, snapshot: { projectId: project.id, projectVersion: snapshot.projectVersion + 1 },
+    data: { externalEnabled: { rewrite: true } },
+  });
+});
+
+it("reorders hierarchy only by approving a version-bound native ChangeSet", async (t) => {
+  const native = await nativeProject(t, "Native hierarchy reorder");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-reorder-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings(native.project.id, client.publicJwks, client.isActive);
+  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+  t.after(instance.close);
+  const projectId = native.project.id;
+  const [first, second] = await native.persistence.transaction(async tx => {
+    const seed = (title: string, orderKey: string) => tx.createDocument({
+      projectId, kind: "volume", title, orderKey, markdown: "", authorId: "owner", idempotencyKey: randomUUID(),
     });
-    assert.equal(approval.status, 204, await approval.text());
-    const applyOperation = async () => {
-      const response = await fetch(`${apiServer.base}/api/projects/${projectId}/apply`, {
-        method: "POST", headers, body: JSON.stringify(operation),
-      });
-      const body = await response.text();
-      assert.equal(response.status, 201, body);
-      return JSON.parse(body) as { operationId: string; generation: number; projectVersion: number; revisions: unknown[] };
-    };
-    const receipt = await applyOperation();
-    assert.equal(receipt.operationId, operation.id);
-    assert.deepEqual(await applyOperation(), receipt, "a repeated apply returns the original receipt");
-    assert.deepEqual(await invoke(actionId, input, snapshot), result, "the original action response remains replayable after apply");
+    return [await seed("First", "1"), await seed("Second", "2")];
+  });
+  const snapshot = (await native.store.observe(projectId)).snapshot;
+  const authorHeaders = client.ownerHeaders();
+  const bearerHeaders = { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" };
+  const actionPath = `/api/projects/${projectId}/actions/core.hierarchy.reorder`;
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const readOrder = () => native.persistence.read(async reader => (await reader.listDocuments(projectId, null)).map(document => document.id));
+  const input = { kind: "volume", orderedIds: [second.document.id, first.document.id], idempotencyKey: randomUUID() };
+  const post = (path: string, body: unknown, headers: Record<string, string> = authorHeaders) =>
+    fetch(instance.base + path, { method: "POST", headers, body: JSON.stringify(body) });
+
+  const response = await post(actionPath, { input, snapshot });
+  assert.equal(response.status, 200);
+  const result = await response.json() as ActionResult<ChangeSetResult>;
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.deepEqual(result.snapshot, snapshot);
+  const { changeSet, replayed } = result.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.authorId, "owner");
+  assert.deepEqual(changeSet.operations.map(({ type }) => type), ["document.update", "document.update"]);
+  assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
+
+  const replayResponse = await post(actionPath, { input, snapshot });
+  const replay = await replayResponse.json() as ActionResult<ChangeSetResult>;
+  assert.ok(replay.ok && replay.data.replayed);
+  assert.equal(replay.data.changeSet.id, changeSet.id);
+
+  const review = await fetch(instance.base + nativePath + "/review-feed", { headers: authorHeaders });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+
+  const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
+  const unauthorized = await post(actionPath, { input: { ...input, idempotencyKey: randomUUID() }, snapshot }, bearerHeaders);
+  assert.equal(unauthorized.status, 401);
+  const unapproved = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version });
+  assert.equal(unapproved.status, 409);
+  assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
+  const approval = await post(changeSetPath + "/approve", { expectedVersion: changeSet.version });
+  assert.equal(approval.status, 200, await approval.text());
+  const applied = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version + 1 });
+  assert.equal(applied.status, 200, await applied.text());
+  assert.deepEqual(await readOrder(), [second.document.id, first.document.id]);
+  const appliedReplay = await post(actionPath, { input, snapshot });
+  const appliedResult = await appliedReplay.json() as ActionResult<ChangeSetResult>;
+  assert.ok(appliedResult.ok && appliedResult.data.replayed);
+  assert.equal(appliedResult.data.changeSet.id, changeSet.id);
+  assert.equal(appliedResult.data.changeSet.status, "applied");
+});
+
+it("resolves the canonical document ID for a mapped manuscript at the requested pin", async (t) => {
+  const { project, store, persistence } = await nativeProject(t, "Mapped manuscript navigation");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-mapped-manuscript-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const before = (await store.reader(project.id)).snapshot;
+  const logicalId = "search-opening";
+  const path = `manuscript/first-volume/first-chapter/${logicalId}.md`;
+  const manuscript = "Harbor opening for Search.";
+  for (const input of [
+    { kind: "volume", id: "first-volume", title: "Volume" },
+    { kind: "chapter", id: "first-chapter", title: "Chapter", volumeId: "first-volume" },
+    { kind: "scene", id: logicalId, title: "Mapped opening", volumeId: "first-volume", chapterId: "first-chapter", manuscriptBody: manuscript },
+  ] as const) {
+    const { snapshot } = await store.observe(project.id);
+    const { changeSet } = await store.proposeHierarchyCreate(project.id, input, {
+      projectVersion: snapshot.projectVersion, actorId: "owner", idempotencyKey: randomUUID(),
+    });
+    const approved = await persistence.transaction(tx => tx.approveChangeSet({
+      projectId: project.id, changeSetId: changeSet.id, expectedVersion: changeSet.version, approvedBy: "owner",
+    }));
+    await persistence.transaction(tx => tx.applyChangeSet({
+      projectId: project.id, changeSetId: approved.id, expectedVersion: approved.version,
+    }));
+  }
+  const pinned = (await store.reader(project.id)).snapshot;
+  const documents = await persistence.read(reader => reader.listDocuments(project.id));
+  const document = documents.find(item => item.kind === "scene");
+  assert.ok(document && document.id !== logicalId);
+  assert.equal((await store.searchSnapshot(project.id, manuscript, 5, pinned)).results[0]?.filePath, path);
+
+  const client = createSignedRequestFixture();
+  const api = await startCustomApi(store, staticDir, { persistence, ...testClientSettings(project.id, client.publicJwks, client.isActive) });
+  t.after(api.close);
+  const resolvePath = async (snapshot: SnapshotId) => {
+    const response = await fetch(`${api.base}/api/projects/${project.id}/actions/core.document.resolve`, {
+      method: "POST", headers: client.ownerHeaders(), body: JSON.stringify({ input: { path }, snapshot }),
+    });
+    assert.equal(response.status, 200);
+    return await response.json();
+  };
+  assert.deepEqual(await resolvePath(pinned), { ok: true, snapshot: pinned, data: { documentId: document.id } });
+  assert.deepEqual(await resolvePath(before), { ok: true, snapshot: before, data: { documentId: null, document: null } });
+});
+
+it("replays native hierarchy creation and deletion through authenticated PostgreSQL HTTP", async (t) => {
+  const native = await nativeProject(t, "Core proposal action replay");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-core-action-replay-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings(native.project.id, client.publicJwks, client.isActive);
+  const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+  t.after(apiServer.close);
+  const projectId = native.project.id;
+  const staleSnapshot = (await native.store.reader(projectId)).snapshot;
+
+  await native.persistence.transaction(tx => tx.createDocument({
+    projectId, kind: "volume", title: "Existing volume", orderKey: "1", markdown: "", authorId: "owner", idempotencyKey: randomUUID(),
+  }));
+
+  const headers = client.ownerHeaders();
+  const invoke = async <Data = unknown>(actionId: string, input: unknown, snapshot?: SnapshotId, credentials = headers): Promise<ActionResult<Data>> => {
+    const response = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${actionId}`, {
+      method: "POST", headers: credentials, body: JSON.stringify({ input, snapshot }),
+    });
+    assert.equal(response.status, 200);
+    return await response.json() as ActionResult<Data>;
+  };
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const postDecision = (id: string, decision: "approve" | "apply", expectedVersion: number, credentials = headers) =>
+    fetch(`${apiServer.base}${nativePath}/changesets/${id}/${decision}`, {
+      method: "POST", headers: credentials, body: JSON.stringify({ expectedVersion }),
+    });
+  const apply = async (id: string, version: number) => {
+    const response = await postDecision(id, "apply", version);
+    assert.equal(response.status, 200);
+    return await response.json() as ChangeSetApplicationResult;
   };
 
+  const readDocuments = () => native.persistence.read(reader => reader.listDocuments(projectId));
+  const createAction = "core.hierarchy.create";
   const createSnapshot = (await native.store.observe(projectId)).snapshot;
-  assert.ok(createSnapshot.projectVersion > 1);
-  const createInput = { kind: "volume", id: "retry-volume", title: "Retry volume", proposalId: randomUUID() };
-  const created = await invoke("core.hierarchy.create", createInput, createSnapshot);
-  const originalProposal = proposalOf(created);
-  const repeatedCreate = await invoke("core.hierarchy.create", createInput, createSnapshot);
-  assert.deepEqual(repeatedCreate, created, "the same create input returns the original proposal and operation ID");
-  assert.deepEqual(proposalOf(repeatedCreate), originalProposal);
+  const createInput = { kind: "volume", id: "retry-volume", title: "Retry volume", idempotencyKey: randomUUID() };
+  const proposeCreation = (input = createInput, snapshot?: SnapshotId) => invoke<ChangeSetResult>(createAction, input, snapshot);
+  const legacyCreate = await invoke(createAction, { ...createInput, proposalId: randomUUID() }, createSnapshot);
+  assert.ok(!legacyCreate.ok && legacyCreate.error.code === "invalid_action_input", JSON.stringify(legacyCreate));
+  const staleCreate = await proposeCreation(createInput, staleSnapshot);
+  assert.ok(!staleCreate.ok && staleCreate.error.code === "conflict", JSON.stringify(staleCreate));
+  const [creation, concurrent] = await Promise.all([
+    proposeCreation(createInput, createSnapshot),
+    proposeCreation(createInput, createSnapshot),
+  ]);
+  assert.ok(creation.ok && concurrent.ok, JSON.stringify({ creation, concurrent }));
+  assert.deepEqual(creation.snapshot, createSnapshot);
+  assert.deepEqual(concurrent.data.changeSet, creation.data.changeSet);
+  assert.deepEqual([creation.data.replayed, concurrent.data.replayed].sort(), [false, true]);
+  const createSet = creation.data.changeSet;
+  assert.equal(createSet.status, "proposed");
+  assert.deepEqual(createSet.operations.map(operation => operation.type), ["document.create"]);
 
-  const changedCreate = await invoke("core.hierarchy.create", { ...createInput, title: "Different title" }, createSnapshot);
-  assert.equal(changedCreate.ok, false);
-  if (!changedCreate.ok) assert.equal(changedCreate.error.code, "proposal_identity_conflict");
-  const staleSnapshot = { ...createSnapshot, projectVersion: 1 };
-  const staleCreate = await invoke("core.hierarchy.create", createInput, staleSnapshot);
-  assert.equal(staleCreate.ok, false);
-  if (!staleCreate.ok) assert.equal(staleCreate.error.code, "proposal_identity_conflict");
-  await approveApplyAndReplay("core.hierarchy.create", createInput, createSnapshot, created);
+  const changedCreate = await proposeCreation({ ...createInput, title: "Different title" }, createSnapshot);
+  assert.ok(!changedCreate.ok && changedCreate.error.code === "idempotency_conflict", JSON.stringify(changedCreate));
+  assert.equal((await postDecision(createSet.id, "apply", createSet.version)).status, 409);
+  assert.equal((await postDecision(createSet.id, "approve", createSet.version)).status, 200);
+  assert.ok(!(await readDocuments()).some(document => document.title === createInput.title));
+  const createdReceipt = await apply(createSet.id, createSet.version + 1);
+  assert.equal(createdReceipt.changeSet.status, "applied");
+  assert.deepEqual(await apply(createSet.id, createSet.version + 1), { ...createdReceipt, replayed: true });
+  const repinnedCreate = await proposeCreation();
+  assert.ok(repinnedCreate.ok && repinnedCreate.data.replayed, JSON.stringify(repinnedCreate));
+  assert.notDeepEqual(repinnedCreate.snapshot, createSnapshot);
+  assert.deepEqual(repinnedCreate.data.changeSet, createdReceipt.changeSet);
+  const committed = (await readDocuments()).find(document => document.title === createInput.title);
+  assert.ok(committed, "the newly created volume must exist before testing deletion");
+  const deleteSnapshot = (await native.store.observe(projectId)).snapshot;
+  const deleteInput = { target: { kind: "volume", id: committed.id }, idempotencyKey: randomUUID() };
+  const external = client.mcpHeaders();
+  const deleteAction = "core.hierarchy.delete";
+  const proposeDeletion = (input = deleteInput) => invoke<ChangeSetResult>(deleteAction, input, deleteSnapshot, external);
 
-  const initialHistory = await native.store.listManuscriptSnapshots(projectId, "s1");
-  const originalRevision = initialHistory.snapshots[0]?.id;
-  assert.ok(originalRevision);
-  const reviseScene = async (content: string) => {
-    const reader = await native.store.reader(projectId);
-    const path = "manuscript/v1/c1/s1.md";
-    const base = await reader.read(path);
-    assert.ok(base);
-    const operation: ChangeOperation = {
-      id: randomUUID(), generation: 0, projectId, baseProjectVersion: reader.snapshot.projectVersion,
-      effect: "manuscript", reads: [{ path, revision: base.revision }],
-      writes: [{ path, revision: base.revision, content }], message: "Change scene text for restore identity test",
-    };
-    const proposal = await native.store.propose(projectId, {
-      id: randomUUID(), snapshot: reader.snapshot, operations: [operation], source: "author",
-    });
-    await native.store.approve(projectId, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "owner" });
-    await native.store.apply(projectId, operation);
+  const rejectedAlias = await invoke(deleteAction, { ...deleteInput, proposalId: randomUUID() }, deleteSnapshot, external);
+  assert.ok(!rejectedAlias.ok && rejectedAlias.error.code === "invalid_action_input", JSON.stringify(rejectedAlias));
+  const denied = await fetch(`${apiServer.base}/api/projects/${projectId}/actions/${deleteAction}`, {
+    method: "POST", headers: client.mcpHeaders("mcp:read"), body: JSON.stringify({ input: deleteInput, snapshot: deleteSnapshot }),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json() as { code: string }).code, "OAUTH_MCP_SCOPE_REQUIRED");
+
+  const proposed = await proposeDeletion();
+  assert.ok(proposed.ok, JSON.stringify(proposed));
+  assert.deepEqual(proposed.snapshot, deleteSnapshot);
+  const { changeSet, replayed } = proposed.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  const retry = await proposeDeletion();
+  assert.ok(retry.ok && retry.data.replayed);
+  assert.deepEqual(retry.data.changeSet, changeSet);
+
+  const review = await fetch(apiServer.base + nativePath + "/review-feed", { headers });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+  assert.equal((await postDecision(changeSet.id, "approve", changeSet.version, external)).status, 403);
+  assert.equal((await postDecision(changeSet.id, "apply", changeSet.version)).status, 409);
+  const approval = await postDecision(changeSet.id, "approve", changeSet.version);
+  assert.equal(approval.status, 200, await approval.text());
+  assert.ok((await readDocuments()).some(document => document.id === committed.id));
+  const receipt = await apply(changeSet.id, changeSet.version + 1);
+  assert.equal(receipt.changeSet.status, "applied");
+  assert.ok(!(await readDocuments()).some(document => document.id === committed.id));
+  assert.deepEqual(await apply(changeSet.id, changeSet.version + 1), { ...receipt, replayed: true });
+  const afterApply = await proposeDeletion();
+  assert.ok(afterApply.ok && afterApply.data.replayed);
+  assert.deepEqual(afterApply.data.changeSet, receipt.changeSet);
+});
+
+it("restores a manuscript revision only through an approved native ChangeSet and replays its receipt", async (t) => {
+  const native = await nativeProject(t, "Native manuscript restoration");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-restore-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const projectId = native.project.id;
+  const client = createSignedRequestFixture();
+  const settings = testClientSettings(projectId, client.publicJwks, client.isActive);
+  const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+  t.after(instance.close);
+
+  const originalText = "The original manuscript.";
+  const currentText = "The current manuscript.";
+  const { document, revision: original } = await native.persistence.transaction(tx => tx.createDocument({
+    projectId, kind: "scene", title: "The manuscript", orderKey: "1", markdown: originalText, authorId: "owner", idempotencyKey: randomUUID(),
+  }));
+  const replace = async (base: typeof original, markdown: string) => (await native.persistence.transaction(tx => tx.saveDocument({
+    projectId, documentId: document.id, baseRevisionId: base.id,
+    changes: [{ fromUtf16: 0, toUtf16: base.markdown.length, insert: markdown }],
+    resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+    authorId: "owner", clientId: "restore-test", idempotencyKey: randomUUID(),
+  }))).revision;
+  const intermediate = await replace(original, "An intermediate revision.");
+  const repeated = await replace(intermediate, originalText);
+  const earlierSnapshot = (await native.store.reader(projectId)).snapshot;
+  const current = await replace(repeated, currentText);
+  const snapshot = (await native.store.observe(projectId)).snapshot;
+  const author = client.ownerHeaders();
+  const external = client.mcpHeaders();
+  const actionPath = `/api/projects/${projectId}/actions/core.operation.restore`;
+  const nativePath = `/api/v1/persistence/projects/${projectId}`;
+  const post = (path: string, body: unknown, headers = author) =>
+    fetch(instance.base + path, { method: "POST", headers, body: JSON.stringify(body) });
+  const input = { documentId: document.id, baseRevisionId: current.id, sourceRevisionId: original.id, idempotencyKey: randomUUID() };
+  const propose = async (payload: unknown, selected: SnapshotId | null = snapshot) => {
+    const response = await post(actionPath, { input: payload, ...(selected ? { snapshot: selected } : {}) }, external);
+    assert.equal(response.status, 200);
+    return await response.json() as ActionResult<ChangeSetResult>;
   };
-  await reviseScene("Middle text");
-  const restoredOriginal = await native.store.buildRestoreOperation(projectId, { sceneId: "s1", snapshotId: originalRevision });
-  const originalRestoreProposal = await native.store.propose(projectId, {
-    id: randomUUID(), snapshot: restoredOriginal.snapshot, operations: [restoredOriginal.operation], source: "author",
+  const readHead = () => native.persistence.read(async reader => {
+    const head = (await reader.getDocument(projectId, document.id))?.headRevisionId;
+    return head && await reader.getRevision(projectId, document.id, head);
   });
-  await native.store.approve(projectId, { proposalId: originalRestoreProposal.id, operationIds: [restoredOriginal.operation.id], authorScope: "owner" });
-  await native.store.apply(projectId, restoredOriginal.operation);
-  const repeatedContentHistory = await native.store.listManuscriptSnapshots(projectId, "s1");
-  const repeatedContentRevision = repeatedContentHistory.snapshots[0]?.id;
-  assert.ok(repeatedContentRevision);
-  assert.notEqual(repeatedContentRevision, originalRevision);
-  const originalText = await native.store.readManuscriptSnapshot(projectId, originalRevision, "s1");
-  const repeatedText = await native.store.readManuscriptSnapshot(projectId, repeatedContentRevision, "s1");
-  assert.equal(originalText.manuscriptSnapshot.body, repeatedText.manuscriptSnapshot.body);
-  const restoreIdentitySnapshot = (await native.store.observe(projectId)).snapshot;
-  const restoreProposalId = randomUUID();
-  const restoreOriginalInput = { sceneId: "s1", snapshotId: originalRevision, proposalId: restoreProposalId };
-  const restoreOriginalResult = await invoke("core.operation.restore", restoreOriginalInput, restoreIdentitySnapshot);
-  assert.ok(restoreOriginalResult.ok, JSON.stringify(restoreOriginalResult));
-  const restoreEquivalentRevision = await invoke("core.operation.restore", {
-    ...restoreOriginalInput, snapshotId: repeatedContentRevision,
-  }, restoreIdentitySnapshot);
-  assert.equal(restoreEquivalentRevision.ok, false);
-  if (!restoreEquivalentRevision.ok) assert.equal(restoreEquivalentRevision.error.code, "proposal_identity_conflict");
 
-  const assertSharedBuilderReplay = async (actionId: string, input: Record<string, unknown>) => {
-    const snapshot = (await native.store.observe(projectId)).snapshot;
-    const first = await invoke(actionId, input, snapshot);
-    const firstProposal = proposalOf(first);
-    const retry = await invoke(actionId, input, snapshot);
-    assert.deepEqual(retry, first, `${actionId} returns the same proposal on retry`);
-    assert.deepEqual(proposalOf(retry), firstProposal);
-    await approveApplyAndReplay(actionId, input, snapshot, first);
+  const readOnly = await post(actionPath, { input, snapshot }, client.mcpHeaders("mcp:read"));
+  assert.equal(readOnly.status, 403);
+  const stale = await propose({ ...input, baseRevisionId: repeated.id, idempotencyKey: randomUUID() });
+  assert.ok(!stale.ok && stale.error.code === "revision_conflict", JSON.stringify(stale));
+
+  const future = await propose(input, earlierSnapshot);
+  assert.ok(!future.ok && future.error.code === "revision_conflict", JSON.stringify(future));
+
+  const result = await propose(input, null);
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.deepEqual(result.snapshot, snapshot);
+  const { changeSet, replayed } = result.data;
+  assert.equal(replayed, false);
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.authorId, "owner");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  const [operation] = changeSet.operations;
+  assert.equal(changeSet.operations.length, 1);
+  assert.ok(operation?.type === "document.restore");
+  assert.equal(operation.command.baseRevisionId, current.id);
+  assert.equal(operation.command.sourceRevisionId, original.id);
+  assert.equal((await readHead())?.markdown, currentText);
+
+  const retry = await propose(input);
+  assert.ok(retry.ok && retry.data.replayed);
+  assert.deepEqual(retry.data.changeSet, changeSet);
+  const equivalent = await propose({ ...input, sourceRevisionId: repeated.id });
+  assert.ok(!equivalent.ok && equivalent.error.code === "idempotency_conflict", JSON.stringify(equivalent));
+  const invalid = await propose({ sceneId: document.id, snapshotId: original.id, proposalId: randomUUID() });
+  assert.ok(!invalid.ok && invalid.error.code === "invalid_action_input", JSON.stringify(invalid));
+
+  const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
+  const review = await fetch(instance.base + nativePath + "/review-feed", { headers: author });
+  assert.equal(review.status, 200);
+  const { items } = await review.json() as { items: Awaited<ReturnType<CoreStore["listAuthorReviews"]>> };
+  assert.ok(items.some(item => item.kind === "native-change-set" && item.changeSet.id === changeSet.id));
+  const approvalBody = { expectedVersion: changeSet.version };
+  assert.equal((await post(changeSetPath + "/approve", approvalBody, external)).status, 403);
+  assert.equal((await post(changeSetPath + "/apply", approvalBody)).status, 409);
+  assert.equal((await readHead())?.id, current.id);
+
+  const approval = await post(changeSetPath + "/approve", approvalBody);
+  assert.equal(approval.status, 200, await approval.text());
+  assert.equal((await readHead())?.id, current.id);
+  const apply = async () => {
+    const response = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version + 1 });
+    assert.equal(response.status, 200);
+    return await response.json() as ChangeSetApplicationResult;
   };
-
-  await assertSharedBuilderReplay("core.hierarchy.reorder", {
-    kind: "volume", orderedIds: ["retry-volume", "v1"], proposalId: randomUUID(),
-  });
-  await assertSharedBuilderReplay("core.hierarchy.delete", {
-    target: { kind: "volume", id: "retry-volume" }, proposalId: randomUUID(),
-  });
-  await assertSharedBuilderReplay("core.operation.restore", {
-    sceneId: "s1", snapshotId: repeatedContentRevision, proposalId: randomUUID(),
+  const receipt = await apply();
+  assert.equal(receipt.replayed, false);
+  assert.equal(receipt.changeSet.status, "applied");
+  const restored = await readHead();
+  assert.ok(restored);
+  assert.equal(restored.markdown, originalText);
+  assert.notEqual(restored.id, original.id);
+  assert.equal(restored.parentRevisionId, current.id);
+  const [restoredResult] = receipt.results;
+  assert.ok(restoredResult && "revision" in restoredResult);
+  assert.equal(restoredResult.revision.id, restored.id);
+  assert.deepEqual(await apply(), { ...receipt, replayed: true });
+  assert.equal((await readHead())?.id, restored.id);
+  const afterApply = await propose(input);
+  assert.ok(afterApply.ok && afterApply.data.replayed);
+  assert.deepEqual(afterApply.data.changeSet, receipt.changeSet);
+  assert.deepEqual(await propose(input, null), {
+    ok: true, snapshot: (await native.store.observe(projectId)).snapshot, data: { changeSet: receipt.changeSet, replayed: true },
   });
 });

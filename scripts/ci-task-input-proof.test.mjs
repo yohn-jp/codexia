@@ -116,48 +116,29 @@ test('task execution proof trust accepts a non-coverage task only from its exact
     expected: { ...expected, artifactDigest: `sha256:${'d'.repeat(64)}` } }), /artifact digest mismatch/);
 });
 
-test('task proof reuse metadata is limited to a complete coverage receipt and stays outside the plan digest', () => {
-  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
-  const receipt = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: 'e'.repeat(64), workflowRunId: 42,
+test('only selected coverage can reuse certified evidence; omitted tasks require no receipts', () => {
+  const base = 'd'.repeat(40);
+  const receipt = { task: 'coverage', sourceSha: base, proofSourceSha: base, planDigest: 'e'.repeat(64), workflowRunId: 42,
     workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types',
     artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
     inputClosure: proof('coverage').inputClosure, runtime: proof('coverage').runtime,
-    certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
+    certification: { sourceSha: base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
       jobId: 85, step: 'Certify every required exact-source matrix element' } };
-  const reusedPlan = { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage: receipt } };
-  assert.doesNotThrow(() => validateVerificationPlan(reusedPlan));
-  assert.equal(createPlanDigest(reusedPlan), createPlanDigest(plan));
-  assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
-    ...reusedPlan.taskInputReuse, coverage: { ...receipt, artifactDigest: 'invalid' },
-  } }), /artifact digest/);
-  assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
-    ...reusedPlan.taskInputReuse, unsupported: receipt,
-  } }), /Unsupported task/);
-});
-
-test('affected PR reuse metadata must account for every omitted validation with exact task artifacts', () => {
-  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
-  const digest = 'e'.repeat(64);
-  const runtime = proof('coverage').runtime;
-  const coverage = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: digest,
-    workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types',
-    artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
-    inputClosure: proof('coverage').inputClosure, runtime,
-    certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
-      jobId: 85, step: 'Certify every required exact-source matrix element' } };
-  const omitted = Object.fromEntries(Object.values(VERIFICATION_GROUPS).flat().filter(task => task !== 'coverage').map(task => {
-    const group = taskGroup(task);
-    return [task, { ...coverage, task, workflowJob: taskWorkflowJob(task), artifactName: `ci-evidence-${group}`,
-      artifactId: 100 + Object.keys(VERIFICATION_GROUPS).indexOf(group) }];
-  }));
-  const reuse = { format: 'codexia-ci-task-input-reuse/v2', coverage, omitted };
-  assert.doesNotThrow(() => validateVerificationPlan({ ...plan, taskInputReuse: reuse }));
-  const missing = structuredClone(reuse);
-  delete missing.omitted['unit-core'];
-  assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: missing }), /proof inventory/);
-  const foreignArtifact = structuredClone(reuse);
-  foreignArtifact.omitted['unit-core'].artifactName = 'ci-evidence-unit-modules';
-  assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: foreignArtifact }), /producer identity/);
+  for (const files of [['package.json'], ['docs/README.md']]) {
+    const plan = createVerificationPlan({ files, event: 'pull_request', sha: sourceSha, base });
+    const reusedPlan = { ...plan, coverageReuse: receipt };
+    assert.doesNotThrow(() => validateVerificationPlan(plan), 'Proofs must not be mandatory for impact selection');
+    assert.doesNotThrow(() => validateVerificationPlan(reusedPlan));
+    assert.equal(createPlanDigest(reusedPlan), createPlanDigest(plan));
+    assert.throws(() => validateVerificationPlan({ ...plan, coverageReuse: { ...receipt, task: 'unit-root' } }),
+      /coverage proof identity/);
+    assert.throws(() => validateVerificationPlan({ ...plan, coverageReuse: { ...receipt, artifactDigest: 'invalid' } }),
+      /artifact digest/);
+    assert.throws(() => validateVerificationPlan({ ...plan, coverageReuse: { ...receipt, omitted: {} } }),
+      /coverage reuse receipt schema/);
+    assert.throws(() => validateVerificationPlan({ ...plan, taskInputReuse: { omitted: {} } }),
+      /canonical impact rules/);
+  }
 });
 
 test('a PR task proof is trusted only through a successful exact-main certification', () => {

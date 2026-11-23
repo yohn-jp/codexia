@@ -45,7 +45,7 @@ test("event streams bound admission and isolate failed or backpressured consumer
   assert.equal(healthy.writableEnded, true);
 });
 
-test("heartbeat and expiration use the same safe lifecycle, finish releases capacity", async () => {
+test("event streams send heartbeats and release capacity on finish", async () => {
   const streams = new EventStreams(1, 5);
   const response = new ResponseDouble();
   try {
@@ -58,28 +58,6 @@ test("heartbeat and expiration use the same safe lifecycle, finish releases capa
     try { await Promise.race([heartbeat, new Promise<void>((_, reject) => response.once("close", () => reject(new Error("closed before heartbeat"))))]); }
     finally { clearTimeout(deadline); }
     response.end();
-    assert.equal(streams.full, false);
-    const expired = new ResponseDouble();
-    const finished = new Promise<void>(resolve => expired.once("finish", resolve));
-    streams.open(expired.asResponse(), "no-store", undefined, Date.now());
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([finished, new Promise<void>((_, reject) => {
-        deadlineTimer = setTimeout(() => reject(new Error("expiration did not end the response")), 1000);
-      })]);
-    } finally { clearTimeout(deadlineTimer); }
-    assert.equal(streams.full, false);
-  } finally { streams.close(); }
-});
-
-test("publishing at an expired deadline closes before the timer can execute", () => {
-  const streams = new EventStreams(1);
-  const response = new ResponseDouble();
-  try {
-    streams.open(response.asResponse(), "no-store", undefined, Date.now());
-    streams.publish("data: expired\n\n");
-    assert.deepEqual(response.frames, []);
-    assert.equal(response.writableEnded, true);
     assert.equal(streams.full, false);
   } finally { streams.close(); }
 });

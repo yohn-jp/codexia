@@ -18,11 +18,7 @@
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
     },
-    "./worker": "./dist/worker.js",
-    "./migration": {
-      "types": "./dist/migration.d.ts",
-      "import": "./dist/migration.js"
-    }
+    "./worker": "./dist/worker.js"
   },
   "files": [
     "dist"
@@ -34,7 +30,6 @@
   },
   "dependencies": {
     "@codexia/contracts": "workspace:*",
-    "@codexia/migration": "workspace:*",
     "@codexia/module-runtime": "workspace:*",
     "@codexia/module-story": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
