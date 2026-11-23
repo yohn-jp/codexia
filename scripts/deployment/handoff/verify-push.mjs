@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
 import { assertVerificationJobs, collectGitHubPages } from '../../release/components/policy.mjs';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
-import { successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
+import { publishedBackendCompatibility, successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from '../../release/backend/image-inspection.mjs';
 import { validatePushDeploymentCertificate } from '../admission/validate.mjs';
 
@@ -152,7 +152,7 @@ function publisherSkippedRelease(publisher) {
   return false;
 }
 
-async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = fetch }) {
+async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = fetch, usePublishedSourceCompatibility = false }) {
   const runId = run.id;
   const [jobs, artifacts] = await Promise.all([
     collectGitHubPages((page, perPage) => githubJson(`actions/runs/${runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs'),
@@ -208,10 +208,12 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
         ? { CODEXIA_BACKEND_PROMOTION_DIR: scratch }
         : { CODEXIA_BACKEND_ARTIFACT_MANIFEST: receiptPath }),
     };
-    await verifyExistingBackendRelease({ env: releaseEnv, args: [full.image, sourceSha, full.producer.sourceSha,
+    await verifyExistingBackendRelease({ env: releaseEnv, usePublishedSourceCompatibility, args: [full.image, sourceSha, full.producer.sourceSha,
       full.identity.version, 'full', full.producer.event] });
 
-    const compatibility = JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json', import.meta.url), 'utf8'));
+    const compatibility = usePublishedSourceCompatibility
+      ? publishedBackendCompatibility(sourceSha)
+      : JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json', import.meta.url), 'utf8'));
     const migrationFingerprint = await expectedBackendMigrationFingerprint();
     for (const certificate of [core, full]) {
       execFileSync('docker', ['pull', certificate.image], { stdio: 'ignore', timeout: 180_000 });
@@ -243,7 +245,9 @@ export async function verifyCutoverBackendPublication(publisherRunId, { env = pr
     id: publisherRunId, attempt: selected.run_attempt, runNumber: selected.run_number, headSha: selected.head_sha,
   });
   execFileSync('git', ['merge-base', '--is-ancestor', run.head_sha, 'HEAD'], { stdio: 'ignore' });
-  const result = await verifyArtifactAndRelease({ env, payload: { workflow_run: run }, run, token, fetchImpl });
+  const result = await verifyArtifactAndRelease({
+    env, payload: { workflow_run: run }, run, token, fetchImpl, usePublishedSourceCompatibility: true,
+  });
   assert.equal(result.skipped, undefined, 'Selected backend publisher did not publish certified images');
   return result;
 }

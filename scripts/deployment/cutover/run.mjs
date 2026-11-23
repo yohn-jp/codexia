@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { verifyCutoverFrontendArtifact } from '../../verification/artifacts/frontend.mjs';
 import { createCloudflareCutover } from '../../release/cutover/cloudflare.mjs';
 import { verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
@@ -33,7 +33,7 @@ async function ansible(scratch, playbook, vars, outputKey) {
 
 function hostInput(plan, approval) {
   return {
-    planSha256: approval, sourceHostId: plan.environment.hostId,
+    planSha256: approval, notAfter: plan.window?.notAfter, sourceHostId: plan.environment.hostId,
     databaseSystemIdentifier: plan.environment.clusterId,
     priorImage: plan.prior.image, priorIdentity: plan.prior.identity,
     priorUnitSha256: plan.prior.unitSha256, priorContainerId: plan.prior.containerId,
@@ -106,11 +106,23 @@ async function execute(operation, input, scratch) {
       'Staging requires a verified, unfenced Full epoch 1 baseline');
     requireCondition(rawHash.test(input.priorArchiveSha256 ?? ''), 'Retained prior frontend archive digest is required');
     prior.archiveSha256 = input.priorArchiveSha256;
+    requireCondition(rawHash.test(input.ingressReviewSha256 ?? ''), 'Independent review of alternate ingress is required');
+    environment.ingressReviewSha256 = input.ingressReviewSha256;
+    requireCondition(typeof input.window?.id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(input.window.id) &&
+      ['notBefore', 'notAfter'].every(key => new Date(input.window[key]).toISOString() === input.window[key]) &&
+      Date.parse(input.window.notAfter) > Math.max(Date.now(), Date.parse(input.window.notBefore)), 'Invalid approved window');
 
     step('verify certified Full image and exact frontend archive');
-    const [backend, frontend] = await Promise.all([
-      verifyCutoverBackendPublication(input.backendPublisherRunId), verifyCutoverFrontendArtifact(input.frontend),
+    const [priorPublication, backend, frontend] = await Promise.all([
+      verifyCutoverBackendPublication(input.priorBackendPublisherRunId),
+      verifyCutoverBackendPublication(input.backendPublisherRunId),
+      verifyCutoverFrontendArtifact(input.frontend),
     ]);
+    requireCondition(priorPublication.fullCertificate.image === prior.image &&
+      isDeepStrictEqual(priorPublication.fullCertificate.identity, prior.identity),
+    'Installed Full release differs from its authenticated publication certificate');
+    prior.backendPublisherRunId = priorPublication.publisherRunId;
+    prior.backendCertificateSha256 = digestEvidence(priorPublication.fullCertificate);
     const { identity, image } = backend.fullCertificate;
     requireCondition(identity.profile === 'full' && identity.apiEpoch === 2 && identity.persistenceFormat === 2 &&
       identity.migrationFingerprint === prior.identity.migrationFingerprint,
@@ -137,8 +149,9 @@ async function execute(operation, input, scratch) {
     requireCondition(['candidate', 'prior'].includes(input.outcome), 'Explicit release outcome is required');
   }
   const outcome = input.outcome;
-  const recovering = operation.startsWith('recover') || (operation === 'finish' && outcome === 'prior');
-  assertMaintenanceApproval(plan, approval, { recovery: recovering });
+  const recovering = operation === 'abort-fence' || operation.startsWith('recover') || (operation === 'finish' && outcome === 'prior');
+  const verifyApproval = () => assertMaintenanceApproval(plan, approval, { recovery: recovering });
+  verifyApproval();
   requireCondition(env.CODEXIA_EPOCH_CUTOVER_PAUSED === 'true', 'Both ordinary production releases must be paused');
   const request = hostInput(plan, approval);
   const verifyIngress = async () => {
@@ -160,12 +173,40 @@ async function execute(operation, input, scratch) {
       const pair = await observePair();
       assertPairedObservation({ ...pair, pinned: plan.prior, environment: plan.environment });
       step('install the hostname fence');
+      verifyApproval();
       await edge.fence();
     }
     step('verify closed public ingress and checkpoint the stopped writer');
     await edge.verifyFenced();
+    verifyApproval();
     const checkpoint = await host('checkpoint', request);
     return { operation, checkpoint, binding: recoveryBinding(plan, checkpoint) };
+  }
+
+  if (operation === 'abort-fence') {
+    step('reconcile a fence created before any durable host change');
+    const journal = await host('observe', request);
+    requireCondition((journal.phase === null || journal.phase === 'finished') &&
+      journal.planSha256 !== approval && journal.priorContainerId === plan.prior.containerId &&
+      journal.priorUnitSha256 === plan.prior.unitSha256, 'The approved cutover must be recovered from its host journal');
+    if (ingress.fence.enabled) await edge.verifyFenced();
+    const pair = await observePair();
+    assertPairedObservation({ ...pair, pinned: plan.prior, environment: plan.environment });
+    const acceptance = JSON.parse(env.CODEXIA_CUTOVER_ACCEPTANCE);
+    assertFunctionalAcceptance(acceptance, { planSha256: approval, outcome: 'prior', origin, image: plan.prior.image,
+      workerVersion: plan.prior.workerVersion }, { since: plan.window.notBefore });
+    try {
+      verifyApproval();
+      if (ingress.fence.enabled) await edge.unfence();
+      await edge.verifyUnfenced();
+      assertPairedObservation({ ...await observePair(), pinned: plan.prior, environment: plan.environment });
+    } catch {
+      await edge.fence();
+      await edge.verifyFenced();
+      throw new Error('Prior ingress verification failed');
+    }
+    return { operation, planSha256: approval, workerVersion: plan.prior.workerVersion,
+      backendImage: plan.prior.image, acceptanceSha256: digestEvidence(acceptance) };
   }
 
   if (operation === 'finish' && !ingress.fence.enabled) {
@@ -184,6 +225,7 @@ async function execute(operation, input, scratch) {
     const binding = recoveryBinding(plan, checkpoint);
     const receipt = JSON.parse(env.CODEXIA_CUTOVER_RECOVERY_RECEIPT);
     validateEpochCutoverRecoveryReceipt(receipt, binding, plan.window);
+    verifyApproval();
     return { operation, host: await host('apply', { ...request, ...binding, recoveryReceiptSha256: digestEvidence(receipt) }) };
   }
 
@@ -209,11 +251,13 @@ async function execute(operation, input, scratch) {
       }
     }
     step('open only the canonical Tunnel behind the fence and select the paired Worker');
+    verifyApproval();
     const state = await host('open-tunnel', { ...request, outcome: target });
     if (target === 'candidate' && ingress.deployment.versionId !== plan.candidate.workerVersion) {
       await edge.assertStaged({ versionId: plan.candidate.workerVersion,
         artifactDigest: 'sha256:' + plan.candidate.frontendArtifact.artifactDigest });
     }
+    verifyApproval();
     const deployment = await edge.deploy({ fromVersionId: plan[target === 'candidate' ? 'prior' : 'candidate'].workerVersion,
       toVersionId: plan[target].workerVersion });
     const pair = await observePair();
@@ -243,6 +287,7 @@ async function execute(operation, input, scratch) {
     assertFunctionalAcceptance(acceptance, { planSha256: approval, outcome, origin, image: pinned.image,
       workerVersion: pinned.workerVersion }, { since });
     try {
+      verifyApproval();
       if (ingress.fence.enabled) await edge.unfence();
       await edge.verifyUnfenced();
       const after = await observePair();

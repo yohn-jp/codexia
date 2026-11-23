@@ -103,7 +103,12 @@ elif name == "podman":
     if cmd == "info":
         print("true")
     elif cmd == "exec" and args[0] == "codexia-db":
-        print("1234567890")
+        if "pg_control_system()" in args[-1]:
+            print("1234567890")
+        elif "pg_stat_activity" in args[-1]:
+            print("f" if s.get("extraDatabaseSession") else "t")
+        else:
+            sys.exit(94)
     elif cmd == "exec" and args[0] == api:
         image_epoch = 1 if s["image"].endswith("1" * 64) else 2
         print(json.dumps(s["identities"][image_epoch - 1]))
@@ -204,12 +209,14 @@ class CutoverHostTest(unittest.TestCase):
             "database": DATABASE, "history": HISTORY, "identities": [identity(1), identity(2)],
         }))
         self.env = dict(os.environ, CUTOVER_FIXTURE=str(self.root), HOME=str(self.root / "home"),
+                        XDG_CONFIG_HOME=str(self.root / "home/.config"),
                         CODEXIA_PUSH_STATE_DIR=str(self.state), CODEXIA_PUSH_QUADLET_DIR=str(self.root / "quadlet"),
                         CODEXIA_BACKUP_DESTINATION=str(self.root / "backups"), CODEXIA_BACKUP_RECIPIENT="age1fixture",
                         CODEXIA_BACKUP_PROGRAM=str(self.root / "bin/backup"),
                         PATH=f"{self.root / 'bin'}:{os.environ['PATH']}")
         self.input = {
             "planSha256": "a" * 64,
+            "notAfter": "2099-01-01T00:00:00.000Z",
             "sourceHostId": digest(Path("/etc/machine-id").read_text().strip().encode()),
             "databaseSystemIdentifier": "1234567890",
             "priorImage": PRIOR,
@@ -258,6 +265,10 @@ class CutoverHostTest(unittest.TestCase):
             self.assertIn("holds the deployment host lock", self.invoke("checkpoint", success=False))
         self.assertTrue(self.live()["codexia-api"])
         self.assertFalse(self.journal.exists())
+
+    def test_expired_maintenance_window_cannot_stop_the_prior_release(self):
+        self.invoke("checkpoint", success=False, notAfter="2000-01-01T00:00:00.000Z")
+        self.assertTrue(self.live()["codexia-api"])
 
     def test_checkpoint_and_independent_binding_before_candidate(self):
         observed = self.invoke("observe")
@@ -311,6 +322,13 @@ class CutoverHostTest(unittest.TestCase):
         self.invoke("recover")
         self.assertEqual(self.live()["image"], PRIOR)
         self.assertFalse(self.live()["codexia-tunnel"])
+
+    def test_another_database_session_blocks_checkpoint_after_stopping_services(self):
+        self.runtime.write_text(json.dumps(self.live() | {"extraDatabaseSession": True}))
+        self.assertIn("PostgreSQL sessions remain", self.invoke("checkpoint", success=False))
+        self.assertFalse(self.live()["codexia-api"])
+        self.assertFalse(self.live()["codexia-tunnel"])
+        self.assertNotIn("checksumManifestSha256", json.loads(self.journal.read_text()))
 
     def test_abrupt_conversion_exit_cannot_repeat_mutation_or_start_writers(self):
         self.checkpoint()

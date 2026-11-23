@@ -212,10 +212,10 @@ start_plan() {
   local scenario=$1 unit="$state/candidate-epoch2.container" plan_sha
   observe > "$work/observed.json"
   plan_sha=$(printf '%s\n' "$scenario" "$(hash_file "$work/observed.json")" | sha256sum | cut -d ' ' -f 1)
-  jq --arg planSha256 "$plan_sha" --arg candidateUnit "$unit" \
+  jq --arg planSha256 "$plan_sha" --arg candidateUnit "$unit" --arg notAfter "$(date -u -d '1 hour' '+%FT%T.000Z')" \
     --arg candidateUnitSha256 "$(hash_file "$unit")" --slurpfile candidate "$work/candidate-image.json" '
     {sourceHostId,databaseSystemIdentifier,priorContainerId,priorImage,priorIdentity,priorUnitSha256,
-      $planSha256,$candidateUnit,$candidateUnitSha256,candidateImage:$candidate[0].image,candidateIdentity:$candidate[0].identity}
+      $planSha256,$candidateUnit,$candidateUnitSha256,$notAfter,candidateImage:$candidate[0].image,candidateIdentity:$candidate[0].identity}
   ' "$work/observed.json" > "$request"
 }
 
@@ -319,6 +319,9 @@ chmod 0700 "$work/fault-bin/podman"
 interrupted=0
 PATH="$work/fault-bin:$PATH" FIXTURE_INTERRUPTED_AFTER_CONVERSION="$work/interrupted" host apply || interrupted=$?
 [[ "$interrupted" == 137 && -f "$work/interrupted" ]]
+# The short-lived Podman shim can still hold its inherited lock after the
+# controller exits. Wait for that descriptor before probing recovery.
+flock --wait 5 "$state/host.lock" true
 both_stopped
 expect_denial 'Interrupted cutover requires explicit recovery' host apply
 host recover-quiesce | jq -e '.requiresRestore == true' >/dev/null

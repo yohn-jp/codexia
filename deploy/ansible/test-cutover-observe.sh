@@ -111,7 +111,7 @@ expect_denial() {
   fi
   test ! -s "$scratch/denial.json"
   test -s "$scratch/denial.err"
-  if rg -Fq "$TEST_OWNER" "$scratch/denial.err"; then
+  if grep -Fq "$TEST_OWNER" "$scratch/denial.err"; then
     echo 'The denial exposed private input' >&2
     exit 1
   fi

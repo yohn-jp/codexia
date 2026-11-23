@@ -7,7 +7,7 @@ on:
         description: Reviewed maintenance phase
         required: true
         type: choice
-        options: [preflight, stage, checkpoint, apply, promote, recover-quiesce, recover, finish]
+        options: [preflight, stage, checkpoint, apply, promote, recover-quiesce, recover, finish, abort-fence]
       request:
         description: Digest-only phase request JSON. Never include credentials or private evidence.
         default: '{}'
@@ -94,7 +94,7 @@ jobs:
           CODEXIA_CUTOVER_INPUT: ${{ inputs.request }}
           CODEXIA_CUTOVER_RECOVERY_RECEIPT: ${{ inputs.operation == 'apply' && secrets.CODEXIA_CUTOVER_RECOVERY_RECEIPT || '' }}
           CODEXIA_CUTOVER_RESTORE_RECEIPT: ${{ inputs.operation == 'recover' && secrets.CODEXIA_CUTOVER_RESTORE_RECEIPT || '' }}
-          CODEXIA_CUTOVER_ACCEPTANCE: ${{ inputs.operation == 'finish' && secrets.CODEXIA_CUTOVER_ACCEPTANCE || '' }}
+          CODEXIA_CUTOVER_ACCEPTANCE: ${{ (inputs.operation == 'finish' || inputs.operation == 'abort-fence') && secrets.CODEXIA_CUTOVER_ACCEPTANCE || '' }}
           CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
           CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}

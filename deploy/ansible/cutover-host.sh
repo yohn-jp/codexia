@@ -51,7 +51,7 @@ HASH = r"[0-9a-f]{64}"
 PLAN_FIELDS = (
     "planSha256", "sourceHostId", "databaseSystemIdentifier", "priorImage",
     "candidateImage", "priorIdentity", "candidateIdentity", "priorContainerId",
-    "priorUnitSha256", "candidateUnit", "candidateUnitSha256",
+    "priorUnitSha256", "candidateUnit", "candidateUnitSha256", "notAfter",
 )
 BACKUP_FIELDS = ("checksumManifestSha256", "databaseFingerprint", "historyFingerprint")
 BLOCK_DROPIN = b"[Unit]\nConditionPathExists=/dev/null/codexia-cutover-blocked\n"
@@ -186,16 +186,20 @@ def require_mount(container, volume, destination):
             relevant[0].get("RW") is True, "The canonical storage volume or mount changed")
 
 
+def postgres_read(sql):
+    return output((*PODMAN, "exec", DATABASE, "sh", "-ec", '''
+        export PGPASSWORD="$(cat /run/secrets/admin-password)"
+        export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000"
+        exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
+    ''', "sh", sql), "Could not verify local PostgreSQL state")
+
+
 def cluster_identity():
     require(property_of(DATABASE, "ActiveState") == "active" and running(DATABASE) and
             inspect(DATABASE, "State.Health.Status") == "healthy", "PostgreSQL is not healthy")
     service_origin(DATABASE)
     require_mount(DATABASE, "codexia-postgres", "/var/lib/postgresql/data")
-    result = output((*PODMAN, "exec", DATABASE, "sh", "-ec",
-                     'export PGPASSWORD="$(cat /run/secrets/admin-password)"; '
-                     'exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia '
-                     '-c "SELECT system_identifier FROM pg_control_system()"'),
-                    "Could not verify the PostgreSQL cluster identity")
+    result = postgres_read("SELECT system_identifier FROM pg_control_system()")
     require(matches(r"[1-9][0-9]{0,19}", result), "PostgreSQL returned an invalid cluster identity")
     return result
 
@@ -216,8 +220,20 @@ def backend_identity(value, epoch):
             "Only the pinned Full API epoch 1/format 1 to epoch 2/format 2 cutover is supported")
 
 
+def approved_deadline(plan):
+    value = plan["notAfter"]
+    require(matches(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", value),
+            "Invalid approved maintenance deadline")
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def require_current_window(plan):
+    require(datetime.now(timezone.utc) <= approved_deadline(plan), "Approved maintenance window has ended")
+
+
 def validate_plan(request):
     require(all(key in request for key in PLAN_FIELDS), "Cutover plan is incomplete")
+    approved_deadline(request)
     for key in ("planSha256", "sourceHostId", "priorUnitSha256", "priorContainerId", "candidateUnitSha256"):
         require(matches(HASH, request[key]), f"Invalid cutover plan field {key}")
     require(matches(IMMUTABLE_IMAGE, request["priorImage"]) and
@@ -225,6 +241,8 @@ def validate_plan(request):
             request["priorImage"] != request["candidateImage"], "Cutover requires two distinct immutable Full images")
     backend_identity(request["priorIdentity"], 1)
     backend_identity(request["candidateIdentity"], 2)
+    require(request["priorIdentity"]["migrationFingerprint"] == request["candidateIdentity"]["migrationFingerprint"],
+            "This cutover requires an unchanged PostgreSQL schema migration ledger")
     candidate = Path(request["candidateUnit"])
     require(candidate.is_absolute() and candidate.parent == STATE and candidate.name.startswith("candidate-") and
             candidate.suffix == ".container", "The candidate Quadlet must be staged in the private deployment state")
@@ -309,17 +327,34 @@ def history_containers():
                   "Could not enumerate containers attached to the manuscript history volume").splitlines()
 
 
-def quiesce():
-    change_guard(TUNNEL, True)
-    change_guard(API, True)
-    service("stop", TUNNEL)
-    service("stop", API)
-    require_inactive(TUNNEL)
-    require_inactive(API)
+def close_service(name):
+    try:
+        change_guard(name, True)
+    finally:
+        # A failed persistent guard still calls for stopping the live process.
+        service("stop", name)
+        require_inactive(name)
+
+
+def stop_interrupted_maintenance():
     if running(MAINTENANCE):
         output((*PODMAN, "stop", MAINTENANCE), "Could not stop interrupted cutover maintenance")
     require(not running(MAINTENANCE), "Interrupted maintenance can still write to the deployment")
+
+
+def quiesce():
+    try:
+        close_service(TUNNEL)
+    finally:
+        try:
+            close_service(API)
+        finally:
+            stop_interrupted_maintenance()
     require(not history_containers(), "The manuscript history volume still has a running container")
+    require(postgres_read("""
+        SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+          AND usename IN ('codexia', 'codexia_auth_runtime') AND backend_type = 'client backend')
+    """) == "t", "Application or auth PostgreSQL sessions remain after the writer stopped")
 
 
 def best_effort_quiesce():
@@ -476,6 +511,7 @@ def phase_status(journal):
 
 
 def checkpoint(plan, journal):
+    require_current_window(plan)
     if journal is None:
         for name in (API, TUNNEL):
             require(not present(guard_path(name)), "Unexpected persistent cutover service guard")
@@ -493,6 +529,7 @@ def checkpoint(plan, journal):
         auth_cli(plan["priorImage"], prior_settings)
         destination = os.environ["CODEXIA_BACKUP_DESTINATION"]
         backup_command("validate-destination", destination)
+        require_current_window(plan)
         durable_write(PRIOR_UNIT, ACTIVE_UNIT.read_bytes())
         durable_write(PRIOR_RELEASE, RELEASE.read_bytes())
         journal = {"format": "codexia-cutover-host/v1", "plan": plan, "requiresRestore": False}
@@ -528,6 +565,7 @@ def match_backup(request, journal):
 
 
 def apply(request, plan, journal):
+    require_current_window(plan)
     match_backup(request, journal)
     receipt = request.get("recoveryReceiptSha256")
     require(matches(HASH, receipt), "An independently approved recovery receipt is required")
@@ -552,6 +590,7 @@ def apply(request, plan, journal):
         history_pending = history_maintenance(image, "--check") == 2
         # Record the possible DB/history mutation before the first write or
         # candidate start. Either can change persisted state despite failure.
+        require_current_window(plan)
         transition(journal, "converting", requiresRestore=True, recoveryReceiptSha256=receipt)
         if database_pending:
             database_maintenance(image, "--apply")
@@ -621,9 +660,16 @@ def check_outcome(plan, journal, outcome, phases):
 
 
 def open_tunnel(plan, journal, outcome):
+    if outcome == "candidate":
+        require_current_window(plan)
     check_outcome(plan, journal, outcome, ("ready", "tunnel"))
     if "backupDirectory" in journal:
         verify_backup(journal)
+    if journal["phase"] == f"{outcome}-tunnel":
+        if property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL) and not present(guard_path(TUNNEL)):
+            emit(phase_status(journal))
+            return
+        transition(journal, f"{outcome}-ready")
     try:
         change_guard(TUNNEL, False)
         service("reset-failed", TUNNEL)
@@ -631,8 +677,7 @@ def open_tunnel(plan, journal, outcome):
         require(property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL), "Tunnel is not running behind the external fence")
         transition(journal, f"{outcome}-tunnel")
     except (CutoverError, OSError):
-        change_guard(TUNNEL, True)
-        service("stop", TUNNEL)
+        close_service(TUNNEL)
         raise
     emit(phase_status(journal))
 

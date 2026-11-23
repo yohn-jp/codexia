@@ -54,6 +54,7 @@
             follow: false
             checksum_algorithm: sha256
           register: settings
+          when: cutover_operation == 'stage'
 
         - name: Confirm authentication settings are immutable and private
           ansible.builtin.assert:
@@ -62,6 +63,7 @@
               - settings.stat.mode == '0600'
               - settings.stat.uid == ansible_facts.user_uid
               - settings.stat.checksum == cutover_request.settingsSha256
+          when: cutover_operation == 'stage'
 
         - name: Prepare the exact Full candidate without modifying the API unit
           when: cutover_operation == 'stage'
