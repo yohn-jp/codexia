@@ -397,6 +397,8 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     'restore proof query matches the API auth schema fingerprint source');
   const toolImage = toolchain.restoreDrill.podmanImage;
   const innerCommand = [
+    // Report the precise failing stage without logging a recovery identity or DB contents.
+    `trap 'status=$?; printf "DBV-007 isolated restore failed at command line %s (status %s)\\n" "$LINENO" "$status" >&2' ERR`,
     'mkdir -p /run/user/0 /tmp/codexia-state /contract/restore-proof',
     'chmod 700 /run/user/0 /tmp/codexia-state',
     'cp /contract/identity /tmp/codexia-restore-identity',
@@ -406,7 +408,9 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     'podman load -i /contract/postgres-image.tar >/dev/null',
     `loaded_id="$(podman image inspect --format '{{.Id}}' ${postgresId})"`,
     'test "${loaded_id#sha256:}" = "' + postgresId.replace(/^sha256:/u, '') + '"',
+    'echo "DBV-007 stage: restore encrypted v2 artifact" >&2',
     'bash /contract/backup.sh drill /contract/backup "$CODEXIA_RESTORE_IDENTITY" --approved',
+    'echo "DBV-007 stage: verify restored identities" >&2',
     'bash /contract/restore-proof.sh',
     'chown -R "$CODEXIA_HOST_UID:$CODEXIA_HOST_GID" /contract/restore-proof',
   ].join('\n');
