@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { createInventory } from './artifacts.mjs';
 import { buildIdentity, hashTree, sourceIdentity, writeNewJsonResult } from './common.mjs';
 import { generate } from './dataset.mjs';
+import { assertSyntheticSamples } from './k6-evidence.mjs';
 import { startFixture } from './k6-fixture.mjs';
 
 const exec = promisify(execFile);
@@ -18,7 +19,7 @@ const docker = (args, env) => exec('docker', ['--host', 'unix:///var/run/docker.
   { timeout: 60_000, env });
 const k6Version = '2.4.0';
 const sha256 = content => createHash('sha256').update(content).digest('hex');
-const scripts = ['k6-run.mjs', 'k6-fixture.mjs', 'k6-target.mjs', 'k6-scenarios.js'];
+const scripts = ['k6-run.mjs', 'k6-evidence.mjs', 'k6-fixture.mjs', 'k6-target.mjs', 'k6-scenarios.js'];
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 
 async function run() {
@@ -120,6 +121,7 @@ async function run() {
       k6: { exitCode, signal },
     });
     if (exitCode !== 0 || signal !== null) throw new Error(`k6 exited with ${exitCode ?? signal}; evidence is in ${output}`);
+    await assertSyntheticSamples(output);
     await createInventory(output, ['dataset.json', 'k6-samples.jsonl', 'k6-summary.json', 'run.json'], join(output, 'inventory.json'));
     console.log(`Synthetic k6 ${profile} evidence: ${output}`);
   } finally {
