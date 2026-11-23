@@ -39,7 +39,7 @@
     "@codexia/module-runtime": "workspace:*",
     "@codexia/persistence-contracts": "workspace:*",
     "@codexia/persistence-postgres": "workspace:*",
-    "@simplewebauthn/server": "13.3.3",
+    "@simplewebauthn/server": "14.1.0",
     "better-auth": "1.7.26",
     "fastify": "^5.12.8",
     "jose": "6.2.17",
