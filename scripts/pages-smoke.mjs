@@ -82,15 +82,18 @@ async function assertVisibleCopyableSha(page, selector, expected, label) {
     let text, index = 0;
     while ((text = walker.nextNode())) {
       const clips = [];
+      let notRendered = getComputedStyle(text.parentElement).visibility !== 'visible';
+      let transparent = false;
       for (let parent = text.parentElement; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent);
-        if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) {
-          return { error: `SHA character ${index} is hidden` };
-        }
+        if (style.display === 'none') notRendered = true;
+        if (Number(style.opacity) === 0) transparent = true;
         const x = ['hidden', 'clip'].includes(style.overflowX);
         const y = ['hidden', 'clip'].includes(style.overflowY);
         if (x || y) clips.push({ rect: parent.getBoundingClientRect(), x, y });
       }
+      if (notRendered) continue;
+      if (transparent) return { error: `SHA character ${index} is hidden` };
       for (let offset = 0; offset < text.length; offset++, index++) {
         range.setStart(text, offset); range.setEnd(text, offset + 1);
         const rects = [...range.getClientRects()];
