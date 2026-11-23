@@ -24,9 +24,9 @@ on:
       - pnpm-workspace.yaml
       - scripts/ci-workspace.mjs
       - scripts/ci-parallel.mjs
-      - scripts/profile-build.mjs
-      - scripts/read-regular-file.mjs
-      - scripts/profile-package.mjs
+      - scripts/build/packaging/profile-build.mjs
+      - scripts/shared/read-regular-file.mjs
+      - scripts/build/packaging/profile-package.mjs
       - scripts/verify-oci.sh
       - scripts/verify-oci-http.mjs
       - scripts/oci-better-auth-fixture.sh

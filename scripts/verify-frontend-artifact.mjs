@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
-import { assertFrontendOAuthConfigIdentity } from './frontend-oauth-config.mjs';
+import { assertFrontendOAuthConfigIdentity } from './build/frontend/oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
 import { assertFrontendIdentity } from './verify-frontend-compatibility.mjs';
 import { verifyReusableMainProof } from './reuse-pr-verification.mjs';

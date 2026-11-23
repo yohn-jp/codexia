@@ -5,9 +5,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createBuildCommands } from './profile-package.mjs';
+import { createBuildCommands } from './packaging/profile-package.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export function createRootBuildCommands(profileName, profile) {
   const selectedProfile = profileName || 'core';

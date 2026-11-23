@@ -4,7 +4,7 @@ import { link, mkdtemp, open, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { readFile, rename, rm } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { readRegularFile as readRegularFileDescriptor } from '../read-regular-file.mjs';
+import { readRegularFile as readRegularFileDescriptor } from '../shared/read-regular-file.mjs';
 
 export function distribution(values) {
   if (!values.length) return { n: 0, p50: null, p95: null, p99: null };
