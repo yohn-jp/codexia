@@ -37,11 +37,11 @@ function assertAdmittedRouteInventory(openapi) {
     throw new Error(`Admitted route inventory mismatch: missing=[${missing.join(", ")}], unexpected=[${unexpected.join(", ")}]`);
   }
   if (actual.length !== expected.length) throw new Error("Admitted route inventory contains duplicate method/path entries");
-  if (new Set(expected.map((key) => key.slice(key.indexOf(" ") + 1))).size !== 88) {
-    throw new Error("Admitted route inventory must contain exactly 88 path templates");
+  if (new Set(expected.map((key) => key.slice(key.indexOf(" ") + 1))).size !== 90) {
+    throw new Error("Admitted route inventory must contain exactly 90 path templates");
   }
-  if (admittedInventory.current.length !== 102 || admittedInventory.target.length !== 11) {
-    throw new Error("Admitted route inventory must distinguish 102 current routes from 11 target routes");
+  if (admittedInventory.current.length !== 104 || admittedInventory.target.length !== 11) {
+    throw new Error("Admitted route inventory must distinguish 104 current routes from 11 target routes");
   }
 
   const targetSet = new Set(admittedInventory.target);
@@ -57,7 +57,8 @@ function assertAdmittedRouteInventory(openapi) {
   assert.equal(betterAuth?.libraryOperationsIncludedHere, false);
   assert.deepEqual(betterAuth?.applicationAdaptersHere, admittedInventory.betterAuthAdapters);
   assert.deepEqual(openapi["x-codexia-external-contracts"]?.betterAuthMetadataPaths, admittedInventory.betterAuthExternal.metadataPaths);
-  for (const externalOperation of admittedInventory.betterAuthExternal.excludedLibraryOperations) {
+  assert.deepEqual(betterAuth?.setupOnlyOfficialLibraryPaths, admittedInventory.betterAuthExternal.excludedApplicationWrappers);
+  for (const externalOperation of [...admittedInventory.betterAuthExternal.excludedLibraryOperations, ...admittedInventory.betterAuthExternal.excludedApplicationWrappers]) {
     assert.ok(!actualSet.has(externalOperation), `${externalOperation} belongs to Better Auth's official external contract`);
   }
   for (const adapter of admittedInventory.betterAuthAdapters) assert.ok(actualSet.has(adapter), `${adapter} is Codexia-owned`);
@@ -102,7 +103,8 @@ test("TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs", (t) 
   assert.match(openapi["x-codexia-cors"].originPolicy, /wildcard origins are forbidden/u);
   assert.ok(openapi["x-codexia-cors"].mcpExposeHeaders.includes("Mcp-Session-Id"));
   assert.equal(openapi["x-codexia-external-contracts"].betterAuth.libraryOperationsIncludedHere, false);
-  assert.ok(!openapi.paths["/api/auth/codexia/auth-methods"]);
+  assert.equal(openapi.paths["/api/auth/codexia/auth-methods"].get.operationId, "auth_methods_get");
+  assert.equal(openapi.paths["/api/auth/codexia/owner-session"].post.operationId, "owner_session_confirm_post");
   assert.ok(!openapi.paths["/api/auth/sign-in/email"]);
   assert.ok(openapi.paths["/api/auth/oauth2/consent-context"].post);
   assert.ok(openapi.paths["/api/auth/oauth2/get-consents"].get);
@@ -124,7 +126,7 @@ test("the generated contract exactly matches the independent admitted route inve
   t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
   const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
   const inventory = assertAdmittedRouteInventory(openapi);
-  assert.equal(inventory.length, 113);
+  assert.equal(inventory.length, 115);
   assert.ok(!openapi.paths["/api/projects/{projectId}/modules/assistant/rewrite/stream"]);
   assert.ok(!openapi.paths["/api/projects/{projectId}/modules/assistant/qa/stream"]);
   const operations = Object.values(openapi.paths).flatMap((pathItem) =>

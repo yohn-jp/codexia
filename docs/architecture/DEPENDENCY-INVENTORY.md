@@ -33,7 +33,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 | `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
-| `orval` | `8.48.0` | app・OpenAPI 3.1からDesktop Web用fetch clientとZod DTOを生成 | **開発専用**: pnpmの公開経過時間ポリシーを満たす版を固定。更新時は選択したoperationのmethod/path照合、再生成差分、Zod検証、appの型検査とテストを確認 |
+| `orval` | `8.49.0` | app・OpenAPI 3.1からDesktop Web用fetch clientとZod DTOを生成 | **開発専用**: pnpmの公開経過時間ポリシーを満たす版を固定。更新時は選択したoperationのmethod/path照合、再生成差分、Zod検証、appの型検査とテストを確認 |
 | `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
 | `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
 | `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
@@ -117,6 +117,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | 対象 | 宣言・実装の基準 | 分類／更新条件 |
 | --- | --- | --- |
 | Node.js | root `engines.node >=24`、Verifyでは`24.22.3`、Backend OCIはNode 24 digest固定 | **連動**: 実行版・型定義・CIイメージ・本番OCIを別々に更新しない。Node 26への移行を承認し実証した後で`@types/node` 26へ進む |
+| Swift OpenAPI Generator | `ios/CodexiaTransport/Package.resolved`: generator `1.14.4`, runtime `1.13.4`, URLSession `1.4.0` | **連動**: TypeSpec由来のOpenAPI 3.1から全operation IDを照合し、再生成、Swift契約テスト、Simulatorを確認 |
+| Ajv | Fastify 5.12.8の推移依存 `8.20.0`、`ajv-formats` `3.0.1` | **連動**: `pnpm-lock.yaml` に従い、FastifyのDraft-07検証とserializerを隔離routeで確認 |
 | pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **連動**: 同期更新、lockfileの互換性・Corepack・キャッシュキーを検証 |
 | AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
 | Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |

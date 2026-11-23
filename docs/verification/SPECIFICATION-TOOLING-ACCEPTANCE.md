@@ -30,7 +30,9 @@
 | G6 性能 | k6 threshold、現行比較baseline、起動/stream/DB負荷 | 承認済みp95/p99、RPS、RSS、SSE維持等のbudget違反 | cheap smokeはPR、長時間は明示したisolated run |
 | G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装 | 部分的にはPR、全量認定はrelease前 |
 
-**この表のG0〜G7は要求される受入モデルであり、現状存在するCI task名ではない。** 実装時は `scripts/ci/impact/contract.mjs` / `ci-impact.mjs` / `verify.yml` / release certifierへ一貫して組み込み、既存の20 job目安などのCI予算とindependent task parallelismを保つ。新しい検証を追加しただけで旧検証を消さない。差し替え時は旧テストの検出能力と新テストの合致を示す。
+G0〜G7は受入モデルであり、実行タスクは [CI/CD契約](CI-CD.md) から参照する。
+HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-contract` を使用する。
+検証を追加するときは影響範囲、タスクの入力、実行証拠を同時に更新する。
 
 ## 既存REQ-IDから検証義務への接続
 
@@ -54,7 +56,9 @@
 ## OpenAPI lint・diff・runtime検証の分界
 
 - RedoclyはOpenAPI構造、参照、operationId一意性、HTTP status/scheme/response Schema、必要なタグ/説明/trace metadataをチェックする。アプリの認可は保証しない。
-- oasdiffはPRの新しい生成OpenAPIと承認済みbaseから生成したOpenAPIを比較する。既存設計で定める `apiEpoch` とcompatibilityを評価し、無条件のbreaking変更を見逃さない。必要な変更は新API epoch/クライアント設計を先に採用する。
+- oasdiffはコミット済みの生成OpenAPIを比較する。
+  pull requestはイベントの `pull_request.base.sha`、mainへのpushはイベントの `before` SHAを基準にする。
+  エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。
 - Schemathesisは**隔離API**で実行する。書込み可能であるため本番や作者データに接続してはならない。Zod/TypeSpecの正常ケース、status/error/body、security testing、boundary/rate/invalid payload等を補強する。
 - Schemathesisによる拒否確認と、Codexiaのowner-only / MCP-proposal / project-BOLA / write preconditionを別々の独立したテストとして保持する。
 - HTTP error/codeやoptional responseがTypeSpec上で定義されていない場合、ツールがスキーマを自動修正するのではなくAPI-CONTRACTへ設計決定を戻す。
@@ -99,6 +103,7 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 - StrictDocへの実行証拠リンクはexternal CI run/artifactを参照し、CI artifactのないソースコード参照をTEST PASSと誤認しない。
 - 初期導入PRでは、mockデータ・登録済み全要求の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
 
-## このPRの完了と次の受入
+## 実行結果の参照
 
-本書で**ツールごとの検証目的とガバナンスを確定**。実際に生成したTypeSpec OpenAPI、StrictDoc HTML、pgTAP schemaテスト、MCP v2 conformance、k6測定、LikeC4/Threagileモデル、Scalar公開画面、GitHub Actionsの新taskを**作成・実行したわけではない**。後続の導入PRでは、対応するG0〜G7の実行結果とCI影響を区別して報告する。
+受入結果は、該当するソースSHAのCI run、検査レポート、公開manifestから参照する。
+公開済みの静的契約と、実DB、API、ブラウザー、稼働環境での適合は、各検証が実行された範囲で判定する。

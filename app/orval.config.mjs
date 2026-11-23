@@ -21,7 +21,7 @@ export function httpClientConfig(input, outputDirectory) {
           name: "generatedHttpFetch",
         },
         fetch: { includeHttpResponseReturnType: false, runtimeValidation: true },
-        includeZodSchemaInArguments: true,
+        includeSchemaInArguments: true,
         zod: { version: 4 },
       },
     },

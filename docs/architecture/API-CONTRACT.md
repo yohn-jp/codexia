@@ -2,7 +2,9 @@
 
 **種別: 規範的API設計。** この文書は **APIのmethod/path、入力・出力DTO、HTTP status・エラー、競合・冪等性、version、検証可能性** を所有する。principalとURLごとの許可・拒否は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuth/Better Authのプロトコルは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) と [MCP OAuth](MCP-OAUTH.md)、Coreの変更/receiptの意味は [Core](CORE.md) が正本である。ここで第二の権限モデルや代替writerを作らない。
 
-**ベースライン:** main@e02933aead466b14cbcd336905b9c2a2a2b39f06。実装の所在・一部DTOを読み取った初期契約であり、全route・全fieldを網羅していない。後述の未充足項目を完全なOpenAPIと偽らない。存在するpathは目標となるpathの実装状況とは別に管理する。
+Codexiaが所有するHTTPのワイヤ契約は [TypeSpec](../../packages/http-contract/src/main.tsp) で編集する。
+この文書は操作の意味、認可の責務、互換性の判断を定める。
+[生成したOpenAPI](../../packages/http-contract/openapi/codexia.openapi.yaml) から各操作のHTTP表現を参照できる。
 
 ## 契約境界
 
@@ -27,11 +29,17 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 | Link | REQ-ID、設計節、handler symbol、関連SQL object、DTO定義、TEST-IDと実行証拠 |
 | Lifecycle | 現行/採用済み将来目標/廃止。公開互換性・変更時の評価とrelease epoch |
 
-実装と仕様の差はこの文書/trace台帳に記録し、コードだけから正本を生成して正当化しない。OpenAPI Schemaを導入する場合、**設計正本と型/handlerの一意の生成・照合方向**を決定するまで両方を独立編集可能な正本としない。
+TypeSpecの各操作には、英小文字と数字をアンダースコアで区切った明示的な `operationId` を付ける。
+IDは重複させず、表示名や説明を変えるときも維持する。
+共有または生成クライアントに公開するモデルには、`PersistenceDocument` のように領域と意味を表すPascalCase名を付ける。
+操作の状態は `x-codexia-contract-status` で表す。
+`target` は採用済みの未実装設計、`incomplete` は詳細または証拠が欠けている契約、`complete` はワイヤ定義が揃った契約を指す。
+実行環境の適合はソースSHAに結び付いた検証証拠で判断する。
 
-## HTTP Operation初期台帳
+## 操作群と設計の参照先
 
-下表は構造を確認した入口の「初期索引」。許可主体は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) が決定する。詳細schema未掲載の行は **INCOMPLETE** とする。
+操作群の設計を下表に示す。
+個別のmethod/path、`operationId`、DTOはTypeSpecから参照し、許可主体は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) で確認する。
 
 | Operation ID | method + path（主なfamily） | principal | handler/契約位置 | 詳細化状況 |
 | --- | --- | --- | --- | --- |
@@ -61,18 +69,20 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 | API-BACKUP-CONSOLE-001 | GET /api/console/backups/status、GET /api/console/backups/config、PUT /api/console/backups/config/draft | OWNER-SESSION、If-Matchと書込時のfresh | [Backup console](BACKUP-CONSOLE-CONTRACT.md)・将来のFastify route | **目標/未実装。BKC-001〜003** |
 | API-BACKUP-CONSOLE-002 | POST /api/console/backups/config/probes、GET .../config/probes/:id、POST .../config/{activate,disable} | OWNER-SESSION＋probe/revisionとfreshの適用 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-004〜007** |
 | API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET /api/console/backups/runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-008〜010** |
-| API-SETUP-001 | /api/auth/codexia/setup/* | SETUP等・厳密な状態別 | [AuthN/AuthZ](API-AUTHN-AUTHZ.md) | **ACCEPTED TARGET / NOT IMPLEMENTED** |
+| API-SETUP-001 | /api/auth/codexia/setup/* | 可否の公開応答とSETUP transactionを分離 | [AuthN/AuthZ](API-AUTHN-AUTHZ.md)、`packages/api/src/owner-setup.ts` | setup専用routeを実装。保護された稼働環境での登録受入は別途確認 |
 
-**展開必須:** 集約表の波括弧表記・wildcardは設計概要でしかない。最終版では全メソッド＋実pathに対してID、schema、権限、code symbol、testを独立に記録する。現在の family IDで全ルートをカバーしたと報告しない。既存の [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) には全般の個別認可表があり、それを漏れ検査の入力にする。
+この表の分類IDは設計上の参照に使用する。
+各method/pathとoperation IDの対応は生成OpenAPIで確認する。
+ハンドラーと試験への追跡は [Traceability](../verification/TRACEABILITY-REGISTER.md) が扱う。
 
-## 実ソースから確認した詳細契約
+## 操作の意味と検証の責務
 
-### API-OWNER-SESSION-001 — 管理コンソールの所有者セッション確認
+### 管理コンソールの所有者セッション確認（API-OWNER-SESSION-001）
 
 - POST `/api/auth/codexia/owner-session`。JSON bodyは空object `{}`、cookie credentialだけを受け付ける。要求には公開originと完全一致する`Origin`が必要。missing/mismatched `Origin`、`Authorization` header、cookieとbearerの併用を拒否する。
 - Better Authが署名・期限を検証したセッションのuser IDが、server設定のowner subjectと一致する場合だけHTTP 200、bodyは`{"authenticated":true}`。user/session ID、email、consent、credentialを返さない。
 - 有効sessionがない場合は401 `AUTHENTICATION_REQUIRED`。owner以外、bearer credential、cross-originは403。JSON bodyが空object以外または型が違う場合は400 `OWNER_SESSION_REQUEST_INVALID`。
-- `Cache-Control: no-store`はserver共通security headerで適用。cookieをOWNER-API bearerやAPI project/sessionに変換しない。実装は [route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) のOWNER-SESSION境界と、本issue #662のconsole route entryで使う。
+- `Cache-Control: no-store`はserver共通security headerで適用。cookieをOWNER-API bearerやAPI project/sessionに変換しない。実装は [route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) のOWNER-SESSION境界とconsoleの入口で使う。
 - SOURCE: `packages/api/src/server.ts` のexplicit route admission、`packages/api/src/better-auth.ts` の`checkOwnerSession`。
 - TEST: `packages/api/src/server.test.ts` と `packages/api/src/better-auth.persistence.test.ts`。
 
@@ -127,13 +137,21 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 1. server.ts、persistence-routes.ts、auth providerの登録済みルート、全module contribution、public reader、/mcpを列挙し、path+methodの全行をこの台帳と照合する。
 2. 全入力/出力のDTO、エラーとheader、version・idempotency・authorizationにSchema定義または等価な型契約を与える。
 3. 仕様→handler・型・DB object・test、handler→要求の双方を [Traceability](../verification/TRACEABILITY-REGISTER.md) に記録する。
-4. **採用済み目標:** [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)に従ってTypeSpecをAPIワイヤの編集正本とし、OpenAPI 3.1.0を生成、Fastify標準ルート/JSON Schema/Ajv、Orval生成client、Redocly/Scalar/oasdiff/Schemathesisで実装・表示・検証する。Better Authのライブラリ管理OAuth endpointは別生成ソースとして検証する。**実導入・全route網羅は未完了**であり、コードに合わせた仕様の追認を禁止する。
-5. 稼働環境のOpenAPI/HTTP検証が未実行ならVERIFIEDとしない。設計書の追加自体ではCIやhandlerの改修を要求しない。
+4. TypeSpecからOpenAPI 3.1.0を生成し、決定性、構造、互換性、実装との照合を [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md) と [ツール受入契約](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に従って検証する。
+5. Better Authが提供するライブラリ操作は公式契約に委ねる。Codexiaの認証アダプターとMCPのHTTP入口はTypeSpecに含め、MCPのtool schemaはSDK側が所有する。
+
+### 操作の追加、変更、廃止
+
+1. 領域設計で公開範囲、許可主体、リクエスト、成功・失敗時の応答を決め、該当するTypeSpecを変更する。
+2. `pnpm --filter @codexia/http-contract generate` でOpenAPIを再生成する。TypeSpecと生成差分を同じ変更に含める。
+3. `pnpm test:http-contract` で生成差分、Redocly、oasdiff、Fastifyのスキーマ適合を確認する。生成物を使用するDesktopとiOSの再生成検査も実行する。
+4. 廃止予定を告知する場合はTypeSpecに廃止予定を記載する。互換性を壊す削除や変更は、利用者の移行とAPI epochの切替を規定する互換手順で扱う。
 
 ## バックアップ管理API（採用済み目標・未実装）
 
 `/api/console/backups/*` は通常の `OWNER-API` bearer用作品APIでもMCPのtool/actionでもない。Cloudflare Workers配信 `/console/backups` から**OWNER-SESSION専用・CSRF/Origin保護**で呼ぶ。fresh proofが必要なmutationと、各method、status/error、version/idempotency、secretの非表示は [Backup console contract](BACKUP-CONSOLE-CONTRACT.md) の `BKC-001`〜`BKC-010` が所有する。
 
-- 契約DTOはTypeSpec→OpenAPI3.1で生成するが、現時点ではOperation-ID索引だけ。秘密を含むcredential inputはwriteOnlyであり、OpenAPI公開例やScalarの静的Pagesに実値を含めない。
+- 契約DTOは [Backup ConsoleのTypeSpec](../../packages/http-contract/src/routes-backup-console.tsp) から生成し、各操作に `target` を付ける。
+- 秘密を含む入力は書き込み専用とし、公開契約の例やScalarへ秘密値を含めない。
 - `202`のprobe・activate・manual backup要求は`operationId`/`probeId`/`runId`を返し、成功は**実executor receiptをGETで再取得して**初めて判断する。別にPOST本番復元エンドポイントは存在しない。
 - 異常系として401/403/404/409/412/422/429/503と、重複/応答不明、S3 credential失効、metadata SSRF、bucket越境、CSRF、owner session expirationを実APIで検証する。
