@@ -27,39 +27,7 @@
 - AI の推論・生成は外部クライアントで実施し、Codexia は MCP 経由で文脈、読取、検証、提案と作者承認を提供する。内部生成モデル API の拡張は凍結する。
 - Git レポジトリを原稿ストア、同期、復旧、デプロイ制御として復活させない。内部のファイル状投影は過渡的な読み取り表現であり、独立した正本または永久互換性の根拠にしない。
 
-```mermaid
-flowchart TB
-    subgraph Clients["利用・外部クライアント"]
-        D["Desktop Web<br/>React + CodeMirror"]
-        I["iOS native<br/>SwiftUI + TextKit 2"]
-        M["外部 AI / MCP client"]
-    end
-    subgraph Edge["公開プレーン"]
-        A["Cloudflare Workers Static Assets<br/>AccessでUI入口を保護"]
-        T["Cloudflare Tunnel / API ingress"]
-    end
-    subgraph App["アプリケーションプレーン"]
-        H["Fastify admission<br/>Better Auth / OAuth / project authorization"]
-        C["Core: snapshot / author-approved mutations"]
-        R["Trusted module runtime<br/>read / compute / propose"]
-        P["PostgreSQL persistence adapter"]
-    end
-    DB[("PostgreSQL<br/>canonical author data + auth schema")]
-    JW[("Web IndexedDB<br/>recoverable draft only")]
-    JI[("iOS protected local files<br/>recoverable draft only")]
-    D --> A
-    D --> T
-    I --> T
-    M --> T
-    D <--> JW
-    I <--> JI
-    T --> H
-    H --> C
-    C <--> R
-    C --> P
-    P --> DB
-    H --> DB
-```
+**C4構造・信頼境界図の正本:** [LikeC4 system model](./likec4/model.likec4)。本書とリンク先の領域設計が製品上の意味・認可・永続化の正本を維持し、LikeC4 model は承認済みのsystem context、container/component、依存方向、外部trust relationshipを構造契約として表す。Architecture Atlas の `system-1` はこのモデルから生成する派生Mermaidであり、直接編集しない。
 
 通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`、**バックアップ保管先管理の`/console/backups`**）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
 

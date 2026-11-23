@@ -1,0 +1,1131 @@
+threagile_version: 1.0.0
+
+title: Codexia architecture and threat inventory
+date: 2026-11-23
+author:
+  name: Codexia maintainers
+  homepage: https://github.com/yohn-jp/codexia
+management_summary_comment: >
+  Static design-time risk inventory for the approved Codexia architecture.
+  Risk tracking is unchecked until the corresponding implementation and runtime
+  verification are independently evidenced; this model does not certify them.
+business_criticality: critical
+business_overview:
+  description: >
+    Codexia stores an author's manuscript and related creative project data.
+    PostgreSQL is the only canonical manuscript authority.
+  images:
+technical_overview:
+  description: >
+    Desktop Web and native iOS client targets use Cloudflare edge routing and
+    the authenticated Fastify API. External AI clients use the restricted MCP
+    adapter. Protected GitHub Actions, Tailscale, SSH and Ansible form a
+    separate operations path.
+  images:
+questions:
+  Is Cloudflare Access the Codexia object-authorization authority?: >
+    No. API admission independently validates the principal, project, object,
+    revision and effect.
+  Is the S3-compatible backup path certified as deployed or restorable?: >
+    No. S3 transfer and isolated restore remain design targets and require
+    independent implementation evidence.
+  Is public Pages output permitted to contain credentials or private data?: >
+    No. Only static public design material is in scope; credentials and private
+    repository data are excluded.
+abuse_cases:
+  Cross-project manuscript access: >
+    An authenticated principal substitutes an object identifier from another
+    project to read or mutate manuscript data.
+  MCP issuer or resource confusion: >
+    A client presents a token at the wrong issuer or resource boundary or uses
+    a grant broader than its assigned project and scope.
+  Session or reader scope confusion: >
+    A browser session, MCP client, owner, or public reader is confused with a
+    different principal or disclosure scope.
+  False persistence receipt: >
+    A caller is told that a manuscript mutation committed when PostgreSQL did
+    not commit the corresponding revision and receipt.
+  Edge and operator plane confusion: >
+    Public Cloudflare routing is confused with the protected Tailscale, SSH,
+    Ansible and host-operations plane.
+  Backup key or restore compromise: >
+    Ciphertext, object identity, age recovery keys, credentials or independent
+    restore receipts are exposed or confused.
+  Public Pages disclosure: >
+    A generated public documentation artifact contains a credential or private
+    source material.
+security_requirements:
+  Object authorization: >
+    Bind every request to the authenticated principal and authorized project,
+    object, revision and effect. Fail closed when any scope is missing.
+  Restricted MCP: >
+    Limit MCP to assigned-project read, compute and propose operations. Keep
+    approval, apply, owner-only operations and deployment outside MCP.
+  Canonical persistence receipt: >
+    Treat a mutation as confirmed only after the PostgreSQL transaction commits
+    the revision and its durable receipt.
+  Separate edge and operations planes: >
+    Cloudflare UI/API routing does not grant project authorization or host
+    administration. Keep the Tailscale/SSH/Ansible path protected.
+  Backup separation: >
+    Encrypt backup artifacts with age before off-VM transfer. Keep recovery keys
+    and S3 credentials outside public artifacts and verify downloaded bytes and
+    an independent receipt before isolated restore.
+  Public artifact hygiene: >
+    Scan public architecture source and generated material for credential-like
+    values and exclude private repository data.
+tags_available:
+  - codexia
+  - architecture-model
+  - public-static-design
+  - age-encrypted-backup
+
+data_assets:
+  Manuscript and project data:
+    id: manuscript
+    description: Canonical author manuscript, revisions, Knowledge, Evidence and project records
+    usage: business
+    tags:
+      - codexia
+    origin: Author
+    owner: Codexia author
+    quantity: many
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: >
+      PostgreSQL is the sole canonical authority for manuscript and project
+      records. Cross-project isolation and durable revision receipts are required.
+  Session and OAuth state:
+    id: session-state
+    description: Better Auth sessions, OAuth grants and server-side identity state
+    usage: business
+    tags:
+      - codexia
+    origin: Codexia API
+    owner: Codexia author
+    quantity: very-few
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: critical
+    justification_cia_rating: >
+      Session and grant state determines access to the author and assigned MCP
+      client surfaces and must not be confused across principals.
+  Age-encrypted backup artifacts:
+    id: backup-ciphertext
+    description: Age-encrypted PostgreSQL, history and manifest artifacts
+    usage: devops
+    tags:
+      - age-encrypted-backup
+    origin: Protected Codexia backup executor
+    owner: Codexia operators
+    quantity: many
+    confidentiality: confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: >
+      Ciphertext is a disaster-recovery input. Integrity, backup identity,
+      independent receipt and key separation must be verified before restore.
+  Public design artifacts:
+    id: public-design
+    description: Approved architecture diagrams and public design documentation
+    usage: devops
+    tags:
+      - public-static-design
+    origin: Public repository
+    owner: Codexia maintainers
+    quantity: many
+    confidentiality: public
+    integrity: critical
+    availability: important
+    justification_cia_rating: >
+      These static documents are intentionally public, but must not contain
+      credentials, private repository data or authorization claims.
+
+technical_assets:
+  Desktop Web client target:
+    id: web-client
+    description: Desktop Web browser UI target; no Mobile Web or PWA target
+    type: external-entity
+    usage: business
+    used_as_client_by_human: true
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: browser
+    tags:
+      - codexia
+    internet: true
+    machine: physical
+    encryption: none
+    owner: Codexia author
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Browser client holds transient author context and must not define API authorization.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+      - session-state
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Loads public UI:
+        target: cloudflare-workers
+        description: Loads static assets protected at the UI entry by Cloudflare Access
+        protocol: https
+        authentication: externalized
+        authorization: none
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: true
+        usage: business
+        data_assets_sent:
+          - session-state
+        data_assets_received:
+          - public-design
+      Authenticated API calls:
+        target: codexia-api
+        description: Calls the API; Cloudflare Access does not replace API object authorization
+        protocol: https
+        authentication: token
+        authorization: enduser-identity-propagation
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+          - session-state
+        data_assets_received:
+          - manuscript
+
+  iOS native client target:
+    id: ios-client
+    description: Native SwiftUI and TextKit 2 target using the API OAuth flow
+    type: external-entity
+    usage: business
+    used_as_client_by_human: true
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: mobile-app
+    tags:
+      - codexia
+    internet: true
+    machine: physical
+    encryption: data-with-enduser-individual-key
+    owner: Codexia author
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Installed client uses OS-protected OAuth credentials and the same API project authorization.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: true
+    data_assets_processed:
+      - manuscript
+      - session-state
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Authenticated API calls:
+        target: codexia-api
+        description: Calls the same API authorization boundary as the browser
+        protocol: https
+        authentication: token
+        authorization: enduser-identity-propagation
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+          - session-state
+        data_assets_received:
+          - manuscript
+
+  External AI MCP client:
+    id: mcp-client
+    description: External AI client owns inference and connects through restricted MCP
+    type: external-entity
+    usage: business
+    used_as_client_by_human: true
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: client-system
+    tags:
+      - codexia
+    internet: true
+    machine: physical
+    encryption: none
+    owner: External client operator
+    confidentiality: restricted
+    integrity: important
+    availability: important
+    justification_cia_rating: External AI clients receive only project-authorized, scope-limited context and proposals.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Restricted MCP requests:
+        target: codexia-api
+        description: Uses the OAuth protected MCP resource and assigned read, compute or propose scopes
+        protocol: https
+        authentication: token
+        authorization: enduser-identity-propagation
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+        data_assets_received:
+          - manuscript
+
+  Cloudflare Workers Static Assets and Access:
+    id: cloudflare-workers
+    description: Static UI delivery and Access-protected browser entry
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: web-server
+    tags:
+      - codexia
+    internet: true
+    machine: serverless
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: public
+    integrity: critical
+    availability: important
+    justification_cia_rating: Static assets are public design and UI inputs; edge Access does not authorize project objects.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: true
+    data_assets_processed:
+      - public-design
+    data_assets_stored:
+      - public-design
+    data_formats_accepted:
+      - json
+    communication_links:
+
+  Cloudflare Tunnel and API ingress:
+    id: cloudflare-ingress
+    description: Routes API traffic to Fastify without granting Codexia object authorization
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: gateway
+    tags:
+      - codexia
+    internet: true
+    machine: serverless
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: restricted
+    integrity: critical
+    availability: important
+    justification_cia_rating: Cloudflare Tunnel is API routing, not an owner or project authorization boundary.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Forwards API requests:
+        target: codexia-api
+        description: API admission independently validates token, principal, resource, scope and effect
+        protocol: https
+        authentication: none
+        authorization: none
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+        data_assets_received:
+          - manuscript
+
+  Codexia Fastify API:
+    id: codexia-api
+    description: Central API admission, Better Auth, shared domain actions and MCP adapter
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: application
+    technology: web-service-rest
+    tags:
+      - codexia
+    internet: false
+    machine: container
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: API admission binds principal, project, object, revision and effect; shared actions commit to PostgreSQL.
+    multi_tenant: true
+    redundant: false
+    custom_developed_parts: true
+    data_assets_processed:
+      - manuscript
+      - session-state
+      - backup-ciphertext
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Shared persistence adapter:
+        target: persistence-adapter
+        description: Delegates canonical reads and writes to the PostgreSQL persistence boundary
+        protocol: in-process-library-call
+        authentication: none
+        authorization: none
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+        data_assets_received:
+          - manuscript
+
+  PostgreSQL persistence adapter:
+    id: persistence-adapter
+    description: API-owned adapter for canonical PostgreSQL reads, revisions and durable receipts
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: component
+    technology: library
+    tags:
+      - codexia
+    internet: false
+    machine: container
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: The adapter is the only API boundary to the PostgreSQL manuscript authority.
+    multi_tenant: true
+    redundant: false
+    custom_developed_parts: true
+    data_assets_processed:
+      - manuscript
+      - session-state
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Canonical PostgreSQL access:
+        target: postgresql
+        description: Reads and commits manuscript revisions and durable database receipts
+        protocol: sql-access-protocol
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+          - session-state
+        data_assets_received:
+          - manuscript
+          - session-state
+
+  PostgreSQL canonical store:
+    id: postgresql
+    description: Sole canonical authority for author manuscript and authentication records
+    type: datastore
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: database
+    tags:
+      - codexia
+    internet: false
+    machine: container
+    encryption: transparent
+    owner: Codexia operators
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: PostgreSQL owns durable revisions, project data, auth schema and the committed mutation receipt.
+    multi_tenant: true
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+      - session-state
+    data_assets_stored:
+      - manuscript
+      - session-state
+    data_formats_accepted:
+      - json
+    communication_links:
+
+  GitHub Actions protected operations:
+    id: github-actions
+    description: Protected verify and deployment admission workflow
+    type: process
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: build-pipeline
+    tags:
+      - codexia
+    internet: true
+    machine: serverless
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia maintainers
+    confidentiality: restricted
+    integrity: mission-critical
+    availability: important
+    justification_cia_rating: Protected workflows provide the only release admission path and execute approved Ansible state.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: false
+    data_assets_processed:
+      - public-design
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Tailscale OIDC and network coordination:
+        target: tailscale
+        description: Obtains an ephemeral identity for the protected host path
+        protocol: https
+        authentication: token
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: devops
+        data_assets_sent:
+        data_assets_received:
+      Pinned SSH and Ansible:
+        target: operator-host-path
+        description: Runs the protected Ansible desired state over pinned SSH and Tailscale
+        protocol: ssh-tunnel
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: true
+        ip_filtered: true
+        readonly: false
+        usage: devops
+        data_assets_sent:
+        data_assets_received:
+      Publish approved static Pages artifacts:
+        target: public-pages
+        description: Uses the existing Repository Audit Pages publisher with constrained GitHub Pages deployment permission
+        protocol: https
+        authentication: token
+        authorization: technical-user
+        tags:
+          - public-static-design
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: devops
+        data_assets_sent:
+          - public-design
+        data_assets_received:
+
+  Tailscale control plane:
+    id: tailscale
+    description: OIDC-authorized private network coordination for operators
+    type: external-entity
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: gateway
+    tags:
+      - codexia
+    internet: true
+    machine: serverless
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: restricted
+    integrity: critical
+    availability: important
+    justification_cia_rating: Tailscale is a private operator network and never grants author project or object authorization.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: false
+    data_assets_processed:
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+
+  Operator SSH and Ansible host path:
+    id: operator-host-path
+    description: Pinned SSH endpoint and approved Ansible actions on the Codexia VM
+    type: process
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: devops-client
+    tags:
+      - codexia
+    internet: false
+    machine: container
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: restricted
+    integrity: mission-critical
+    availability: important
+    justification_cia_rating: Host operations remain behind the protected GitHub Actions, Tailscale and pinned SSH path.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - backup-ciphertext
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Invokes protected backup executor:
+        target: backup-executor
+        description: Invokes existing backup.sh with the host lock through approved operator automation
+        protocol: local-file-access
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: devops
+        data_assets_sent:
+        data_assets_received:
+
+  Protected backup executor:
+    id: backup-executor
+    description: Existing backup.sh producer under the host lock; no web or MCP invocation
+    type: process
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: component
+    technology: batch-processing
+    tags:
+      - codexia
+      - age-encrypted-backup
+    internet: false
+    machine: container
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia operators
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: The executor reuses the approved host lock, quiesced PostgreSQL backup and age encryption path.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+      - backup-ciphertext
+    data_assets_stored:
+    data_formats_accepted:
+      - file
+    communication_links:
+      Quiesced database backup source:
+        target: postgresql
+        description: Reads backup source only while the established host lock and writer quiescence are held
+        protocol: sql-access-protocol
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: true
+        usage: devops
+        data_assets_sent:
+        data_assets_received:
+          - manuscript
+      Off-VM encrypted artifact transfer:
+        target: s3-storage
+        description: Uploads and re-reads age-encrypted ciphertext and verifies the separate protected receipt
+        protocol: https
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - age-encrypted-backup
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: devops
+        data_assets_sent:
+          - backup-ciphertext
+        data_assets_received:
+          - backup-ciphertext
+
+  S3-compatible off-VM object storage:
+    id: s3-storage
+    description: Offsite object storage for age-encrypted backup artifacts only
+    type: datastore
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: block-storage
+    tags:
+      - age-encrypted-backup
+    internet: true
+    machine: virtual
+    encryption: none
+    owner: Codexia operators
+    confidentiality: confidential
+    integrity: mission-critical
+    availability: critical
+    justification_cia_rating: Object storage contains ciphertext only; independent recovery keys and receipts are held elsewhere.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: false
+    data_assets_processed:
+      - backup-ciphertext
+    data_assets_stored:
+      - backup-ciphertext
+    data_formats_accepted:
+      - file
+    communication_links:
+
+  GitHub Pages public static artifacts:
+    id: public-pages
+    description: Public allowlisted Repository Audit Pages content; no API or private repository data
+    type: process
+    usage: devops
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: system
+    technology: web-server
+    tags:
+      - public-static-design
+    internet: true
+    machine: serverless
+    encryption: data-with-symmetric-shared-key
+    owner: Codexia maintainers
+    confidentiality: public
+    integrity: critical
+    availability: important
+    justification_cia_rating: The existing Pages publisher exposes only allowlisted static repository design artifacts.
+    multi_tenant: false
+    redundant: true
+    custom_developed_parts: false
+    data_assets_processed:
+      - public-design
+    data_assets_stored:
+      - public-design
+    data_formats_accepted:
+      - json
+      - file
+    communication_links:
+
+trust_boundaries:
+  Public clients:
+    id: public-clients
+    description: Browser, iOS and external MCP clients are untrusted callers
+    type: network-on-prem
+    tags:
+      - codexia
+    technical_assets_inside:
+      - web-client
+      - ios-client
+      - mcp-client
+    trust_boundaries_nested:
+  Cloudflare edge:
+    id: cloudflare-edge
+    description: Static UI delivery and API ingress; not Codexia object authorization
+    type: network-cloud-provider
+    tags:
+      - codexia
+    technical_assets_inside:
+      - cloudflare-workers
+      - cloudflare-ingress
+    trust_boundaries_nested:
+  Codexia application and persistence host:
+    id: codexia-vm
+    description: Fastify API and canonical PostgreSQL persistence on the application host
+    type: network-dedicated-hoster
+    tags:
+      - codexia
+    technical_assets_inside:
+      - codexia-api
+      - persistence-adapter
+      - postgresql
+    trust_boundaries_nested:
+  Protected GitHub Actions workflow:
+    id: protected-workflow
+    description: GitHub Actions admission is a protected remote control-plane principal
+    type: execution-environment
+    tags:
+      - codexia
+    technical_assets_inside:
+      - github-actions
+    trust_boundaries_nested:
+  Tailscale control plane:
+    id: tailscale-control
+    description: External private-network coordination remains distinct from Codexia API authorization
+    type: network-cloud-provider
+    tags:
+      - codexia
+    technical_assets_inside:
+      - tailscale
+    trust_boundaries_nested:
+  Protected host operations:
+    id: host-operations
+    description: Pinned SSH, Ansible host actions and host-locked backup executor on the Codexia VM
+    type: execution-environment
+    tags:
+      - codexia
+    technical_assets_inside:
+      - operator-host-path
+      - backup-executor
+    trust_boundaries_nested:
+  Off-VM object storage:
+    id: offsite-storage
+    description: External S3-compatible destination stores age ciphertext only
+    type: network-cloud-provider
+    tags:
+      - age-encrypted-backup
+    technical_assets_inside:
+      - s3-storage
+    trust_boundaries_nested:
+  Public Pages:
+    id: public-pages
+    description: Public static artifacts published through the existing Repository Audit Pages path
+    type: network-cloud-provider
+    tags:
+      - public-static-design
+    technical_assets_inside:
+      - public-pages
+    trust_boundaries_nested:
+
+shared_runtimes:
+  Codexia API process:
+    id: codexia-api-process
+    description: Fastify API and persistence adapter share the application process
+    tags:
+      - codexia
+    technical_assets_running:
+      - codexia-api
+      - persistence-adapter
+
+individual_risk_categories:
+  BOLA project isolation:
+    id: codexia-bola-project-isolation
+    description: Project and object authorization must remain bound at every API read and mutation.
+    impact: Cross-project access could expose or alter strictly confidential manuscript data.
+    asvs: V4 - Access Control
+    cheat_sheet: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
+    action: Reject object access unless principal, project, object, revision and effect all match.
+    mitigation: Central Fastify admission and the PostgreSQL project scope remain authoritative.
+    check: REQ-AUTH-002; REQ-DATA-003; negative cross-project API tests against a disposable PostgreSQL database.
+    function: architecture
+    stride: elevation-of-privilege
+    detection_logic: Review request object identifiers and project-scoped SQL reads/writes for fail-closed authorization.
+    risk_assessment: Design risk retained until independent implementation and runtime tests prove the boundary.
+    false_positives: Read-only access to the same public design artifact is not manuscript access.
+    model_failure_possible_reason: false
+    cwe: 639
+    risks_identified:
+      Cross-project manuscript access at the API:
+        severity: high
+        exploitation_likelihood: likely
+        exploitation_impact: high
+        data_breach_probability: probable
+        data_breach_technical_assets:
+          - codexia-api
+          - postgresql
+        most_relevant_data_asset: manuscript
+        most_relevant_technical_asset: codexia-api
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: codexia-vm
+        most_relevant_shared_runtime:
+
+  MCP issuer and resource binding:
+    id: codexia-mcp-issuer-resource
+    description: MCP OAuth issuer, resource audience and assigned scopes must match.
+    impact: A confused token or resource could expose project context or grant unintended operations.
+    asvs: V2 - Authentication
+    cheat_sheet: https://www.rfc-editor.org/rfc/rfc9068
+    action: Validate trusted issuer, exact resource audience, principal, project assignment and MCP scope.
+    mitigation: Better Auth and centralized Fastify admission enforce OAuth, project and read/compute/propose scope.
+    check: REQ-AUTH-001; REQ-AUTH-003; REQ-EXT-002; MCP OAuth negative issuer/resource/scope scenarios.
+    function: architecture
+    stride: spoofing
+    detection_logic: Compare token issuer, resource metadata, registered client assignments and requested MCP effect.
+    risk_assessment: Model tracks the attack path; no OAuth or MCP runtime certification is claimed.
+    false_positives: Public OAuth discovery metadata alone does not authorize tool invocation.
+    model_failure_possible_reason: false
+    cwe: 345
+    risks_identified:
+      MCP token accepted for a mismatched issuer or resource:
+        severity: high
+        exploitation_likelihood: likely
+        exploitation_impact: high
+        data_breach_probability: probable
+        data_breach_technical_assets:
+          - codexia-api
+        most_relevant_data_asset: manuscript
+        most_relevant_technical_asset: codexia-api
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: codexia-vm
+        most_relevant_shared_runtime:
+
+  Session and reader scope confusion:
+    id: codexia-session-scope-confusion
+    description: Owner, browser session, MCP client and public-reader scopes must remain distinct.
+    impact: Session confusion can expose private author data or permit owner-only actions.
+    asvs: V3 - Session Management
+    cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
+    action: Bind every request to its authenticated actor and explicit project/data disclosure scope.
+    mitigation: Better Auth session identity and route authorization remain independent from UI and edge state.
+    check: REQ-AUTH-002; REQ-AUTH-003; REQ-AUTH-005; cross-principal, share-reader and reauthentication tests.
+    function: architecture
+    stride: elevation-of-privilege
+    detection_logic: Inspect session-to-principal resolution, project assignments, reader disclosure and owner-only route effects.
+    risk_assessment: Owner-console and sharing goals are not certified as implemented by this model.
+    false_positives: A reader's explicit public disclosure does not grant owner or MCP write access.
+    model_failure_possible_reason: false
+    cwe: 384
+    risks_identified:
+      Session scope or principal confused at the API:
+        severity: high
+        exploitation_likelihood: likely
+        exploitation_impact: high
+        data_breach_probability: probable
+        data_breach_technical_assets:
+          - codexia-api
+        most_relevant_data_asset: session-state
+        most_relevant_technical_asset: codexia-api
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: codexia-vm
+        most_relevant_shared_runtime:
+
+  False database receipt:
+    id: codexia-false-db-receipt
+    description: A mutation receipt must be evidence of a committed PostgreSQL revision.
+    impact: A false receipt can cause the author to lose or overwrite uncommitted manuscript changes.
+    asvs: V8 - Data Protection
+    cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
+    action: Confirm the transaction commit and durable revision receipt before reporting success.
+    mitigation: PostgreSQL owns the revision and receipt transaction; response loss remains reconcilable by operation identity.
+    check: REQ-DATA-002; REQ-API-002; injected database failure and response-loss receipt tests.
+    function: architecture
+    stride: repudiation
+    detection_logic: Trace receipt creation to the same PostgreSQL transaction and reject success on rollback or unknown commit.
+    risk_assessment: This model describes the failure mode and does not assert current runtime proof.
+    false_positives: A committed transaction with a delayed response is unknown until reconciled, not a failed or false success.
+    model_failure_possible_reason: false
+    cwe: 345
+    risks_identified:
+      Uncommitted manuscript mutation reported as successful:
+        severity: critical
+        exploitation_likelihood: unlikely
+        exploitation_impact: very-high
+        data_breach_probability: possible
+        data_breach_technical_assets:
+          - codexia-api
+          - postgresql
+        most_relevant_data_asset: manuscript
+        most_relevant_technical_asset: codexia-api
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: codexia-vm
+        most_relevant_shared_runtime:
+
+  Edge and operator plane confusion:
+    id: codexia-edge-operations-plane
+    description: Public Cloudflare routing must not be confused with the protected host operations path.
+    impact: Confusion can expose host administration or treat Access identity as Codexia object authorization.
+    asvs: V4 - Access Control
+    cheat_sheet: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
+    action: Keep Workers/Tunnel routing, Fastify project authorization and Tailscale/SSH/Ansible administration separate.
+    mitigation: Cloudflare carries UI/API traffic only; host state changes use the protected GitHub Actions to Ansible path.
+    check: REQ-EXT-001; REQ-OPS-001; REQ-OPS-002; verify deny of web, MCP and Cloudflare access to operator actions.
+    function: architecture
+    stride: elevation-of-privilege
+    detection_logic: Check for any route from public UI/MCP to SSH, Ansible, backup executor or Tailscale administration.
+    risk_assessment: Edge configuration and production network policies require separate runtime evidence.
+    false_positives: HTTPS API forwarding does not itself grant a host command or owner permission.
+    model_failure_possible_reason: false
+    cwe: 284
+    risks_identified:
+      Public edge or MCP can reach host operations:
+        severity: critical
+        exploitation_likelihood: unlikely
+        exploitation_impact: very-high
+        data_breach_probability: possible
+        data_breach_technical_assets:
+          - codexia-api
+          - operator-host-path
+        most_relevant_data_asset: session-state
+        most_relevant_technical_asset: operator-host-path
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: host-operations
+        most_relevant_shared_runtime:
+
+  Backup key and restore integrity:
+    id: codexia-backup-key-restore
+    description: Off-VM backup integrity, independent receipts and age key separation must be maintained.
+    impact: Key loss, ciphertext substitution or a false receipt can make a recovery point unusable or unsafe.
+    asvs: V8 - Data Protection
+    cheat_sheet: https://age-encryption.org/
+    action: Keep age recovery keys and S3 credentials outside public artifacts; compare downloaded bytes and protected receipt before isolated drill.
+    mitigation: Reuse backup.sh, host lock, age-encrypted v2 artifact and isolated restore drill; Web and MCP cannot restore production.
+    check: REQ-OPS-003; REQ-OPS-004; REQ-OPS-005; BACKUP-S3-001 through BACKUP-S3-005 remain runtime acceptance.
+    function: operations
+    stride: tampering
+    detection_logic: Compare backup ID, source identity, ciphertext digest, manifest and independent receipt; exercise key loss and altered objects.
+    risk_assessment: S3 upload, retrieval and isolated restore remain unimplemented targets until separate execution evidence exists.
+    false_positives: Object storage's ETag or checksum alone is not an independent restore receipt.
+    model_failure_possible_reason: false
+    cwe: 522
+    risks_identified:
+      Backup ciphertext or key separation failure:
+        severity: critical
+        exploitation_likelihood: unlikely
+        exploitation_impact: very-high
+        data_breach_probability: possible
+        data_breach_technical_assets:
+          - backup-executor
+          - s3-storage
+        most_relevant_data_asset: backup-ciphertext
+        most_relevant_technical_asset: backup-executor
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: offsite-storage
+        most_relevant_shared_runtime:
+
+  Public Pages disclosure:
+    id: codexia-public-pages-disclosure
+    description: Public architecture artifacts must not disclose credentials or private repository data.
+    impact: A public secret can enable unauthorized access; private source disclosure can expose author data.
+    asvs: V14 - Configuration
+    cheat_sheet: https://owasp.org/www-project-application-security-verification-standard/
+    action: Publish only allowlisted static design and scan source inputs and generated public files for secrets.
+    mitigation: Keep one Repository Audit Pages publisher, public static diagrams and no API, MCP, VM or repository credentials.
+    check: REQ-EXT-002; REQ-QUAL-002; injected secret-like artifact must fail the G5 public-artifact scanner.
+    function: development
+    stride: information-disclosure
+    detection_logic: Scan the threat model, LikeC4 source, generated Mermaid and architecture docs before publishing.
+    risk_assessment: Static generation is not an authorization boundary; only the public artifact allowlist is in scope.
+    false_positives: Deliberately public architecture labels are not private source or credentials.
+    model_failure_possible_reason: false
+    cwe: 200
+    risks_identified:
+      Credential-like material in public design artifacts:
+        severity: high
+        exploitation_likelihood: unlikely
+        exploitation_impact: high
+        data_breach_probability: possible
+        data_breach_technical_assets:
+          - github-actions
+          - public-pages
+        most_relevant_data_asset: public-design
+        most_relevant_technical_asset: public-pages
+        most_relevant_communication_link:
+        most_relevant_trust_boundary: public-pages
+        most_relevant_shared_runtime:
+
+risk_tracking:
+  codexia-bola-project-isolation@*:
+    status: unchecked
+    justification: Static risk inventory only; REQ-AUTH-002 and REQ-DATA-003 require independent runtime evidence.
+    ticket: REQ-AUTH-002
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-mcp-issuer-resource@*:
+    status: unchecked
+    justification: Static risk inventory only; OAuth issuer, resource and scope acceptance remains unverified.
+    ticket: REQ-AUTH-003
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-session-scope-confusion@*:
+    status: unchecked
+    justification: Static risk inventory only; owner, MCP and reader scope behavior requires separate runtime evidence.
+    ticket: REQ-AUTH-005
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-false-db-receipt@*:
+    status: unchecked
+    justification: Static risk inventory only; transaction receipt and response-loss scenarios remain unverified.
+    ticket: REQ-API-002
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-edge-operations-plane@*:
+    status: unchecked
+    justification: Static risk inventory only; production edge and host policy need independent verification.
+    ticket: REQ-EXT-001
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-backup-key-restore@*:
+    status: unchecked
+    justification: Static risk inventory only; S3 transfer, key recovery and isolated restore are not certified here.
+    ticket: REQ-OPS-003
+    date: 2026-11-23
+    checked_by: Codexia design-time model
+  codexia-public-pages-disclosure@*:
+    status: unchecked
+    justification: Static risk inventory only; public artifact scanner is a source-level G5 check, not runtime authorization proof.
+    ticket: REQ-QUAL-002
+    date: 2026-11-23
+    checked_by: Codexia design-time model
