@@ -31,6 +31,8 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 ## 採用済み目標: S3互換オブジェクトストレージへの暗号化バックアップ
 
+**運用設定UIの正本:** [バックアップ管理コンソール設計](../architecture/BACKUP-CONSOLE-CONTRACT.md)。ownerは`/console/backups`からS3の保存先・credential（write-only）・要求する保持期間・検証・有効化・run状態を操作する。通常の保存先指定にSSH/Ansible編集を要求しない。一方、既存の暗号化アーティファクト生成・host lock・writer停止は`backup.sh`が所有し、実本番復元やVM/IAM変更は引き続き保護されたOPERATORの経路で行う。local stagingとage受取公開鍵はoperator-controlledでありWeb変更を禁止する。
+
 **状態: 機能要件・設計採用済み、実装/本番検証は未完了。** 現行のローカル/独立mount先に加えて、**S3 API互換ストレージをオフVM保管先としてサポートする**。特定のクラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOはまだ確定していない。S3対応はバックアップの保管・取得機能であり、CodexiaのPostgreSQL正本やdeploy管理プレーンを変更しない。
 
 ### 機能・データフロー
