@@ -606,8 +606,32 @@ disable_fixture_tunnel() {
   fi
 }
 
+prepare_app_update() {
+  # When no compatible published release exists, create an independent, same-identity
+  # test-only digest. This must not depend on the Better Auth lane's database.
+  local from candidate tag digest_file digest
+  from=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).candidates.head.image' "$evidence")
+  candidate="$build_context/app-update"
+  rootless mkdir -p "$candidate"
+  cat > "$tmp/app-update.Dockerfile" <<'DOCKERFILE'
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+LABEL org.codexia.lifecycle-scenario="app-update"
+DOCKERFILE
+  sudo install -o codexia -g codexia -m 0644 "$tmp/app-update.Dockerfile" "$candidate/Dockerfile"
+  tag="localhost:5000/yohn-jp/codexia-backend:app-update-$source_sha"
+  rootless_podman build --pull=never --build-arg "BASE_IMAGE=$from" -t "$tag" -f "$candidate/Dockerfile" "$candidate" >"$tmp/app-update-build.log" 2>&1
+  digest_file="$candidate/digest"
+  rootless_podman push --digestfile "$digest_file" "$tag" >"$tmp/app-update-push.log" 2>&1
+  digest=$(rootless cat "$digest_file")
+  rootless rm -f "$digest_file"
+  node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
+}
 run_application_lifecycle() {
-  local initial_key update_key update_image failed_image
+  local initial_key update_key update_image
+  if [[ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).transition.kind' "$evidence")" == test-only-digest ]]; then
+    prepare_app_update
+  fi failed_image
   read -r initial_key update_key update_image < <(node - "$evidence" <<'TRANSITION'
 const fs = require('node:fs');
 const { transition, candidates } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
