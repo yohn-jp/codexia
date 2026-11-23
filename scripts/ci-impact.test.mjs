@@ -128,6 +128,22 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
   ]) {
     assert.equal((await plan([changedPath])).full_model_oci, false, `Unexpected plan impact for ${changedPath}`);
   }
+  for (const [label, files, expected] of [
+    ['DB contract-only test', ['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
+    ['HTTP contract-only test', ['packages/http-contract/test/fastify-persistence-registration.test.ts'], false],
+    ['MCP unit test in src', ['modules/mcp/src/tool-catalog.test.ts'], false],
+    ['Core unit test in src', ['packages/core/src/snapshot-reuse.test.ts'], false],
+    ['Desktop unit test', ['app/src/api-generated.test.ts'], false],
+    ['Native Swift source', ['ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift'], false],
+    ['Backend source', ['packages/api/src/server.ts'], true],
+    ['Desktop source', ['app/src/api.ts'], true],
+    ['Real-model fixture', ['tests/integration/model-oci-lifecycle-arguments.test.mjs'], true],
+    ['Profile packager', ['scripts/build/packaging/profile-package.mjs'], true],
+    ['Mixed source and test', ['modules/mcp/src/tool-catalog.test.ts', 'packages/api/src/server.ts'], true],
+  ]) {
+    assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);
+    assert.equal((await plan(files)).full_model_oci, expected, `PR model selection: ${label}`);
+  }
   const nativeConfig = 'app/native/capacitor.config.ts';
   const bridgeDeclaration = 'app/native/plugins/codexia-auth/src/index.d.mts';
   for (const [files, expected] of [
@@ -141,7 +157,7 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `main push: ${files.join(', ')}`);
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
-  assert.equal((await plan(null)).full_model_oci, false);
+  assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
   assert.equal((await plan(['profiles/full/config.json'], 'push')).full_model_oci, false);
 
   const verify = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
