@@ -1027,16 +1027,19 @@ test("partial approvals preserve each actor in immutable PostgreSQL revisions", 
   const proposal: ChangeProposal = {
     id: randomUUID(), snapshot: reader.snapshot, source: "author", operations: edits,
   };
+  // The HTTP owner maps to "owner". The Core port also preserves an opaque actor ID.
+  const aliceApprover = "owner";
+  const bobApprover = "01JBGQ7R5X1T4H8X85P9MN4CT8";
   await core.propose(p.id, proposal);
   await core.approve(p.id, {
-    proposalId: proposal.id, operationIds: [one!.id], authorScope: "hosted:alice",
+    proposalId: proposal.id, operationIds: [one!.id], authorScope: aliceApprover,
   });
   await core.approve(p.id, {
-    proposalId: proposal.id, operationIds: [two!.id], authorScope: "hosted:bob",
+    proposalId: proposal.id, operationIds: [two!.id], authorScope: bobApprover,
   });
   for (const edit of edits) await core.apply(p.id, edit);
   const documents = await persistence.read((reader) => reader.listDocuments(p.id));
-  for (const [title, expectedAuthor] of [["Alice", "hosted:alice"], ["Bob", "hosted:bob"]]) {
+  for (const [title, expectedAuthor] of [["Alice", aliceApprover], ["Bob", bobApprover]]) {
     const document = documents.find((candidate) => candidate.title === title);
     assert.ok(document?.headRevisionId);
     const revision = await persistence.read((reader) =>
