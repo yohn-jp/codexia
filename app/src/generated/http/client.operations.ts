@@ -5,6 +5,41 @@
  * OpenAPI spec version: 2.0.0
  */
 export const operations = {
+  "persistenceDocumentAnchorsPost": {
+    "operationId": "persistence_document_anchors_post",
+    "operationName": "persistenceDocumentAnchorsPost",
+    "method": "POST",
+    "path": "/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors",
+    "url": "/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors",
+    "route": "POST /api/v1/persistence/projects/:projectId/documents/:documentId/anchors",
+    "tag": "persistence",
+    "tags": [
+      "persistence"
+    ],
+    "pathParams": [
+      {
+        "name": "projectId",
+        "key": "projectId"
+      },
+      {
+        "name": "documentId",
+        "key": "documentId"
+      }
+    ],
+    "queryParams": [],
+    "serialization": {
+      "explode": [],
+      "arrayFormat": [],
+      "deepObject": [],
+      "explodeOnly": true
+    },
+    "body": {
+      "contentType": "application/json",
+      "required": true
+    },
+    "mock": null,
+    "deprecated": false
+  },
   "persistenceDocumentsGet": {
     "operationId": "persistence_documents_get",
     "operationName": "persistenceDocumentsGet",

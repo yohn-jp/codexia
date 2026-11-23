@@ -2,7 +2,8 @@ import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
-import { getPersistenceDocumentsGetUrl, persistenceStatusGet } from "./generated/http/client";
+import { getPersistenceDocumentsGetUrl, persistenceDocumentAnchorsPost, persistenceStatusGet } from "./generated/http/client";
+import type { PersistenceAnchorCreatedResponse } from "./generated/http/schemas/persistenceAnchorCreatedResponse.zod";
 import type { PersistenceStatusResponse } from "./generated/http/schemas/persistenceStatusResponse.zod";
 import type {
   ActionResult,
@@ -381,6 +382,15 @@ async function request<T>(guard: ResponseGuard<T>, path: string, init: RequestIn
   });
 }
 
+function requestCreatedAnchor<T>(guard: ResponseGuard<T>, path: string, init: RequestInit): Promise<T> {
+  return request((value): value is T => {
+    if (!guard(value)) return false;
+    // The generated schema validates each offset. Keep the range ordering check as well.
+    const { fromUtf16, toUtf16 } = (value as PersistenceAnchorCreatedResponse).anchor;
+    return toUtf16 >= fromUtf16;
+  }, path, init);
+}
+
 async function requestEventStream(path: string, signal: AbortSignal): Promise<Response> {
   if (nativeApiSession) {
     throw new ApiError("Native job event streaming is unavailable; use the Job Inbox refresh action.", 501, "NATIVE_STREAM_UNSUPPORTED");
@@ -585,14 +595,18 @@ export const api = {
     const suffix = `documents/${encodeURIComponent(documentId)}/anchors${query.size ? `?${query}` : ""}`;
     return request(dto.persistenceAnchors, persistencePath(projectId, suffix), { ...(signal ? { signal } : {}) });
   },
-  createPersistenceAnchor: (
+  createPersistenceAnchor: async (
     projectId: string,
     documentId: string,
     input: Pick<SaveEvidenceAnchorCommand, "id" | "revisionId" | "fromUtf16" | "toUtf16"> & { status: "proposed" | "confirmed"; nodeId?: string },
     signal?: AbortSignal,
-  ) => request(dto.persistenceAnchorCreated, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/anchors`), {
-    method: "POST", body: JSON.stringify(input), ...(signal ? { signal } : {}),
-  }),
+  ) => {
+    const created = await persistenceDocumentAnchorsPost(projectId, documentId, input, {
+      request: requestCreatedAnchor, ...(signal ? { signal } : {}),
+    });
+    // Branded identifiers represent the validated wire IDs in application contracts.
+    return created as PersistenceAnchorCreatedResponse & { anchor: EvidenceAnchor };
+  },
   updatePersistenceAnchor: (
     projectId: string,
     documentId: string,
