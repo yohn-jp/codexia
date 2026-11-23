@@ -62,6 +62,77 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 
 **重要:** `/api/auth/codexia/setup/*` は合意済みの**目標endpoint名**であり、現行mainで動作していない。公開APIのSchema/operation/状態は実装PRで固定し、Better Authを迂回する別の認証サーバーを作らない。MCPのallowlistとproject assignmentは現状の保護されたサーバー設定が正本であり、認証clientの表示・登録だけを更新しても有効権限を変更したことにしてはならない。
 
+## 個別APIルートの認可表（wildcardではなく最終一致規則）
+
+上記の`/api/projects/:p/*`は**一律のMCP read許可ではない**。以下の個別path/methodが上位の包括規則より優先する。`p`はプロジェクトUUID、`d`は文書ID、`a`はAnchor/Assertion ID、`n`はKnowledge ID、`c`はChangeSet ID。`O` = OWNER-API、`M-R` = MCP-CLIENTの`mcp:read`＋server割当、`M-P` = MCP-CLIENTの`mcp:propose`＋server割当。MCPからの直接Persistenceはすべて403であり、下の「O」はMCPが読むことを意味しない。
+
+### Core APIとモジュール
+
+| method・path | 許可principal / 条件 | 特別な制約・UI |
+| --- | --- | --- |
+| `GET /api/projects` | O / M-R | MCPは割当済み作品のみをページング・列挙 |
+| `POST /api/projects` | O | titleの検証、新規作成は作者のみ |
+| `GET /api/review-queue` | O / M-R | Mは私有提案を除外。author reviewは別 |
+| `GET /api/projects/:p` | O / M-R | 同じprojectのobserveまで |
+| `GET /api/projects/:p/{tree,history,status,observation}` | O / M-R | 固定project/version、存在しないsnapshotを現在値で代替しない |
+| `GET /api/projects/:p/scenes/:d` | O / M-R | canonical document・snapshot境界、本文・根拠の可視範囲を限定 |
+| `GET /api/projects/:p/snapshot?projection=editor` | O / M-R | project/versionの一致と有効documentを照合 |
+| `GET /api/projects/:p/{modules,contributions}` | O / M-R | 有効profileと宣言済みcapabilityのみ |
+| `GET /api/projects/:p/manuscripts/:d/snapshots`、`GET .../snapshots/:revision` | O / M-R | 要求した履歴版の到達可能性とbyte limit |
+| `GET /api/projects/:p/{search,writing-stats}` | O / M-R | 検索語、結果・snapshotを制限 |
+| `GET /api/projects/:p/recent-activity` | **Oだけ** | 作者の私有閲覧/執筆位置。MCPは403 |
+| `PUT /api/projects/:p/recent-activity` | **Oだけ** | client order/generation検証。MCPは403 |
+| `GET /api/projects/:p/actions` | O / M-R | Mには許されたeffectだけを公開 |
+| `POST /api/projects/:p/actions/:actionId` | O / M-R/M-P/`mcp:compute`に対応するeffect | effectとsnapshot双方をサーバーで検査。MはAssistant/author-only拒否 |
+| `GET /api/projects/:p/{proposals,proposals/:id,review-queue}` | O / M-R | Mはprivate proposalを除外し、他project参照不可 |
+| `POST /api/projects/:p/proposals` | O / M-P | 版固定・proposal identity/冪等性・read/write set |
+| `POST /api/projects/:p/approvals` | **Oだけ** | authorScopeとoperationIdsの承認 |
+| `POST /api/projects/:p/apply` | **Oだけ** | 承認前提とDB receipt。MCPは403 |
+| `POST /api/projects/:p/scratch` | **Oだけ** | 保存に影響するauthor-only操作 |
+| `/api/projects/:p/modules/:module/*` | **Oが既定**。MはMCP transportの許可された`mcp` contributionのみ | moduleごとの宣言access/effect/methodを検査。AssistantをMから拒否 |
+| `GET /api/jobs`・`GET /api/jobs/:id`・`GET /api/jobs/events` | **Oだけ** | job history/streamをMCPに漏らさない |
+| `GET /api/inbox`・`POST /api/inbox/:id/read`・`POST /api/inbox/read-all` | **Oだけ** | 通知閲覧・既読は本人のみ |
+| `GET /api/projects/events` | **Oだけ** | owner全作品stream。MCPは403 |
+| `GET /api/public/projects/:p/modules/:module/*` | SHARE-READER | そのcontributionがpublic/readかつ正しいshare capabilityのGET。private APIの権限は付与しない |
+
+### PostgreSQL persistence（全行がOWNER-API専用）
+
+| method・path | 入場後に必要な資源・競合検査 |
+| --- | --- |
+| `GET /api/v1/persistence/status` | 認証されたownerのDB状態だけを示す |
+| `GET /api/v1/persistence/projects` | ownerのproject一覧と正しいcursor |
+| `POST /api/v1/persistence/projects` | 新規projectとtitle/設定の検証 |
+| `POST /api/v1/persistence/import` | portable JSONのschema/hash/referenceを原子的に検証、既存作品に上書きしない |
+| `GET /api/v1/persistence/projects/:p` | ownerのproject IDを確認 |
+| `PATCH /api/v1/persistence/projects/:p` | expectedVersionとname/settingsの検証 |
+| `GET /api/v1/persistence/projects/:p/archive` | 固定snapshotの現在状態をexport |
+| `GET /api/v1/persistence/projects/:p/documents` | 同じprojectの親/並びと取得上限 |
+| `POST /api/v1/persistence/projects/:p/documents` | 親とpath、idempotency、本文の新規Revision |
+| `GET /api/v1/persistence/projects/:p/documents/:d` | document/revisionが当該projectに属する |
+| `PATCH /api/v1/persistence/projects/:p/documents/:d` | baseRevision、sha256、idempotency、保存receipt |
+| `PATCH /api/v1/persistence/projects/:p/documents/:d/metadata` | expectedVersionと木の非循環性 |
+| `DELETE /api/v1/persistence/projects/:p/documents/:d` | expectedVersion、明示的な削除、履歴保全 |
+| `GET /api/v1/persistence/projects/:p/documents/:d/revisions` | immutable履歴とcursor/対象限定 |
+| `POST /api/v1/persistence/projects/:p/documents/:d/restore` | 過去Revisionを新Revisionとして復元、冪等化 |
+| `GET/POST /api/v1/persistence/projects/:p/documents/:d/anchors` | Revision一致、quote/rangeと登録権限 |
+| `PATCH /api/v1/persistence/projects/:p/documents/:d/anchors/:a` | Anchor ID/currentRevision/versionを再検証 |
+| `POST /api/v1/persistence/projects/:p/documents/:d/anchors/:a/mentions` | Evidenceとnodeが同一projectに属しconfirmed状態が整合 |
+| `POST /api/v1/persistence/projects/:p/documents/:d/anchors/:a/assertions` | owner判断、EvidenceとAssertionの結合 |
+| `GET /api/v1/persistence/projects/:p/nodes` | Knowledge一覧、filter/cursor/snapshotを固定 |
+| `GET/PUT /api/v1/persistence/projects/:p/nodes/:n` | node同一性、version、作者が確認したstatus |
+| `POST /api/v1/persistence/projects/:p/nodes/:n/{merge-preview,merge}` | previewDigest、targetID、projectVersion、明示confirm |
+| `POST /api/v1/persistence/projects/:p/nodes/:n/{aliases,relations}` | source/targetとproject境界、曖昧名を自動確定しない |
+| `GET /api/v1/persistence/projects/:p/nodes/:n/evidence` | node/anchorを同じsnapshotの根拠で返す |
+| `GET/PUT /api/v1/persistence/projects/:p/assertions/:a` | assertion status/version・source ID・スコープを検査 |
+| `GET/POST /api/v1/persistence/projects/:p/assertions/:a/evidence` | 根拠の属するprojectと役割を検証 |
+| `GET/POST /api/v1/persistence/projects/:p/changesets` | 閲覧と提案を分け、POSTはactor・operation set・冪等性 |
+| `GET /api/v1/persistence/projects/:p/changesets/:c` | 当該projectに属するChangeSetのみ |
+| `POST /api/v1/persistence/projects/:p/changesets/:c/{approve,reject,apply}` | **それぞれ別操作**。owner・最新expectedVersion・適用前read/write setを確認 |
+| `GET /api/v1/persistence/projects/:p/review-feed` | owner以外に非公開のレビュー資料を返さない |
+
+本表の`{a,b}`や`GET/POST`は記法上の短縮であり、単一の曖昧なwildcard route実装を要求しない。バックエンドは実際に宣言したmethod/pathと対象IDを認証後に解釈し、未列挙methodを`405`、未定義pathを`404`で拒否する。**この表が広いprefixにMCP readを認めるものではない。**
+
+
 ## プロトコル拒否・復旧の契約
 
 | 状態 | HTTP | 画面側の契約 |
