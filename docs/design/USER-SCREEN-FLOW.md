@@ -4,6 +4,8 @@
 
 ## 起動から作品への遷移
 
+[利用画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#user-1)
+
 ```mermaid
 flowchart TD
     START["起動"] --> PATH{"URLは公開 reader /r/* か"}

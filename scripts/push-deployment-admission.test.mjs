@@ -14,7 +14,7 @@ const identity = (sourceSha, extra = {}) => ({
   profile: 'full', platform: 'linux/amd64', migrationFingerprint: digest('a'),
   persistenceFormat: 1, apiEpoch: 1, ...extra,
 });
-const installed = () => ({ image: `ghcr.io/yohn-jp/codexia-backend@${digest('a')}`, identity: identity(sha('a')) });
+const installed = () => ({ image: `ghcr.io/yohn-jp/codexia-backend@${digest('a')}`, identity: identity(sha('a'), { version: '0.1.1' }) });
 const certificate = (extra = {}) => ({
   format: 'codexia-backend-deployment-certificate/v1',
   verifiedMainSha: sha('b'),
@@ -35,6 +35,16 @@ test('admits a certified immutable image only when its tree and identity match e
   });
   assert.equal(admitted.image, `ghcr.io/yohn-jp/codexia-backend@${digest('f')}`);
   assert.equal(admitted.identity.sourceSha, sha('d'));
+});
+
+test('an older or already occupied version cannot replace the running image', () => {
+  for (const version of ['0.1.2', '0.1.10']) {
+    const running = installed();
+    running.identity.version = version;
+    assert.throws(() => assertPushDeploymentAdmission(certificate(), running, {
+      expectedMainSha: sha('b'), deployedUiEpoch: 1,
+    }), /newer backend version/u);
+  }
 });
 
 test('validates a reusable certificate against its complete producer receipt before runtime compatibility checks', () => {
@@ -110,6 +120,7 @@ test('admits an exact same-digest reapplication as an idempotent no-op', () => {
   const installedValue = installed();
   const receipt = structuredClone(base.producer.receipt);
   receipt.sourceSha = sha('a');
+  receipt.version = installedValue.identity.version;
   const sameRelease = {
     ...base,
     producer: { ...base.producer, sourceSha: sha('a'), receipt },

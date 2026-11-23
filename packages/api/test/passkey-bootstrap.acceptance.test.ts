@@ -9,6 +9,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "nod
 import { test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
 import { Pool } from "pg";
+import { verifyAuthSchema } from "../src/auth-schema.js";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
 import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "../src/better-auth.js";
 import { createServer as createApiServer, type ApiServerOptions } from "../src/server.js";
@@ -287,7 +288,7 @@ function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, o
   return environment;
 }
 
-function runPackageCli(command: "migrate-auth" | "grant-passkey-owner" | "grant-passkey-owner-recovery", args: readonly string[], env: NodeJS.ProcessEnv): {
+function runPackageCli(command: "migrate-auth" | "grant-passkey-owner" | "grant-passkey-owner-recovery" | "verify-auth-clients", args: readonly string[], env: NodeJS.ProcessEnv): {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
@@ -375,6 +376,20 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.notEqual(unappliedMigration.status, 0, "auth schema migration must require --apply");
   const migration = runPackageCli("migrate-auth", ["--apply"], migrationEnvironment);
   assert.equal(migration.status, 0, "OIDC-free explicit auth migration must succeed against the disposable PostgreSQL schema");
+  const readOnlyPool = new Pool({
+    connectionString: runtimeDatabase.toString(),
+    options: "-c search_path=codexia_auth -c default_transaction_read_only=on",
+  });
+  try {
+    await verifyAuthSchema(readOnlyPool);
+    const candidateAudience = "https://auth-preflight.example.test/api";
+    const preflight = runPackageCli("verify-auth-clients", [], { ...migrationEnvironment, CODEXIA_API_AUDIENCE: candidateAudience });
+    assert.notEqual(preflight.status, 0, "an unregistered owner cannot be deployed");
+    const seeded = await readOnlyPool.query('SELECT 1 FROM codexia_auth."oauthResource" WHERE identifier = $1', [candidateAudience]);
+    assert.equal(seeded.rowCount, 0, "candidate verification must not seed resources into the installed auth database");
+  } finally {
+    await readOnlyPool.end();
+  }
 
   const grantWithoutApply = runPackageCli("grant-passkey-owner", [], migrationEnvironment);
   assert.notEqual(grantWithoutApply.status, 0, "operator grant command must require --apply");
@@ -389,6 +404,7 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   const bootstrapConfig: BetterAuthRuntimeConfig = {
     databaseUrl: runtimeDatabase.toString(),
     publicOrigin: apiOrigin,
+    apiAudience: migrationEnvironment.CODEXIA_API_AUDIENCE!,
     authSecret,
     oauthIntrospectionClientId: "passkey-fixture-introspector",
     oauthIntrospectionClientSecret: "passkey-fixture-introspection-secret-over-32-bytes",
@@ -608,6 +624,8 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal(introspectionClient.client_id, bootstrapConfig.oauthIntrospectionClientId);
   await oauthRuntime.assertRegisteredClients(owner.id);
   await oauthRuntime.verifyIntrospectionCredentials();
+  const admitted = runPackageCli("verify-auth-clients", [], { ...migrationEnvironment, CODEXIA_OAUTH_OWNER_SUBJECT: owner.id });
+  assert.equal(admitted.status, 0, "a compatible schema and registered clients pass read-only deployment verification");
 
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");

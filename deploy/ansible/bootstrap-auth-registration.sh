@@ -13,30 +13,12 @@ fi
 
 auth_dir="$HOME/.config/codexia-auth"
 state_dir="$HOME/.local/state/codexia-deploy"
-unit="$HOME/.config/containers/systemd/codexia-api.container"
 exec 9>"$state_dir/host.lock"
 flock --exclusive --nonblock 9 || {
   echo 'Another Codexia operation holds the host lock' >&2
   exit 75
 }
-if [[ -e "$state_dir/deploy-transaction.json" || -L "$state_dir/deploy-transaction.json" ]]; then
-  echo 'Registration requires no pending deployment transaction' >&2
-  exit 1
-fi
-if podman container exists codexia-api; then
-  # An existing pre-cutover API must still match its exact retired unit contract.
-  if [[ ! -f "$unit" || -L "$unit" || ! -O "$unit" ]] ||
-     ! grep -Fxq 'Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token' "$unit" ||
-     grep -Eq 'CODEXIA_AUTH_MODE=better-auth|codexia-auth-database-url' "$unit" ||
-     ! systemctl --user is-active --quiet codexia-api.service ||
-     [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" != healthy ]]; then
-    echo 'Registration requires a healthy prior API or a fresh host' >&2
-    exit 1
-  fi
-elif [[ $? != 1 || -e "$unit" || -L "$unit" ]] || systemctl --user is-active --quiet codexia-api.service; then
-  echo 'Registration refuses an unverified or stale API installation' >&2
-  exit 1
-fi
+"$HOME/.local/bin/codexia-require-clean-api-target"
 for file in runtime.env bootstrap.env tls.crt tls.key; do
   if [[ ! -f "$auth_dir/$file" || -L "$auth_dir/$file" || ! -O "$auth_dir/$file" ]] ||
      [[ ! "$(stat -c %a "$auth_dir/$file")" =~ ^[46]00$ ]]; then
@@ -62,7 +44,7 @@ oidc_secret=()
 if [[ "$runtime_oidc" == true ]]; then
   oidc_secret=(--secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET)
 fi
-podman run --rm --pull=never --timeout=900 \
+podman run --rm --pull=missing --timeout=900 \
   --name codexia-auth-registration --userns=keep-id:uid=1000,gid=1000 --user 1000:1000 \
   --network codexia --network codexia-data --publish 127.0.0.1:8443:8443 \
   --read-only --cap-drop=all --security-opt=no-new-privileges \

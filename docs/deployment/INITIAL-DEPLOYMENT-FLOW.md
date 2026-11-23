@@ -4,13 +4,16 @@
 
 ## 初期構築・公開までの状態遷移
 
+[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/#first-1)
+
 ```mermaid
 flowchart TD
     PRE["前提: Ubuntu 26.04 x86-64 VM<br/>Tailscale、bootstrap SSH、公開 UI と運用者承認"] --> INVENTORY["private inventory / secrets / pinned host key / backup recipient を確認"]
     INVENTORY --> VALID{"入力・権限・ホストが要求どおりか"}
     VALID -->|いいえ| STOP1["停止: 明示的に修正、暗黙の採用を禁止"]
     VALID -->|はい| INSPECT["inspect: ホスト/アカウント/既存 Podman・volume を観測"]
-    INSPECT --> HOST["host: Ubuntu/systemd/cgroup、rootless codexia と linger"]
+    INSPECT --> BOOT["bootstrap: 指定された段階を順序どおり収束"]
+    BOOT --> HOST["host: Ubuntu/systemd/cgroup、rootless codexia と linger"]
     HOST --> SECRETS["secrets: 保護された Podman credential を検証・収束"]
     SECRETS --> BASE["base: network、volume、PostgreSQL 17、Tunnel Quadlet"]
     BASE --> DATA{"PostgreSQL volume の状態"}
@@ -48,6 +51,7 @@ flowchart TD
 
 | 遷移 | 実行権限・入力 | 成功判定 | 失敗時 |
 | --- | --- | --- | --- |
+| `bootstrap` | 既存 bootstrap管理者、承認済み private inventory | host/secrets/base と許可した auth-runtime を順序どおり収束 | 途中で失敗した状態を観測し、同じ inventory の明示的な再適用に限定 |
 | `inspect` | bootstrap またはサービス利用者、private inventory | サポート対象 OS、所有 ID、既存資源の観測 | 読取専用で中断 |
 | `host` | 必要な sudo とアカウント作成承認 | rootless user、Podman/systemd 条件 | UID 衝突や既存 unit の予期せぬ自動起動を拒否 |
 | `secrets` | mode 0400/0600 の保護 credential ファイルと承認 | Podman secret の内容・所有が一致 | 不足・異なる secret を自動修復・rotation しない |
@@ -59,11 +63,11 @@ flowchart TD
 
 管理経路は **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**。公開 UI/認証入口は Cloudflare Worker Static Assets、API origin は Cloudflare Tunnel。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
 
-## 宣言的な初期化: 設計目標と実装の区別
+## 宣言的な初期化と公開の責務分離
 
-**設計目標:** 宣言的 inventory と明示的な承認によって新規 VM へ `bootstrap` 一操作で `host → secrets → base → auth-runtime` を順序どおり収束させる。秘密情報や既存データの無条件な初期化、本人の Passkey 登録、OAuth client 登録、本番初回起動の承認を省略しない。再適用は安全であること。登録完了後は一時 enrollment ファイルを残さない。
+**採用済み設計:** 宣言的 inventory と明示的な承認によって新規 VM へ `bootstrap` 一操作で `host → secrets → base → auth-runtime` を順序どおり収束させる。秘密情報や既存データの無条件な初期化、本人の Passkey 登録、OAuth client 登録、本番初回起動の承認を省略しない。再適用は安全であること。登録完了後は一時 enrollment ファイルを残さない。
 
-**この設計を作成した時点の main の実装:** `deploy/ansible/site.yml` のサポートステージは `inspect`、`host`、`secrets`、`base`、`auth-runtime`、`deploy`、検証専用 `deploy-lifecycle-fixture`、復旧専用 `restore-drill` であり、`bootstrap` 統合ステージは未搭載。別 PR に存在する実装は稼働中機能として説明しない。統合後に本書と runbook/契約テストの照合を行う。
+**実装境界:** `deploy/ansible/site.yml` は `bootstrap` を提供し、宣言的な inventory に従って `host`、`secrets`、`base`、承認された `auth-runtime` を順次適用する。`inspect`、単独ステージ、検証専用 `deploy-lifecycle-fixture`、復旧専用 `restore-drill` も区別して維持する。owner Passkey / OAuth client の本人登録と本番での初回 `deploy` は別の明示操作であり、`bootstrap` の実装が本番受入を証明するわけではない。
 
 初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。
 

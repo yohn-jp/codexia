@@ -33,6 +33,8 @@ on:
       - deploy/ansible/deploy*.yml
       - deploy/ansible/auth-runtime*
       - deploy/ansible/bootstrap-auth-registration.sh
+      - deploy/ansible/grant-passkey-owner.sh
+      - deploy/ansible/require-clean-api-target.sh
       - deploy/ansible/test-push-*-lifecycle.sh
       - deploy/ansible/push-deployment-recover.sh
       - deploy/ansible/requirements.txt

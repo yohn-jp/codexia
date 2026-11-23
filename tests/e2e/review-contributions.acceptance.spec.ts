@@ -228,7 +228,7 @@ test("Core presents native Knowledge review without Story or Speaker contributio
 test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page, authorizeAuthor }) => {
   test.setTimeout(180_000);
   test.skip(process.env.CODEXIA_PROFILE !== "full", "Story and Speaker review contributions are selected by the full profile.");
-  const initialAuthor = await authorizeAuthor("desktop");
+  const initialAuthor = await authorizeAuthor("desktop", undefined, { apiSetupOnly: true });
   const project = await createReviewProject(initialAuthor);
   // Open the seeded project through its canonical route. A prior workspace
   // selection can otherwise keep an older document active during async guards.

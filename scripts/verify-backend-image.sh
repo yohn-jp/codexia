@@ -188,7 +188,6 @@ start_snapshot_preflight() {
     --publish 127.0.0.1::3000 --read-only \
     --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
     --tmpfs /data:rw,nosuid,nodev,noexec,size=128m,mode=1777 \
-    --tmpfs /history:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
     --cap-drop ALL --security-opt no-new-privileges \
     --volume "$secret_directory/preflight-password:/run/secrets/app-password:ro" \
     "${oci_auth_runtime_args[@]}" \

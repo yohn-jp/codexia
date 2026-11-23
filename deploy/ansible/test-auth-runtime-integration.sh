@@ -198,6 +198,9 @@ fi
 sed -i 's/codexia_auth_registration_pending: true/codexia_auth_registration_pending: false/' "$tmp/auth-inventory.yml"
 sed -i '/codexia_auth_registration_pending: false/a\        codexia_oauth_owner_subject: fixture-provider|stable-owner-subject' "$tmp/auth-inventory.yml"
 apply_stage > "$tmp/auth-finalize.log" 2>&1 || { cat "$tmp/auth-finalize.log"; exit 1; }
+as_service test ! -e "$registration_launcher"
+as_service test ! -e "$service_home/.local/bin/codexia-grant-passkey-owner"
+as_service test -x "$service_home/.local/bin/codexia-grant-passkey-recovery"
 as_service grep -Fxq 'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-provider|stable-owner-subject' "$runtime_env"
 
 if as_service grep -Eq '^CODEXIA_OAUTH_MCP_(CLIENT_IDS|PROJECT_ASSIGNMENTS)=' "$runtime_env"; then

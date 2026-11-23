@@ -55,7 +55,7 @@ async function createDocument(author: AuthorSession, projectId: string, input: {
 }
 
 async function buildManuscript(page: Page, mode: "desktop" | "mobile", authorizeAuthor: AuthorizeAuthor) {
-  const author = await authorizeAuthor(mode);
+  const author = await authorizeAuthor(mode, undefined, { apiSetupOnly: true });
   const { origin } = author;
   const projectResponse = await author.fetch("/api/v1/persistence/projects", {
     method: "POST",

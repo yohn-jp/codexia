@@ -1,6 +1,7 @@
 import { EventStreams } from "./event-streams.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
+import { verifyAuthSchema } from "./auth-schema.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
 import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
@@ -26,9 +27,6 @@ import { assertCurrentJobHistory, JobHistoryError, JobHistoryStore, type JobEven
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
-export { importLegacyJobHistory, type LegacyJobHistoryImportOptions, type LegacyJobHistoryImportReport } from "./job-history-store.js";
-export { importLegacyRecentActivity, type LegacyRecentActivityImportOptions, type LegacyRecentActivityImportReport } from "./recent-activity-store.js";
-
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -485,10 +483,13 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 };
 
 function resolveUsageDirectory(usageDirectory?: string): string {
-  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
-  const configured = usageDirectory ?? readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history");
+  const configured = usageDirectory ?? readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolveDataPath("host-history");
   if (!configured.trim()) throw new Error("Model usage history requires a non-empty usage directory");
   return resolve(configured);
+}
+
+function resolveDataPath(child: string): string {
+  return resolve(readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data", child);
 }
 
 export function createServer(options: ApiServerOptions): Server {
@@ -545,7 +546,7 @@ export function createServer(options: ApiServerOptions): Server {
     ...(options.runtimeOptions ?? {}),
     hostCapabilities,
     capabilityProviders,
-    cacheDirectory: options.runtimeOptions?.cacheDirectory ?? resolve(process.cwd(), "data/module-cache"),
+    cacheDirectory: options.runtimeOptions?.cacheDirectory ?? readCodexiaEnvironment("MODULE_CACHE_DIR") ?? resolveDataPath("module-cache"),
   });
   const profile = options.profile ?? readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   if (profile === "full" && !options.runtime && !options.runtimeOptions) {
@@ -2057,7 +2058,6 @@ function parsePositivePort(value: string | undefined): number {
 export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
   const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
-  const cacheDirectory = resolve(readCodexiaEnvironment("MODULE_CACHE_DIR") ?? "./data/module-cache");
   const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
   const deprecatedSettings = ["AUTH_TOKEN", "AUTH_TOKEN_FILE", "BROWSER_AUTH", "ACCESS_ISSUER", "ACCESS_AUDIENCE", "ACCESS_ORIGIN", "ACCESS_OWNER_EMAIL", "OAUTH_ISSUER", "OAUTH_AUDIENCE", "OAUTH_JWKS_URL"];
   if (deprecatedSettings.some(setting => readCodexiaEnvironment(setting) !== undefined)) {
@@ -2113,6 +2113,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   });
   let persistenceOptions: Awaited<ReturnType<typeof postgresPersistenceOptions>> | undefined;
   try {
+    await verifyAuthSchema(betterAuth.pool);
     await betterAuth.assertRegisteredClients();
     await betterAuth.verifyIntrospectionCredentials();
     const oauthOwner: OAuthOwnerOptions = {
@@ -2138,7 +2139,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       throw new Error("CODEXIA_CORS_ALLOWED_ORIGINS must contain at least one exact HTTPS origin");
     }
     const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
-    const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
+    const runtimeOptions = await loadProfileRuntimeOptions(profile);
     persistenceOptions = await postgresPersistenceOptions();
     if (Object.keys(mcpProjectAssignments).length > 0) {
       const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
@@ -2229,10 +2230,7 @@ async function postgresPersistenceOptions() {
   return { persistence, closePersistenceOnShutdown: true };
 }
 
-async function loadProfileRuntimeOptions(
-  profile: string,
-  cacheDirectory: string,
-): Promise<Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string }> {
+async function loadProfileRuntimeOptions(profile: string): Promise<Omit<ModuleRuntimeOptions, "cacheDirectory">> {
   if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) throw new Error("CODEXIA_PROFILE must be a valid profile name");
   const generated = readCodexiaEnvironment("MODULE_PROFILE_PATH") ?? process.env.CODEXIA_BUILD_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
   let composition: {
@@ -2246,7 +2244,7 @@ async function loadProfileRuntimeOptions(
     composition = await import(pathToFileURL(generated).href) as typeof composition;
   } catch (error) {
     if (profile === "core" && (error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
-      return { manifests: [], enabled: [], cacheDirectory };
+      return { manifests: [], enabled: [] };
     }
     throw new Error(`Unable to load trusted ${profile} module composition from ${generated}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -2264,7 +2262,6 @@ async function loadProfileRuntimeOptions(
     loaders: composition.moduleLoaders,
     moduleDirectories: composition.moduleDirectories,
     workerEntries: composition.moduleWorkerEntries,
-    cacheDirectory,
   };
 }
 

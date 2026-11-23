@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {componentVersion} from './component-release-version.mjs';
+import {compareComponentVersions, componentVersion} from './component-release-version.mjs';
 import {
   assertFrontendCompatibility,
   assertFrontendReleaseAdmission,
-  compareFrontendVersions,
   readFrontendReleaseConfiguration,
   verifyFrontendCompatibility,
 } from './verify-frontend-compatibility.mjs';
@@ -28,9 +27,9 @@ test('frontend and backend releases are independent, but profile and API epoch m
 test('frontend release order rejects stale versions and preserves same-version immutability',()=>{
   const current={format:'codexia-frontend-identity/v1',version:'0.4.9',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
   const newer={...current,version:'0.4.10',sourceSha:'b'.repeat(40)};
-  assert.equal(compareFrontendVersions('0.4.10','0.4.9'),1);
-  assert.equal(compareFrontendVersions('0.4.9','0.4.10'),-1);
-  assert.equal(compareFrontendVersions('0.4.9','0.4.9'),0);
+  assert.equal(compareComponentVersions('0.4.10','0.4.9'),1);
+  assert.equal(compareComponentVersions('0.4.9','0.4.10'),-1);
+  assert.equal(compareComponentVersions('0.4.9','0.4.9'),0);
   assert.equal(assertFrontendReleaseAdmission(current,newer),true);
   assert.throws(()=>assertFrontendReleaseAdmission(current,{...current,version:'0.4.8'}),/older than deployed frontend/);
   assert.equal(assertFrontendReleaseAdmission(current,{...current}),false);

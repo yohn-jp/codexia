@@ -6,6 +6,8 @@
 
 ## リリースからアクティベーションまでの状態遷移
 
+[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/#update-1)
+
 ```mermaid
 flowchart TD
     MAIN["main の確定ソース"] --> VERIFY["Verify Codexia<br/>exact-source必須チェックとcertification"]
@@ -18,7 +20,7 @@ flowchart TD
     TRUST -->|はい| QUEUE["codexia-production の保護された deploy queue"]
     QUEUE --> ENABLE{"有効化フラグと保護環境の承認あり"}
     ENABLE -->|いいえ| SKIP["安全に skip: VM不変"]
-    ENABLE -->|はい| FRESH["queue内でsourceとreleaseを再検証（設計目標）"]
+    ENABLE -->|はい| FRESH["queue内でsourceとreleaseを再検証"]
     FRESH --> COMPAT{"Full / API epoch / migration fingerprint<br/>/ persistence format / auth schema の互換性"}
     COMPAT -->|不明または不一致| MAINT["停止: 別設計の migration / epoch cutover"]
     COMPAT -->|一致| SSH["Tailscale OIDC → pinned SSH<br/>rootless codexia"]
@@ -84,8 +86,8 @@ runner や SSH が途中で消えた場合は、`~/.local/state/codexia-deploy` 
 
 ## 最新 main 追従と運用上の authority
 
-- **設計目標:** 保護された deploy queue の取得直後に、候補が指す main、published release、証明書と現在許可されたソースを再確認する。古い認定結果、動くタグ、出所不明の registry artifact を自動採用しない。
-- **現行 main:** `.github/workflows/backend-release.yml` と `.github/workflows/backend-deployment-handoff.yml` が exact-main 検証、handoff、保護されたデプロイを所有する。Ansible `deploy` は互換 Full image を適用し、migration fingerprint / persistence format / API epoch 不一致を拒否する。queue 内での再検証・Better Auth catalog 前段検査などの改善は、その実装が main に統合されたことを確認するまでは目標仕様として扱う。
+- **採用済み・実装済みのゲート:** 保護された deploy queue の取得直後に、候補の main・published release・証明書を再確認し、古い認定結果、動くタグ、出所不明の registry artifact を拒否する。CI と運用環境での受入は別の証拠を要する。
+- **現行 main:** `.github/workflows/backend-release.yml` と `.github/workflows/backend-deployment-handoff.yml` が exact-main 検証、handoff、保護されたデプロイを所有する。Ansible `deploy` は互換 Full image を適用し、migration fingerprint / persistence format / API epoch 不一致を拒否する。queue 内の再検証と Better Auth catalog の事前照合は通常更新の admission に含まれる。稼働中 VM での成功は別途実証する。
 - **別の ownership:** Cloudflare Worker の Frontend release、Cloudflare Terraform / Access、認証 schema maintenance は backend image-only lane に混ぜない。MCP デプロイ経路、VM polling、旧 pull updater を復活させない。
 
 ## 最低限の受入証拠

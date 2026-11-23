@@ -5,6 +5,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Topic | Reference |
 | --- | --- |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
+| Graphical, source-bound diagrams | [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/) · [viewer and verification](verification/ARCHITECTURE-ATLAS.md) — SVG diagram viewer, built and validated by Repository Audit Pages |
 | Overall architecture and trust boundaries | [System design](architecture/SYSTEM-DESIGN.md) — canonical system design |
 | PostgreSQL domain and schema invariants | [Data model](architecture/DATA-MODEL.md) — canonical domain design |
 | User screen navigation and recovery | [User screen flows](design/USER-SCREEN-FLOW.md) — canonical state transitions |

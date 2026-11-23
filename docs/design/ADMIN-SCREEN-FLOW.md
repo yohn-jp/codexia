@@ -4,6 +4,8 @@
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）
 
+[管理画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#admin-1)
+
 - **Desktop:** 原稿 Shell の「認証・セキュリティ」から dialog を開く。閉じると元の原稿に戻る。
 - **Mobile:** ヘッダー「設定」→ `view=settings` →「認証とセキュリティ」を表示し、元の執筆面に戻る。
 - **前提:** API session が認証済み、作者 scope が `owner`、Passkey runtime と Better Auth session が利用可能。いずれかが欠けた場合は UI を非表示または利用不能として示す。UI を非表示にすることはサーバー側認可の代替ではない。

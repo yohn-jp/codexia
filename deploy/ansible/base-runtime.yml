@@ -4,7 +4,6 @@
     that:
       - codexia_base_approved | default(false) | bool
       - not ansible_check_mode
-      - ansible_facts.user_uid | int > 0
       - codexia_service_user is defined
       - codexia_service_user is string and codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
       - codexia_service_uid is integer and codexia_service_uid > 0
@@ -343,9 +342,9 @@
     scope: user
     state: started
   when: base_runtime_containers.results[0].rc == 1
-- name: Wait for the canonical PostgreSQL service to accept connections
+- name: Wait for the permanent PostgreSQL server to accept TCP connections
   ansible.builtin.command:
-    argv: [podman, exec, codexia-db, pg_isready, -U, codexia_admin, -d, codexia]
+    argv: [podman, exec, codexia-db, pg_isready, -h, 127.0.0.1, -U, codexia_admin, -d, codexia]
   register: base_runtime_pg_ready
   changed_when: false
   retries: 60

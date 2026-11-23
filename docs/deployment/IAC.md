@@ -1,21 +1,22 @@
 # Infrastructure as code
 
-**Lifecycle authority:** [Initial VM deployment flow](INITIAL-DEPLOYMENT-FLOW.md) and [Compatible image update flow](UPDATE-FLOW.md), with the [system design](../architecture/SYSTEM-DESIGN.md) defining control-plane separation. The listed Ansible stages reflect the currently supported interface; a single bootstrap stage is an accepted design target until integrated and accepted.
+**Normative lifecycle:** [Initial VM deployment](INITIAL-DEPLOYMENT-FLOW.md), [Compatible backend updates](UPDATE-FLOW.md), and [system design](../architecture/SYSTEM-DESIGN.md) specify the approved state transitions. The implemented `bootstrap` operation and individually supported stages must conform to them.
 
 The sole backend delivery path is **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**. Cloudflare Tunnel remains application ingress, not the administration channel. No pull updater, polling timer, signed release channel, reverse-proxy selector or alternate writer controller is maintained.
 
-The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires encrypted off-VM backup and probes readiness. Pull-request validation receives no production credentials.
+The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup and probes readiness. Pull-request validation receives no production credentials.
 
 ## Supported Ansible operations
 
 | Stage | Responsibility |
 | --- | --- |
 | `inspect` | Read-only host and Podman inventory |
+| `bootstrap` | Converge the declared host, SSH deployment key, protected base secrets and base runtime. Include authentication provisioning when approved. |
 | `host` | Rootless service account and host prerequisites |
 | `secrets` | Initial protected Podman credential convergence |
 | `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
 | `auth-runtime` | Approved application schema initialization for a pristine database, Better Auth role, schema and protected runtime secrets |
-| `deploy` | Approved pristine-schema first activation or certified image update, encrypted off-VM backup, application health and rollback |
+| `deploy` | Approved pristine-schema first activation or certified image update, encrypted backup, application health and rollback |
 | `deploy-lifecycle-fixture` | GitHub Actions disposable-host verification only; local `localhost` connection, run-bound source evidence and the shared deployment transaction, with production admission kept on `deploy` |
 | `restore-drill` | Isolated encrypted backup restoration and checksum verification |
 
@@ -25,6 +26,6 @@ Runtime state lives only in `~/.local/state/codexia-deploy`, with the host lock,
 
 Require pinned SSH host keys, protected GitHub environment approval, independently held backup encryption keys and a private inventory. Never put credentials or private keys in Git.
 
-For first activation, run `host`, `secrets`, `base`, and `auth-runtime` before `deploy`. On a pristine database, `auth-runtime` initializes the application schema from a reviewed immutable Full image before provisioning the auth schema. Register the owner and OAuth clients through the isolated setup, then use the first-install and database-use approvals for the [protected activation](PUSH-DEPLOYMENT.md).
+For first activation, `bootstrap` runs `host`, `secrets`, `base`, and the approved `auth-runtime` tasks in order. Reapply the same inventory to resume provisioning. On a pristine database, `auth-runtime` initializes the application schema from a reviewed immutable Full image before provisioning the auth schema. Register the owner and OAuth clients through the isolated setup, reapply the final registration settings and use the first-install and database-use approvals for the [protected activation](PUSH-DEPLOYMENT.md).
 
 [Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md) describe independent restore and disposable-host verification. Production acceptance also requires observations on the target VM and its public route.

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, matchesGlob } from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { publicError, readExactBackendProducerArtifacts } from './push-app-lifecycle.mjs';
+import { publicError, readExactBackendProducerArtifacts, selectPriorPublication, selectLifecycleTransition } from './push-app-lifecycle.mjs';
 
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
@@ -202,15 +202,42 @@ test('Better Auth checkpoints identify their exact installed image, including th
   ]);
 });
 
+test('only the newest strictly earlier release matching API and storage metadata is selected for certificate lookup', () => {
+  const head = { sourceSha: 'a'.repeat(40), version: '1.0.101', apiEpoch: 2, persistenceFormat: 3 };
+  function release(version, overrides = {}) {
+    const metadata = { component: 'backend', version, sourceSha: 'b'.repeat(40), providedApiEpoch: 2, persistenceFormat: 3,
+      producer: { sourceSha: 'c'.repeat(40) }, ...overrides };
+    return { tag_name: 'backend-v' + version, draft: false, prerelease: false,
+      body: ['```json', JSON.stringify(metadata), '```'].join('\n') };
+  }
+  const rejected = [release('1.0.101'), release('1.0.102'), release('1.0.96', { providedApiEpoch: 1 }),
+    release('1.0.97', { persistenceFormat: 1 }), release('1.0.98', { producer: { sourceSha: head.sourceSha } }),
+    { ...release('1.0.99'), draft: true }, { ...release('1.0.100'), body: 'missing release metadata' }];
+  assert.equal(selectPriorPublication(rejected, head), undefined);
+  assert.equal(selectPriorPublication([release('1.0.10'), ...rejected, release('1.0.9')], head).metadata.version, '1.0.10');
+});
+
+test('published transitions require an upwards version and matching certified database and API identities', () => {
+  const head = { version: '1.0.101', profile: 'full', apiEpoch: 2, persistenceFormat: 3, migrationFingerprint: 'sha256:' + 'a'.repeat(64) };
+  const prior = { ...head, version: '1.0.100' };
+  assert.deepEqual(selectLifecycleTransition(head, prior), { from: 'prior', to: 'head', kind: 'published-upgrade' });
+  assert.deepEqual(selectLifecycleTransition(head), { from: 'head', to: 'auth-update', kind: 'test-only-digest' });
+  for (const mismatch of [{ version: head.version }, { version: '1.0.102' }, { profile: 'core' },
+    { apiEpoch: 3 }, { persistenceFormat: 4 }, { migrationFingerprint: 'sha256:' + 'b'.repeat(64) }]) {
+    assert.throws(() => selectLifecycleTransition(head, { ...prior, ...mismatch }), /compatible database and API/u);
+  }
+});
+
 test('image selection binds the exact-source Full artifact and verified publication proof', () => {
   const source = readFileSync(new URL('./push-app-lifecycle.mjs', import.meta.url), 'utf8');
   const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   assert.match(source, /selectBackendArtifacts/u);
   assert.match(source, /apiArrayPages\('releases'\)/u,
     'the GitHub releases endpoint must use its array response pagination contract');
-  assert.match(source, /publicationRun\.head_sha === metadata\.publication\.workflowHeadSha/u,
-    'a workflow_run publication binds the runner head SHA separately from the backend source SHA');
-  assert.doesNotMatch(source, /publicationRun\.head_sha === metadata\.sourceSha/u);
+  assert.match(source, /metadata\.publication\?\.workflowHeadSha \?\? metadata\.sourceSha/u);
+  assert.match(source, /run\.head_sha === workflowHead/u, 'a publication must bind its recorded workflow head');
+  assert.match(fixture, /run_deploy "\$initial_key" true/u);
+  assert.match(fixture, /observe_runtime compatible-update "\$update_key"/u);
   assert.match(source, /downloadArtifact/u);
   assert.match(source, /validatePushDeploymentCertificatePair/u);
   assert.match(source, /migrationFingerprint/u);

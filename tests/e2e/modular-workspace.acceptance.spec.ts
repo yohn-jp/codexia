@@ -493,7 +493,7 @@ async function seedTermRegistry(author: AuthorSession, fixture: WorkspaceFixture
 async function openFixtureScene(
   page: Page, authorizeAuthor: AuthorizeAuthor, mode: "desktop" | "mobile", sceneIndex = 0, seedTerms = false,
 ): Promise<WorkspaceFixture & { author: AuthorSession }> {
-  const initialAuthor = await authorizeAuthor(mode);
+  const initialAuthor = await authorizeAuthor(mode, undefined, { apiSetupOnly: true });
   const fixture = await createWorkspaceFixture(initialAuthor);
   if (seedTerms) await seedTermRegistry(initialAuthor, fixture);
   const scene = fixture.scenes[sceneIndex];

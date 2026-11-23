@@ -1,5 +1,7 @@
 # Codexia システム基本設計
 
+[図をグラフィカルに閲覧する](https://yohn-jp.github.io/codexia/architecture/#system-1)
+
 **種別: 正本・規範的設計（normative）。** 本書はシステム全体の構成、責務分界、変更が守る不変条件を定義する。実装・CI・本番環境を検査して得られる事実は適合証拠であり、設計の代替正本ではない。運用手順・個別機能の詳細は本書から参照する所有文書が定める。
 
 ## 設計の優先順位
@@ -96,7 +98,7 @@ flowchart LR
 ```
 
 - **一つのデプロイ制御プレーン:** GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet。VM 上の polling updater、pull timer、別のリリース選択器、MCP によるデプロイは設けない。
-- 初期導入では専用の承認を要する。空ホストと既存データの採用を分け、資格情報、DB 初期化、owner 登録、本番初回起動を無断連結しない。単一の `bootstrap` 操作へ収束させることは設計目標であり、現行コードの段階操作を実装済みと読み替えない。
+- 初期導入では専用の承認を要する。空ホストと既存データの採用を分け、資格情報、DB 初期化、owner 登録、本番初回起動を無断連結しない。`bootstrap` は承認された host、secrets、base、auth-runtime の順序収束を提供する。owner 登録と保護された本番 `deploy` は引き続き別の明示操作であり、CI と本番受入を混同しない。
 - 通常更新は **DB migration fingerprint、persistence format、API epoch、Full profile、認証スキーマ互換性** を検証し、互換なイメージのみ自動適用できる。互換でないものは承認済み別手順に隔離する。
 - 変更前バックアップ、host lock、停止、適用、health、失敗時の既知良好イメージへの復帰を一つのトランザクションとして扱う。コンテナーだけを戻してデータ変更が巻き戻ったと主張しない。
 

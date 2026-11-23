@@ -41,7 +41,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       const session = await api.session();
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== "postgres") {
-        throw new Error("PostgreSQL保存基盤が利用できません。Gitワークスペースへの切替は提供していません。");
+        throw new Error("PostgreSQL保存基盤が利用できません。");
       }
       if (!session.authorScope) {
         throw new Error("このアカウントには原稿編集権限がありません。");

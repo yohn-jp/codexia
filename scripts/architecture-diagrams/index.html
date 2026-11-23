@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="description" content="Codexia canonical architecture diagrams and transition states">
+  <title>Architecture Atlas — Codexia</title>
+  <link rel="stylesheet" href="./atlas.css">
+  <script type="module" src="./atlas.js"></script>
+</head>
+<body>
+<a class="skip" href="#diagram">図へ移動</a>
+<div class="page">
+  <header class="masthead">
+    <div class="masthead-upper">
+      <a href="../" class="wordmark" aria-label="Codexia Repository Auditへ戻る">CODEXIA <span>/ ARCHITECTURE</span></a>
+      <nav aria-label="関連ページ">
+        <a href="../">Source audit</a>
+        <a href="../ci/">CI Observatory</a>
+        <a href="../graph/">Source graph</a>
+      </nav>
+    </div>
+    <div class="masthead-title">
+      <div>
+        <p class="eyebrow">NORMATIVE DESIGN / READ-ONLY</p>
+        <h1>Architecture Atlas<span class="period">.</span></h1>
+        <p class="intro">画面、認証、初期デプロイ、更新・復旧。設計書のMermaidをSVGとして可視化し、実装とは独立した正本を参照する。</p>
+      </div>
+      <div class="revision">
+        <span>Source revision</span>
+        <code id="source-sha">読み込み中</code>
+        <span id="diagram-total" class="count">—</span>
+      </div>
+    </div>
+  </header>
+  <div class="workspace">
+    <aside class="rail" aria-labelledby="index-title">
+      <div class="rail-head">
+        <p class="eyebrow">DESIGN CATALOG</p>
+        <h2 id="index-title">設計図一覧</h2>
+      </div>
+      <nav id="diagram-list" aria-label="設計図を選択"></nav>
+      <p class="rail-note">図はリポジトリの正本Markdownからビルド時に生成。ここからの操作で設計書や本番環境は変更されません。</p>
+    </aside>
+    <main id="diagram" class="main">
+      <div class="diagram-head">
+        <div>
+          <p id="diagram-group" class="eyebrow">SELECT A DIAGRAM</p>
+          <h2 id="diagram-title">図を読み込んでいます</h2>
+          <p class="diagram-meta"><span id="diagram-kind"></span> <a id="source-link" target="_blank" rel="noopener noreferrer">設計書の原文を見る</a></p>
+        </div>
+        <div class="controls" aria-label="図の表示倍率を変更">
+          <button type="button" id="zoom-out" aria-label="縮小">−</button>
+          <button type="button" id="zoom-reset">100%</button>
+          <button type="button" id="zoom-in" aria-label="拡大">＋</button>
+          <a id="svg-link" class="open-svg" target="_blank" rel="noopener noreferrer">SVGを開く</a>
+        </div>
+      </div>
+      <div id="canvas" class="canvas" tabindex="0" aria-label="選択中の状態遷移図、拡大縮小とスクロールに対応">
+        <div id="loading" class="loading" role="status">図を準備しています。</div>
+        <img id="svg-image" alt="" hidden>
+      </div>
+      <div class="canvas-foot">
+        <span id="view-status" role="status" aria-live="polite">—</span>
+        <span>原本はMarkdown / 表示はビルド生成されたSVG</span>
+      </div>
+    </main>
+  </div>
+  <footer class="footer">CANONICAL DESIGN · SOURCE-BOUND SVG · No runtime Mermaid CDN · <a href="https://github.com/yohn-jp/codexia/tree/main/docs">Documentation</a></footer>
+</div>
+</body>
+</html>
