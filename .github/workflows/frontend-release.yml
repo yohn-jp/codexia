@@ -13,6 +13,19 @@ on:
       - packages/module-runtime/**
       - packages/persistence-contracts/**
       - packages/persistence-postgres/**
+      # Test-only files are not source-bound runtime or host-lifecycle inputs.
+      - '!app/**/test/**'
+      - '!app/**/tests/**'
+      - '!app/**/*.test.*'
+      - '!app/**/*.spec.*'
+      - '!modules/**/test/**'
+      - '!modules/**/tests/**'
+      - '!modules/**/*.test.*'
+      - '!modules/**/*.spec.*'
+      - '!packages/**/test/**'
+      - '!packages/**/tests/**'
+      - '!packages/**/*.test.*'
+      - '!packages/**/*.spec.*'
       - deploy/cloudflare/**
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
