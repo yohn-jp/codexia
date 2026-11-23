@@ -40,10 +40,11 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.equal(modelJob['continue-on-error'], undefined);
   assert.equal(REQUIRED_VERIFICATION_JOBS.includes(modelJob.name), false);
   assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
-  assert.ok(VERIFICATION_GROUPS['types-tests'].includes('requirements-trace'));
+  assert.ok(!VERIFICATION_GROUPS['types-tests'].includes('requirements-trace'));
+  assert.deepEqual(VERIFICATION_GROUPS['types-trace'], ['requirements-trace']);
   assert.equal(VERIFICATION_TASKS.filter(task => task === 'requirements-trace').length, 1);
   const strictdocSetup = workflow.jobs.types.steps.find(step => step.name === 'Install pinned StrictDoc and Chromium');
-  const traceSelected = "matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')";
+  const traceSelected = "matrix.group == 'trace'";
   assert.equal(strictdocSetup.if, traceSelected);
   for (const [files, expected] of [
     [['docs/verification/CI-CD.md'], false],
@@ -60,7 +61,7 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.equal(python.if, traceSelected);
   assert.equal(python.with['python-version'], '3.12');
   const typesCheckout = workflow.jobs.types.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
-  assert.equal(typesCheckout.with['fetch-depth'], "${{ matrix.group == 'tests' && '0' || '1' }}");
+  assert.equal(typesCheckout.with['fetch-depth'], "${{ matrix.group == 'trace' && '0' || '1' }}");
   const groupRunner = readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8');
   assert.match(groupRunner, /CODEXIA_CI_SOURCE_SHA:\s*sha/u);
   assert.match(groupRunner, /CODEXIA_CI_TASK:\s*task/u);
