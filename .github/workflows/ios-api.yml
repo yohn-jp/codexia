@@ -32,6 +32,32 @@ jobs:
           xcodebuild -version | grep -E '^Xcode 27\.'
           swift --version
           python3 -m pip install PyYAML==6.0.3
+      - name: Resolve locked Swift dependencies
+        env:
+          CODEXIA_GIT_READ_TOKEN: ${{ github.token }}
+        run: |
+          helper=$(mktemp "$RUNNER_TEMP/codexia-swift-credential.XXXXXX")
+          trap 'rm -f "$helper"' EXIT
+          cat > "$helper" <<'EOF'
+          #!/bin/sh
+          [ "$1" = get ] || exit 0
+          protocol=
+          host=
+          while IFS='=' read -r key value && [ -n "$key" ]; do
+            case "$key" in
+              protocol) protocol=$value ;;
+              host) host=$value ;;
+            esac
+          done
+          if [ "$protocol" = https ] && [ "$host" = github.com ]; then
+            printf 'username=x-access-token\npassword=%s\n' "$CODEXIA_GIT_READ_TOKEN"
+          fi
+          EOF
+          chmod 700 "$helper"
+          GIT_CONFIG_COUNT=2 \
+            GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='' \
+            GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1="!\"$helper\"" \
+            swift package --package-path ios/CodexiaTransport --force-resolved-versions resolve
       - name: Compare regenerated client and operation IDs
         run: ios/CodexiaTransport/generate.sh --check
       - name: Run Swift contract tests
