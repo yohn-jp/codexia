@@ -95,6 +95,9 @@ test('one Gemini Markdown covers all verified files and redacts unverified delet
     const reviewHtml=readFileSync(join(dir, 'index.html'), 'utf8');
     assert.match(reviewHtml, new RegExp(`href="\\.\\./\\.\\./audit/#sha-${f.feature}"`));
     assert.match(reviewHtml, /<main>/u);
+    assert.match(reviewHtml, /class="cx-pages-hero"/u);
+    assert.match(reviewHtml, /<details class="cx-pages-disclosure"><summary>1 selected source files<\/summary>/u);
+    assert.match(reviewHtml, /download="codexia-[a-f0-9]{40}-review\.md"/u);
     const auditIndex=readFileSync(join(f.site, 'audit', 'index.html'), 'utf8');
     assert.match(auditIndex, new RegExp(f.feature));
     assert.match(auditIndex, new RegExp(`id="sha-${f.feature}"`));
