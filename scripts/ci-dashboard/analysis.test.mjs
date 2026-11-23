@@ -267,9 +267,25 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/actions/runs')) {
       await inventoryReady;
+      if (mode === 'two-revisions') {
+        return route.fulfill({ json: { workflow_runs: [
+          { ...run({
+            id: 2, status: 'in_progress', conclusion: null, created_at: at(100), run_started_at: at(100),
+            head_sha: 'b'.repeat(40), html_url: 'https://github.com/yohn-jp/codexia/actions/runs/2',
+          }), workflow_id: 7, pull_requests: [{ number: 43 }] },
+          { ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] },
+        ] } });
+      }
       if (mode === 'empty') return route.fulfill({ json: { workflow_runs: [] } });
       if (mode === '403' || mode === '429') return route.fulfill({ status: Number(mode) });
       return route.fulfill({ json: { workflow_runs: [{ ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] }] } });
+    }
+    if (mode === 'two-revisions' && path.endsWith('/actions/runs/2/attempts/1/jobs')) {
+      return route.fulfill({ json: { jobs: [{
+        id: 20, name: 'plan', status: 'queued', conclusion: null, run_attempt: 1,
+        created_at: at(100), started_at: null, completed_at: null, steps: [],
+        html_url: 'https://github.com/yohn-jp/codexia/actions/runs/2/job/20',
+      }] } });
     }
     if (mode === 'incomplete' && path.endsWith('/actions/runs/1/attempts/1/jobs') &&
       new URL(route.request().url()).searchParams.get('page') === '1') {
@@ -325,6 +341,15 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.origin.executedSha, 'a'.repeat(40));
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
+
+  // Switching to a revision with no completed jobs must not retain the prior timeline range.
+  mode = 'two-revisions';
+  await page.reload();
+  await page.getByRole('status').filter({ hasText: 'Collected' }).waitFor();
+  await page.locator('#timeline-foot').filter({ hasText: 'Range:' }).waitFor();
+  await page.locator('#pr').selectOption('0');
+  assert.equal(await page.locator('#timeline-foot').textContent(), '未計測');
+  await timeline.getByText('表示可能なジョブ時刻がありません。').waitFor();
 
   for (const status of ['403', '429']) {
     mode = status;

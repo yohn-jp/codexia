@@ -183,8 +183,8 @@ model DocumentChange {
 }
 
 model SaveDocumentResponse {
-  document: JsonObject;
-  revision: JsonObject;
+  document: PersistenceDocument;
+  revision: PersistenceDocumentRevision;
   replayed: boolean;
   ...Record<never>;
 }
@@ -193,8 +193,57 @@ model SaveConflictResponse {
   code: "PERSISTENCE_CONFLICT";
   error: string;
   details?: JsonObject | null;
-  current: JsonObject | null;
+  current: { document: PersistenceDocument; revision: PersistenceDocumentRevision | null; ...Record<unknown> } | null;
   ...Record<never>;
+}
+
+model PersistenceDocument {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  kind: string;
+  title: string;
+  orderKey: string;
+  headRevisionId: string | null;
+  version: int32;
+  createdAt: utcDateTime;
+  updatedAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model PersistenceDocumentRevision {
+  id: string;
+  projectId: string;
+  documentId: string;
+  parentRevisionId: string | null;
+  markdown: string;
+  @pattern("^[0-9a-f]{64}$")
+  sha256: string;
+  authorId: string;
+  createdAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model PersistenceDocumentListResponse {
+  documents: PersistenceDocument[];
+  ...Record<unknown>;
+}
+
+model PersistenceDocumentGetResponse {
+  document: PersistenceDocument;
+  revision: PersistenceDocumentRevision | null;
+  ...Record<unknown>;
+}
+
+model PersistenceDocumentEnvelope {
+  document: PersistenceDocument;
+  ...Record<unknown>;
+}
+
+model DocumentRevisionPageResponse {
+  revisions: PersistenceDocumentRevision[];
+  nextBefore: string | null;
+  ...Record<unknown>;
 }
 
 model BackupConfigView {
