@@ -2,7 +2,7 @@ import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
-import { persistenceStatusGet } from "./generated/http/client";
+import { getPersistenceDocumentsGetUrl, persistenceStatusGet } from "./generated/http/client";
 import type { PersistenceStatusResponse } from "./generated/http/schemas/persistenceStatusResponse.zod";
 import type {
   ActionResult,
@@ -520,10 +520,14 @@ export const api = {
   applyNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetApplication,
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/apply`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
   persistenceDocuments: async (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
-    const query = new URLSearchParams({limit:"1000"});
-    if (parentId !== undefined) query.set("parentId", parentId ?? "root");
-    const result = await request(dto.persistenceDocuments, persistencePath(projectId, `documents?${query}`), { ...(signal ? { signal } : {}) });
-    if (result.documents.length >= 1000) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
+    const limit = 1000;
+    const url = getPersistenceDocumentsGetUrl(projectId, {
+      limit,
+      ...(parentId !== undefined ? { parentId: parentId ?? "root" } : {}),
+    });
+    // The generated schema currently accepts negative document versions.
+    const result = await request(dto.persistenceDocuments, url, { ...(signal ? { signal } : {}) });
+    if (result.documents.length >= limit) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
     return result;
   },
   persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgePage> => {
