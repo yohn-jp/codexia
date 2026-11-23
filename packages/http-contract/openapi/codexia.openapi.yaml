@@ -103,6 +103,23 @@ paths:
         - health
       security:
         - {}
+    head:
+      operationId: api_browser_version_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
   /api/console/backups/config:
     get:
       operationId: backup_console_config_get
@@ -545,6 +562,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_health_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
       tags:
         - health
       security:
@@ -1712,6 +1746,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: api_ready_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
       tags:
         - health
       security:
@@ -3477,6 +3537,23 @@ paths:
         - health
       security:
         - {}
+    head:
+      operationId: api_version_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
   /health/live:
     get:
       operationId: health_live_get
@@ -3488,6 +3565,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: health_live_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
       tags:
         - health
       security:
@@ -3507,6 +3601,32 @@ paths:
         - health
       security:
         - {}
+    head:
+      operationId: health_ready_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+      tags:
+        - health
+      security:
+        - {}
   /health/startup:
     get:
       operationId: health_startup_get
@@ -3518,6 +3638,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+      tags:
+        - health
+      security:
+        - {}
+    head:
+      operationId: health_startup_head
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
+        '503':
+          description: Service unavailable.
+          headers:
+            content-type:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - application/json
       tags:
         - health
       security:
@@ -4240,5 +4386,17 @@ x-codexia-cors:
   mcpExposeHeaders:
     - Mcp-Session-Id
     - WWW-Authenticate
+  preflight:
+    route: generic OPTIONS catch-all at / and /*; not a per-resource operation
+    successStatus: 204
+    deniedStatus: 403
+    allowMethods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
 x-codexia-api-epoch: 2
 x-codexia-contract-status: incomplete

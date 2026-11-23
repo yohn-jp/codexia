@@ -11,28 +11,56 @@ namespace Codexia.Http;
 op getHealth(): HealthResponse | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("health") @useAuth(NoAuth)
+@route("/api/health") @head @operationId("api_health_head")
+op headHealth(): HeadJsonResponse;
+
+@tag("health") @useAuth(NoAuth)
 @route("/api/ready") @get @operationId("api_ready_get")
 op getReady(): ReadinessResponse;
+
+@tag("health") @useAuth(NoAuth)
+@route("/api/ready") @head @operationId("api_ready_head")
+op headReady(): HeadJsonResponse | { @statusCode _: 503; @header contentType: "application/json"; };
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/live") @get @operationId("health_live_get")
 op getLive(): ReadinessResponse;
 
 @tag("health") @useAuth(NoAuth)
+@route("/health/live") @head @operationId("health_live_head")
+op headLive(): HeadJsonResponse;
+
+@tag("health") @useAuth(NoAuth)
 @route("/health/ready") @get @operationId("health_ready_get")
 op getHealthReady(): ReadinessResponse;
+
+@tag("health") @useAuth(NoAuth)
+@route("/health/ready") @head @operationId("health_ready_head")
+op headHealthReady(): HeadJsonResponse | { @statusCode _: 503; @header contentType: "application/json"; };
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/startup") @get @operationId("health_startup_get")
 op getStartup(): ReadinessResponse;
 
 @tag("health") @useAuth(NoAuth)
+@route("/health/startup") @head @operationId("health_startup_head")
+op headStartup(): HeadJsonResponse | { @statusCode _: 503; @header contentType: "application/json"; };
+
+@tag("health") @useAuth(NoAuth)
 @route("/api/version") @get @operationId("api_version_get")
 op getApiVersion(): VersionResponse;
 
 @tag("health") @useAuth(NoAuth)
+@route("/api/version") @head @operationId("api_version_head")
+op headApiVersion(): HeadJsonResponse;
+
+@tag("health") @useAuth(NoAuth)
 @route("/api/browser/version") @get @operationId("api_browser_version_get")
 op getBrowserVersion(): VersionResponse;
+
+@tag("health") @useAuth(NoAuth)
+@route("/api/browser/version") @head @operationId("api_browser_version_head")
+op headBrowserVersion(): HeadJsonResponse;
 
 @tag("owner") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/session") @get @operationId("api_session_get")

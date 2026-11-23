@@ -180,11 +180,18 @@ export function toFastifyRoutes(openapi, options = {}) {
     else if (requestSchemaEntries.length > 1) schema.body = { oneOf: requestSchemaEntries };
 
     const responseContentTypes = {};
+    const responseHeaders = {};
     if (operation.responses) {
       schema.response = {};
       for (const [status, response] of Object.entries(operation.responses)) {
         const types = Object.keys(response?.content ?? {});
         responseContentTypes[status] = types;
+        responseHeaders[status] = Object.fromEntries(Object.entries(response?.headers ?? {}).map(([name, header]) => [
+          name.toLowerCase(), {
+            required: Boolean(header.required),
+            schema: mapSchema(header.schema ?? {}, `${method} ${path}.responses.${status}.headers.${name}`),
+          },
+        ]));
         const responseSchemas = contentSchemas(response?.content, `${method} ${path}.responses.${status}`);
         const entries = Object.values(responseSchemas);
         if (entries.length === 1) schema.response[status] = entries[0];
@@ -198,6 +205,7 @@ export function toFastifyRoutes(openapi, options = {}) {
       contractStatus: operation["x-codexia-contract-status"] ?? openapi["x-codexia-contract-status"],
       requestContentTypes,
       contentTypes: responseContentTypes,
+      responseHeaders,
       schema,
     };
   });

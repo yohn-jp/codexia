@@ -40,8 +40,8 @@ function assertAdmittedRouteInventory(openapi) {
   if (new Set(expected.map((key) => key.slice(key.indexOf(" ") + 1))).size !== 84) {
     throw new Error("Admitted route inventory must contain exactly 84 path templates");
   }
-  if (admittedInventory.current.length !== 91 || admittedInventory.target.length !== 11) {
-    throw new Error("Admitted route inventory must distinguish 91 current routes from 11 target routes");
+  if (admittedInventory.current.length !== 98 || admittedInventory.target.length !== 11) {
+    throw new Error("Admitted route inventory must distinguish 98 current routes from 11 target routes");
   }
 
   const targetSet = new Set(admittedInventory.target);
@@ -95,6 +95,10 @@ test("TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs", (t) 
   assert.equal(openapi.info.version, "2.0.0");
   assert.equal(openapi["x-codexia-api-epoch"], 2);
   assert.equal(openapi["x-codexia-cors"].credentials, false);
+  assert.match(openapi["x-codexia-cors"].preflight.route, /generic OPTIONS catch-all/u);
+  assert.equal(openapi["x-codexia-cors"].preflight.successStatus, 204);
+  assert.equal(openapi["x-codexia-cors"].preflight.deniedStatus, 403);
+  assert.deepEqual(openapi["x-codexia-cors"].preflight.allowMethods, ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
   assert.match(openapi["x-codexia-cors"].originPolicy, /wildcard origins are forbidden/u);
   assert.ok(openapi["x-codexia-cors"].mcpExposeHeaders.includes("Mcp-Session-Id"));
   assert.equal(openapi["x-codexia-external-contracts"].betterAuth.libraryOperationsIncludedHere, false);
@@ -105,6 +109,14 @@ test("TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs", (t) 
   assert.equal(openapi.paths["/api/health"].get.operationId, "api_health_get");
   assert.ok(openapi.paths["/api/health"].get.responses["200"]);
   assert.ok(openapi.paths["/api/health"].get.responses["503"]);
+  for (const route of ["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup", "/api/version", "/api/browser/version"]) {
+    assert.ok(openapi.paths[route].get, `${route} GET remains declared`);
+    assert.ok(openapi.paths[route].head, `${route} HEAD is explicitly declared`);
+    for (const response of Object.values(openapi.paths[route].head.responses)) {
+      assert.equal(response.content, undefined, `${route} HEAD must not declare a response body`);
+      assert.equal(response.headers?.["content-type"]?.schema?.enum?.[0], "application/json");
+    }
+  }
 });
 
 test("the generated contract exactly matches the independent admitted route inventory", (t) => {
@@ -112,7 +124,7 @@ test("the generated contract exactly matches the independent admitted route inve
   t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
   const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
   const inventory = assertAdmittedRouteInventory(openapi);
-  assert.equal(inventory.length, 102);
+  assert.equal(inventory.length, 109);
   assert.ok(!openapi.paths["/api/projects/{projectId}/modules/assistant/rewrite/stream"]);
   assert.ok(!openapi.paths["/api/projects/{projectId}/modules/assistant/qa/stream"]);
   const operations = Object.values(openapi.paths).flatMap((pathItem) =>
@@ -167,6 +179,44 @@ test("generated request and response schemas preserve null, oneOf, closed object
   assert.ok(save.responses["409"]);
   assert.ok(openapi.paths["/api/console/backups/config/draft"].put.parameters.some((parameter) => parameter.name === "If-Match" && parameter.in === "header"));
   assert.ok(openapi.paths["/api/projects/events"].get.responses["200"].content["text/event-stream"]);
+});
+
+test("generated same-path GET and HEAD routes preserve headers and HEAD has no body", async (t) => {
+  const outputDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-head-"));
+  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
+  const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
+  const { routes, schemas } = toFastifyRoutes(openapi);
+  const getRoute = routes.find(({ method, url }) => method === "GET" && url === "/api/health");
+  const headRoute = routes.find(({ method, url }) => method === "HEAD" && url === "/api/health");
+  assert.ok(getRoute);
+  assert.ok(headRoute);
+  assert.deepEqual(headRoute.contentTypes["200"], []);
+  assert.equal(headRoute.responseHeaders["200"]["content-type"].schema.enum[0], "application/json");
+
+  // Fastify otherwise synthesizes HEAD routes for GET routes, which would
+  // collide with the explicit pair emitted by the contract.
+  const app = Fastify({ exposeHeadRoutes: false, ajv: { customOptions: { removeAdditional: false } } });
+  t.after(() => app.close());
+  for (const schema of schemas) app.addSchema(schema);
+  app.route({
+    method: getRoute.method,
+    url: getRoute.url,
+    schema: getRoute.schema,
+    handler: async (_request, reply) => reply.header("Content-Type", "application/json; charset=utf-8").send({ status: "ok" }),
+  });
+  app.route({
+    method: headRoute.method,
+    url: headRoute.url,
+    schema: headRoute.schema,
+    handler: async (_request, reply) => reply.header("Content-Type", "application/json; charset=utf-8").send(),
+  });
+  const getResponse = await app.inject({ method: "GET", url: "/api/health" });
+  const headResponse = await app.inject({ method: "HEAD", url: "/api/health" });
+  assert.equal(getResponse.statusCode, 200, getResponse.payload);
+  assert.equal(headResponse.statusCode, 200, headResponse.payload);
+  assert.equal(getResponse.headers["content-type"], "application/json; charset=utf-8");
+  assert.equal(headResponse.headers["content-type"], "application/json; charset=utf-8");
+  assert.equal(headResponse.payload, "");
 });
 
 test("OpenAPI 3.1 routes convert to Fastify schemas without losing closed, nullable, union, or format constraints", async (t) => {

@@ -22,7 +22,13 @@ using TypeSpec.OpenAPI;
   methods: #["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
   requestHeaders: #["Authorization", "Content-Type", "Idempotency-Key", "X-Client-Id", "X-Codexia-Recent-Activity-Order", "Prefer"],
   mcpRequestHeaders: #["Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID"],
-  mcpExposeHeaders: #["Mcp-Session-Id", "WWW-Authenticate"]
+  mcpExposeHeaders: #["Mcp-Session-Id", "WWW-Authenticate"],
+  preflight: #{
+    route: "generic OPTIONS catch-all at / and /*; not a per-resource operation",
+    successStatus: 204,
+    deniedStatus: 403,
+    allowMethods: #["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  }
 })
 @extension("x-codexia-external-contracts", #{
   betterAuth: #{

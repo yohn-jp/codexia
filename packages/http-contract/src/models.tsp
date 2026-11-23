@@ -124,6 +124,11 @@ model ReadinessResponse {
   ...Record<never>;
 }
 
+// HEAD responses retain applicable representation headers but never a body.
+model HeadJsonResponse {
+  @header contentType: "application/json";
+}
+
 model VersionResponse {
   name: "codexia";
   version: string;

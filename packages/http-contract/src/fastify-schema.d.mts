@@ -7,6 +7,7 @@ export interface FastifyContractRoute {
   contractStatus: "complete" | "incomplete" | "target" | "external";
   requestContentTypes: string[];
   contentTypes: Record<string, string[]>;
+  responseHeaders: Record<string, Record<string, { required: boolean; schema: Record<string, unknown> }>>;
   schema: Record<string, unknown>;
 }
 

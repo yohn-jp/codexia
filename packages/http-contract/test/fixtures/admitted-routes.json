@@ -1,6 +1,7 @@
 {
   "sourceBasis": {
     "coreOwnerHealthAndAuthAdapters": "packages/api/src/server.ts",
+    "headAndPreflightDispatcher": "packages/api/src/server.ts",
     "persistence": "packages/api/src/persistence-routes.ts",
     "mcpContribution": "modules/mcp/src/http.ts",
     "publicPublishingContribution": "modules/publishing/src/http.ts",
@@ -64,6 +65,13 @@
     "GET /health/live",
     "GET /health/ready",
     "GET /health/startup",
+    "HEAD /api/browser/version",
+    "HEAD /api/health",
+    "HEAD /api/ready",
+    "HEAD /api/version",
+    "HEAD /health/live",
+    "HEAD /health/ready",
+    "HEAD /health/startup",
     "GET /mcp",
     "PATCH /api/v1/persistence/projects/{projectId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}",
