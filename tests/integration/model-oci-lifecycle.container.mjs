@@ -12,7 +12,9 @@ import { seedModelFixture } from "./model-postgres-fixture.mjs";
 
 const OUTPUT_DIRECTORY = "/p13-output";
 const LOCAL_API_ORIGIN = "http://127.0.0.1:3000";
-const API_ORIGIN = new URL(process.env.CODEXIA_PUBLIC_ORIGIN).origin;
+const API_ORIGIN = "https://codexia-lifecycle-proxy:4443";
+assert.equal(new URL(process.env.CODEXIA_PUBLIC_ORIGIN).origin, API_ORIGIN,
+  "The OCI lifecycle must use its pinned private HTTPS reverse proxy");
 const PROJECT_ID = process.env.P13_PROJECT_ID;
 const OWNER_SUBJECT = process.env.CODEXIA_OAUTH_OWNER_SUBJECT;
 const WEB_CLIENT_ID = process.env.P13_OAUTH_WEB_CLIENT;
@@ -268,6 +270,8 @@ async function api(path, options = {}) {
     headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
   }
+  // Only the pinned in-network HTTPS proxy may receive authenticated API requests;
+  // its x-forwarded host/proto contract is required by Better Auth.
   const response = await fetch(API_ORIGIN + path, init);
   const text = await response.text();
   let value;

@@ -27,24 +27,26 @@ node scripts/performance/summarize.mjs /tmp/codexia-postgresql-baseline-20261115
 
 The output path must be new. The runner records the exact source and dirty state, built output hashes, toolchain, OS/CPU, PostgreSQL version and `pg_settings` snapshot/hash, fixture hashes, sample counts and cold/warm conditions. Raw JSON, the machine summary, Markdown tables and Chromium CPU profiles remain under the output directory. Keep raw evidence outside product documentation.
 
-`BENCH_SIZES` selects a comma-separated subset of `small,long-form,knowledge-dense,limit-999,limit-1000,limit-1001`. `BENCH_BROWSER_SIZES` selects browser runs and defaults to `small,long-form`. `BENCH_TIMEOUT_MS` defaults to 600000 (10 minutes) per worker; the earlier 180-second budget is insufficient for the measured long-form fixture. `BENCH_REPEATS` controls Core and browser navigation repeats; `BENCH_BROWSER_SAVE_REPEATS` controls editor save/receipt repeats per document size and defaults to 3. Set these variables before the command to narrow a run. `CODEXIA_E2E_CHROMIUM` selects a system Chromium; otherwise Playwright's installed Chromium is used. Browser probes use `/desktop/`, the Better Auth browser OAuth flow, the authenticated Persistence API, real PostgreSQL revisions, isolated browser storage and the current IndexedDB journal/save protocol.
+`BENCH_SIZES` selects a comma-separated subset of `small,long-form,knowledge-dense,limit-999,limit-1000,limit-1001`. The default measures `small,long-form,knowledge-dense,limit-999`. `BENCH_BROWSER_SIZES` selects browser runs and defaults to `small,long-form`. `BENCH_TIMEOUT_MS` defaults to 600000 (10 minutes) per worker; the earlier 180-second budget is insufficient for the measured long-form fixture. `BENCH_REPEATS` controls Core and browser navigation repeats; `BENCH_BROWSER_SAVE_REPEATS` controls editor save/receipt repeats per document size and defaults to 3. Set these variables before the command to narrow a run. `CODEXIA_E2E_CHROMIUM` selects a system Chromium; otherwise Playwright's installed Chromium is used. Browser probes use `/desktop/`, the Better Auth browser OAuth flow, the authenticated Persistence API, real PostgreSQL revisions, isolated browser storage and the current IndexedDB journal/save protocol.
 
 ## PostgreSQL fixture dimensions
 
-| Fixture | Persisted documents | Shape and additional records | Expected snapshot outcome |
+| Fixture | Planned documents | Shape and additional records | Expected outcome |
 | --- | ---: | --- | --- |
 | `small` | 8 | 1 volume, 1 chapter, 6 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 4 KiB; 3 extra revisions on the first scene | supported |
 | `long-form` | 400 | 2 volumes, 20 chapters, 378 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 4 KiB; 10 extra revisions on the first scene | supported |
 | `knowledge-dense` | 100 | 1 volume, 5 chapters, 94 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 2 KiB; 100 Knowledge nodes, 200 aliases, 400 Evidence anchors/mentions, 100 assertions and supporting links; 5 extra revisions | supported |
 | `limit-999` | 999 | 1 volume, 1 chapter, 997 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | supported |
-| `limit-1000` | 1,000 | 1 volume, 1 chapter, 998 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | rejected with `snapshot_too_large` |
-| `limit-1001` | 1,001 | 1 volume, 1 chapter, 999 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | rejected with `snapshot_too_large` |
+| `limit-1000` | 1,000 | 1 volume, 1 chapter, 998 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | seeding rejected with `conflict` |
+| `limit-1001` | 1,001 | 1 volume, 1 chapter, 999 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | seeding rejected with `conflict` |
 
 Dataset identity is derived from the fixed plan and content hashes, independent of the temporary output path or generated PostgreSQL IDs. Before migration or seeding, the importer verifies the manifest, transport plan and exact scene bytes against that identity. Persisted document and revision counts, logical Markdown bytes, PostgreSQL tuple bytes, Knowledge/Evidence row counts and bytes, and measured projection bytes are recorded from the database or actual Core projection. Fixture setup time is recorded separately and is never included in workload latency.
 
 ## Workloads and interpretation
 
-Core workloads measure cold current snapshot materialization, repeated current reads, first and warm pinned reads, scene/tree reads, Knowledge/Evidence projection access, literal search, writing statistics, revision listing/body reads, and document save/proposal/approval/apply/receipt replay. Projection bytes are recorded from the pinned reader; projection generation is included in cold snapshot materialization. `limit-999` through `limit-1001` exercise the existing document guard; expected rejection wall time is retained as a rejection record, not successful latency.
+Core workloads measure cold current snapshot materialization, repeated current reads, first and warm pinned reads, scene/tree reads, Knowledge/Evidence projection access, literal search, writing statistics, revision listing/body reads, and document save/proposal/approval/apply/receipt replay. Projection bytes are recorded from the pinned reader; projection generation is included in cold snapshot materialization. `limit-999` measures cold Core materialization at the persistence limit.
+
+To exercise the seed-time rejection, select `BENCH_SIZES=limit-1000,limit-1001` explicitly. The PostgreSQL persistence adapter rejects creation of the 1,000th active document with `conflict`. The Core worker result records the error with status `NOT_CHECKED`. The failure occurs before the worker records any snapshot operation or sample. The runner exits nonzero. Run the separate `summarize.mjs` command shown above to carry the worker status and error into `summary.json`.
 
 Browser workloads measure login readiness, author login, project/scene navigation, editor changes, strict IndexedDB journal writes, and PostgreSQL save receipts at the three body sizes. They use the built API and the product authoring UI. Each browser worker builds assets for its own OAuth registration and records their hash under `harness.browserAssets`. Authentication fixture setup and browser asset build time are separate from the measured workload phases. Synthetic keyboard events and animation-frame opportunities are probes, not native IME or input-to-pixel acceptance.
 
@@ -62,3 +64,48 @@ CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_pe
 Set `CODEXIA_E2E_CHROMIUM` and `CODEXIA_AUTH_TEST_DISPOSABLE=1` after a Core build to additionally execute the browser benchmark smoke and IndexedDB probes. The Core CI writing browser lane also executes the same smoke against a fresh disposable database on its private PostgreSQL service, through a loopback-only forwarding adapter. The smoke is not a full matched performance campaign. The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
 
 Historical Core64, Git/OCI and release probes are specific to their recorded source and artifact identities. The retired Core64 and C62 OCI probe sources are available at commit `91b6cb64a85da6c8f4b864a5843ac7fb776e08fa` under `scripts/performance/`. Use the source, runtime and artifact identities from the historical report for reproduction. The historical wave0 manifest remains accessible in the [pinned archive revision](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/performance/wave0/INDEX.json); use the current [artifact verifier](artifacts.mjs) with a local copy of that manifest.
+
+## k6 synthetic transport smoke and measurement
+
+Use Linux with a local Docker daemon at `/var/run/docker.sock`, Git, Node, and
+[k6 v2.4.0](https://github.com/grafana/k6/releases/tag/v2.4.0). Verify the
+download against the release's SHA-256 checksums. From the repository root:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @codexia/core... build
+node scripts/performance/k6-run.mjs smoke /tmp/codexia-k6-smoke /absolute/path/to/k6
+node scripts/performance/k6-run.mjs measurement /tmp/codexia-k6-measurement /absolute/path/to/k6
+CODEXIA_K6_TEST_BINARY=/absolute/path/to/k6 node --test scripts/performance/k6.test.mjs
+```
+
+Each invocation starts a fresh digest-pinned PostgreSQL container, generates
+the deterministic `small` dataset, applies migrations, and seeds the
+database with the existing fixture importer. The database and the synthetic
+HTTP fixture bind to dynamically assigned IPv4 loopback ports. The runner
+selects both targets itself and removes the database container on exit. k6
+accepts only a numeric loopback origin, confirms the current fixture's
+identity before starting iterations and follows no redirects.
+
+The smoke performs two iterations with one virtual user. The measurement
+profile runs two virtual users for 30 seconds with a 100 ms pause per
+iteration. Each iteration verifies a PostgreSQL-backed synthetic revision
+and consumes a finite two-event stream. The smoke fails on incorrect
+responses or an incomplete iteration count. Its thresholds are correctness
+checks. The optional real-k6 test injects an incorrect synthetic response
+and checks the process exit code and the exclusion from the scene latency
+samples.
+
+Use the new output directory outside the checkout to retain the dataset
+manifest, source and build identities, runtime and database settings,
+seeding time, raw k6 samples, metric summary and SHA-256 inventory. The run
+record stores the k6 process outcome. The runner reports success after the
+output files have been inventoried. Custom
+latency trends contain only checked responses. The PostgreSQL timing
+includes persistence and pool overhead. Stream timing covers first byte
+and full response receipt. The application RSS readings describe the
+fixture process, and its lifetime peak includes seeding. This fixture
+provides an executable measurement foundation. Product API and MCP
+scenarios, production SSE behavior, long-running certification and the
+approved G6 budgets require their respective runtime contracts and
+integration into the canonical verification plan.

@@ -20,7 +20,7 @@ This is the normative execution and release architecture. [Test architecture](TE
 | Task producer invocation, input-proof generation, and coverage input inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci-coverage-inputs.mjs) |
 | Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci-workspace.mjs), [ci-group.mjs](../../scripts/ci-group.mjs) |
 | Verification DAG | [verify.yml](../../.github/workflows/verify.yml) |
-| Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) uses pinned `actions/download-artifact@v8.0.2` by selector-validated immutable artifact ID and fails on digest mismatch; [certify-ci.mjs](../../scripts/certify-ci.mjs) validates the downloaded evidence. Cross-run API retrieval still uses [download-ci-artifacts.mjs](../../scripts/download-ci-artifacts.mjs). |
+| Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) retrieves each selector-validated immutable artifact ID through [download-ci-artifacts.mjs](../../scripts/download-ci-artifacts.mjs), verifies its SHA-256 and extracts only the plan or report JSON. Execution reports use one directory per artifact regardless of selection count. [certify-ci.mjs](../../scripts/certify-ci.mjs) validates the downloaded evidence. |
 | Release eligibility and exact main source | [release-policy.mjs](../../scripts/release-policy.mjs), [verify-release-source.mjs](../../scripts/verify-release-source.mjs) |
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
@@ -124,15 +124,24 @@ if effective rules cannot be read, do not deploy a potentially deadlocking filte
 ### Measurement and change acceptance
 
 Measure **run count**, cancellation before and after runner acquisition,
-per-PR workflow multiplicity, job count, p50/p95 queue time, runner seconds,
+per-PR workflow multiplicity, executed versus queued job count, p50/p95 queue time, runner seconds,
 critical path, wall clock, cold/warm cache state, failure/retry rate, and the
 specific phases (tool downloads, fixture setup, build, browser, artifacts).
 `cancelled` run count is *not* equal to wasted runner minutes; check actual job
-start/logs before making a savings claim. Prefer comparable exact-source and
+start/logs before making a savings claim. Actions queued/waiting jobs may expose
+placeholder start timestamps; they consume no observed runner seconds and must
+not be counted as executed jobs. Cancelled jobs may also expose placeholder
+timestamps even after becoming `completed`; require a positive assigned
+`runner_id` before claiming runner consumption, and report pre/post-runner
+cancellations separately. Prefer comparable exact-source and
 toolchain runs; record counterfactual estimates separately from observed results.
 Compare a full run, native-only changes, test-only DB changes, documentation-only
 changes, frontend/backend runtime changes, unknown/new paths and changed workflow
-definitions before and after an admission change.
+definitions before and after an admission change. For rapid consecutive main merges,
+record each source SHA and its actual PR plan mode, base SHA, merge parent,
+reusable proof decision, queued jobs, executed jobs and runner seconds. A green
+`affected` PR check is not a complete main certificate; a stale base or
+unverified proof must trigger exact-source execution, not an implicit pass.
 
 A rollout passes only when (a) the canonical plan and actual workflow trigger
 agree; (b) every selected task is proven or blocked/fails, never silently skipped;

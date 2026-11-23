@@ -29,15 +29,18 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '!app/**/test/**',
   '!app/**/tests/**',
   '!app/**/*.test.*',
-  '!app/**/*.spec.*',
   '!modules/**/test/**',
   '!modules/**/tests/**',
   '!modules/**/*.test.*',
-  '!modules/**/*.spec.*',
   '!packages/**/test/**',
   '!packages/**/tests/**',
   '!packages/**/*.test.*',
-  '!packages/**/*.spec.*',
+  'app/src/**/test/**',
+  'app/src/**/tests/**',
+  'modules/**/src/**/test/**',
+  'modules/**/src/**/tests/**',
+  'packages/**/src/**/test/**',
+  'packages/**/src/**/tests/**',
   // api and persistence-contracts package their entire compiled source trees, including tests/specs.
   'packages/api/src/**',
   'packages/persistence-contracts/src/**',
@@ -183,7 +186,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const selected = new Set(['coverage']);
   let full = event !== 'pull_request' || !Array.isArray(files);
   // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
-  const fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
+  let fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
     files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
       file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
@@ -220,6 +223,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       file === 'packages/http-contract/redocly.yaml'
     ) {
       add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
+      if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
       continue;
     }
     // API client source is read by the canonical deployment route assertion.
@@ -242,6 +246,13 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         }
         continue;
       }
+      // The declared workspace root test/ and tests/ directories are outside
+      // the runtime package source tree. Unknown owners remain fail-closed.
+      const knownWorkspaceFixture = WORKSPACES.some(item =>
+        file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
+      // The Swift native client is built by its independent iOS lifecycle, not model OCI.
+      const knownNativeClientSource = file.startsWith('ios/CodexiaTransport/Sources/') && file.endsWith('.swift');
+      if (!owner && !knownWorkspaceFixture && !knownNativeClientSource && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }

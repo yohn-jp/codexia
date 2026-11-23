@@ -32,6 +32,7 @@ jobs:
           scan-ref: .
           version: v0.76.2
           scanners: vuln,misconfig
+          trivyignores: .trivyignore.yaml
           format: sarif
           output: trivy.sarif
           exit-code: '0'

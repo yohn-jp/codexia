@@ -2,15 +2,15 @@
 
 **詳細画面設計:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[画面状態遷移図](SCREEN-STATE-ATLAS.md)、[URL/API認可設計](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) が初回SETUP、owner-session管理、OIDC/OAuth、運用プレーンの権限を区別する。
 
-**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile React 内の認証・セキュリティ UI は**旧実装**であり、Desktop WebとSwiftUI Native iOSが採用製品である。Nativeの本人認証・設定UIは[iOS SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)で独立して実装する。現行Webの認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
+**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile React 内の認証・セキュリティ UI は**旧実装**であり、Desktop WebとSwiftUI Native iOSが採用製品である。Nativeの本人認証・設定UIは[iOS SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)で独立して実装する。Desktop Web の `/console/security` は Passkey とセッションを管理する。`/console/identity` は外部 IdP の設定状態と保存済み OAuth 同意を参照する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）
 
 [既存の本人セキュリティ画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#admin-1)
 
-- **Desktop:** 原稿 Shell の「認証・セキュリティ」から dialog を開く。閉じると元の原稿に戻る。
+- **Desktop:** 原稿 Shell の「管理コンソール」から `/console/security` と `/console/identity` に進む。原稿 Shell の「認証・セキュリティ」でも同じ管理画面をダイアログで開ける。
 - **iOS Native目標:** SwiftUI設定・OS認証から許可された本人操作へ移動する。旧Mobile Reactの`view=settings`は廃止対象でありNative UIの正本ではない。
-- **前提:** API session が認証済み、作者 scope が `owner`、Passkey runtime と Better Auth session が利用可能。いずれかが欠けた場合は UI を非表示または利用不能として示す。UI を非表示にすることはサーバー側認可の代替ではない。
+- **前提:** 管理コンソールでは Better Auth の所有者セッションを API で確認する。原稿 Shell のダイアログでは作者 scope `owner` も確認する。Passkey runtime やセッションを確認できない場合は、画面で再認証や再読込の方法を示す。
 - **本人認証:** Better Auth session と必要な fresh reauthentication をサーバーで検証する。Passkey ceremony は安全な origin と利用者による明示操作を必要とする。
 
 ```mermaid
@@ -21,7 +21,7 @@ flowchart TD
     GATE -->|はい| HOME["認証とセキュリティ"]
     HOME --> PASS["Passkey 一覧"]
     HOME --> SESS["セッション一覧"]
-    HOME --> STAGED["外部IDプロバイダーとアプリ同意<br/>現行UIから変更不可"]
+    HOME --> STAGED["外部IDプロバイダーの設定有無と保存済みアプリ同意<br/>現行UIから参照"]
     PASS --> ADD["新規 Passkey 登録<br/>WebAuthn とサーバー確認"]
     PASS --> RENAME["名称変更<br/>server mutation"]
     PASS --> DELETE{"Passkey 削除要求"}
@@ -44,11 +44,11 @@ flowchart TD
     HOME -->|閉じる / 戻る| RETURN["元の作品・執筆画面"]
 ```
 
-変更には **要求前の本人認証・owner 確認 → 対象識別 → 確認 → サーバー書込結果 → 最新一覧の再取得** を必須とする。一覧の取得失敗を操作失敗と同一視せず、「書込は成功、一覧更新は失敗」を区別する。最後の Passkey 削除や現在のセッション個別 revoke は UI 側でも抑止するが、API 側でも同じ権限・安全条件を検証する。
+変更には **要求前の本人認証・owner 確認 → 対象識別 → 確認 → サーバー書込結果 → 最新一覧の再取得** を必須とする。一覧の取得失敗を操作失敗と同一視せず、「書込は成功、一覧更新は失敗」を区別する。書込の応答を確認できない場合は同じ一覧を再取得し、利用者に現在の状態を示す。最後の Passkey 削除や現在のセッション個別 revoke は UI 側でも抑止するが、API 側でも同じ権限・安全条件を検証する。
 
 ## 外部 IdP / OAuth クライアントの管理（採用済み設計目標）
 
-次の遷移は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md) の**目標仕様**を図式化したものであり、現在の `IdentityManagementPanel` に操作可能な IdP 追加・更新・取消画面が存在するという主張ではない。現行画面は「この画面からの追加・変更・取り消しはまだ利用できません」と表示する。OAuth consent 画面は `/oauth/consent` の専用認可経路であり、設定画面の OAuth client 一覧ではない。
+以下は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md) に定める IdP 管理と OAuth 同意管理の**目標仕様**である。`/console/identity` と原稿 Shell の設定では、運用者設定の有無と所有者リンクの未確認状態を区別し、保存済みの OAuth 同意をクライアント ID と scope で参照できる。アプリへの同意は専用認可経路 `/oauth/consent` で行う。
 
 ```mermaid
 flowchart TD

@@ -1,5 +1,8 @@
 .codexia-console {
-  min-height: 100vh;
+  /* The Ionic styles bundled with Desktop fix the body in place. */
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
   padding: clamp(1rem, 3vw, 2.25rem);
   color: var(--ink);
   background: var(--page-bg);
@@ -206,4 +209,35 @@
   .codexia-console__auth-actions > button,
   .codexia-console__panel > button { width: 100%; }
   .codexia-console-nav-error { align-items: stretch; flex-direction: column; inset-inline: 0.75rem; }
+}
+
+.codexia-setup {
+  width: min(37rem, 100%);
+  margin-inline: auto;
+  margin-block-start: clamp(1.5rem, 6vh, 4rem);
+}
+
+.codexia-setup__form { display: grid; gap: .6rem; margin-block-start: 1.5rem; }
+.codexia-setup__form label { margin-block-start: .35rem; font-weight: 650; }
+.codexia-setup__form input {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--interaction-boundary, var(--input-border));
+  border-radius: .35rem;
+  color: var(--ink);
+  background: var(--page-bg);
+  font: inherit;
+}
+.codexia-setup__form input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.codexia-setup__form input[aria-invalid="true"] { border-color: var(--error-border); }
+.codexia-setup__form small { color: var(--muted); line-height: 1.55; }
+.codexia-setup__form > button { justify-self: start; margin-block-start: .6rem; }
+.codexia-setup__form .codexia-console__actions { margin-block-start: .75rem; }
+.codexia-setup .codexia-setup__error {
+  padding: .75rem;
+  border: 1px solid var(--error-border);
+  border-radius: .35rem;
+  color: var(--error-text);
+  background: var(--error-bg);
 }

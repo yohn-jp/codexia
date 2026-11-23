@@ -38,7 +38,14 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
 }
 
 async function request(resource,token){
-  // codeql[js/file-access-to-http] Only the GitHub API receives the read-scoped token and validated release identifiers.
+  // Repository metadata can influence run identifiers, but never an arbitrary API endpoint.
+  const safeResource =
+    resource === 'git/matching-refs/tags/backend-v' ||
+    /^releases\?per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5}$/u.test(resource) ||
+    /^actions\/runs\/[1-9]\d{0,15}$/u.test(resource) ||
+    /^actions\/runs\/[1-9]\d{0,15}\/jobs\?filter=latest(?:&per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5})?$/u.test(resource) ||
+    /^actions\/workflows\/backend-release\.yml\/runs\?head_sha=[a-f0-9]{40}&branch=main&event=(?:push|workflow_run)(?:&per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5})?$/u.test(resource);
+  assert.ok(safeResource, 'Unapproved backend release proof API resource');
   const response=await fetch('https://api.github.com/repos/'+REPOSITORY+'/'+resource,{headers:{Authorization:'Bearer '+token,
     Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(20_000)});
   if(!response.ok)throw new Error('Existing backend release proof lookup failed (HTTP '+response.status+')');

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authClient } from "../auth-client";
 import { fetchAuthMethodAvailability, type AuthMethodAvailability } from "../oauth-login";
+import { IdentityManagementPanel } from "../settings/IdentityManagementPanel";
+import { OwnerIdentityPanel } from "../settings/OwnerIdentityPanel";
 import { checkOwnerSession, type OwnerSessionState } from "./console-session";
 import { consumeConsoleReturnLocation, resolveConsoleReturnLocation } from "./console-return";
+import { ConsoleSetup } from "./ConsoleSetup";
 import "./console.css";
 
 const SECTIONS = [
@@ -41,13 +44,6 @@ function routeTitle(route: ConsoleRoute): string {
 
 function hasAuthError(result: unknown): boolean {
   return Boolean(result && typeof result === "object" && "error" in result && (result as { error?: unknown }).error);
-}
-
-function sectionDescription(route: ConsoleRoute): string {
-  if (route === "security") return "Passkeyとセッションの管理画面は、後続のセキュリティ実装で提供します。認証状態はサーバーで確認済みです。";
-  if (route === "identity") return "連携IDとアプリのアクセス管理画面は、後続のIdentity実装で提供します。認証状態はサーバーで確認済みです。";
-  if (route === "backups") return "バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。";
-  return "このURLは初回所有者向けです。登録状態を検証するAPIと登録手順が利用可能になるまで、登録を開始しません。";
 }
 
 /** Keep the validated same-tab handoff while navigating among console pages. */
@@ -147,12 +143,7 @@ export function ConsoleEntry() {
         <a className="codexia-console__brand" href="/desktop/" aria-label="Codexiaへ戻る">Codexia<span aria-hidden="true">.</span></a>
         <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
       </header>
-      <section className="codexia-console__panel" aria-labelledby="console-title">
-        <p className="codexia-console__eyebrow">初回登録</p>
-        <h1 id="console-title">{routeTitle(route)}</h1>
-        <p role="status">{sectionDescription(route)}</p>
-        <button type="button" className="quiet-button" onClick={() => { window.location.assign(consoleHref("/console")); }}>コンソールへ戻る</button>
-      </section>
+      <ConsoleSetup consoleUrl={consoleHref("/console")}/>
     </div>
   </main>;
 
@@ -233,8 +224,11 @@ export function ConsoleEntry() {
                 <span className="codexia-console__card-title">{section.title}</span><span>{section.description}</span><span className="codexia-console__card-action" aria-hidden="true">開く →</span>
               </a>)}
             </div>
-          </> : <div className="codexia-console__notice"><p role="status">{sectionDescription(route)}</p>
-            <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
+          </> : route === "security" ? <IdentityManagementPanel placement="console" />
+            : route === "identity" ? <div className="identity-management"><OwnerIdentityPanel headingLevel={2} /></div>
+            : <div className="codexia-console__notice">
+              <p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
+              <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
           <div className="codexia-console__auth-actions">
             <button type="button" disabled={busy} onClick={() => void inspect()}>セッションを再確認</button>
             <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button>

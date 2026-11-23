@@ -2,6 +2,9 @@ import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
+import { getPersistenceDocumentsGetUrl, persistenceDocumentAnchorsPost, persistenceStatusGet } from "./generated/http/client";
+import type { PersistenceAnchorCreatedResponse } from "./generated/http/schemas/persistenceAnchorCreatedResponse.zod";
+import type { PersistenceStatusResponse } from "./generated/http/schemas/persistenceStatusResponse.zod";
 import type {
   ActionResult,
   Approval,
@@ -171,10 +174,7 @@ export interface PersistenceDocumentRead {
   revision: PersistenceRevision | null;
 }
 
-export interface PersistenceStatus {
-  available: boolean;
-  provider: "postgres" | null;
-}
+export type PersistenceStatus = PersistenceStatusResponse;
 
 export interface PersistenceProjectPage {
   projects: PersistenceProject[];
@@ -382,6 +382,15 @@ async function request<T>(guard: ResponseGuard<T>, path: string, init: RequestIn
   });
 }
 
+function requestCreatedAnchor<T>(guard: ResponseGuard<T>, path: string, init: RequestInit): Promise<T> {
+  return request((value): value is T => {
+    if (!guard(value)) return false;
+    // The generated schema validates each offset. Keep the range ordering check as well.
+    const { fromUtf16, toUtf16 } = (value as PersistenceAnchorCreatedResponse).anchor;
+    return toUtf16 >= fromUtf16;
+  }, path, init);
+}
+
 async function requestEventStream(path: string, signal: AbortSignal): Promise<Response> {
   if (nativeApiSession) {
     throw new ApiError("Native job event streaming is unavailable; use the Job Inbox refresh action.", 501, "NATIVE_STREAM_UNSUPPORTED");
@@ -491,7 +500,10 @@ export const api = {
     }
     return data.documentId;
   },
-  persistenceStatus: (signal?: AbortSignal) => request(dto.persistenceStatus, "/api/v1/persistence/status", { ...(signal ? { signal } : {}) }),
+  persistenceStatus: (signal?: AbortSignal) => persistenceStatusGet({
+    request,
+    ...(signal ? { signal } : {}),
+  }),
   exportWorkArchive: (projectId: string, signal?: AbortSignal) => request(dto.portableWorkArchive,
     persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),
   importWorkArchive: (archive: unknown, signal?: AbortSignal) => request(dto.portableWorkImport,
@@ -518,10 +530,14 @@ export const api = {
   applyNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetApplication,
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/apply`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
   persistenceDocuments: async (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
-    const query = new URLSearchParams({limit:"1000"});
-    if (parentId !== undefined) query.set("parentId", parentId ?? "root");
-    const result = await request(dto.persistenceDocuments, persistencePath(projectId, `documents?${query}`), { ...(signal ? { signal } : {}) });
-    if (result.documents.length >= 1000) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
+    const limit = 1000;
+    const url = getPersistenceDocumentsGetUrl(projectId, {
+      limit,
+      ...(parentId !== undefined ? { parentId: parentId ?? "root" } : {}),
+    });
+    // The generated schema currently accepts negative document versions.
+    const result = await request(dto.persistenceDocuments, url, { ...(signal ? { signal } : {}) });
+    if (result.documents.length >= limit) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
     return result;
   },
   persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgePage> => {
@@ -579,14 +595,18 @@ export const api = {
     const suffix = `documents/${encodeURIComponent(documentId)}/anchors${query.size ? `?${query}` : ""}`;
     return request(dto.persistenceAnchors, persistencePath(projectId, suffix), { ...(signal ? { signal } : {}) });
   },
-  createPersistenceAnchor: (
+  createPersistenceAnchor: async (
     projectId: string,
     documentId: string,
     input: Pick<SaveEvidenceAnchorCommand, "id" | "revisionId" | "fromUtf16" | "toUtf16"> & { status: "proposed" | "confirmed"; nodeId?: string },
     signal?: AbortSignal,
-  ) => request(dto.persistenceAnchorCreated, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/anchors`), {
-    method: "POST", body: JSON.stringify(input), ...(signal ? { signal } : {}),
-  }),
+  ) => {
+    const created = await persistenceDocumentAnchorsPost(projectId, documentId, input, {
+      request: requestCreatedAnchor, ...(signal ? { signal } : {}),
+    });
+    // Branded identifiers represent the validated wire IDs in application contracts.
+    return created as PersistenceAnchorCreatedResponse & { anchor: EvidenceAnchor };
+  },
   updatePersistenceAnchor: (
     projectId: string,
     documentId: string,

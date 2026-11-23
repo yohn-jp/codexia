@@ -1,6 +1,6 @@
 # Better Auth runtime provisioning
 
-> **現行実装の運用手順。** 以下の初回登録は、SSHポートフォワードと一時登録コンテナーを使用する**移行前の実装**である。採用済みの目標では、Ansibleから安全に発行される256-bit一回限りのキーを本人がCloudflare Workersの`/console/setup`に入力し、VM上のsetup-only Fastify/Better Auth APIでPasskey登録する。SSHから一時登録サーバーを手動起動する操作は目標UXに含まない。新しい仕組みが実装・受入済みになるまで、この文書の実行コマンドを新しい仕様の実装証拠と見なさない。設計の正本は[初期導入遷移](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md)と[管理画面遷移](../../docs/design/ADMIN-SCREEN-FLOW.md)。
+> Owner setup supports a same-origin browser enrollment through the setup-only Fastify runtime. An operator must validate the VM and Cloudflare boundary before handing off credentials. The existing SSH enrollment path remains available during the transition. Design authority is [Initial deployment](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [Owner security](../../docs/design/ADMIN-SCREEN-FLOW.md).
 
 The [owner security screen flow](../../docs/design/ADMIN-SCREEN-FLOW.md) defines owner-visible credential and session management; the [initial deployment flow](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) owns staged enrollment and its approval gates.
 
@@ -12,7 +12,26 @@ Supply `codexia_auth_database_url_file`, `codexia_auth_secret_file`, and `codexi
 
 Secret bytes are read with `no_log`, passed through standard input, and stored as rootless Podman secrets. The private `~/.config/codexia-auth/runtime.env` contains only nonsecret configuration. The stage leaves the active API and its credentials running. PostgreSQL backups include schemas and rows. PostgreSQL roles and Podman secrets require separate recovery, so escrow the protected values through the approved external secret authority.
 
-## Initial owner and OAuth client registration
+## First owner through the browser
+
+Use the private inventory on a newly approved VM with pristine application storage. Review the exact production HTTPS origin, Web OAuth return URI, the native `jp.yohn.codexia:/oauth2redirect` callback, and three distinct Web, iOS and introspection client IDs. Use a confidential introspection secret of at least 32 characters. Omit the existing owner, legacy bootstrap, OIDC and MCP settings. Set `codexia_auth_registration_pending: false`.
+
+Before setting `codexia_owner_setup_edge_approved: true`, verify the Access protections for `/console/setup`, `/api/auth/codexia/setup/*`, and the Better Auth registration options and verification paths. The browser and the Tunnel route must use the same production HTTPS origin and RP ID. Validate the edge rate controls and keep the API container port unpublished. The static route and its API requests must both pass Access for the intended browser. These settings do not modify Cloudflare.
+
+Set `codexia_owner_setup_approved: true`, `codexia_database_initialization_approved: true`, and `codexia_auth_runtime_approved: true`. Provide the reviewed Full image digest in `codexia_auth_bootstrap_image`, the exact callback list in `codexia_owner_setup_web_redirect_uris`, and the intended owner's verified age public key in `codexia_owner_setup_age_recipient`. Apply `bootstrap` on the clean target. The protected process verifies fresh application initialization and the restricted auth schema. It issues one 24-hour key and starts the setup-only API and Tunnel. PostgreSQL stores only its digest. Ansible receives only the operation result. The host stores the encrypted envelope at `~/.local/state/codexia-deploy/owner-setup.age`, mode `0600`.
+
+Use the protected operator channel to give that envelope to the intended owner. The recipient decrypts it in a private session and pastes the key into the browser form at the included `/console/setup` URL. Paste the key into the form only. Confirm that disabled business and OAuth paths fail closed before handing over the envelope. The browser displays the enrolled and OAuth client readiness states. A replay, expired grant, restored owner database or a repeat bootstrap never creates another owner.
+
+On the VM, the rootless service operator can inspect nonsecret setup state and its grant ID. If the key is lost or expired, an independent operator approval authorizes replacing that exact prior ID. The first command never returns plaintext. The second command replaces the encrypted envelope and invalidates the previous grant.
+
+```sh
+~/.local/bin/codexia-owner-setup --inspect <reviewed-full-image-digest>
+~/.local/bin/codexia-owner-setup --replace-explicitly-approved <reviewed-full-image-digest> <previous-grant-id> <owner-age-recipient>
+```
+
+After the owner registers a Passkey, run `~/.local/bin/codexia-owner-setup --prepare-activation <reviewed-full-image-digest>` in the rootless service environment. It verifies the exact enrolled owner and approved clients, stops the setup-only service and Tunnel, and derives the normal runtime owner subject from PostgreSQL. The protected first deployment still checks compatibility, encrypted backup and approvals. Set the browser setup approval back to false for subsequent operations. The setup slot no longer admits registration while the normal API is active.
+
+## Legacy initial owner and OAuth client registration
 
 Initial owner registration runs on the clean target before the first API activation. Both first-owner launchers hold the deployment lock and verify the absence of an API container, unit and deployment records. Existing owners who have lost a device use [device-loss recovery](#existing-owner-device-loss-recovery).
 

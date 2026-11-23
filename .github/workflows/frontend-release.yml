@@ -4,7 +4,6 @@ on:
     branches: [main]
     paths:
       - app/**
-      - app/public/**
       - edge/frontend/**
       - profiles/**
       - modules/**
@@ -17,15 +16,26 @@ on:
       - '!app/**/test/**'
       - '!app/**/tests/**'
       - '!app/**/*.test.*'
-      - '!app/**/*.spec.*'
       - '!modules/**/test/**'
       - '!modules/**/tests/**'
       - '!modules/**/*.test.*'
-      - '!modules/**/*.spec.*'
       - '!packages/**/test/**'
       - '!packages/**/tests/**'
       - '!packages/**/*.test.*'
-      - '!packages/**/*.spec.*'
+      - 'app/src/**/test/**'
+      - 'app/src/**/tests/**'
+      - 'modules/**/src/**/test/**'
+      - 'modules/**/src/**/tests/**'
+      # Restore shipped public assets and source helpers only within the frontend closure.
+      - 'app/public/**'
+      - 'packages/core/src/**/test/**'
+      - 'packages/core/src/**/tests/**'
+      - 'packages/contracts/src/**/test/**'
+      - 'packages/contracts/src/**/tests/**'
+      - 'packages/module-runtime/src/**/test/**'
+      - 'packages/module-runtime/src/**/tests/**'
+      - 'packages/persistence-postgres/src/**/test/**'
+      - 'packages/persistence-postgres/src/**/tests/**'
       # Build-emitted source and test files remain runtime package inputs.
       - 'packages/persistence-contracts/src/**'
       - deploy/cloudflare/**

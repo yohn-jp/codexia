@@ -276,14 +276,14 @@ MCP clientは割当projectとread/compute/proposeまで。承認/applyやowner�
 **MID**: 98f28a41293b47032faa301b09ce740e
 **UID**: REQ-AUTH-004
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: MAPPED_UNVERIFIED
+**Applicability**: CURRENT
 **Design owner**: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
-**Implementation identifiers**: 目標の /console/setup と setup-only API は現行未実装。旧bootstrapを目標仕様と混同しない
-**Verification identifiers**: tests/e2e/passkey-bootstrap.acceptance.spec.ts
+**Implementation identifiers**: /console/setup、setup-only Fastify、codexia_auth.owner_setup、Ansible の protected owner-setup operation。公開経路と初回配備の運用受入は別途確認する
+**Verification identifiers**: tests/e2e/passkey-bootstrap.acceptance.spec.ts, packages/api/test/passkey-bootstrap.acceptance.test.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／**目標・未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: 初回登録を実装。Cloudflare 経路、使い捨て VM の配備と運用受入の証跡待ち。
 
 Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認証ceremonyを満たす
 
@@ -295,20 +295,28 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
   **Path**: docs/deployment/INITIAL-DEPLOYMENT-FLOW.md
 - **Type**: File
   **Path**: tests/e2e/passkey-bootstrap.acceptance.spec.ts
+- **Type**: File
+  **Path**: app/src/console/ConsoleSetup.tsx
+- **Type**: File
+  **Path**: packages/api/src/owner-setup.ts
+- **Type**: File
+  **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
+- **Type**: File
+  **Path**: deploy/ansible/owner-setup.yml
 
 ## REQ-AUTH-005
 
 **MID**: 962171018b777bef7028ea6af006f662
 **UID**: REQ-AUTH-005
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
+**Conformance status**: PARTIAL
 **Applicability**: FUTURE_TARGET
 **Design owner**: [Admin screen flow](../design/ADMIN-SCREEN-FLOW.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)
-**Implementation identifiers**: /console; /console/security; /console/identity は現行未実装
-**Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+**Implementation identifiers**: app/src/console/ConsoleEntry.tsx; packages/api/src/owner-security.ts; `/console/security`; `/console/identity`
+**Verification identifiers**: tests/e2e/auth-recovery.acceptance.spec.ts; packages/api/src/better-auth.test.ts; packages/api/src/owner-security.test.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／**目標・未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: Desktop Web の Passkey・セッション管理と連携情報の参照を実装。OIDC 設定の登録・検証・有効化と OAuth grant 失効は目標。
 
 `/console`管理、Passkey/session、OIDC設定はowner権限と再認証に拘束する
 
@@ -318,6 +326,12 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
   **Path**: docs/design/ADMIN-SCREEN-FLOW.md
 - **Type**: File
   **Path**: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md
+- **Type**: File
+  **Path**: app/src/console/ConsoleEntry.tsx
+- **Type**: File
+  **Path**: packages/api/src/owner-security.ts
+- **Type**: File
+  **Path**: tests/e2e/auth-recovery.acceptance.spec.ts
 
 ## REQ-API-001
 

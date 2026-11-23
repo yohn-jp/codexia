@@ -20,6 +20,359 @@ tags:
   - name: auth-adapter
   - name: backup-console
 paths:
+  /api/auth/codexia/setup/authorize:
+    post:
+      operationId: owner_setup_authorize_post
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupTransaction'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '403':
+          description: Access is forbidden.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '413':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '429':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+      tags:
+        - auth-adapter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerSetupKeyInput'
+      security:
+        - {}
+      x-codexia-principal: SETUP grant; same-origin JSON; setup-only runtime
+  /api/auth/codexia/setup/complete:
+    post:
+      operationId: owner_setup_complete_post
+      parameters:
+        - name: x-codexia-setup-transaction
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupCompleted'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '403':
+          description: Access is forbidden.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '413':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+      tags:
+        - auth-adapter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              unevaluatedProperties:
+                not: {}
+      security:
+        - {}
+      x-codexia-principal: SETUP transaction matched to committed owner; same-origin JSON; setup-only runtime
+  /api/auth/codexia/setup/profile:
+    post:
+      operationId: owner_setup_profile_post
+      parameters:
+        - name: x-codexia-setup-transaction
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupTransaction'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '403':
+          description: Access is forbidden.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '413':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+      tags:
+        - auth-adapter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerSetupProfileInput'
+      security:
+        - {}
+      x-codexia-principal: SETUP transaction; same-origin JSON; setup-only runtime
+  /api/auth/codexia/setup/status:
+    get:
+      operationId: owner_setup_status_get
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/OwnerSetupState'
+                  - $ref: '#/components/schemas/OwnerSetupEnrolled'
+        '403':
+          description: Access is forbidden.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '429':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
+      tags:
+        - auth-adapter
+      security:
+        - {}
+      x-codexia-principal: ANON; no OAuth bearer; same-origin status
   /api/auth/oauth2/consent-context:
     post:
       operationId: auth_consent_context_post
@@ -2463,6 +2816,16 @@ paths:
             type: integer
             format: int32
           explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 1000
+            default: 500
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -2745,8 +3108,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceAnchorCreatedResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2800,8 +3162,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceEvidenceAnchor'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3590,6 +3951,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+        '429':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
       tags:
         - health
       security:
@@ -4104,6 +4482,127 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    OwnerSetupCompleted:
+      type: object
+      required:
+        - state
+        - clientsReady
+        - sessionConfirmed
+      properties:
+        state:
+          type: string
+          enum:
+            - owner-enrolled
+        clientsReady:
+          type: boolean
+          enum:
+            - true
+        sessionConfirmed:
+          type: boolean
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupEnrolled:
+      type: object
+      required:
+        - state
+        - clientsReady
+      properties:
+        state:
+          type: string
+          enum:
+            - owner-enrolled
+        clientsReady:
+          type: boolean
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupError:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          enum:
+            - SETUP_SAME_ORIGIN_REQUIRED
+            - SETUP_KEY_INVALID
+            - SETUP_TRANSACTION_INVALID
+            - SETUP_PROFILE_INVALID
+            - SETUP_CLOSED
+            - SETUP_REQUEST_INVALID
+            - SETUP_RATE_LIMIT
+            - SETUP_UNAVAILABLE
+            - SETUP_ONLY
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupKeyInput:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupProfileInput:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        email:
+          type: string
+          maxLength: 254
+          format: email
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupState:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum:
+            - waiting
+            - setup-pending
+            - expired
+            - blocked
+            - active
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupTransaction:
+      type: object
+      required:
+        - transaction
+      properties:
+        transaction:
+          type: string
+      unevaluatedProperties:
+        not: {}
+    PersistenceAnchorCreatedResponse:
+      type: object
+      required:
+        - anchor
+        - quote
+        - nodeId
+        - authorId
+      properties:
+        anchor:
+          $ref: '#/components/schemas/PersistenceEvidenceAnchor'
+        quote:
+          type: string
+        nodeId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        authorId:
+          type: string
+      additionalProperties: {}
     PersistenceDocument:
       type: object
       required:
@@ -4207,6 +4706,58 @@ components:
         authorId:
           type: string
         createdAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    PersistenceEvidenceAnchor:
+      type: object
+      required:
+        - id
+        - projectId
+        - documentId
+        - revisionId
+        - fromUtf16
+        - toUtf16
+        - quoteSha256
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        documentId:
+          type: string
+        revisionId:
+          type: string
+        fromUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        toUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        quoteSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - needs_review
+            - orphaned
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
       additionalProperties: {}
@@ -4476,6 +5027,10 @@ x-codexia-external-contracts:
     applicationAdaptersHere:
       - POST /api/auth/oauth2/consent-context
       - GET /api/auth/oauth2/get-consents
+      - GET /api/auth/codexia/setup/status
+      - POST /api/auth/codexia/setup/authorize
+      - POST /api/auth/codexia/setup/profile
+      - POST /api/auth/codexia/setup/complete
   betterAuthMetadataPaths:
     - /.well-known/oauth-authorization-server/api/auth
     - /.well-known/openid-configuration/api/auth

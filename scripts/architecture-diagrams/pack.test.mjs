@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -9,7 +10,6 @@ import {
   LIKEC4_DERIVATIVE_PATH,
   parseGeneratedSystemDiagram,
   parseMermaidDiagrams,
-  SCREEN_IMPLEMENTATION_PATHS,
   SYSTEM_DESIGN_PATH,
 } from './pack.mjs';
 
@@ -43,30 +43,50 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   assert.equal(systemOverview.title, 'Codexia system context, containers, and trust boundaries');
   assert.equal(systemOverview.markdown, SYSTEM_DESIGN_PATH);
   assert.equal(systemOverview.sourceModel, 'docs/architecture/likec4/model.likec4');
-  assert.equal(systemOverview.sourceModelSha256, generatedSystemDiagram.sourceModelSha256);
-  assert.equal(systemOverview.line, generatedSystemDiagram.line);
+  assert.equal(systemOverview.sourceModelSha256, createHash('sha256').update(modelSource).digest('hex'));
+  assert.match(systemDesign.split(/\r?\n/u)[systemOverview.line - 1], /\[LikeC4 system model\]\(\.\/likec4\/model\.likec4\)/u);
   assert.ok(manifest.diagrams.some(d => d.id === 'system-2' && d.title === '運用プレーンと更新'),
     'The original system-1 locator remains stable and the operations diagram is retained');
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
   const screenSection = DIAGRAM_DOCUMENTS.find(section => section.id === 'screen');
   assert.ok(screenSection, 'The screen state atlas must remain registered');
-  const crossShellSources = parseMermaidDiagrams(
-    readFileSync(join(root, screenSection.path), 'utf8'),
-    screenSection,
-  ).filter(diagram => diagram.title.includes('Cross-shell'));
-  assert.equal(crossShellSources.length, 1, 'The cross-shell contract must have one source diagram');
-  const crossShell = manifest.diagrams.find(diagram =>
-    diagram.group === 'screen' && diagram.title === crossShellSources[0].title);
-  assert.ok(crossShell, 'The cross-shell contract must be rendered from the screen state atlas');
+  const screenSource = readFileSync(join(root, screenSection.path), 'utf8');
+  const screenLines = screenSource.split(/\r?\n/u);
+  const crossShellDiagrams = manifest.diagrams.filter(diagram =>
+    diagram.group === 'screen' && diagram.title.includes('Cross-shell'));
+  assert.equal(crossShellDiagrams.length, 1, 'The cross-shell contract must have one rendered diagram');
+  const crossShell = crossShellDiagrams[0];
   assert.equal(crossShell.markdown, screenSection.path);
-  assert.equal(crossShell.line, crossShellSources[0].line);
+  assert.equal(screenLines[crossShell.line - 2], '```mermaid');
+  assert.match(screenLines[crossShell.line - 1], /^flowchart\s/u);
+  const crossHeading = screenLines.slice(0, crossShell.line - 2).findLast(line => /^#{1,4}\s/u.test(line));
+  assert.equal(crossShell.title, crossHeading.replace(/^#{1,4}\s+/u, '').trim());
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
     /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));
   const entry = manifest.diagrams.find(d => d.screenIds.includes('ENTRY-01'));
-  assert.deepEqual(entry.implementationPaths, SCREEN_IMPLEMENTATION_PATHS['ENTRY-01']);
-  assert.deepEqual(entry.screenContracts, [{ id: 'ENTRY-01', line: 26, status: '実装' }]);
+  assert.ok(entry, 'ENTRY-01 must have a diagram');
+  const entryDocument = readFileSync(join(root, 'app/index.html'), 'utf8');
+  const moduleScripts = [...entryDocument.matchAll(/<script\b([^>]*)>/giu)]
+    .map(([, attributes]) => attributes)
+    .filter(attributes => /\btype\s*=\s*(["'])module\1/iu.test(attributes))
+    .map(attributes => /\bsrc\s*=\s*(["'])([^"']+)\1/iu.exec(attributes)?.[2]);
+  assert.equal(moduleScripts.length, 1, 'The web entry document must identify one module entry');
+  const entryScript = moduleScripts[0];
+  assert.equal(entryScript, '/src/launcher.tsx', 'The web entry document must load the launcher');
+  assert.deepEqual(entry.implementationPaths, [`app${entryScript}`], 'ENTRY-01 must link to the actual web entry');
+  assert.ok(statSync(join(root, entry.implementationPaths[0])).isFile(), 'The linked web entry must exist');
+  assert.equal(entry.markdown, 'docs/design/SCREEN-STATE-ATLAS.md');
+  assert.equal(screenLines[entry.line - 2], '```mermaid');
+  assert.match(screenLines[entry.line - 1], /^flowchart\s/u);
+  assert.match(screenLines.slice(0, entry.line - 2).findLast(line => /^#{1,4}\s/u.test(line)), /^## ENTRY-01\b/u);
+  assert.equal(entry.screenContracts.length, 1);
+  const entryContract = entry.screenContracts[0];
+  assert.equal(entryContract.id, 'ENTRY-01');
+  assert.equal(entryContract.status, '実装');
+  assert.match(catalog.split(/\r?\n/u)[entryContract.line - 1], /^\| ENTRY-01 \|.*\| 実装 \|\s*$/u,
+    'The contract link must identify the ENTRY-01 row and its published status');
   assert.ok(manifest.diagrams.filter(d => d.screenIds.includes('CON-01'))
     .every(d => d.implementationPaths.length === 0), 'goal screens without a direct implementation stay unmapped');
 });

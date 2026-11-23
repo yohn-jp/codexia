@@ -69,6 +69,17 @@ function invokeValidation(fixture, operation, artifactPath) {
   });
 }
 
+test('S3 transfer checks canonical checksums, direct HTTPS, and exact-version retention', () => {
+  const result = spawnSync('python3', [
+    '-B', '-m', 'unittest', 'deploy.backup.test_s3_admission', 'deploy.backup.test_s3_retention', '-v',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+});
+
 test('encrypted backup verification accepts read-only artifacts without weakening destination writes', async () => {
   const fixture = await createFixture();
   const archive = path.join(fixture.backupDestination, 'read-only-archive');

@@ -496,11 +496,14 @@ jobs:
         run: node scripts/select-ci-plan.mjs
       - name: Download selected plan by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
-        uses: actions/download-artifact@v8.0.2
-        with:
-          artifact-ids: ${{ steps.select-plan.outputs.artifact-id }}
-          path: ${{ runner.temp }}/ci-plan
-          merge-multiple: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
+          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-plan.outputs.artifact-id }}
+          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-plan
+          CODEXIA_CI_ARTIFACT_KIND: plan
+        run: node scripts/download-ci-artifacts.mjs
       - name: Select latest exact-run execution evidence
         if: needs.plan.outputs.reuse != 'true'
         id: select-evidence
@@ -512,10 +515,14 @@ jobs:
         run: node scripts/select-ci-evidence.mjs
       - name: Download selected execution evidence by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
-        uses: actions/download-artifact@v8.0.2
-        with:
-          artifact-ids: ${{ steps.select-evidence.outputs.artifact-ids }}
-          path: ${{ runner.temp }}/ci-evidence/${{ steps.select-evidence.outputs.artifact-subdirectory }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
+          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-evidence.outputs.artifact-ids }}
+          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-evidence
+          CODEXIA_CI_ARTIFACT_KIND: evidence
+        run: node scripts/download-ci-artifacts.mjs
       - name: Certify every required exact-source matrix element
         if: needs.plan.outputs.reuse != 'true'
         env:
