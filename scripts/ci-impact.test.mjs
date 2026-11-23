@@ -54,6 +54,8 @@ test('PR paths and completed-Verify release impact retain component build inputs
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
     ['Backend API', ['packages/api/src/server.ts'], [false, true]],
+    ['Backend API source helper', ['packages/api/src/auth/tests/helper.ts'], [false, true]],
+    ['Desktop public asset', ['app/public/test/theme.test.css'], [true, false]],
     ['Base compiler settings', ['tsconfig.base.json'], [true, true]],
     ['Docker context', ['.dockerignore'], [false, true]],
     ['Dockerfile context override', ['Dockerfile.backend.dockerignore'], [false, true]],
