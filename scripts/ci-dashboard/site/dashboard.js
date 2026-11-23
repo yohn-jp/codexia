@@ -374,7 +374,8 @@ function inventoryStatus() {
       : incomplete ? ' · GitHub APIの履歴範囲に未取得分があります。'
         : ' · GitHub APIが返した履歴の読み込みが完了しました。';
   setStatus('Collected ' + formatTime(coverage.observedAt) + ' · ' + inventoryRuns.length +
-    (reportedTotal === null ? '' : ' / ' + reportedTotal) + ' workflow runs · ' + all.length +
+    ' workflow runs' + (reportedTotal === null ? '' : ' (初期API報告 ' + reportedTotal + ')') +
+    ' · ' + all.length +
     ' PR revisions · PR対応不明 ' + coverage.unresolvedRunCount + ' runs' + suffix +
     ' Required Checks全体の証明ではありません。', incomplete ? 'info' : 'success');
   el('load-all').hidden = !hasMore;
