@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { assertSyntheticSamples } from './k6-evidence.mjs';
 import { fixtureOrigin } from './k6-target.mjs';
 import { startFixture } from './k6-fixture.mjs';
 
@@ -36,6 +40,42 @@ test('only serves the synthetic workload with the per-run token', async () => {
     fixture.server.close();
     await closed;
   }
+});
+
+test('k6 evidence requires matching summary and raw samples for all fixture metrics', async t => {
+  const output = await mkdtemp(join(tmpdir(), 'codexia-k6-evidence-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  const metrics = {
+    iterations: { count: 2 },
+    fixture_scene_ms: { count: 2 },
+    fixture_scene_pg_round_trip_ms: { count: 2 },
+    fixture_stream_ms: { count: 2 },
+    fixture_stream_first_byte_ms: { count: 2 },
+  };
+  const points = Object.keys(metrics).filter(name => name !== 'iterations').flatMap(metric =>
+    [0, 1].map(value => ({ type: 'Point', metric, data: { value } })));
+  const writeSummary = () => writeFile(join(output, 'k6-summary.json'), JSON.stringify({ metrics }));
+  const writePoints = entries => writeFile(join(output, 'k6-samples.jsonl'),
+    entries.map(entry => JSON.stringify(entry) + '\n').join(''));
+
+  await writeSummary();
+  await writePoints(points);
+  await assertSyntheticSamples(output);
+
+  await writePoints([]);
+  await assert.rejects(assertSyntheticSamples(output), /fixture_scene_ms has 0 raw samples; expected 2/u);
+
+  await writePoints(points.filter(point => point.metric !== 'fixture_stream_first_byte_ms'));
+  await assert.rejects(assertSyntheticSamples(output), /fixture_stream_first_byte_ms has 0 raw samples; expected 2/u);
+
+  await writePoints(points);
+  metrics.fixture_scene_pg_round_trip_ms.count = 0;
+  await writeSummary();
+  await assert.rejects(assertSyntheticSamples(output), /fixture_scene_pg_round_trip_ms summary count must equal 2/u);
+
+  delete metrics.fixture_scene_pg_round_trip_ms;
+  await writeSummary();
+  await assert.rejects(assertSyntheticSamples(output), /fixture_scene_pg_round_trip_ms summary count must equal 2/u);
 });
 
 const k6Binary = process.env.CODEXIA_K6_TEST_BINARY;
