@@ -338,6 +338,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OwnerSetupError'
+        '429':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
         '503':
           description: Service unavailable.
           headers:
@@ -3926,6 +3943,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+        '429':
+          description: Client error
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerSetupError'
       tags:
         - health
       security:

@@ -14,6 +14,7 @@ import { provisionSetupOAuthClients } from "./setup-oauth-clients.js";
 export const OWNER_SETUP_PATH = "/api/auth/codexia/setup";
 const CONTEXT_HEADER = "x-codexia-setup-transaction";
 const TEN_MINUTES = 600;
+const RATE_LIMIT_SECONDS = 60;
 
 const setupKeyBody = z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u) }).strict();
 const profileBody = z.object({
@@ -45,6 +46,22 @@ async function tunnelAddresses(): Promise<readonly string[]> {
   }
 }
 
+function createSetupRateLimiter() {
+  let windowStart = performance.now();
+  let requests = 0;
+  // A per-instance ceiling independent of spoofable forwarded IP headers.
+  return () => {
+    const now = performance.now();
+    if (now - windowStart >= RATE_LIMIT_SECONDS * 1000) {
+      windowStart = now;
+      requests = 0;
+    }
+    if (requests >= 60) return false;
+    requests += 1;
+    return true;
+  };
+}
+
 export function createOwnerSetupApp(
   config: BetterAuthRuntimeConfig,
   webRedirectUris: readonly string[],
@@ -66,6 +83,11 @@ export function createOwnerSetupApp(
   }
 
   const app = Fastify({ bodyLimit: 128 * 1024, logger: false });
+  // Status polling and setup grant attempts have independent budgets.
+  const withinStatusWindow = createSetupRateLimiter();
+  const withinAdmissionWindow = createSetupRateLimiter();
+  const withinLoopbackReadinessWindow = createSetupRateLimiter();
+  const withinNetworkReadinessWindow = createSetupRateLimiter();
   const registration = new AsyncLocalStorage<SetupRegistration>();
   const clientId = new AsyncLocalStorage<string>();
   const provisioningOwner = new AsyncLocalStorage<string>();
@@ -159,7 +181,14 @@ export function createOwnerSetupApp(
   app.setNotFoundHandler((_request, reply) => reply.code(403).send({ code: "SETUP_ONLY" }));
   app.addHook("onClose", async () => auth.pool.end());
 
-  app.get("/health/ready", { exposeHeadRoute: false }, async () => {
+  app.get("/health/ready", { exposeHeadRoute: false }, async (request, reply) => {
+    // Reserve an independent budget for the Quadlet's actual loopback probe.
+    const peer = request.raw.socket.remoteAddress?.replace(/^::ffff:/u, "");
+    const withinWindow = peer === "127.0.0.1" || peer === "::1"
+      ? withinLoopbackReadinessWindow : withinNetworkReadinessWindow;
+    if (!withinWindow()) {
+      return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
+    }
     await auth.pool.query("SELECT 1 FROM owner_setup LIMIT 1");
     return { status: "ready" };
   });
@@ -167,6 +196,9 @@ export function createOwnerSetupApp(
   app.get(OWNER_SETUP_PATH + "/status", { exposeHeadRoute: false }, async (request, reply) => {
     if (request.headers.authorization || (request.headers.origin && request.headers.origin !== origin.origin)) {
       return reply.code(403).send({ code: "SETUP_SAME_ORIGIN_REQUIRED" });
+    }
+    if (!withinStatusWindow()) {
+      return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
     }
     const state = await readOwnerSetup(auth.pool);
     if (!state) return { state: "blocked" };
@@ -177,19 +209,6 @@ export function createOwnerSetupApp(
     if (!state.grant_id || !state.expires_at) return { state: "waiting" };
     return { state: state.expires_at.getTime() > Date.now() ? "setup-pending" : "expired" };
   });
-
-  let windowStart = 0;
-  let requests = 0;
-  // Shared per-instance ceiling independent of spoofable forwarded IP headers.
-  // The protected edge applies its own rate controls before the VM is exposed.
-  function withinAdmissionWindow() {
-    const now = Date.now();
-    if (now >= windowStart + 60_000) {
-      windowStart = now;
-      requests = 0;
-    }
-    return ++requests <= 60;
-  }
 
   app.register(async (setup) => {
     setup.addHook("onRequest", async (request, reply) => {
@@ -212,7 +231,7 @@ export function createOwnerSetupApp(
 
     setup.post(OWNER_SETUP_PATH + "/authorize", async (request, reply) => {
       if (!withinAdmissionWindow()) {
-        return reply.header("Retry-After", "60").code(429).send({ code: "SETUP_RATE_LIMIT" });
+        return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
       }
       const input = setupKeyBody.safeParse(request.body);
       if (!input.success) return reply.code(400).send({ code: "SETUP_KEY_INVALID" });

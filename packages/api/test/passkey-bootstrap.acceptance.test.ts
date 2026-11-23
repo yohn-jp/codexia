@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { test } from "node:test";
 import { chromium, expect, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
+import type { LightMyRequestResponse } from "fastify";
 import { Pool } from "pg";
 import { verifyAuthSchema } from "../src/auth-schema.js";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
@@ -840,22 +841,75 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
     } as const;
 
     await migrateBetterAuth({ ...config, installOwnerSetupSchema: true });
+    authPool = new Pool({ connectionString: runtimeDatabase.href, options: "-c search_path=codexia_auth" });
+    const rateLimitApp = createOwnerSetupApp(config, [config.publicOrigin + "/desktop/"]);
+    try {
+      const readiness = { method: "GET", url: "/health/ready" } as const;
+      const networkReadiness = {
+        ...readiness, remoteAddress: "192.0.2.10", headers: { "x-forwarded-for": "127.0.0.1" },
+      };
+      const status = { method: "GET", url: "/api/auth/codexia/setup/status" } as const;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const allowed = await rateLimitApp.inject(status);
+        assert.equal(allowed.statusCode, 200);
+        assert.deepEqual(allowed.json(), { state: "blocked" });
+        assert.equal((await rateLimitApp.inject(networkReadiness)).statusCode, 200);
+      }
+      assert.equal((await rateLimitApp.inject(readiness)).statusCode, 200, "network traffic must leave the loopback health probe available");
+      const authorize = await rateLimitApp.inject({
+        method: "POST", url: "/api/auth/codexia/setup/authorize",
+        headers: { origin: config.publicOrigin, host: new URL(config.publicOrigin).host },
+        payload: { key: "X".repeat(43) },
+      });
+      assert.equal(authorize.statusCode, 403, "status traffic must leave the setup key quota available");
+      assert.deepEqual(authorize.json(), { code: "SETUP_KEY_INVALID" });
+      await authPool.query("ALTER TABLE owner_setup RENAME TO unavailable_owner_setup");
+      try {
+        // A database query would now fail. Exhausted quotas must reject first.
+        for (const input of [networkReadiness, status]) {
+          const blocked = await rateLimitApp.inject(input);
+          assert.equal(blocked.statusCode, 429, input.url);
+          assert.equal(blocked.headers["retry-after"], "60");
+          assert.equal(blocked.headers["cache-control"], "no-store");
+          assert.deepEqual(blocked.json(), { code: "SETUP_RATE_LIMIT" });
+        }
+        assert.equal((await rateLimitApp.inject(readiness)).statusCode, 503, "an unhealthy database must fail readiness");
+      } finally {
+        await authPool.query("ALTER TABLE unavailable_owner_setup RENAME TO owner_setup");
+      }
+    } finally {
+      await rateLimitApp.close();
+    }
     app = createOwnerSetupApp(config, [config.publicOrigin + "/desktop/"]);
     const dist = process.env.CODEXIA_PASSKEY_SETUP_UI_DIST;
     if (dist) {
       // Serve the reviewed built SPA route as Workers does. API requests still
       // go directly to the actual setup-only Fastify routes and PostgreSQL.
       const index = await readFile(join(dist, "index.html"), "utf8");
+      const assetDirectory = join(dist, "assets");
+      const assets = new Map<string, { readonly type: string; readonly body: Buffer }>();
+      for (const file of await readdir(assetDirectory, { withFileTypes: true })) {
+        if (!file.isFile() || !/^[\w-]+[.](js|css)$/u.test(file.name)) continue;
+        assets.set(file.name, {
+          type: file.name.endsWith(".css") ? "text/css" : "text/javascript",
+          body: await readFile(join(assetDirectory, file.name)),
+        });
+      }
       app.get("/console/setup", (_request, reply) => reply.type("text/html").send(index));
-      app.get<{ Params: { file: string } }>("/desktop/assets/:file", async (request, reply) => {
-        const file = request.params.file;
-        if (!/^[\w-]+[.](js|css)$/u.test(file)) return reply.code(404).send();
-        return reply.type(file.endsWith(".css") ? "text/css" : "text/javascript").send(await readFile(join(dist, "assets", file)));
+      app.get<{ Params: { file: string } }>("/desktop/assets/:file", (request, reply) => {
+        const asset = assets.get(request.params.file);
+        return asset ? reply.type(asset.type).send(asset.body) : reply.code(404).send();
       });
     }
     await app.verifySchema();
+    if (dist) {
+      for (const asset of ["unknown.js", "%2e%2e%2findex.html", "subdirectory%2fasset.js"]) {
+        const source: LightMyRequestResponse = await app.inject({ method: "GET", url: "/desktop/assets/" + asset });
+        assert.equal(source.statusCode, 404, asset);
+        assert.equal(source.body, "");
+      }
+    }
     await app.listen({ host: "localhost", port });
-    authPool = new Pool({ connectionString: runtimeDatabase.href, options: "-c search_path=codexia_auth" });
     const setupPath = "/api/auth/codexia/setup";
     const originHeaders = { origin: config.publicOrigin, "content-type": "application/json", host: new URL(config.publicOrigin).host };
     const status = async () => (await app!.inject({ method: "GET", url: setupPath + "/status" })).json();

@@ -92,6 +92,13 @@ model OwnerSetupBodyTooLarge {
   @body body: OwnerSetupError;
 }
 
+model OwnerSetupRateLimited {
+  @statusCode statusCode: 429;
+  @header("Cache-Control") cacheControl: "no-store";
+  @header("Retry-After") retryAfter: string;
+  @body body: OwnerSetupError;
+}
+
 model OwnerSetupUnavailable {
   @statusCode statusCode: 503;
   @header("Cache-Control") cacheControl: "no-store";
@@ -101,15 +108,14 @@ model OwnerSetupUnavailable {
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "ANON; no OAuth bearer; same-origin status")
 @route("/api/auth/codexia/setup/status") @get @operationId("owner_setup_status_get")
-op getOwnerSetupStatus(): OwnerSetupSuccess<OwnerSetupState | OwnerSetupEnrolled> | OwnerSetupDenied | OwnerSetupUnavailable;
+op getOwnerSetupStatus(): OwnerSetupSuccess<OwnerSetupState | OwnerSetupEnrolled> | OwnerSetupDenied | OwnerSetupRateLimited | OwnerSetupUnavailable;
 
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "SETUP grant; same-origin JSON; setup-only runtime")
 @route("/api/auth/codexia/setup/authorize") @post @operationId("owner_setup_authorize_post")
 op authorizeOwnerSetup(@body body: OwnerSetupKeyInput):
   OwnerSetupSuccess<OwnerSetupTransaction> | OwnerSetupInvalid | OwnerSetupDenied | OwnerSetupBodyTooLarge |
-  { @statusCode statusCode: 429; @header("Cache-Control") cacheControl: "no-store"; @header("Retry-After") retryAfter: string; @body body: OwnerSetupError; } |
-  OwnerSetupUnavailable;
+  OwnerSetupRateLimited | OwnerSetupUnavailable;
 
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "SETUP transaction; same-origin JSON; setup-only runtime")
