@@ -74,4 +74,4 @@ Secretsの実値、production owner data、実認証token、バックアップ�
 
 ## ツール導入の前提
 
-**採用済み目標:** [Toolchain](SPECIFICATION-TOOLCHAIN.md)、[HTTP platform](HTTP-PLATFORM-MIGRATION.md)、[MCP v2](MCP-V2-MIGRATION.md)、[Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)。外部IFは実際のプロトコルに適したschema/宣言を維持し、TypeSpec/OpenAPIをMCPやTerraformの第二正本として強制しない。LikeC4は構成図、Threagileは脅威リスク、既存Mermaidは画面/状態遷移を所有する。上記のEXT-EDGE-002に記したFastifyは**現行実装の観測**であり、Honoは導入試験待ちの採用済み移行目標。各ツールは未導入・未検証であり、仕様上の主体・権限・管理経路を変更しない。
+**採用済み目標:** [Toolchain](SPECIFICATION-TOOLCHAIN.md)、[HTTP platform](HTTP-PLATFORM-MIGRATION.md)、[MCP v2](MCP-V2-MIGRATION.md)、[Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)。外部IFは実際のプロトコルに適したschema/宣言を維持し、TypeSpec/OpenAPIをMCPやTerraformの第二正本として強制しない。LikeC4は構成図、Threagileは脅威リスク、既存Mermaidは画面/状態遷移を所有する。上記のEXT-EDGE-002に記したFastifyは**継続採用する実行基盤**。TypeSpec/OpenAPIと明示的Fastifyルートへの移行は未実装。各ツールは未導入・未検証であり、仕様上の主体・権限・管理経路を変更しない。
