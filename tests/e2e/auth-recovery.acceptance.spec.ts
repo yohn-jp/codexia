@@ -115,6 +115,9 @@ test("recovery-session failure cannot discard an unjournaled manuscript through 
   // Authoritative acceptance for #454: simulate an IndexedDB draft failure
   // and an independently failing session refresh on a real PostgreSQL document.
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
+  // Wait for the persisted manuscript to be hydrated before injecting an
+  // IndexedDB failure; otherwise the initial document can arrive after fill().
+  await expect(manuscriptEditor(page)).toHaveText("最初の本文。次の文章です。");
   let unavailable = false;
   let logoutRequests = 0;
   let saveRequests = 0;
