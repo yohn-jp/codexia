@@ -182,6 +182,8 @@ test('lifecycle readiness uses real conditions without time-based sleep loops', 
     '../deploy/ansible/test-push-app-lifecycle.sh',
     '../deploy/ansible/test-push-auth-lifecycle.sh',
     '../deploy/ansible/deploy-transaction.yml',
+    '../deploy/ansible/push-deployment-recover.sh',
+    '../deploy/fixtures/sshfs-server/build.sh',
   ]) {
     const source = readFileSync(new URL(name, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /\bsleep\s+[0-9]+/u, name);
