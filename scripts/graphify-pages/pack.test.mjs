@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { packGraph, summarizeGraph } from './pack.mjs';
+import { EXCLUSION_PATTERNS } from './analysis.mjs';
 
 const sha = 'a'.repeat(40);
 const trackedFiles = new Set(['packages/api/server.ts', 'packages/core/db.ts', 'modules/story/scene.ts']);
@@ -12,14 +13,14 @@ const graph = {
     { id: 'a', label: 'server.ts', source_file: 'packages/api/server.ts', file_type: 'code' },
     { id: 'a2', label: 'startServer', source_file: 'packages/api/server.ts', file_type: 'code' },
     { id: 'b', label: 'loadFromDb', source_file: 'packages/core/db.ts', file_type: 'code' },
-    { id: 'c', label: '</script><script>alert(1)</script>', source_file: 'modules/story/scene.ts', file_type: 'code' },
+    { id: 'c', label: '</script><script>alert(1)</script>$& $$ $` __GRAPHIFY_SOURCE_LINKS__', source_file: 'modules/story/scene.ts', file_type: 'code' },
     { id: 'external', label: 'pkg', file_type: 'concept', external: true },
     { id: 'bad', label: 'secret', source_file: '/private/home/secret.ts' },
     { id: 'artifact', label: 'dist file', source_file: 'packages/core/dist/index.js' },
     { id: 'dependency', label: 'node:fs', source_file: 'node:fs' },
   ],
   links: [
-    { source: 'a', target: 'b', relation: 'imports' },
+    { source: 'a', target: 'b', relation: 'imports', source_file: 'packages/api/server.ts', source_location: 'L3' },
     { source: 'a2', target: 'b', relation: 'calls' },
     { source: 'c', target: 'a', relation: 'imports' },
     { source: 'a', target: 'a2', relation: 'calls' },
@@ -33,14 +34,14 @@ const graph = {
 
 test('indexes source files, symbols and directed cross-file references without claiming unused', () => {
   const result = summarizeGraph(graph, sha, trackedFiles);
-  assert.deepEqual(result.stats, { files: 3, nodes: 8, links: 9, crossFileLinks: 3 });
+  assert.deepEqual(result.stats, { files: 3, nodes: 8, links: 9, crossFileLinks: 3, symbolEdges: 1 });
   const api = result.files.find(f => f.path === 'packages/api/server.ts');
   const core = result.files.find(f => f.path === 'packages/core/db.ts');
-  assert.deepEqual(api.symbols, ['startServer']);
+  assert.deepEqual(api.symbols.map(symbol => symbol.label), ['startServer']);
   assert.deepEqual(api.incoming.map(x => x.path), ['modules/story/scene.ts']);
   assert.deepEqual(api.outgoing, [{
     path: 'packages/core/db.ts', count: 2, relations: ['calls', 'imports'],
-    relationCounts: { calls: 1, imports: 1 }, evidence: [],
+    relationCounts: { calls: 1, imports: 1 }, evidence: [{ path: 'packages/api/server.ts', line: 3, relation: 'imports' }],
   }]);
   assert.deepEqual(core.incoming.map(x => x.path), ['packages/api/server.ts']);
   assert.ok(!result.files.some(f => f.path.includes('private') || f.path.includes('/dist/') || f.path.startsWith('node:')));
@@ -56,9 +57,10 @@ test('publishes a searchable file explorer and keeps native community graph inta
   await writeFile(join(source, 'graph.json'), JSON.stringify(graph));
   const result = await packGraph(source, join(root, 'site'), sha, trackedFiles);
   const published = join(root, 'site', 'graph');
-  assert.deepEqual((await readdir(published)).sort(), ['communities.html', 'index.html', 'source.json']);
+  assert.deepEqual((await readdir(published)).sort(), ['analysis.mjs', 'communities.html', 'index.html', 'source.json']);
   assert.equal(result.path, join(published, 'index.html'));
   assert.deepEqual(await readFile(join(published, 'communities.html')), generatedHtml);
+  assert.deepEqual(await readFile(join(published, 'analysis.mjs')), await readFile(new URL('./analysis.mjs', import.meta.url)));
   const explorer = await readFile(join(published, 'index.html'), 'utf8');
   assert.match(explorer, /Graphify File Explorer/);
   assert.match(explorer, /packages\/api\/server.ts/);
@@ -66,6 +68,10 @@ test('publishes a searchable file explorer and keeps native community graph inta
   assert.ok(explorer.includes('https://github.com/yohn-jp/codexia/blob/' + sha + '/packages/api/server.ts'));
   assert.doesNotMatch(explorer, /<script>alert\(1\)<\/script>/);
   assert.match(explorer, /\\u003c\/script>/);
+  const embedded = explorer.match(/<script id="graph-data" type="application\/json">([\s\S]*?)<\/script>/);
+  assert.ok(embedded);
+  const embeddedIndex = JSON.parse(embedded[1]);
+  assert.equal(embeddedIndex.files.find(file => file.path === 'modules/story/scene.ts').symbols[0].label, graph.nodes[3].label);
   const sourceRecord = JSON.parse(await readFile(join(published, 'source.json'), 'utf8'));
   const expected = summarizeGraph(graph, sha, trackedFiles);
   assert.deepEqual(sourceRecord, {
@@ -88,4 +94,30 @@ test('rejects invalid or incomplete inputs without publishing output', async t =
   await writeFile(join(root, 'graph.json'), JSON.stringify({ ...graph, built_at_commit: 'c'.repeat(40) }));
   await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /expected/);
   assert.deepEqual(await readdir(root), ['graph.html', 'graph.json']);
+});
+
+test('validates a same-SHA Graphify candidate inventory and publishes measured coverage only', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'graphify-pages-candidates-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = join(root, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'graph.html'), '<html>' + 'Graphify native '.repeat(30) + '</html>');
+  await writeFile(join(source, 'graph.json'), JSON.stringify({ ...graph, built_at_commit: sha }));
+  const candidates = {
+    schemaVersion: 1, sourceSha: sha, generator: 'graphify.detect', generatorVersion: '0.9.115',
+    codeOnly: true, excludes: [...EXCLUSION_PATTERNS], files: [...trackedFiles],
+  };
+  const candidateFile = join(root, 'candidates.json');
+  await writeFile(candidateFile, JSON.stringify(candidates));
+  const result = await packGraph(source, join(root, 'site'), sha, trackedFiles, candidateFile);
+  assert.equal(result.stats.files, 3);
+  const sourceRecord = JSON.parse(await readFile(join(root, 'site', 'graph', 'source.json'), 'utf8'));
+  assert.equal(sourceRecord.coverage.scopeStatus, 'measured');
+  assert.equal(sourceRecord.coverage.eligibleFiles, 3);
+  assert.equal(sourceRecord.coverage.extractedFiles, 3);
+  assert.deepEqual(sourceRecord.coverage.unavailableFiles, []);
+  assert.equal(sourceRecord.coverage.otherTrackedFiles, 0);
+  await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, sourceSha: 'c'.repeat(40) }), /source SHA/);
+  await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, excludes: [] }), /exclusions/);
+  await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, files: [...trackedFiles, '../private'] }), /invalid or excluded/);
 });
