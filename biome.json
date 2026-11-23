@@ -11,10 +11,10 @@
       "packages/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
       "modules/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
       "edge/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
-      "!**/dist/**",
-      "!**/build/**",
-      "!**/generated/**",
-      "!**/node_modules/**"
+      "!**/dist",
+      "!**/build",
+      "!**/generated",
+      "!**/node_modules"
     ]
   },
   "formatter": {
