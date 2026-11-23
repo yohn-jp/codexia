@@ -249,13 +249,23 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     if (!Object.hasOwn(contentTypes, name)) return route.fulfill({ status: 404 });
     return route.fulfill({ body: await readFile(join(output, path.slice(1))), contentType: contentTypes[name] });
   });
+  let mode = 'measured';
   let releaseInventory;
   const inventoryReady = new Promise(resolve => { releaseInventory = resolve; });
   await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/actions/runs')) {
       await inventoryReady;
+      if (mode === 'empty') return route.fulfill({ json: { workflow_runs: [] } });
+      if (mode === '403' || mode === '429') return route.fulfill({ status: Number(mode) });
       return route.fulfill({ json: { workflow_runs: [{ ...run(), workflow_id: 7, pull_requests: [{ number: 42 }] }] } });
+    }
+    if (mode === 'incomplete' && path.endsWith('/actions/runs/1/attempts/1/jobs') &&
+      new URL(route.request().url()).searchParams.get('page') === '1') {
+      return route.fulfill({ json: { jobs: Array.from({ length: 100 }, (_, index) => ({ ...jobs[0], id: index + 1 })) } });
+    }
+    if (mode === 'incomplete' && path.endsWith('/actions/runs/1/attempts/1/jobs')) {
+      return route.fulfill({ json: { jobs: Array(100).fill(jobs[0]) } });
     }
     if (path.endsWith('/actions/runs/1/attempts/1/jobs')) return route.fulfill({ json: { jobs } });
     return route.fulfill({ status: 404 });
@@ -283,9 +293,19 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
 
-  await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/**', route => route.fulfill({ status: 503 }));
+  for (const status of ['403', '429']) {
+    mode = status;
+    await page.reload();
+    await page.getByRole('status').filter({ hasText: new RegExp('CIデータを読み込めませんでした.*' + status, 'u') }).waitFor();
+    assert.equal(await copyButton.isDisabled(), true);
+  }
+  mode = 'empty';
   await page.reload();
-  await page.getByRole('status').filter({ hasText: /CIデータを読み込めませんでした.*503/u }).waitFor();
+  await page.getByRole('status').filter({ hasText: 'Bounded recent pull_request workflow sample' }).waitFor();
+  assert.equal(await copyButton.isDisabled(), true);
+  mode = 'incomplete';
+  await page.reload();
+  await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
   assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
 });
