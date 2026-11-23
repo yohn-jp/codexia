@@ -7,8 +7,8 @@ on:
       - deploy/ansible/deploy.yml
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/push-deployment-recover.sh
-      - scripts/push-deployment-backup.test.mjs
-      - scripts/push-deployment-recovery.test.mjs
+      - scripts/deployment/recovery/backup.test.mjs
+      - scripts/deployment/recovery/recovery.test.mjs
       - .github/workflows/push-backup.yml
   push:
     branches: [main]
@@ -17,8 +17,8 @@ on:
       - deploy/ansible/deploy.yml
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/push-deployment-recover.sh
-      - scripts/push-deployment-backup.test.mjs
-      - scripts/push-deployment-recovery.test.mjs
+      - scripts/deployment/recovery/backup.test.mjs
+      - scripts/deployment/recovery/recovery.test.mjs
       - .github/workflows/push-backup.yml
 permissions:
   contents: read
@@ -59,7 +59,7 @@ jobs:
           bash -n deploy/ansible/push-deployment-recover.sh
       - name: Verify push backup lock and recovery contract
         if: steps.reuse.outputs.eligible != 'true'
-        run: node --test scripts/push-deployment-backup.test.mjs scripts/push-deployment-recovery.test.mjs
+        run: node --test scripts/deployment/recovery/backup.test.mjs scripts/deployment/recovery/recovery.test.mjs
       - name: Verify S3 transfer unit contract
         if: steps.reuse.outputs.eligible != 'true'
         run: python3 -m unittest deploy/backup/test_s3_transfer.py -v

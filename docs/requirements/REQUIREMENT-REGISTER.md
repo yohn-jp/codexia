@@ -602,7 +602,7 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Applicability**: CURRENT
 **Design owner**: [Deployment](../deployment/README.md)、[System design](../architecture/SYSTEM-DESIGN.md)
 **Implementation identifiers**: deploy/cloudflare/ui-routes.json; public-protocol-paths.json; terraform/
-**Verification identifiers**: scripts/verify-deployment-config.mjs
+**Verification identifiers**: scripts/verification/infrastructure/deployment-config.mjs
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
@@ -618,7 +618,7 @@ Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore
 - **Type**: File
   **Path**: deploy/cloudflare/ui-routes.json
 - **Type**: File
-  **Path**: scripts/verify-deployment-config.mjs
+  **Path**: scripts/verification/infrastructure/deployment-config.mjs
 
 ## REQ-EXT-002
 

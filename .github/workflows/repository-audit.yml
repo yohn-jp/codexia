@@ -14,7 +14,7 @@ on:
       - 'packages/http-contract/**'
       - 'pnpm-lock.yaml'
       - 'scripts/code-scanning-pages/**'
-      - 'scripts/pages-smoke.mjs'
+      - 'scripts/verification/artifacts/pages-smoke.mjs'
       - 'docs/architecture/SYSTEM-DESIGN.md'
       - 'docs/architecture/DATA-MODEL.md'
       - 'docs/design/USER-SCREEN-FLOW.md'
@@ -328,7 +328,7 @@ jobs:
           node scripts/architecture-diagrams/smoke.mjs \
             "$RUNNER_TEMP/audit-site/architecture" \
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core"
-          node scripts/pages-smoke.mjs "$RUNNER_TEMP/audit-site" \
+          node scripts/verification/artifacts/pages-smoke.mjs "$RUNNER_TEMP/audit-site" \
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM" "$PAGES_SCREENSHOTS"
           CODEXIA_PAGES_SITE="$RUNNER_TEMP/audit-site" node --test scripts/audit/specifications.browser.mjs
       - name: Verify manifests, links and public artifact scope

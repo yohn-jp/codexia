@@ -237,7 +237,7 @@
   ansible.builtin.command:
     argv:
       - node
-      - "{{ repo_root }}/scripts/push-deployment-admission.mjs"
+      - "{{ repo_root }}/scripts/deployment/admission/validate.mjs"
       - --admit
       - "{{ codexia_deployment_certificate_file }}"
       - "{{ {'image': (codexia_current_api_repo_digests.stdout | from_json | select('match', '^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$') | list | first), 'identity': (codexia_current_identity_result.stdout | from_json)} | to_json | b64encode }}"

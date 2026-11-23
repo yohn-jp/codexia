@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { resolveProducerJobAttempts, selectLatestJobArtifact } from './artifact-selection.mjs';
 import { downloadArtifact } from './download-artifacts.mjs';
 

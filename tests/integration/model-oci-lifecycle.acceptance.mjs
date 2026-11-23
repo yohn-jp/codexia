@@ -143,7 +143,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     CODEXIA_OCI_IMAGE: image,
     CODEXIA_OCI_PORT: String(port),
   };
-  const { stdout: verifyOutput } = await execFile("bash", ["scripts/verify-oci.sh"], {
+  const { stdout: verifyOutput } = await execFile("bash", ["scripts/verification/runtime/oci.sh"], {
     cwd: root,
     env: verifyEnvironment,
     encoding: "utf8",
@@ -220,7 +220,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
       shift
       setup_oci_better_auth "$@"
       printf '%s\n%s\n' "$oci_owner_subject" "$OCI_AUTH_WEB_CLIENT"
-    `, "setup-model-oci-auth", join(root, "scripts/oci-better-auth-fixture.sh"),
+    `, "setup-model-oci-auth", join(root, "scripts/verification/runtime/better-auth-fixture.sh"),
     podman, image, network, databaseName, authDirectory, bootstrapName, oidcName, "codexia_test", nodeUserNamespace], { timeout: 180_000 });
     const [ownerSubject, webClientId] = authIdentity.split("\n");
     assert.match(ownerSubject, /^[a-zA-Z0-9._@:/|+-]+$/u);

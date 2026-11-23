@@ -516,7 +516,7 @@ build_context="$fixture_home/.local/state/codexia-lifecycle-build"
 # The source-bound fixture is built and SSH-smoked in a separate producer job.
 # A unique run key is installed only here, never in the OCI layers or artifact.
 : "${CODEXIA_LIFECYCLE_FIXTURE_DIR:?}"
-node "$repo_root/scripts/verify-sshfs-fixture-artifact.mjs" "$CODEXIA_LIFECYCLE_FIXTURE_DIR"
+node "$repo_root/scripts/verification/artifacts/sshfs-fixture.mjs" "$CODEXIA_LIFECYCLE_FIXTURE_DIR"
 fixture_manifest="$CODEXIA_LIFECYCLE_FIXTURE_DIR/manifest.json"
 fixture_image=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image' "$fixture_manifest")
 fixture_image_id=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).imageId' "$fixture_manifest")
@@ -599,7 +599,7 @@ test "$backup_recipient" != ''
 # Resolve and verify published images before installing the disposable registry map.
 # This keeps public GHCR pulls pointed at GHCR, never at the empty test registry.
 candidate_started=$(date +%s%3N)
-node "$repo_root/scripts/push-app-lifecycle.mjs" prepare
+node "$repo_root/scripts/deployment/lifecycle/app.mjs" prepare
 record_phase_timing backend_candidate "$candidate_started"
 registry_started=$(date +%s%3N)
 
@@ -624,7 +624,7 @@ sudo install -o codexia -g codexia -m 0600 "$tmp/registries.conf" "$fixture_home
 # Retry the live HTTP readiness result, not elapsed time.
 curl --fail --silent --retry 20 --retry-all-errors --retry-connrefused \
   --retry-delay 1 --connect-timeout 2 --max-time 3 http://127.0.0.1:5000/v2/ >/dev/null
-node "$repo_root/scripts/push-app-lifecycle.mjs" mirror
+node "$repo_root/scripts/deployment/lifecycle/app.mjs" mirror
 record_phase_timing registry_mirror "$registry_started"
 database_image_name=$(rootless_podman inspect --format '{{.ImageName}}' codexia-db)
 database_image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-db)
@@ -675,7 +675,7 @@ DOCKERFILE
   rootless_podman push --digestfile "$digest_file" "$tag" >"$tmp/app-update-push.log" 2>&1
   digest=$(rootless cat "$digest_file")
   rootless rm -f "$digest_file"
-  node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
+  node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
 }
 seed_database_sentinel() {
   rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
@@ -737,7 +737,7 @@ rootless_podman push --digestfile "$failed_digest_file" "$failed_tag" >/dev/null
 failed_digest=$(sudo -u codexia cat "$failed_digest_file")
 rootless rm -f "$failed_digest_file"
 failed_image="ghcr.io/yohn-jp/codexia-backend@$failed_digest"
-node "$repo_root/scripts/push-app-lifecycle.mjs" record-failed "$failed_image"
+node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-failed "$failed_image"
 before_failure=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
 if run_deploy failed false '' deploy-failed-candidate; then
   echo 'Deliberately failing candidate unexpectedly deployed' >&2

@@ -43,21 +43,21 @@ on:
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
-      - scripts/release-policy.mjs
-      - scripts/component-release-version*.mjs
-      - scripts/record-component-release.mjs
-      - scripts/verify-release-source.mjs
-      - scripts/verify-deployment-config.mjs
-      - scripts/verify-frontend-artifact*.mjs
-      - scripts/frontend-promotion-contract.test.mjs
-      - scripts/frontend-promotion-handoff.test.mjs
+      - scripts/release/components/policy.mjs
+      - scripts/release/components/version*.mjs
+      - scripts/release/components/record.mjs
+      - scripts/release/components/verify-source.mjs
+      - scripts/verification/infrastructure/deployment-config.mjs
+      - scripts/verification/artifacts/frontend*.mjs
+      - scripts/release/frontend/promotion-contract.test.mjs
+      - scripts/release/frontend/promotion-handoff.test.mjs
       - scripts/build/frontend/oauth-config.mjs
       - scripts/build/frontend/oauth-config.test.mjs
-      - scripts/component-release-record*.mjs
+      - scripts/release/components/record-model*.mjs
       - scripts/ci/certification/reuse-merged-pr*.mjs
-      - scripts/verify-frontend-compatibility*.mjs
-      - scripts/backend-update-identity*.mjs
-      - scripts/identity-probe-client.mjs
+      - scripts/release/frontend/verify-compatibility*.mjs
+      - scripts/release/backend/update-identity*.mjs
+      - scripts/verification/infrastructure/identity-probe-client.mjs
       - scripts/build/frontend/build.mjs
       - scripts/build/packaging/profile-build.mjs
       - scripts/shared/read-regular-file.mjs
@@ -70,10 +70,10 @@ on:
       - .github/workflows/frontend-release.yml
       - .github/workflows/production-preflight.yml
       - deploy/release-impact-paths.json
-      - scripts/release-impact.mjs
-      - scripts/release-impact.test.mjs
-      - scripts/release-source-gate.mjs
-      - scripts/release-source-gate.test.mjs
+      - scripts/release/components/impact.mjs
+      - scripts/release/components/impact.test.mjs
+      - scripts/release/components/source-gate.mjs
+      - scripts/release/components/source-gate.test.mjs
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]
@@ -119,7 +119,7 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-source-gate.mjs frontend
+        run: node scripts/release/components/source-gate.mjs frontend
   preflight:
     name: Verify production Access and identity paths
     needs: source
@@ -163,7 +163,7 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/verify-frontend-compatibility.mjs preflight
+        run: node scripts/release/frontend/verify-compatibility.mjs preflight
       - name: Select exact tested PR frontend artifact
         id: promotion
         env:
@@ -179,7 +179,7 @@ jobs:
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
-        run: node scripts/verify-frontend-artifact.mjs select-promotion
+        run: node scripts/verification/artifacts/frontend.mjs select-promotion
   build:
     name: Build and verify UI assets
     # The certified main archive must be available even while production is blocked.
@@ -327,7 +327,7 @@ jobs:
         id: freshness
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-source-gate.mjs frontend
+        run: node scripts/release/components/source-gate.mjs frontend
       - name: Install pinned Wrangler
         if: steps.freshness.outputs.affected == 'true'
         run: npm ci --prefix edge/frontend
@@ -344,7 +344,7 @@ jobs:
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
-        run: node scripts/verify-frontend-artifact.mjs
+        run: node scripts/verification/artifacts/frontend.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility
         if: steps.freshness.outputs.affected == 'true'
@@ -352,7 +352,7 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/verify-frontend-compatibility.mjs
+        run: node scripts/release/frontend/verify-compatibility.mjs
       - name: Deploy static assets only
         id: deploy-assets
         if: steps.compatibility.outputs.deploy == 'true'
@@ -367,10 +367,10 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/verify-frontend-compatibility.mjs deployed
+        run: node scripts/release/frontend/verify-compatibility.mjs deployed
       - name: Record independent frontend release
         if: always() && steps.compatibility.outcome == 'success' && steps.verify-deployed.outcome == 'success' && (steps.deploy-assets.outcome == 'success' || steps.compatibility.outputs.deploy == 'false')
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_FRONTEND_VERIFY_RUN_ID: ${{ needs.preflight.outputs.producer-verify-run-id || needs.source.outputs.verify-run-id }}
-        run: node scripts/record-component-release.mjs frontend
+        run: node scripts/release/components/record.mjs frontend

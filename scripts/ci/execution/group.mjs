@@ -97,7 +97,7 @@ async function executeTaskInContext(task, index, scope) {
         await run('pnpm', ['typecheck:safety']);
       } else if (task.startsWith('build-')) await run('pnpm', ['build'], { CODEXIA_PROFILE: task.slice(6) });
       else if (task === 'audit-core') await run('pnpm', ['audit:core']);
-      else if (task.startsWith('oci-')) await run('bash', ['scripts/verify-oci.sh'], { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice(4), CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice(4)}` });
+      else if (task.startsWith('oci-')) await run('bash', ['scripts/verification/runtime/oci.sh'], { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice(4), CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice(4)}` });
       else if (task.startsWith('browser-')) {
         const [, profile, ...suite] = task.split('-');
         let executing = false;

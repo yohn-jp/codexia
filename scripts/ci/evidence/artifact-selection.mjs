@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { validateVerificationPlan } from '../impact/plan.mjs';
-import { collectGitHubPages } from '../../release-policy.mjs';
+import { collectGitHubPages } from '../../release/components/policy.mjs';
 
 /**
  * Select one artifact produced inside the latest successful job attempt window.

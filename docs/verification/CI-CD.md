@@ -15,13 +15,13 @@ This is the normative execution and release architecture. [Test architecture](TE
 | Responsibility | Canonical implementation |
 | --- | --- |
 | Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci/impact/contract.mjs) |
-| Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci/impact/plan.mjs) |
+| Impact selection, plan validation and digest | [plan.mjs](../../scripts/ci/impact/plan.mjs) |
 | Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs) |
 | Task producer invocation, input-proof generation, and coverage input inventory | [group.mjs](../../scripts/ci/execution/group.mjs), [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci/evidence/coverage-inputs.mjs) |
 | Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci/execution/workspace.mjs), [group.mjs](../../scripts/ci/execution/group.mjs) |
 | Verification DAG | [verify.yml](../../.github/workflows/verify.yml) |
 | Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) retrieves each selector-validated immutable artifact ID through [download-artifacts.mjs](../../scripts/ci/evidence/download-artifacts.mjs), verifies its SHA-256 and extracts only the plan or report JSON. Execution reports use one directory per artifact regardless of selection count. [certify.mjs](../../scripts/ci/certification/certify.mjs) validates the downloaded evidence. |
-| Release eligibility and exact main source | [release-policy.mjs](../../scripts/release-policy.mjs), [verify-release-source.mjs](../../scripts/verify-release-source.mjs) |
+| Release eligibility and exact main source | [policy.mjs](../../scripts/release/components/policy.mjs), [verify-source.mjs](../../scripts/release/components/verify-source.mjs) |
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
 

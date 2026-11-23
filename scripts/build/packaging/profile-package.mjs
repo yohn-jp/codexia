@@ -144,7 +144,7 @@ async function main() {
         ...(!serverOnly ? [path.join(outputDirectory, 'app/dist')] : []),
       ];
       run(process.execPath, [
-        path.join(root, 'scripts/audit-runtime-deps.mjs'),
+        path.join(root, 'scripts/verification/dependencies/audit-runtime.mjs'),
         '--node-modules', path.join(outputDirectory, 'node_modules'),
         '--production',
         ...runtimeDists.flatMap((directory) => ['--dist', directory]),

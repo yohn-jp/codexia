@@ -5,8 +5,8 @@ The root `Dockerfile` builds Core and Full profiles of one application container
 Every API startup requires PostgreSQL. The OCI verification script creates an isolated network and PostgreSQL sidecar, applies checked migrations, registers a Better Auth owner and OAuth clients, and checks authorization alongside health, assets, profile metadata, nonroot execution, writable scratch data and graceful shutdown. It removes the fixture containers and network on exit.
 
 ```sh
-CODEXIA_PROFILE=core bash scripts/verify-oci.sh
-CODEXIA_PROFILE=full bash scripts/verify-oci.sh
+CODEXIA_PROFILE=core bash scripts/verification/runtime/oci.sh
+CODEXIA_PROFILE=full bash scripts/verification/runtime/oci.sh
 ```
 
 For a standalone installation, apply application migrations to private PostgreSQL and follow [Better Auth runtime provisioning](../../deploy/ansible/AUTH-RUNTIME.md) and [protected activation](../deployment/PUSH-DEPLOYMENT.md#first-application-activation). `/data` holds derived module caches, and `/history` holds private usage and job history. Give each container its own writable volumes and use a trusted HTTPS reverse proxy beyond localhost.

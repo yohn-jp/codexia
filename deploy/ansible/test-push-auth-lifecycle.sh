@@ -32,7 +32,7 @@ run_better_auth_lifecycle() {
     }
     digest=$(rootless cat "$digest_file") || return
     immutable="ghcr.io/yohn-jp/codexia-backend@$digest"
-    node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth "$scenario" "$immutable" || return
+    node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-auth "$scenario" "$immutable" || return
     printf '%s\n' "$immutable"
   }
   observe_auth() {
@@ -113,7 +113,7 @@ SQL
     -keyout "$tmp/auth-tls.key" -out "$tmp/auth-tls.crt" >"$tmp/auth-certificate.log" 2>&1
   sudo install -o codexia -g codexia -m 0644 "$tmp/auth-tls.crt" "$auth_context/tls.crt"
   sudo install -o codexia -g codexia -m 0644 "$tmp/auth-tls.crt" "$proxy_context/tls.crt"
-  sudo install -o codexia -g codexia -m 0644 "$repo_root/scripts/push-auth-lifecycle-oidc.mjs" "$proxy_context/push-auth-lifecycle-oidc.mjs"
+  sudo install -o codexia -g codexia -m 0644 "$repo_root/scripts/deployment/lifecycle/auth-oidc.mjs" "$proxy_context/push-auth-lifecycle-oidc.mjs"
   sudo install -o codexia -g codexia -m 0600 "$tmp/auth-tls.key" "$proxy_context/tls.key"
   base_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).candidates.head.image' "$evidence")
   cat >"$tmp/auth.Dockerfile" <<'DOCKERFILE'

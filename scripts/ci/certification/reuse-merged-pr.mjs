@@ -11,7 +11,7 @@ import { assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
-import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from '../../release-policy.mjs';
+import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from '../../release/components/policy.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
 const FULL_MODEL_JOB = 'full-model-oci / Run pinned Full model lifecycle on rootless Podman';

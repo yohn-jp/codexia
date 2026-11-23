@@ -25,4 +25,4 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/verify-frontend-compatibility.mjs preflight
+        run: node scripts/release/frontend/verify-compatibility.mjs preflight

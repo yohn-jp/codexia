@@ -11,7 +11,7 @@ on:
       - deploy/ansible/site.yml
       - deploy/ansible/requirements.txt
       - docs/deployment/PUSH-HOST-CI.md
-      - scripts/push-host.test.mjs
+      - scripts/deployment/lifecycle/host.test.mjs
 permissions:
   contents: read
 concurrency:
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           bash -n deploy/ansible/test-host-integration.sh
           bash -n deploy/ansible/test-push-host.sh
-          node --test scripts/push-host.test.mjs
+          node --test scripts/deployment/lifecycle/host.test.mjs
       - name: Install the pinned Ansible control environment
         run: |
           set -euo pipefail

@@ -5,7 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readComponentVersion } from '../../component-release-version.mjs';
+import { readComponentVersion } from '../../release/components/version.mjs';
 import { frontendOAuthConfigIdentity, readFrontendOAuthConfig } from './oauth-config.mjs';
 import { createBuildCommands } from '../packaging/profile-package.mjs';
 
