@@ -2,6 +2,8 @@ import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
+import { persistenceStatusGet } from "./generated/http/client";
+import type { PersistenceStatusResponse } from "./generated/http/schemas/persistenceStatusResponse.zod";
 import type {
   ActionResult,
   Approval,
@@ -171,10 +173,7 @@ export interface PersistenceDocumentRead {
   revision: PersistenceRevision | null;
 }
 
-export interface PersistenceStatus {
-  available: boolean;
-  provider: "postgres" | null;
-}
+export type PersistenceStatus = PersistenceStatusResponse;
 
 export interface PersistenceProjectPage {
   projects: PersistenceProject[];
@@ -491,7 +490,10 @@ export const api = {
     }
     return data.documentId;
   },
-  persistenceStatus: (signal?: AbortSignal) => request(dto.persistenceStatus, "/api/v1/persistence/status", { ...(signal ? { signal } : {}) }),
+  persistenceStatus: (signal?: AbortSignal) => persistenceStatusGet({
+    request,
+    ...(signal ? { signal } : {}),
+  }),
   exportWorkArchive: (projectId: string, signal?: AbortSignal) => request(dto.portableWorkArchive,
     persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),
   importWorkArchive: (archive: unknown, signal?: AbortSignal) => request(dto.portableWorkImport,
