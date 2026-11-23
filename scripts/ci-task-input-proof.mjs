@@ -242,7 +242,7 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
       assert.equal(proof.workflowAttempt, report.workflowAttempt, 'Task input proof attempt mismatch');
       assert.equal(proof.workflowJob, report.workflowJob, 'Task input proof job mismatch');
       if (proof.reusedFrom !== undefined) {
-        assert.deepEqual(proof.reusedFrom, plan.taskInputReuse?.coverage, 'Task proof reuse receipt mismatch');
+        assert.deepEqual(proof.reusedFrom, plan.coverageReuse, 'Task proof reuse receipt mismatch');
         assert.equal(plan.base, proof.reusedFrom.sourceSha, 'Task proof base source mismatch');
         assert.deepEqual(proof.inputClosure, proof.reusedFrom.inputClosure, 'Task proof reused input closure mismatch');
       }
