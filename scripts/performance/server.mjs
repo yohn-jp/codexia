@@ -69,7 +69,8 @@ try {
     observeApiServer: observeRequests,
   });
   const buildStart = performance.now();
-  buildAuthorBrowserAssets(author, 'core', assets);
+  // This benchmark measures a cold frontend build: never substitute CI's shared E2E template.
+  buildAuthorBrowserAssets(author, 'core', assets, undefined, { reuseCiTemplate: false });
   const browserAssetBuildMs = performance.now() - buildStart;
   const { files, sha256 } = await hashTree(assets);
   const sceneSummaries = fixture.sceneRecords.map(row => ({ id: row.document.id, title: row.title,
