@@ -31,15 +31,13 @@ jobs:
       - name: Build and smoke-test browser image without registry credentials
         shell: bash
         env:
-          BROWSER: chromium
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          image="codexia-playwright-test:$BROWSER"
+          image="codexia-playwright-test:chromium"
           docker build --platform linux/amd64 \
             -f .github/docker/playwright-ubuntu-minimal.Dockerfile \
             --build-arg PLAYWRIGHT_VERSION=1.65.1 \
-            --build-arg "BROWSER=$BROWSER" \
             -t "$image" .
           observed="$(docker run --rm -v "$PWD:/work:ro" -w /work "$image" \
             git -c safe.directory=/work rev-parse HEAD)"
@@ -65,18 +63,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish immutable variant and measure compressed manifest size
+      - name: Publish immutable Chromium image and measure uncompressed size
         env:
-          VARIANT: ubuntu
-          BROWSER: chromium
         shell: bash
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY,,}/playwright-$VARIANT-$BROWSER"
-          metadata="$RUNNER_TEMP/$BROWSER.json"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/playwright-ubuntu-chromium"
+          metadata="$RUNNER_TEMP/chromium.json"
           docker buildx build --platform linux/amd64 \
             -f .github/docker/playwright-ubuntu-minimal.Dockerfile \
-            --build-arg PLAYWRIGHT_VERSION=1.65.1 --build-arg "BROWSER=$BROWSER" \
+            --build-arg PLAYWRIGHT_VERSION=1.65.1 \
             -t "$image:pw-1.65.1" --metadata-file "$metadata" --push .
           digest="$(jq -r '."containerimage.digest" // empty' "$metadata")"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
@@ -86,7 +82,7 @@ jobs:
           mib="$(awk -v n="$bytes" 'BEGIN { printf "%.1f", n / 1048576 }')"
           echo "Uncompressed image size: $mib MiB" >> "$GITHUB_STEP_SUMMARY"
           {
-            echo "### $VARIANT / $BROWSER"
+            echo "### Ubuntu / Chromium"
             echo "\`$image@$digest\`"
             echo 'Source Playwright: 1.65.1; platform linux/amd64'
           } >> "$GITHUB_STEP_SUMMARY"
