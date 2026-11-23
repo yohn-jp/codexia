@@ -193,6 +193,16 @@ test('JSON extraction rejects an incorrect CRC on an unmaterialized diagnostic e
   await assert.rejects(extractJsonEntry(archive, 'report.json'), /CRC|signature/i);
 });
 
+test('evidence JSON retains the report when accompanying trace diagnostics exceed the compressed archive limit', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-trace-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{"trace":true}');
+  await writeFile(path.join(directory, 'trace.html'), Buffer.alloc(19 * 1024 * 1024, 'a'));
+  execFileSync('zip', ['-q', 'fixture.zip', 'report.json', 'trace.html'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  assert.equal((await extractJsonEntry(archive, 'report.json')).toString(), '{"trace":true}');
+});
+
 test('frontend ZIP extraction rejects case and Unicode path collisions', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-collisions-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

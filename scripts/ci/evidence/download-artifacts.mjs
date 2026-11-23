@@ -248,7 +248,9 @@ export async function extractJsonEntry(bytes, filename) {
   const profile = filename === 'profile-build.json';
   const maxArchive = profile ? MAX_ASSET_ARCHIVE : MAX_ARCHIVE;
   const maxJson = profile ? MAX_ASSET_ARCHIVE : MAX_JSON;
-  const maxUncompressed = profile ? MAX_ASSET_BYTES : MAX_ARCHIVE;
+  // Report archives can also contain compressed diagnostics, such as the
+  // requirements-trace site. Keep the JSON limit independent of their size.
+  const maxUncompressed = MAX_ASSET_BYTES;
   return withArtifactZip(bytes, {maxArchive, maxUncompressed, maxEntries: 0xfffe}, async (entries, readEntry) => {
     const selected = entries.find(entry => entry.pathname === filename && !entry.isDirectory);
     assert.ok(selected, 'Missing required JSON entry');
