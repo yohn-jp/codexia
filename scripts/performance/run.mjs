@@ -119,6 +119,12 @@ function osRelease() {
   catch { return null; }
 }
 
+export function selectCoreDatasets(value = 'small,long-form,knowledge-dense,limit-999') {
+  const selected = value.split(',').filter(Boolean);
+  for (const size of selected) if (!Object.hasOwn(sizes, size)) throw new Error(`Unknown dataset: ${size}`);
+  return selected;
+}
+
 async function main() {
   const root = resolve(process.argv[2] ?? '/tmp/codexia-postgresql-baseline');
   const repeats = Number(process.env.BENCH_REPEATS ?? 20);
@@ -145,8 +151,7 @@ async function main() {
   await mkdir(results);
   const browserExecutable = process.env.CODEXIA_E2E_CHROMIUM ?? 'Playwright bundled Chromium';
   const browserSizes = (process.env.BENCH_BROWSER_SIZES ?? 'small,long-form').split(',').filter(Boolean);
-  const selected = (process.env.BENCH_SIZES ?? Object.keys(sizes).join(',')).split(',').filter(Boolean);
-  for (const size of selected) if (!Object.hasOwn(sizes, size)) throw new Error(`Unknown dataset: ${size}`);
+  const selected = selectCoreDatasets(process.env.BENCH_SIZES);
   for (const size of browserSizes) if (!Object.hasOwn(sizes, size)) throw new Error(`Unknown browser dataset: ${size}`);
   if (browserSizes.length && !build['app/dist']) throw new Error('Missing app/dist; run CODEXIA_PROFILE=core pnpm build before browser measurements');
   const environment = { schemaVersion: 2, timestamp: new Date().toISOString(), command: process.argv,
