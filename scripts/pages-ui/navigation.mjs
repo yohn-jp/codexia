@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const SHA = /^[a-f0-9]{40}$/i;
+export const apiReferencePage = Object.freeze({
+  id: 'api', title: 'API Reference', section: 'API', mode: 'static target contract', source: 'TypeSpec-generated OpenAPI 3.1',
+});
 
 const CORE_PAGES = new Map([
   ['index.html', { id: 'overview', title: 'Development Portal', section: '概要', mode: 'サイトマップ', source: 'Pages artifact' }],
   ['audit/index.html', { id: 'audit', title: 'Source Audit', section: 'Source Audit', mode: 'branch snapshots', source: 'Branch and snapshot materials' }],
   ['ci/index.html', { id: 'ci', title: 'CI Observatory', section: 'CI', mode: 'live public Actions metadata', source: 'GitHub Actions public API' }],
-  ['api/index.html', { id: 'api', title: 'API Reference', section: 'API', mode: 'static target contract', source: 'TypeSpec-generated OpenAPI 3.1' }],
+  ['api/index.html', apiReferencePage],
   ['security/index.html', { id: 'security', title: 'Code scanning export', section: 'Security', mode: 'authorized on-demand', source: 'GitHub Code scanning API (authorized locally)' }],
   ['graph/index.html', { id: 'graph', title: 'Code Map', section: 'Code Map', mode: 'build snapshot', source: 'Graphify static analysis' }],
   ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'Canonical design documents' }],

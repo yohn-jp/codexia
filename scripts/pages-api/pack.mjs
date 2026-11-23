@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from '../audit/publication-policy.mjs';
+import { apiReferencePage, decoratePage } from '../pages-ui/navigation.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const self = fileURLToPath(import.meta.url);
@@ -241,7 +242,11 @@ export async function pack(sitePath, sourceSha) {
 </body>
 </html>
 `;
-  writeFileSync(join(directory, 'index.html'), index);
+  const decoratedIndex = decoratePage(index, {
+    pagePath: 'api/index.html',
+    page: { ...apiReferencePage, sha: sourceSha },
+  });
+  writeFileSync(join(directory, 'index.html'), decoratedIndex);
   const scalarNotice = `@scalar/api-reference ${packageInfo.version}\nCopyright Scalar\nLicense: MIT\n\nMIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n`;
   writeFileSync(join(directory, 'THIRD_PARTY_NOTICES.txt'), scalarNotice);
   const scalarIntegrity = scalarLock?.integrity;
