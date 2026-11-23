@@ -66,6 +66,24 @@ After initial schema creation, image-only `deploy` supports only an unchanged mi
 
 The exact certified image packages `node /app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js --check`. Its read-only connection reports pending snapshot proofs, Publishing records and NLP feature settings. A pending result exits with status 2. During approved maintenance, keep ingress closed and stop the old writer under the host lock. Verify the encrypted backup before running the same command with `--apply` and the authorized writable connection. It converts Publishing records and NLP feature settings before reconciling snapshot proofs. Rerun `--check` and require exit 0. Keep ingress closed until the paired activation and its readiness, sign-in and publication checks are complete. Recovery to the earlier persistence format requires the approved pre-change database restore.
 
+### One-time job history maintenance
+
+Use the exact certified Full image and run the maintenance command as the API's UID 1000. Mount only the installation's `codexia-history` volume at `/history`, preserve its ownership, mode and labels, and disable container networking.
+
+```sh
+CODEXIA_USAGE_DIR=/history node /app/node_modules/@codexia/api/dist/maintain-job-history.js --check
+```
+
+Exit 0 means the history is already current or absent. Exit 2 means conversion is pending. Exit 1 means invalid history or a maintenance error and blocks activation. If conversion is pending, keep the old writer stopped under the host lock and verify the encrypted pre-change backup. Then run the following command with the same image, UID and scoped mount.
+
+```sh
+CODEXIA_USAGE_DIR=/history node /app/node_modules/@codexia/api/dist/maintain-job-history.js --apply
+```
+
+Run `--check` again and require exit 0. Complete the applicable PostgreSQL maintenance and its verification before paired activation.
+
+On the [isolated recovery host](BACKUP.md#rehearse-a-reviewed-full-candidate), verify the check, apply and recheck sequence against a restored backup copy. If activation fails and the prior release cannot read the converted history, restore the history from the encrypted pre-change backup before restarting it. Restore the pre-change PostgreSQL backup when the prior release requires it.
+
 ## Coordinated API epoch cutover
 
 The standalone OAuth cutover pairs the epoch 2 Full backend with the epoch 2 static frontend and moves installations on persistence format 1 to format 2. The normal frontend workflow requires an already compatible live backend. The backend workflow requires an already compatible live UI and refuses an epoch, persistence-format or migration-fingerprint change to an installed API. Neither workflow implements the public ingress fence, paired activation or cross-component recovery. Keep the ordinary gates in place and use a separately reviewed, explicitly approved maintenance plan for these operations. First-install approvals apply only to an absent API and must never be used to replace an existing installation.
@@ -85,7 +103,7 @@ bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file"
   --candidate-full-image "$certified_full_image"
 ```
 
-**Fence, quiesce and activate.** Pause both ordinary deployment paths. Have the zone owner fence the entire public application hostname, covering the static Worker and Tunnel routes, including any enabled OAuth/MCP paths that bypass the parent Access application. Allow only the exact GETs for `/api/version` and `/desktop/update-identity.json` under their existing Access policies and approved, restricted functional acceptance. Verify that ordinary traffic is blocked before stopping the writer. Under the host lock, stop the Tunnel and old writer and retain a verified encrypted pre-change backup off the VM. Apply the approved conversion with the certified image and require its maintenance check to return 0. Start the certified backend. Restore Tunnel connectivity behind the fence and switch the candidate Worker UUID to 100%. Verify the running backend digest and readiness on the host, both live Full/epoch 2 identities, the exact deployed frontend identity, owner sign-in, and the authorized and denied paths for the approved public configuration. Reopen ingress only after both components and their access controls pass.
+**Fence, quiesce and activate.** Pause both ordinary deployment paths. Have the zone owner fence the entire public application hostname, covering the static Worker and Tunnel routes, including any enabled OAuth/MCP paths that bypass the parent Access application. Allow only the exact GETs for `/api/version` and `/desktop/update-identity.json` under their existing Access policies and approved, restricted functional acceptance. Verify that ordinary traffic is blocked before stopping the writer. Under the host lock, stop the Tunnel and old writer and retain a verified encrypted pre-change backup off the VM. Complete the approved history and PostgreSQL maintenance with the certified image and require the applicable maintenance checks to return 0. Start the certified backend. Restore Tunnel connectivity behind the fence and switch the candidate Worker UUID to 100%. Verify the running backend digest and readiness on the host, both live Full/epoch 2 identities, the exact deployed frontend identity, owner sign-in, and the authorized and denied paths for the approved public configuration. Reopen ingress only after both components and their access controls pass.
 
 **Keep the fence on failure.** Restore the retained Worker version to 100%, the prior backend digest and its authentication configuration, and the verified pre-change database and history when the prior release cannot read the converted state. Verify the restored identities, readiness, access controls and data before reopening ingress or resuming ordinary releases.
 
