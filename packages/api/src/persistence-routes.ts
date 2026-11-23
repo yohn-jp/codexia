@@ -24,8 +24,6 @@ import {
 
 export interface PersistenceRouteInput {
   persistence?: Persistence;
-  /** Hosted instances may access only the project assigned to that runtime. */
-  assignedProjectId?: string;
   method: string;
   url: string;
   body: unknown;
@@ -156,7 +154,6 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
   try {
     if (url.pathname === "/api/v1/persistence/import") {
       if (input.method !== "POST") return { status: 405, body: { error: "Method not allowed", code: "METHOD_NOT_ALLOWED" } };
-      if (input.assignedProjectId) failure(403, "ASSIGNED_PROJECT_ONLY", "Hosted runtimes cannot import new projects");
       const authorId = await input.requireAuthor();
       return { status: 201, body: await importWorkArchive(persistence, input.body, authorId) };
     }
@@ -166,11 +163,6 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         let cursor;
         try { cursor = decodeProjectPageCursor(url.searchParams.get("cursor")); }
         catch { failure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
-        const assignedProjectId = input.assignedProjectId as ProjectId | undefined;
-        if (assignedProjectId) {
-          const project = await persistence.read((reader) => reader.getProject(assignedProjectId));
-          return { status: 200, body: { projects: project ? [project] : [], nextCursor: null } };
-        }
         const rows = await persistence.read((reader) => {
           if (!reader.listProjectPage) failure(503, "PROJECT_PAGINATION_UNAVAILABLE", "Project pagination is unavailable");
           return reader.listProjectPage(limit + 1, cursor);
@@ -181,7 +173,6 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         return { status: 200, body: { projects, nextCursor } };
       }
       if (input.method === "POST") {
-        if (input.assignedProjectId) failure(403, "ASSIGNED_PROJECT_ONLY", "Hosted runtimes cannot create projects");
         await input.requireAuthor();
         const body = bodyRecord(input.body);
         const title = requiredString(body.title, "title", 256);
@@ -199,9 +190,6 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     const projectPath = url.pathname.match(/^\/api\/v1\/persistence\/projects\/([^/]+)(?:\/(.*))?$/u);
     if (!projectPath) return { status: 404, body: { error: "Persistence route not found", code: "NOT_FOUND" } };
     const projectId = decoded(projectPath[1]!, "Project id") as ProjectId;
-    if (input.assignedProjectId && projectId !== input.assignedProjectId) {
-      return { status: 404, body: { error: "Project was not found", code: "PERSISTENCE_NOT_FOUND" } };
-    }
     const nativeRead = <T>(read: (reader: PersistenceReader) => Promise<T>) => {
       const selected = url.searchParams.get("projectVersion");
       if (selected === null) return readCurrentNativeKnowledge(persistence, projectId, read);

@@ -1,14 +1,12 @@
 import { EventStreams } from "./event-streams.js";
-import { scheduleAtDeadline } from "./deadline-timer.js";
-import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
 import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
 import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable, Transform } from "node:stream";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
@@ -28,37 +26,9 @@ import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-s
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
-import {
-  createHostedAuthorizationPolicy,
-  HostedAuthorizationError,
-  verifyCompactJwt,
-} from "./hosted-policy.js";
-import {
-  HOSTED_ACCESS_COOKIE,
-  HOSTED_ASSIGNMENT_PATH,
-  HOSTED_CSRF_COOKIE,
-  RUNTIME_METADATA_PATH,
-  RUNTIME_QUIESCE_PATH,
-  RUNTIME_RESUME_PATH,
-  RUNTIME_STATUS_PATH,
-  metadataForRuntime,
-  observePostgresPersistence,
-  parseQuiesceRequest,
-  parseRuntimeAssignment,
-  parseRuntimeControlCredential,
-  readRuntimeAssignment,
-  sha256Digest,
-  type QuiesceRequest,
-  type QuiesceResult,
-  type RuntimeAssignment,
-  type RuntimeStatus,
-} from "./platform-runtime.js";
-
 export { importLegacyJobHistory, type LegacyJobHistoryImportOptions, type LegacyJobHistoryImportReport } from "./job-history-store.js";
 export { importLegacyRecentActivity, type LegacyRecentActivityImportOptions, type LegacyRecentActivityImportReport } from "./recent-activity-store.js";
 
-const RUNTIME_CONTROL_CENSUS_TIMEOUT_MS = 3_500;
-const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -124,28 +94,6 @@ export interface ApiServerOptions {
   /** Host-owned historical model usage, independent from Core's disposable cache. */
   usageDirectory?: string;
   profile?: string;
-  hosted?: {
-    assignment: RuntimeAssignment;
-    projectId: string;
-    authorization: HostedAuthorizationPolicy;
-    controlFetch?: typeof fetch;
-    producerRevision?: string;
-  };
-}
-
-export type HostedPermission = "read" | "write" | "maintain" | "admin";
-export interface HostedPrincipal {
-  userId: string;
-  permissions: readonly HostedPermission[];
-  repositoryId: number;
-  instanceId: string;
-  runtimeEpoch: number;
-  sessionRevision: number;
-  authorizationRevision: number;
-  expiresAt: number;
-}
-export interface HostedAuthorizationPolicy {
-  authenticate(token: string, requiredPermission?: HostedPermission): Promise<HostedPrincipal>;
 }
 
 interface HttpFailure {
@@ -170,27 +118,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function constantTimeEqual(actual: string, expected: string): boolean {
-  const actualBytes = Buffer.from(actual);
-  const expectedBytes = Buffer.from(expected);
-  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
-}
-
 function requestPath(request: IncomingMessage): string {
   return new URL(request.url ?? "/", "http://localhost").pathname;
-}
-
-function cookieValues(request: IncomingMessage, name: string): string[] {
-  const cookieHeader = request.headers.cookie;
-  if (typeof cookieHeader !== "string") return [];
-  const values: string[] = [];
-  for (const part of cookieHeader.split(";")) {
-    const separator = part.indexOf("=");
-    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
-    try { values.push(decodeURIComponent(part.slice(separator + 1).trim())); }
-    catch { return [""]; }
-  }
-  return values;
 }
 
 function requestProtocol(request: IncomingMessage, trustProxy: boolean): "http:" | "https:" {
@@ -246,22 +175,6 @@ function vary(response: ServerResponse, value: string): void {
   const values = new Set((Array.isArray(current) ? current.join(",") : String(current ?? "")).split(",").map((item) => item.trim()).filter(Boolean));
   values.add(value);
   response.setHeader("Vary", [...values].join(", "));
-}
-
-function sameHostedOrigin(request: IncomingMessage, trustProxy: boolean, audience: string): boolean {
-  const origin = request.headers.origin;
-  const host = request.headers.host;
-  if (typeof origin !== "string" || typeof host !== "string") return false;
-  try {
-    const assigned = new URL(audience);
-    const parsed = new URL(origin);
-    const target = new URL(`${requestProtocol(request, trustProxy)}//${host}`);
-    return assigned.protocol === "https:" && assigned.origin === audience &&
-      parsed.origin === audience && parsed.pathname === "/" && !parsed.search && !parsed.hash &&
-      target.origin === audience;
-  } catch {
-    return false;
-  }
 }
 
 function setSecurityHeaders(response: ServerResponse, styleNonce: string): void {
@@ -573,14 +486,7 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 
 export function createServer(options: ApiServerOptions): Server {
   if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
-  const hosted = options.hosted;
-  if (!hosted && !options.betterAuth) throw new Error("Standalone authentication requires Better Auth");
-  if (hosted && (!hosted.projectId || hosted.authorization === undefined)) {
-    throw new Error("Hosted runtime requires an assignment, assigned project, and grant policy");
-  }
-  if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
-  if (options.oauthMcp && hosted) throw new Error("Standalone MCP OAuth authentication is not available in Hosted mode");
-  if (options.betterAuth && hosted) throw new Error("Standalone Better Auth is not available in Hosted mode");
+  if (!options.betterAuth) throw new Error("Standalone authentication requires Better Auth");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
   const authenticateOAuthMcp = options.oauthMcp ? createOAuthMcpAuthenticator(options.oauthMcp) : undefined;
   const publicBetterAuth = options.betterAuth?.audience?.startsWith("https://") && options.betterAuth.issuer?.startsWith("https://")
@@ -592,12 +498,7 @@ export function createServer(options: ApiServerOptions): Server {
   const oauthMcpMetadataResponse = oauthResource && oauthAuthorizationServer
     ? createMcpProtectedResourceMetadataResponse({ resource: oauthResource, authorizationServer: oauthAuthorizationServer })
     : undefined;
-  if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
-  const assignment = hosted?.assignment;
-  if (assignment && parseRuntimeAssignment(assignment).instanceId !== assignment.instanceId) {
-    throw new Error("Hosted runtime assignment is invalid");
-  }
   const staticDir = options.staticDir ?? resolve(process.cwd(), "app/dist");
   const trustProxy = options.trustProxy ?? false;
   const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
@@ -610,46 +511,20 @@ export function createServer(options: ApiServerOptions): Server {
   const requestControllers = new Set<AbortController>();
   const asyncDomainJobControllers = new Set<AbortController>();
   const activeDomainJobIds = new Set<string>();
-  const activeWorkerJobIds = new Set<string>();
-  const privateHistoryUncertaintyIds = new Set<string>();
-  const workerJobLifecycleStates = new Map<string, WorkerJobLifecycleSnapshot["state"]>();
   const projectEventStreams = new EventStreams();
   const jobEventStreams = new EventStreams();
   const coreStore = options.store as CoreStoreApi;
-  let quiesceGate = false;
-  let quiesceOperationId: string | undefined;
-  let lastQuiesceOperationId: string | undefined;
-  let lastResumedOperationId: string | undefined;
-  let hostedRuntimeCensus: {
-    mode: "remote" | "local";
-    promise: Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }>;
-  } | undefined;
-  let activeApiRequests = 0;
-  let activeMcpRequests = 0;
-  let activeMutations = 0;
-  let runtimeActivityVersion = 0;
-  let lastMeaningfulActivityAt: string | null = null;
-  const recordRuntimeActivity = (): void => { runtimeActivityVersion += 1; };
   const listProjects = async (allowedProjectIds?: readonly string[]): Promise<Project[]> => {
-    if (!hosted) {
-      const projects = await options.store.listProjects();
-      return allowedProjectIds ? projects.filter((project) => allowedProjectIds.includes(project.id)) : projects;
-    }
-    const assigned = await options.persistence.read((reader) => reader.getProject(hosted.projectId as import("@codexia/persistence-contracts").ProjectId));
-    if (!assigned || assigned.id !== hosted.projectId) throw httpFailure(503, "HOSTED_PROJECT_BINDING_INVALID", "Assigned PostgreSQL project is unavailable");
-    return !allowedProjectIds || allowedProjectIds.includes(assigned.id) ? [assigned] : [];
+    const projects = await options.store.listProjects();
+    return allowedProjectIds ? projects.filter((project) => allowedProjectIds.includes(project.id)) : projects;
   };
   const assertAssignedProject = (projectId: string, allowedProjectIds?: readonly string[]): void => {
-    if (hosted && projectId !== hosted.projectId) {
-      throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
-    }
     if (allowedProjectIds && !allowedProjectIds.includes(projectId)) {
       throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
     }
   };
   const findAuthorizedProject = async (projectId: string, allowedProjectIds?: readonly string[]): Promise<Project | undefined> => {
     assertAssignedProject(projectId, allowedProjectIds);
-    if (hosted) return (await listProjects())[0];
     const project = await options.persistence.read(reader => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
     return project?.id === projectId ? project : undefined;
   };
@@ -679,7 +554,6 @@ export function createServer(options: ApiServerOptions): Server {
   let shuttingDown = false;
   let activeRequests = 0;
   let started = false;
-  let lastPendingLocalCheckpoints: number | null = null;
   let closed = false;
   let runtimeShutdownPromise: Promise<void> | undefined;
   const publishJobEvent = (event: JobEvent): void => {
@@ -697,30 +571,13 @@ export function createServer(options: ApiServerOptions): Server {
   };
 
   unsubscribeJobLifecycle = runtime.subscribeJobLifecycle(async (lifecycle: WorkerJobLifecycleSnapshot) => {
-    const previousState = workerJobLifecycleStates.get(lifecycle.jobId);
-    if (previousState !== lifecycle.state) recordRuntimeActivity();
-    workerJobLifecycleStates.set(lifecycle.jobId, lifecycle.state);
-    activeWorkerJobIds.add(lifecycle.jobId);
-    const historyId = `worker:${lifecycle.jobId}`;
     try {
-      const event = await jobHistory.record(lifecycle);
-      if (lifecycle.state === "succeeded" || lifecycle.state === "failed" || lifecycle.state === "cancelled") {
-        privateHistoryUncertaintyIds.delete(historyId);
-      }
-      publishJobEvent(event);
+      publishJobEvent(await jobHistory.record(lifecycle));
     } catch (error) {
-      privateHistoryUncertaintyIds.add(historyId);
       const code = error instanceof JobHistoryError ? error.code : "storage_failure";
       console.error(`Codexia worker lifecycle history was not retained (${code}).`);
-    } finally {
-      if (lifecycle.state === "succeeded" || lifecycle.state === "failed" || lifecycle.state === "cancelled") {
-        workerJobLifecycleStates.delete(lifecycle.jobId);
-        activeWorkerJobIds.delete(lifecycle.jobId);
-      }
     }
   });
-
-
 
   app.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: MAX_JSON_BYTES }, (_request, body, done) => {
     try { done(null, JSON.parse(body as string) as unknown); }
@@ -1105,12 +962,11 @@ export function createServer(options: ApiServerOptions): Server {
       ...(allowedEffects ? { allowedEffects } : {}),
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
-        throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
+        throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
       }, allowedProjectIds, resolveNativeProposalActor, canReviewPrivateChangeSets && source !== "mcp"),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
-        if (hosted || (source === "mcp" && authorizeProposal)) {
-          if (!authorizeProposal) throw httpFailure(403, "WRITE_PERMISSION_REQUIRED", "Current project write permission is required to propose changes");
+        if (source === "mcp" && authorizeProposal) {
           await authorizeProposal();
         }
         if (proposalId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId)) throw httpFailure(400, "INVALID_PROPOSAL_ID", "Proposal ID must contain 1 to 128 letters, numbers, underscores, or hyphens");
@@ -1187,27 +1043,22 @@ export function createServer(options: ApiServerOptions): Server {
         // concurrent invokes cannot all observe the same free capacity.
         activeDomainJobIds.add(id);
         const historyId = `domain:${id}`;
-        recordRuntimeActivity();
         let registered = false;
         try {
           const event = await jobHistory.beginDomainJob({ id, type, projectId: snapshot.projectId });
           registered = true;
-          recordRuntimeActivity();
           publishJobEvent(event);
           onDomainJobStarted?.(id);
           publishJobEvent(await jobHistory.markDomainJobRunning(id));
-          recordRuntimeActivity();
         } catch (error) {
-          privateHistoryUncertaintyIds.add(historyId);
           if (registered) {
             try {
               publishJobEvent(await jobHistory.finishDomainJob(id, actionFailure(snapshot, {
                 code: "job_history_unavailable", message: "The host could not safely start this task", retryable: true,
               }, "job_history_unavailable")));
-              privateHistoryUncertaintyIds.delete(historyId);
             } catch { /* Keep the original storage failure as the useful boundary error. */ }
           }
-          if (activeDomainJobIds.delete(id)) recordRuntimeActivity();
+          activeDomainJobIds.delete(id);
           const code = error instanceof JobHistoryError ? error.code : "job_history_unavailable";
           console.error(`Codexia domain job was not started (${code}).`);
           return actionFailure(snapshot, { code: "job_history_unavailable", message: "The host could not safely register this job" }, "job_history_unavailable");
@@ -1224,10 +1075,8 @@ export function createServer(options: ApiServerOptions): Server {
         catch (error) { result = actionFailure(snapshot, error, "domain_job_failed"); }
         try {
           publishJobEvent(await jobHistory.finishDomainJob(id, result));
-          privateHistoryUncertaintyIds.delete(historyId);
         }
         catch (error) {
-          privateHistoryUncertaintyIds.add(historyId);
           const code = error instanceof JobHistoryError ? error.code : "storage_failure";
           console.error(`Codexia domain job result was not retained (${code}).`);
           try {
@@ -1237,10 +1086,9 @@ export function createServer(options: ApiServerOptions): Server {
               retryable: true,
             }, "domain_job_result_not_retained");
             publishJobEvent(await jobHistory.finishDomainJob(id, failed));
-            privateHistoryUncertaintyIds.delete(historyId);
           } catch { /* Startup recovery will mark any still-running record as interrupted. */ }
         } finally {
-          if (activeDomainJobIds.delete(id)) recordRuntimeActivity();
+          activeDomainJobIds.delete(id);
         }
         return result;
       };
@@ -1253,13 +1101,7 @@ export function createServer(options: ApiServerOptions): Server {
     return host;
   };
 
-  const serveModuleResponse = async (response: Response, raw: ServerResponse, signal: AbortSignal, publicResponse = false, expiresAt?: number): Promise<void> => {
-    // Authenticated module SSE (including MCP) must not outlive its admitting grant.
-    const streaming = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() === "text/event-stream";
-    if (streaming && expiresAt !== undefined && expiresAt <= Date.now()) {
-      await response.body?.cancel().catch(() => undefined);
-      throw httpFailure(401, "UNAUTHORIZED", "Authentication expired");
-    }
+  const serveModuleResponse = async (response: Response, raw: ServerResponse, signal: AbortSignal, publicResponse = false): Promise<void> => {
     if (response.status < 200 || response.status > 599) throw httpFailure(502, "MODULE_HTTP_INVALID_RESPONSE", "Module returned an invalid HTTP response");
     const forbiddenHeaders = new Set(["set-cookie", "content-security-policy", "x-frame-options", "x-content-type-options", "referrer-policy", "cache-control", "connection", "keep-alive", "content-length", "trailer", "transfer-encoding", "upgrade"]);
     response.headers.forEach((value, key) => {
@@ -1274,30 +1116,7 @@ export function createServer(options: ApiServerOptions): Server {
       raw.end();
       return;
     }
-    if (!streaming || expiresAt === undefined) {
-      await pipeline(Readable.fromWeb(response.body as never), raw, { signal });
-      return;
-    }
-    const expiry = new AbortController();
-    const grantDeadline = expiresAt;
-    const cancelExpiry = scheduleAtDeadline(grantDeadline, () => expiry.abort());
-    // A busy event loop can deliver a ready chunk before the expiry timer runs.
-    // Check the absolute deadline before forwarding each chunk as well.
-    const fence = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        if (Date.now() >= grantDeadline) {
-          expiry.abort();
-          callback(new Error("Authentication expired"));
-          return;
-        }
-        callback(null, chunk);
-      },
-    });
-    try {
-      await pipeline(Readable.fromWeb(response.body as never), fence, raw, { signal: AbortSignal.any([signal, expiry.signal]) });
-    } catch (error) {
-      if (!expiry.signal.aborted) throw error;
-    } finally { cancelExpiry(); }
+    await pipeline(Readable.fromWeb(response.body as never), raw, { signal });
   };
   const makeWebRequest = (request: IncomingMessage, body: unknown, signal: AbortSignal, relativePath?: string): Request => {
     const method = request.method ?? "GET";
@@ -1403,239 +1222,18 @@ export function createServer(options: ApiServerOptions): Server {
     });
   };
 
-  const unavailableHostedRuntimeStatus = (): { status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean } => {
-    if (!hosted || !assignment) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
-    return { status: {
-      contractVersion: "codexia-runtime-status/v2",
-      instanceId: assignment.instanceId, projectId: hosted.projectId, runtimeEpoch: assignment.runtimeEpoch,
-      imageDigest: assignment.imageDigest, compositionManifestDigest: assignment.compositionManifestDigest,
-      enabledModuleIds: [...assignment.enabledModuleIds], ready: false,
-      activity: { lastMeaningfulActivityAt, activeApiRequests, activeMcpRequests, activeMutations,
-        activeJobs: new Set([...activeWorkerJobIds, ...activeDomainJobIds]).size, restartableJobs: 0 },
-      persistence: { state: "unknown", provider: "postgres", projectVersion: null }, observedAt: new Date().toISOString(),
-    }, pendingProposals: 0, complete: false, localWorkspaceDirty: false };
-  };
-  const collectHostedRuntimeStatus = async (_mode: "remote" | "local"): Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }> => {
-    const result = unavailableHostedRuntimeStatus();
-    const activityVersion = runtimeActivityVersion;
-    try {
-      if (!coreStore.listProposals) throw new Error("Core proposal status is unavailable");
-      const [observation, proposals] = await Promise.all([
-        observePostgresPersistence(options.persistence, hosted!.projectId),
-        coreStore.listProposals(hosted!.projectId),
-      ]);
-      result.complete = observation.state === "verified" && activityVersion === runtimeActivityVersion;
-      result.status.persistence = { ...observation, state: result.complete ? "verified" : "unknown" };
-      result.status.ready = result.complete && started && !closed && !shuttingDown && !quiesceGate;
-      result.pendingProposals = proposals.filter((proposal) => proposal.state !== "applied").length;
-    } catch { /* A failed database observation cannot establish durability. */ }
-    return result;
-  };
-
-  const readHostedRuntimeStatus = async (maximumWaitMs?: number, requestedMode?: "remote" | "local"): Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }> => {
-    const mode = requestedMode ?? (quiesceGate ? "local" : "remote");
-    let scan: Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }>;
-    if (hostedRuntimeCensus?.mode === mode) {
-      scan = hostedRuntimeCensus.promise;
-    } else {
-      const entry: NonNullable<typeof hostedRuntimeCensus> = {
-        mode,
-        promise: Promise.resolve(unavailableHostedRuntimeStatus()),
-      };
-      entry.promise = collectHostedRuntimeStatus(mode).finally(() => {
-        if (hostedRuntimeCensus === entry) hostedRuntimeCensus = undefined;
-      });
-      hostedRuntimeCensus = entry;
-      scan = entry.promise;
-    }
-    if (maximumWaitMs === undefined) return scan;
-    let timer: NodeJS.Timeout | undefined;
-    const timeout: Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }> = new Promise((resolveTimeout) => {
-      timer = setTimeout(() => resolveTimeout(unavailableHostedRuntimeStatus()), Math.max(0, maximumWaitMs));
-      timer.unref();
-    });
-    try { return await Promise.race([scan, timeout]); }
-    finally { if (timer) clearTimeout(timer); }
-  };
-
-  // Keep one fetcher identity per server so the verifier's bounded JWKS cache
-  // is shared across requests without sharing trust across server instances.
-  const runtimeControlFetcher: typeof fetch = (input, init) => {
-    const boundedSignal = AbortSignal.timeout(RUNTIME_CONTROL_JWKS_TIMEOUT_MS);
-    const signal = init?.signal ? AbortSignal.any([init.signal, boundedSignal]) : boundedSignal;
-    return (hosted?.controlFetch ?? fetch)(input, { ...init, signal });
-  };
-
-  const authorizeRuntimeControl = async (
-    request: IncomingMessage,
-    action: "status" | "quiesce" | "resume",
-    operationId: string,
-    payloadDigest: string,
-  ) => {
-    if (!hosted || !assignment) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
-    const accessCookies = cookieValues(request, HOSTED_ACCESS_COOKIE);
-    if (accessCookies.length > 0) throw httpFailure(400, "AMBIGUOUS_CREDENTIALS", "Runtime controls require a control-service bearer credential only");
-    const header = request.headers.authorization;
-    const token = typeof header === "string" && /^Bearer [A-Za-z0-9_.-]+$/u.test(header) ? header.slice(7) : "";
-    if (!token) throw httpFailure(401, "RUNTIME_CONTROL_UNAUTHORIZED", "A signed runtime-control credential is required");
-    try {
-      const verified = await verifyCompactJwt(
-        token,
-        assignment.controlServicePolicy.jwksUrl,
-        assignment.controlServicePolicy.issuer,
-        assignment.controlServicePolicy.audience,
-        Date.now(),
-        runtimeControlFetcher,
-      );
-      const claims = isRecord(verified) ? verified : null;
-      const boundOperationId = action === "status" ? claims?.operationId : operationId;
-      if (typeof boundOperationId !== "string") throw new TypeError("runtime control operation is missing");
-      return parseRuntimeControlCredential(verified, {
-        issuer: assignment.controlServicePolicy.issuer,
-        audience: assignment.controlServicePolicy.audience,
-        instanceId: assignment.instanceId,
-        repositoryId: assignment.repositoryId,
-        runtimeEpoch: assignment.runtimeEpoch,
-        operationId: boundOperationId,
-        action,
-        payloadDigest,
-        nowSeconds: Math.floor(Date.now() / 1000),
-      });
-    } catch (error) {
-      if (error instanceof HostedAuthorizationError && (error.status === 502 || error.status === 503)) {
-        const failure = authorizationFailure(error, "read");
-        throw httpFailure(failure.status, failure.code, failure.message);
-      }
-      throw httpFailure(401, "RUNTIME_CONTROL_UNAUTHORIZED", "Runtime-control credential binding is invalid or expired");
-    }
-  };
-
-  const bindQuiesceRequest = (request: QuiesceRequest, credential: { operationId: string }): void => {
-    if (!assignment || request.instanceId !== assignment.instanceId || request.runtimeEpoch !== assignment.runtimeEpoch ||
-        request.operationId !== credential.operationId) {
-      throw httpFailure(403, "RUNTIME_CONTROL_BINDING_MISMATCH", "Quiesce request does not match its runtime-control credential");
-    }
-  };
-
-  const platformStatus = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    await authorizeRuntimeControl(request, "status", "status", sha256Digest(""));
-    const { status } = await readHostedRuntimeStatus(RUNTIME_CONTROL_CENSUS_TIMEOUT_MS);
-    sendJson(response, 200, status);
-  };
-
-  const platformQuiesce = async (request: IncomingMessage, response: ServerResponse, parsedBody?: unknown): Promise<void> => {
-    if (!hosted) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
-    let rawBody: unknown;
-    let body: QuiesceRequest;
-    try {
-      rawBody = await readJson(request, parsedBody);
-      body = parseQuiesceRequest(rawBody);
-    }
-    catch { throw httpFailure(400, "QUIESCE_REQUEST_INVALID", "Quiesce request does not match the runtime-control contract"); }
-    bindQuiesceRequest(body, { operationId: body.operationId });
-    // Praetorium signs JSON.stringify(requestBody); preserve the parsed wire
-    // object's property insertion order instead of hashing the parser's rebuilt
-    // contract object, whose order is intentionally different.
-    const serialized = serializeParsedJson(rawBody);
-    const credential = await authorizeRuntimeControl(request, "quiesce", body.operationId, sha256Digest(serialized));
-    bindQuiesceRequest(body, credential);
-    if (Date.parse(body.deadline) <= Date.now()) throw httpFailure(409, "QUIESCE_DEADLINE_EXPIRED", "Quiesce deadline has expired");
-    if (quiesceGate && quiesceOperationId !== body.operationId) {
-      throw httpFailure(409, "QUIESCE_ALREADY_ACTIVE", "A different runtime operation already owns quiesce admission");
-    }
-    quiesceGate = true;
-    quiesceOperationId = body.operationId;
-    lastQuiesceOperationId = body.operationId;
-    const controlDeadline = Math.min(Date.parse(body.deadline), Date.now() + RUNTIME_CONTROL_CENSUS_TIMEOUT_MS);
-    let historyTimer: NodeJS.Timeout | undefined;
-    const historyDeadline = new Promise<boolean>((resolveDeadline) => {
-      historyTimer = setTimeout(() => resolveDeadline(false), Math.max(0, controlDeadline - Date.now()));
-      historyTimer.unref();
-    });
-    const historyBarrier = jobHistory.listJobs(hosted.projectId)
-      .then(() => jobHistory.flush())
-      .then(() => privateHistoryUncertaintyIds.size === 0, () => false);
-    let historyDurable = false;
-    try { historyDurable = await Promise.race([historyBarrier, historyDeadline]); }
-    finally { if (historyTimer) clearTimeout(historyTimer); }
-    const censusWaitMs = Math.max(0, controlDeadline - Date.now());
-    const census = await readHostedRuntimeStatus(censusWaitMs, "local");
-    const { status, pendingProposals, complete, localWorkspaceDirty } = census;
-    const historyPersistenceVerified = historyDurable && privateHistoryUncertaintyIds.size === 0;
-    const reasonCodes: string[] = [];
-    if (status.activity.activeMutations > 0) reasonCodes.push("ACTIVE_MUTATIONS");
-    if (status.activity.activeJobs > 0) reasonCodes.push("ACTIVE_JOBS");
-    if (pendingProposals > 0) reasonCodes.push("PENDING_PROPOSALS");
-    if (localWorkspaceDirty) reasonCodes.push("LOCAL_WORKSPACE_DIRTY");
-    if (!complete || status.persistence.state !== "verified" || !historyPersistenceVerified) reasonCodes.push("PERSISTENCE_UNVERIFIED");
-    if (Date.parse(body.deadline) <= Date.now()) reasonCodes.push("QUIESCE_DEADLINE_EXPIRED");
-    const unknown = !complete || !historyPersistenceVerified;
-    const blocked = status.activity.activeMutations > 0 || status.activity.activeJobs > 0 ||
-      pendingProposals > 0 || localWorkspaceDirty;
-    const disposition = Date.parse(body.deadline) <= Date.now() ? "unknown" : unknown ? "unknown" : blocked ? "blocked" : "safe";
-    if (disposition === "blocked") {
-      quiesceGate = false;
-      quiesceOperationId = undefined;
-    }
-    const result: QuiesceResult = {
-      contractVersion: "codexia-runtime-status/v2",
-      operationId: body.operationId,
-      instanceId: hosted.assignment.instanceId,
-      runtimeEpoch: hosted.assignment.runtimeEpoch,
-      quiesceRevision: status.persistence.projectVersion === null ? null : String(status.persistence.projectVersion),
-      disposition,
-      activeMutations: status.activity.activeMutations,
-      activeJobs: status.activity.activeJobs,
-      restartableJobs: status.activity.restartableJobs,
-      projectId: hosted.projectId,
-      projectVersion: status.persistence.projectVersion,
-      reasonCodes,
-      observedAt: status.observedAt,
-    };
-    sendJson(response, 200, result);
-  };
-
-  const platformResume = async (request: IncomingMessage, response: ServerResponse, parsedBody?: unknown): Promise<void> => {
-    if (!hosted) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
-    let rawBody: unknown;
-    let body: QuiesceRequest;
-    try {
-      rawBody = await readJson(request, parsedBody);
-      body = parseQuiesceRequest(rawBody);
-    }
-    catch { throw httpFailure(400, "RESUME_REQUEST_INVALID", "Resume request does not match the runtime-control contract"); }
-    const credential = await authorizeRuntimeControl(request, "resume", body.operationId, sha256Digest(serializeParsedJson(rawBody)));
-    bindQuiesceRequest(body, credential);
-    if (quiesceOperationId !== undefined && quiesceOperationId !== body.operationId) {
-      throw httpFailure(409, "RESUME_BINDING_MISMATCH", "Resume request does not own the active quiesce operation");
-    }
-    if (quiesceOperationId === undefined && body.operationId !== lastQuiesceOperationId && body.operationId !== lastResumedOperationId) {
-      throw httpFailure(409, "RESUME_BINDING_MISMATCH", "Resume request does not match a known quiesce operation");
-    }
-    if (quiesceOperationId !== undefined) {
-      quiesceGate = false;
-      quiesceOperationId = undefined;
-      lastResumedOperationId = body.operationId;
-    }
-    response.writeHead(204);
-    response.end();
-  };
-
   const handle = async (request: IncomingMessage, response: ServerResponse, parsedBody?: unknown): Promise<void> => {
     const styleNonce = STYLE_NONCES.get(request) ?? randomBytes(18).toString("base64");
     if (!response.headersSent) setSecurityHeaders(response, styleNonce);
-    const originalPath = requestPath(request);
-    const standaloneMcpRoute = !hosted && originalPath === "/mcp";
-    let routePath = hosted && originalPath === "/mcp"
-      ? `/api/projects/${encodeURIComponent(hosted.projectId)}/modules/mcp/streamable`
-      : originalPath;
+    let routePath = requestPath(request);
+    const standaloneMcpRoute = routePath === "/mcp";
     const mcpStreamableRoute = standaloneMcpRoute || routePath.endsWith("/modules/mcp/streamable");
     const isApiRoute = standaloneMcpRoute || routePath.startsWith("/api/");
     const method = request.method ?? "GET";
     const query = queryOf(request);
     const isRead = method === "GET" || method === "HEAD";
     const publicRead = isRead && (VERSION_PATHS.includes(routePath) || ["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup"].includes(routePath));
-    const publicModuleRoute = !hosted && routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
+    const publicModuleRoute = routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
     const originHeader = request.headers.origin;
     const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
     if (isApiRoute && crossOrigin) {
@@ -1723,30 +1321,6 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
 
-    if (hosted && (originalPath === "/.well-known/oauth-protected-resource" ||
-        originalPath === "/.well-known/oauth-protected-resource/mcp") && method === "GET") {
-      sendJson(response, 200, {
-        resource: assignment!.grantPolicy.audience,
-        authorization_servers: [assignment!.grantPolicy.issuer],
-        scopes_supported: ["read", "write"],
-      });
-      return;
-    }
-
-    if (routePath === RUNTIME_METADATA_PATH && method === "GET") {
-      try {
-        sendJson(response, 200, metadataForRuntime({
-          producerRevision: hosted?.producerRevision ?? readCodexiaEnvironment("PRODUCER_REVISION") ?? "",
-          port: parsePositivePort(process.env.PORT),
-          shutdownTimeoutSeconds: 25,
-        }));
-      } catch { throw httpFailure(503, "RUNTIME_METADATA_UNAVAILABLE", "Immutable producer runtime metadata is unavailable"); }
-      return;
-    }
-    if (hosted && routePath === RUNTIME_STATUS_PATH && method === "GET") { await platformStatus(request, response); return; }
-    if (hosted && routePath === RUNTIME_QUIESCE_PATH && method === "POST") { await platformQuiesce(request, response, parsedBody); return; }
-    if (hosted && routePath === RUNTIME_RESUME_PATH && method === "POST") { await platformResume(request, response, parsedBody); return; }
-
     if (method === "OPTIONS") {
       if (isApiRoute && crossOrigin) {
         const requestedMethod = request.headers["access-control-request-method"];
@@ -1792,18 +1366,13 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, 200, {
         name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
         ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
-        hosted: Boolean(hosted),
-        profile, auth: hosted ? ["cookie-owner", "bearer-read-compute-propose"] : ["oauth-owner", "oauth-mcp"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        profile, auth: ["oauth-owner", "oauth-mcp"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
     }
-    const accessCookies = hosted ? cookieValues(request, HOSTED_ACCESS_COOKIE) : [];
-    const accessToken = accessCookies.length === 1 ? accessCookies[0] : undefined;
     const authHeader = request.headers.authorization;
     const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (hosted && accessCookies.length > 1) { fail(response, 401, "UNAUTHORIZED", "Hosted access cookie is ambiguous"); return; }
-    if (hosted && accessToken && bearer) { fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either a hosted browser grant or a bearer grant"); return; }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
     // Admission returns public identity and policy fields after signature and liveness checks.
     let admittedMcpClient: OAuthMcpPrincipal | undefined;
@@ -1866,27 +1435,10 @@ export function createServer(options: ApiServerOptions): Server {
       assertAssignedProject(projectId, assigned);
       routePath = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;
     }
-    let hostedPrincipal: HostedPrincipal | undefined;
-    const presentedHostedToken = hosted ? accessToken ?? (bearer || undefined) : undefined;
-    if (hosted && presentedHostedToken) {
-      try { hostedPrincipal = await hosted.authorization.authenticate(presentedHostedToken, "read"); }
-      catch (error) {
-        const failure = authorizationFailure(error, "read");
-        if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable")) {
-          response.setHeader("WWW-Authenticate",
-            `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`);
-        }
-        fail(response, failure.status, failure.code, failure.message);
-        return;
-      }
-    }
-    const accessExpiresAt = hostedPrincipal?.expiresAt;
-    const isCookie = Boolean(hosted && accessToken && hostedPrincipal);
-    const isOAuthAuthor = Boolean(oauthPrincipal);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : Boolean(admittedMcpClient);
-    const isAuthor = isCookie || isOAuthAuthor;
-    const canReviewPrivateChangeSets = isAuthor && (!hosted || hostedPrincipal?.permissions.includes("write") === true);
-    const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
+    const isAuthor = Boolean(oauthPrincipal);
+    const isBearer = Boolean(admittedMcpClient);
+    const canReviewPrivateChangeSets = isAuthor;
+    const hasAuth = isAuthor || isBearer;
     const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = admittedMcpClient
       ? (["read", "compute", "propose"] as const).filter((effect) =>
         admittedMcpClient!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
@@ -1902,82 +1454,28 @@ export function createServer(options: ApiServerOptions): Server {
       requireMcpEffect("read");
     }
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
-      response.setHeader("WWW-Authenticate", hosted && mcpStreamableRoute
-        ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
-        : !hosted && mcpStreamableRoute && oauthMcpMetadataUrl
-          ? mcpChallenge(oauthMcpMetadataUrl)
-          : hosted ? 'Bearer realm="codexia", Cookie realm="codexia"' : 'Bearer realm="codexia"');
+      response.setHeader("WWW-Authenticate", mcpStreamableRoute && oauthMcpMetadataUrl
+        ? mcpChallenge(oauthMcpMetadataUrl) : 'Bearer realm="codexia"');
       fail(response, 401, "UNAUTHORIZED", "Authentication required");
       return;
     }
-    if (hosted && accessToken && !isRead && routePath.startsWith("/api/")) {
-      const csrfCookies = cookieValues(request, HOSTED_CSRF_COOKIE);
-      const csrfHeader = request.headers["x-csrf-token"];
-      const originMatches = hosted
-        ? sameHostedOrigin(request, trustProxy, assignment!.grantPolicy.audience)
-        : sameOrigin(request, trustProxy);
-      if (!originMatches || csrfCookies.length !== 1 || !csrfCookies[0] ||
-          typeof csrfHeader !== "string" || !constantTimeEqual(csrfHeader, csrfCookies[0])) {
-        fail(response, 403, "CSRF_INVALID", "Hosted browser mutations require same-origin CSRF validation");
-        return;
-      }
-    }
-    const requireWritePermission = async (): Promise<HostedPrincipal | undefined> => {
-      if (hosted) {
-        if (!presentedHostedToken) throw httpFailure(401, "UNAUTHORIZED", "A hosted user grant is required");
-        try {
-          const principal = await hosted.authorization.authenticate(presentedHostedToken, "write");
-          hostedPrincipal = principal;
-          return principal;
-        }
-        catch (error) {
-          const failure = authorizationFailure(error, "write");
-          throw httpFailure(failure.status, failure.code, failure.message);
-        }
-      }
-      if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner identity is required");
-      return undefined;
-    };
-    const requireAuthorSession = async (): Promise<HostedPrincipal | undefined> => {
+    const requireAuthorSession = async (): Promise<string> => {
       if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author identity is required");
-      return requireWritePermission();
+      return "owner";
     };
-    const resolvePublishingAuthor = canReviewPrivateChangeSets
-      ? async () => (await requireAuthorSession())?.userId ?? "owner"
-      : undefined;
+    const resolvePublishingAuthor = isAuthor ? requireAuthorSession : undefined;
     const authorizeActionProposal = async (): Promise<void> => {
-      if (hosted) { await requireWritePermission(); return; }
       requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
-    const resolveNativeProposalActor = (hosted ? Boolean(hostedPrincipal) : isAuthor || Boolean(admittedMcpClient))
-      ? async (): Promise<string> => {
-        if (hosted) {
-          const principal = await requireWritePermission();
-          if (principal?.userId) return principal.userId;
-        } else {
-          requireMcpEffect("propose");
-          if (admittedMcpClient) return admittedMcpClient.userId;
-          if (isAuthor) return "owner";
-        }
-        throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "A verified actor is required to propose a native ChangeSet");
-      }
-      : undefined;
+    const resolveNativeProposalActor = hasAuth ? async (): Promise<string> => {
+      await authorizeActionProposal();
+      return admittedMcpClient?.userId ?? "owner";
+    } : undefined;
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
       return;
     }
-    if (hosted && quiesceGate && routePath.startsWith("/api/") && !isRead &&
-        routePath !== RUNTIME_QUIESCE_PATH && routePath !== RUNTIME_RESUME_PATH) {
-      fail(response, 503, "RUNTIME_QUIESCED", "This runtime is quiescing and is not accepting mutations");
-      return;
-    }
-    if (hasAuth && hosted && routePath.startsWith("/api/") &&
-        !["/api/health", "/api/ready", ...VERSION_PATHS, RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH].includes(routePath) &&
-        ((method !== "GET" && method !== "HEAD" && method !== "OPTIONS") || routePath.endsWith("/recent-activity"))) {
-      lastMeaningfulActivityAt = new Date().toISOString();
-    }
-
     const signal = abortSignalFor(request, response);
     if (admittedMcpClient && routePath.startsWith("/api/v1/persistence/")) {
       fail(response, 403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
@@ -1985,16 +1483,12 @@ export function createServer(options: ApiServerOptions): Server {
     }
     const persistenceResponse = await handlePersistenceRoute({
       persistence: options.persistence,
-      ...(hosted ? { assignedProjectId: hosted.projectId } : {}),
       method,
       url: request.url ?? routePath,
       body: parsedBody,
       requestHeaders: request.headers,
       canReviewPrivateChangeSets,
-      requireAuthor: async () => {
-        const principal = await requireAuthorSession();
-        return principal?.userId ?? "owner";
-      },
+      requireAuthor: requireAuthorSession,
     });
     if (persistenceResponse) {
       sendJson(response, persistenceResponse.status, persistenceResponse.body);
@@ -2003,26 +1497,25 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/session" && method === "GET") {
       sendJson(response, 200, {
         authenticated: true,
-        authorScope: hosted ? `hosted:${hostedPrincipal!.userId}` : isAuthor ? "owner" : "",
-        ...(hosted ? { permissions: [...hostedPrincipal!.permissions] } : {}),
+        authorScope: isAuthor ? "owner" : "",
       });
       return;
     }
     if (routePath === "/api/projects/events" && method === "GET") {
       if (admittedMcpClient) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
-      projectEventStreams.open(response, "no-store", undefined, accessExpiresAt);
+      projectEventStreams.open(response, "no-store", undefined);
       return;
     }
     if (routePath === "/api/jobs/events" && method === "GET") {
       if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner identity"); return; }
       if (jobEventStreams.full) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
-      jobEventStreams.open(response, "no-cache", ": ok\n\n", accessExpiresAt);
+      jobEventStreams.open(response, "no-cache", ": ok\n\n");
       return;
     }
     if (routePath === "/api/jobs" && method === "GET") {
       if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
-      try { sendJson(response, 200, await jobHistory.listJobs(hosted?.projectId)); }
+      try { sendJson(response, 200, await jobHistory.listJobs()); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable"); }
       return;
     }
@@ -2031,7 +1524,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
       const jobId = parseProjectId(jobMatch[1]!);
       try {
-        const job = await jobHistory.getJob(jobId, hosted?.projectId);
+        const job = await jobHistory.getJob(jobId);
         if (!job) throw httpFailure(404, "JOB_NOT_FOUND", "Job was not found");
         sendJson(response, 200, job);
       } catch (error) {
@@ -2042,22 +1535,22 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/inbox" && method === "GET") {
       if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner identity"); return; }
-      try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1", ...(hosted ? { projectId: hosted.projectId } : {}) })); }
+      try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1" })); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
     }
     if (routePath === "/api/inbox/read-all" && method === "POST") {
-      await requireWritePermission();
-      try { sendJson(response, 200, { marked: await jobHistory.markAllInboxRead(hosted?.projectId) }); }
+      await requireAuthorSession();
+      try { sendJson(response, 200, { marked: await jobHistory.markAllInboxRead() }); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
     }
     const inboxReadMatch = routePath.match(/^\/api\/inbox\/([^/]+)\/read$/u);
     if (inboxReadMatch && method === "POST") {
-      await requireWritePermission();
+      await requireAuthorSession();
       const inboxId = parseProjectId(inboxReadMatch[1]!);
       try {
-        const item = await jobHistory.markInboxRead(inboxId, hosted?.projectId);
+        const item = await jobHistory.markInboxRead(inboxId);
         if (!item) throw httpFailure(404, "INBOX_ITEM_NOT_FOUND", "Inbox item was not found");
         sendJson(response, 200, { item });
       } catch (error) {
@@ -2073,9 +1566,7 @@ export function createServer(options: ApiServerOptions): Server {
       catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
 
       const assignedIds = admittedMcpClient?.projectIds;
-      const assigned = hosted
-        ? await listProjects(assignedIds)
-        : assignedIds && await options.persistence.read(async (reader) => {
+      const assigned = assignedIds && await options.persistence.read(async (reader) => {
           const projects: Project[] = [];
           for (const id of assignedIds) {
             const project = await reader.getProject(id as ProjectId);
@@ -2097,8 +1588,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/projects" && method === "POST") {
-      if (hosted) throw httpFailure(403, "HOSTED_ASSIGNMENT_IMMUTABLE", "Hosted runtimes can only use their assigned project");
-      await requireWritePermission();
+      await requireAuthorSession();
       const body = await readJson(request, parsedBody);
       if (!isRecord(body) || typeof body.title !== "string" || !body.title.trim()) throw httpFailure(400, "INVALID_PROJECT", "Project title is required");
       const project = await options.store.createProject({ title: body.title.trim() });
@@ -2108,7 +1598,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
       const projectIds = admittedMcpClient
         ? [...admittedMcpClient.projectIds]
-        : hosted ? (await listProjects()).map(project => project.id) : null;
+        : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds, { excludePrivateProposals: !canReviewPrivateChangeSets }));
       return;
     }
@@ -2122,9 +1612,8 @@ export function createServer(options: ApiServerOptions): Server {
       }
       const suffix = projectRoot[2] ?? "";
       if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
-        if (!hosted && !isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
-        if (method === "PUT") await requireWritePermission();
-        const activityAuthorScope = hosted ? `hosted:${hostedPrincipal!.userId}` : "owner";
+        if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
+        const activityAuthorScope = "owner";
 
         try {
           if (method === "GET") {
@@ -2202,7 +1691,6 @@ export function createServer(options: ApiServerOptions): Server {
       if (suffix === "observation" && method === "GET") { sendJson(response, 200, await options.store.observe(projectId)); return; }
       if (suffix === "proposals" && method === "POST") {
         requireMcpEffect("propose");
-        if (hosted) await requireWritePermission();
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
         if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
@@ -2243,10 +1731,10 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, proposal); return;
       }
       if (suffix === "approvals" && method === "POST") {
-        const approver = await requireAuthorSession();
+        const authorScope = await requireAuthorSession();
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || typeof body.proposalId !== "string" || !body.proposalId || !Array.isArray(body.operationIds) || !body.operationIds.every((id) => typeof id === "string")) throw httpFailure(400, "INVALID_APPROVAL", "Proposal and operation IDs are required");
-        await options.store.approve(projectId, { proposalId: body.proposalId, operationIds: body.operationIds as string[], authorScope: hosted ? `hosted:${approver!.userId}` : "owner" });
+        await options.store.approve(projectId, { proposalId: body.proposalId, operationIds: body.operationIds as string[], authorScope });
         response.writeHead(204); response.end(); return;
       }
       if (suffix === "apply" && method === "POST") {
@@ -2275,7 +1763,6 @@ export function createServer(options: ApiServerOptions): Server {
         if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
         if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
         requireMcpEffect(descriptor.effect);
-        if (hosted && descriptor.effect !== "read") await requireWritePermission();
         let boundSnapshot: SnapshotId | undefined;
         if (body.snapshot !== undefined) {
           const selected = body.snapshot;
@@ -2309,7 +1796,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
+        }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2356,7 +1843,7 @@ export function createServer(options: ApiServerOptions): Server {
             settledInvocation.then((settled) => ({ kind: "settled" as const, settled })),
           ]);
           if (outcome.kind === "started") {
-            const job = await jobHistory.getJob(outcome.id, hosted?.projectId);
+            const job = await jobHistory.getJob(outcome.id);
             if (!job) throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "The registered job could not be read back");
             response.setHeader("X-Codexia-Job-Id", job.id);
             response.setHeader("Location", `/api/jobs/${encodeURIComponent(job.id)}`);
@@ -2411,13 +1898,11 @@ export function createServer(options: ApiServerOptions): Server {
         // The MCP transport advertises "propose" because some tools create
         // proposals, but initialization and read-only tools require read only.
         // Actual proposal writes are gated by actionHost.authorizeProposal.
-        if (hosted && contribution.effect !== "read" && moduleId !== "mcp")
-          await requireWritePermission();
         if (!runtime.invokeHttp) throw httpFailure(503, "MODULE_HTTP_UNAVAILABLE", "The runtime does not support HTTP module contributions");
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
         if (mcpStreamableRoute && admittedMcpClient) {
           const { issuer, clientId, userId } = admittedMcpClient;
           host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
@@ -2425,7 +1910,7 @@ export function createServer(options: ApiServerOptions): Server {
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
-        await serveModuleResponse(moduleResponse, response, signal, false, hostedPrincipal?.expiresAt);
+        await serveModuleResponse(moduleResponse, response, signal);
         return;
       }
 
@@ -2443,8 +1928,8 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, await writingStatsSnapshot(projectId, selected)); return;
       }
       if (suffix === "scratch" && method === "POST") {
-        const author = await requireAuthorSession();
-        await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response); return;
+        const authorScope = await requireAuthorSession();
+        await createScratch(projectId, await readJson(request, parsedBody), authorScope, response); return;
       }
       if (suffix === "review-queue" && method === "GET") {
         if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
@@ -2480,34 +1965,10 @@ export function createServer(options: ApiServerOptions): Server {
   const routeHandler = async (request: FastifyRequest, reply: import("fastify").FastifyReply): Promise<void> => {
     reply.hijack();
     activeRequests += 1;
-    const originalPath = requestPath(request.raw);
-    const routePath = hosted && originalPath === "/mcp"
-      ? `/api/projects/${encodeURIComponent(hosted.projectId)}/modules/mcp/streamable`
-      : originalPath;
-    const method = request.raw.method ?? "GET";
-    const isNonActivityRoute = [
-      RUNTIME_STATUS_PATH, RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_METADATA_PATH,
-      "/api/health", "/api/ready", ...VERSION_PATHS,
-    ].includes(routePath);
-    const trackedApiRequest = (routePath.startsWith("/api/") || originalPath === "/mcp") && !isNonActivityRoute;
-    const isMcpRequest = trackedApiRequest && typeof request.raw.headers.authorization === "string" && request.raw.headers.authorization.startsWith("Bearer ");
-    const isActiveMutation = hosted && trackedApiRequest && !["GET", "HEAD", "OPTIONS"].includes(method);
-    if (trackedApiRequest) activeApiRequests += 1;
-    if (isMcpRequest) activeMcpRequests += 1;
-    if (isActiveMutation) {
-      activeMutations += 1;
-      recordRuntimeActivity();
-    }
     try { await handle(request.raw, reply.raw, request.body); }
     catch (error) { if (!reply.raw.headersSent) sendError(reply.raw, error); else reply.raw.destroy(error instanceof Error ? error : undefined); }
     finally {
       activeRequests = Math.max(0, activeRequests - 1);
-      if (trackedApiRequest) activeApiRequests = Math.max(0, activeApiRequests - 1);
-      if (isMcpRequest) activeMcpRequests = Math.max(0, activeMcpRequests - 1);
-      if (isActiveMutation) {
-        activeMutations = Math.max(0, activeMutations - 1);
-        recordRuntimeActivity();
-      }
     }
   };
   const methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
@@ -2562,8 +2023,6 @@ export function createServer(options: ApiServerOptions): Server {
           console.warn(`Codexia API shutdown exceeded ${API_DRAIN_TIMEOUT_MS} ms; remaining HTTP connections were closed.`);
         }
 
-        lastPendingLocalCheckpoints = null;
-
         const appClose = app.close().then(() => undefined, (error: unknown) => {
           closeError ??= error instanceof Error ? error : new Error("Fastify shutdown failed");
         });
@@ -2597,52 +2056,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const { CoreStore, SNAPSHOT_PROJECTION_EPOCH } = await import("@codexia/core");
   const cacheDirectory = resolve(readCodexiaEnvironment("MODULE_CACHE_DIR") ?? "./data/module-cache");
   const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
-  const hostedModeValue = readCodexiaEnvironment("HOSTED_MODE");
-  if (hostedModeValue !== undefined && hostedModeValue !== "0" && hostedModeValue !== "1") {
-    throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
-  }
-  const hostedMode = hostedModeValue === "1";
   const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
-  if (hostedMode && corsOriginsValue !== undefined) throw new Error("CORS origin allowlists are supported only in standalone mode");
-  if (hostedMode) {
-    if (readCodexiaEnvironment("AUTH_TOKEN") !== undefined || readCodexiaEnvironment("GITHUB_TOKEN") !== undefined) {
-      throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
-    }
-    const assignment = await readRuntimeAssignment(readCodexiaEnvironment("RUNTIME_ASSIGNMENT_PATH") ?? HOSTED_ASSIGNMENT_PATH);
-    const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "hosted";
-    if (profile !== "hosted") throw new Error("Hosted runtime requires the generated hosted profile");
-    const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory, assignment.enabledModuleIds);
-    const manifestIds = new Set<string>(runtimeOptions.manifests.map((manifest) => manifest.id));
-    if (assignment.enabledModuleIds.some((id) => !manifestIds.has(id))) {
-      throw new Error("Hosted assignment enables modules absent from the immutable composition");
-    }
-    const authorization = createHostedAuthorizationPolicy({ assignment });
-    const projectId = readCodexiaEnvironment("HOSTED_PROJECT_ID");
-    const producerRevision = readCodexiaEnvironment("PRODUCER_REVISION");
-    if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
-      throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
-    }
-    if (!projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
-    const persistenceOptions = await postgresPersistenceOptions();
-    try {
-      const assignedProject = await persistenceOptions.persistence!.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
-      if (assignedProject?.id !== projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
-      await assertSnapshotProjectionReady(persistenceOptions.persistence, SNAPSHOT_PROJECTION_EPOCH, assignedProject.id);
-      const store = new CoreStore({ persistence: persistenceOptions.persistence });
-      return await startServer({
-        store,
-        ...persistenceOptions,
-        hosted: { assignment, projectId, authorization, producerRevision },
-        trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
-        runtimeOptions,
-        usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
-        profile,
-      });
-    } catch (error) {
-      await persistenceOptions.persistence!.close().catch(() => undefined);
-      throw error;
-    }
-  }
   const deprecatedSettings = ["AUTH_TOKEN", "AUTH_TOKEN_FILE", "BROWSER_AUTH", "ACCESS_ISSUER", "ACCESS_AUDIENCE", "ACCESS_ORIGIN", "ACCESS_OWNER_EMAIL", "OAUTH_ISSUER", "OAUTH_AUDIENCE", "OAUTH_JWKS_URL"];
   if (deprecatedSettings.some(setting => readCodexiaEnvironment(setting) !== undefined)) {
     throw new Error("Standalone authentication supports only Better Auth settings");
@@ -2763,11 +2177,9 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
 async function assertSnapshotProjectionReady(
   persistence: PostgresPersistence,
   projectionEpoch: number,
-  hostedProjectId?: ProjectId,
 ): Promise<void> {
-  const mode = await persistence.snapshotStartupMode();
-  if (hostedProjectId !== undefined && mode !== "transition") throw new Error("Hosted startup requires the PostgreSQL writer");
-  const selection = hostedProjectId === undefined ? { limit: 10 } : { projectId: hostedProjectId, limit: 10 };
+  await persistence.snapshotStartupMode();
+  const selection = { limit: 10 };
   const [unprovenSnapshots, unmigratedPublishing, unmigratedNlpSettings] = await Promise.all([
     persistence.findUnprovenCurrentSnapshotProjectIds(projectionEpoch, selection),
     persistence.findUnmigratedPublishingProjectIds(selection),
@@ -2775,11 +2187,10 @@ async function assertSnapshotProjectionReady(
   ]);
   const pending = [...new Set([...unprovenSnapshots, ...unmigratedPublishing, ...unmigratedNlpSettings])];
   if (pending.length > 0) {
-    const scope = hostedProjectId === undefined ? "" : ` --project ${hostedProjectId}`;
     const maintenanceScript = fileURLToPath(new URL("./maintain-snapshot-projections.js", import.meta.url)).replaceAll("'", "'\\''");
     throw new Error(
       `SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED: PostgreSQL projects ${pending.join(", ")} require maintenance for snapshot projections, Publishing records, or NLP feature settings. ` +
-      `Run node '${maintenanceScript}' --check${scope}, then replace --check with --apply using the PostgreSQL writer before starting Codexia.`,
+      `Run node '${maintenanceScript}' --check, then replace --check with --apply using the PostgreSQL writer before starting Codexia.`,
     );
   }
 }
@@ -2820,7 +2231,6 @@ async function postgresPersistenceOptions() {
 async function loadProfileRuntimeOptions(
   profile: string,
   cacheDirectory: string,
-  assignedEnabledModuleIds?: readonly string[],
 ): Promise<Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string }> {
   if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) throw new Error("CODEXIA_PROFILE must be a valid profile name");
   const generated = readCodexiaEnvironment("MODULE_PROFILE_PATH") ?? process.env.CODEXIA_BUILD_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
@@ -2841,9 +2251,7 @@ async function loadProfileRuntimeOptions(
   }
   if (composition?.profile !== profile || !Array.isArray(composition.moduleManifests)) throw new Error(`Generated composition does not match profile ${profile}`);
   const enabledByEnvironment = readCodexiaEnvironment("ENABLED_MODULES");
-  const enabled = assignedEnabledModuleIds !== undefined
-    ? [...assignedEnabledModuleIds]
-    : enabledByEnvironment === undefined
+  const enabled = enabledByEnvironment === undefined
     ? composition.moduleManifests.map((manifest) => manifest.id)
     : enabledByEnvironment.split(",").map((id) => id.trim()).filter(Boolean);
   if (new Set(enabled).size !== enabled.length || enabled.some((id) => !composition!.moduleManifests!.some((manifest) => manifest.id === id))) {

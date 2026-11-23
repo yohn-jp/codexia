@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
-import { request as httpRequest } from "node:http";
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -12,90 +10,15 @@ import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type C
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { ChangeSetApplicationResult, ChangeSetId, ChangeSetResult, JsonObject, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
-import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
-import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
+import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
-import { createServer, importLegacyJobHistory, type ApiServerOptions, type HostedAuthorizationPolicy, type HostedPrincipal } from "./server.js";
-import { RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_STATUS_PATH, sha256Digest, type RuntimeAssignment } from "./platform-runtime.js";
+import { createServer, importLegacyJobHistory, type ApiServerOptions } from "./server.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
 
 const ACCESS_TOKEN = "test-access-token-which-is-longer-than-32-characters";
 const SNAPSHOT: SnapshotId = { projectId: "project-1", projectVersion: 1 };
-const HOSTED_ASSIGNMENT: RuntimeAssignment = {
-  contractVersion: "scriptorium-platform/v1",
-  instanceId: "instance-1",
-  repositoryId: 123,
-  repositoryLocator: "https://github.com/owner/work",
-  defaultBranchPolicy: "repository-default",
-  runtimeEpoch: 3,
-  imageDigest: `sha256:${"a".repeat(64)}`,
-  compositionManifestDigest: `sha256:${"b".repeat(64)}`,
-  enabledModuleIds: ["story", "mcp"],
-  credentialBrokerLocator: "https://praetorium.example/internal/github/credential",
-  controlServicePolicy: {
-    issuer: "https://praetorium.example",
-    jwksUrl: "https://praetorium.example/.well-known/control-jwks.json",
-    audience: "praetorium-runtime-control",
-  },
-  grantPolicy: {
-    issuer: "https://praetorium.example",
-    jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json",
-    audience: "https://instance-1.instances.example",
-  },
-};
-const RUNTIME_CONTROL_KEY = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-const RUNTIME_CONTROL_PUBLIC_JWK = {
-  ...RUNTIME_CONTROL_KEY.publicKey.export({ format: "jwk" }),
-  use: "sig",
-  alg: "ES256",
-  kid: "runtime-control-test-key",
-};
-const HOSTED_GRANT_KEY = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-const HOSTED_GRANT_PUBLIC_JWK = {
-  ...HOSTED_GRANT_KEY.publicKey.export({ format: "jwk" }),
-  use: "sig",
-  alg: "ES256",
-  kid: "hosted-grant-test-key",
-};
-
-function hostedGrantToken(expired = false, lifetimeSeconds = 120): string {
-  const now = Math.floor(Date.now() / 1000);
-  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const issuedAt = expired ? now - 120 : now;
-  const unsigned = `${encode({ alg: "ES256", kid: "hosted-grant-test-key", typ: "JWT" })}.${encode({
-    iss: HOSTED_ASSIGNMENT.grantPolicy.issuer,
-    sub: "hosted-user-1",
-    aud: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    instanceId: HOSTED_ASSIGNMENT.instanceId,
-    repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-    runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-    permissions: ["read", "write"],
-    sessionRevision: 2,
-    authorizationRevision: 3,
-    iat: issuedAt,
-    nbf: issuedAt,
-    exp: expired ? now - 1 : now + lifetimeSeconds,
-    jti: expired ? "expired-browser-grant" : "valid-browser-grant",
-  })}`;
-  const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
-    key: HOSTED_GRANT_KEY.privateKey,
-    dsaEncoding: "ieee-p1363",
-  });
-  return `${unsigned}.${signature.toString("base64url")}`;
-}
-
-function realHostedGrantPolicy(): HostedAuthorizationPolicy {
-  return createHostedAuthorizationPolicy({
-    assignment: HOSTED_ASSIGNMENT,
-    fetch: async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.grantPolicy.jwksUrl);
-      return Response.json({ keys: [HOSTED_GRANT_PUBLIC_JWK] });
-    },
-  });
-}
-
 async function nativePersistence(t: { after(callback: () => Promise<void>): void }) {
   const url = process.env.CODEXIA_TEST_DATABASE_URL;
   if (!url) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database for native Core API recovery tests");
@@ -504,29 +427,6 @@ function testClientSettings(projectId: string, publicJwks: object, isActive: (to
 
 const signedRequests = createSignedRequestFixture();
 
-function hostedTestPolicy(): HostedAuthorizationPolicy {
-  const principals = new Map<string, HostedPrincipal>([
-    ["read-grant", {
-      userId: "reader-1", permissions: ["read"], repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-      instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000,
-    }],
-    ["write-grant", {
-      userId: "writer-1", permissions: ["read", "write"], repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-      instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000,
-    }],
-  ]);
-  return {
-    async authenticate(token, requiredPermission = "read") {
-      const principal = principals.get(token);
-      if (!principal) throw Object.assign(new Error("grant invalid"), { status: 401 });
-      if (!principal.permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
-      return principal;
-    },
-  };
-}
-
 it("starts standalone API only with Better Auth and exposes no static session mutation routes", async (t) => {
   const store = makeStore();
   const persistence = admissionPersistence(store);
@@ -536,6 +436,12 @@ it("starts standalone API only with Better Auth and exposes no static session mu
   const instance = await startCustomApi(store, staticDir);
   const owner = signedRequests.ownerHeaders();
   t.after(instance.close);
+  const version = await fetch(instance.base + "/api/browser/version");
+  assert.equal(version.status, 200);
+  const identity = await version.json();
+  assert.deepEqual(identity.auth, ["oauth-owner", "oauth-mcp"]);
+  assert.equal("hosted" in identity, false);
+  assert.equal((await fetch(instance.base + "/api/platform/v1/metadata", { headers: owner })).status, 404);
   const oldLogin = await fetch(instance.base + "/api/login", { method: "POST", headers: owner, body: "{}" });
   assert.equal(oldLogin.status, 404);
   assert.equal(oldLogin.headers.get("set-cookie"), null);
@@ -545,158 +451,6 @@ it("starts standalone API only with Better Auth and exposes no static session mu
   assert.equal(retiredLogout.status, 404);
   assert.equal(retiredLogout.headers.get("set-cookie"), null);
 });
-
-class InterleavingLifecycleRuntime extends ModuleRuntime {
-  private lifecycleListener: WorkerJobLifecycleListener | undefined;
-
-  override subscribeJobLifecycle(listener: WorkerJobLifecycleListener): () => void {
-    this.lifecycleListener = listener;
-    return () => { if (this.lifecycleListener === listener) this.lifecycleListener = undefined; };
-  }
-
-  async emitLifecycle(snapshot: WorkerJobLifecycleSnapshot): Promise<void> {
-    await this.lifecycleListener?.(snapshot);
-  }
-}
-
-async function startHostedApi(
-  store: CoreStore,
-  staticDir: string,
-  authorization: HostedAuthorizationPolicy,
-  controlFetch?: typeof fetch,
-  runtime?: ModuleRuntime,
-  usageDirectory?: string,
-  persistence: ApiServerOptions["persistence"] = admissionPersistence(store),
-  projectId = "project-1",
-) {
-  const server = createServer({
-    store, staticDir, persistence,
-    trustProxy: true,
-    ...(runtime ? { runtime } : {}),
-    ...(usageDirectory ? { usageDirectory } : {}),
-    hosted: { assignment: HOSTED_ASSIGNMENT, projectId, authorization, ...(controlFetch ? { controlFetch } : {}) },
-  });
-  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const base = `http://127.0.0.1:${address.port}`;
-  const close = () => new Promise<void>((resolveClose, reject) => {
-    server.close((error) => error ? reject(error) : resolveClose());
-  });
-  return { server, base, close };
-}
-
-function rawHostedRequest(urlValue: string, headers: Record<string, string>, body?: string): Promise<{ status: number; body: string; cookies: string[] }> {
-  const url = new URL(urlValue);
-  return new Promise((resolveResponse, reject) => {
-    const request = httpRequest({
-      hostname: "127.0.0.1",
-      port: Number(url.port),
-      path: `${url.pathname}${url.search}`,
-      method: "POST",
-      headers,
-    }, (response) => {
-      const chunks: Buffer[] = [];
-      response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.once("end", () => resolveResponse({
-        status: response.statusCode ?? 0,
-        body: Buffer.concat(chunks).toString("utf8"),
-        cookies: response.headers["set-cookie"] ?? [],
-      }));
-    });
-    request.once("error", reject);
-    request.end(body);
-  });
-}
-
-it("prints a runnable packaged maintenance command when Hosted startup needs migration", async (t) => {
-  const { persistence, store, project } = await nativeProject(t, "Hosted maintenance command");
-  const legacy = await persistence.transaction((tx) => tx.saveModuleRecord({
-    projectId: project.id, moduleId: "core.artifacts", key: "meta/scriptorium/modules/nlp/feature-settings.json",
-    value: { content: '{"externalEnabled":{}}' }, expectedVersion: null,
-  }));
-  const before = await store.observe(project.id);
-  const directory = await mkdtemp(resolve(tmpdir(), "codexia-start-maintenance-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const assignment = resolve(directory, "assignment.json");
-  const profile = resolve(directory, "profile.mjs");
-  await writeFile(assignment, JSON.stringify({ ...HOSTED_ASSIGNMENT, enabledModuleIds: [] }));
-  await writeFile(profile, 'export const profile = "hosted"; export const moduleManifests = [];');
-  const env = {
-    CODEXIA_DATABASE_URL: process.env.CODEXIA_TEST_DATABASE_URL,
-    CODEXIA_HOSTED_MODE: "1", CODEXIA_HOSTED_PROJECT_ID: project.id, CODEXIA_PROFILE: "hosted",
-    CODEXIA_RUNTIME_ASSIGNMENT_PATH: assignment, CODEXIA_MODULE_PROFILE_PATH: profile,
-    CODEXIA_PRODUCER_REVISION: "d".repeat(40), CODEXIA_DATA_DIR: directory, PORT: "0",
-  };
-  const startup = spawnSync(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url))], {
-    cwd: directory, env, encoding: "utf8", timeout: 10_000,
-  });
-  assert.ifError(startup.error);
-  assert.equal(startup.status, 1, startup.stderr);
-  assert.match(startup.stderr, /SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED/u);
-  const command = startup.stderr.match(/Run node '([^']+)' --check --project ([a-f0-9-]+),/u);
-  assert.ok(command, startup.stderr);
-  const [, cliPath, projectId] = command;
-  assert.equal(cliPath, fileURLToPath(new URL("./maintain-snapshot-projections.js", import.meta.url)));
-  assert.equal(projectId, project.id);
-  const check = spawnSync(process.execPath, [cliPath, "--check", "--project", projectId], {
-    cwd: directory, env, encoding: "utf8", timeout: 10_000,
-  });
-  assert.ifError(check.error);
-  assert.equal(check.status, 2, check.stderr);
-  const report = JSON.parse(check.stdout);
-  assert.equal(report.status, "maintenance_required");
-  assert.deepEqual(report.pendingNlpFeatureSettingsProjectIds, [project.id]);
-  assert.deepEqual(await persistence.read((reader) => reader.getModuleRecord(project.id, legacy.moduleId, legacy.key)), legacy);
-  assert.deepEqual((await store.observe(project.id)).snapshot, before.snapshot);
-});
-
-it("keeps Hosted session mutations at the Instance Access boundary", async (t) => {
-  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-logout-"));
-  t.after(() => rm(staticDir, { recursive: true, force: true }));
-  const api = await startHostedApi(makeSnapshotStore().store, staticDir, hostedTestPolicy());
-  t.after(api.close);
-  const headers = {
-    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    Cookie: "__Host-praetorium_access=read-grant; __Host-praetorium_csrf=fixture-csrf",
-    "Content-Type": "application/json",
-  };
-  for (const path of ["/api/login", "/api/logout"]) {
-    const result = await rawHostedRequest(api.base + path, { ...headers, "X-CSRF-Token": "fixture-csrf" }, "{}");
-    assert.equal(result.status, 404, result.body);
-    assert.deepEqual(result.cookies, []);
-  }
-});
-
-async function rawHostedRequestStatus(urlValue: string, headers: Record<string, string>, body?: string): Promise<number> {
-  return (await rawHostedRequest(urlValue, headers, body)).status;
-}
-
-function runtimeControlToken(action: "status" | "quiesce" | "resume", operationId: string, payloadDigest: string, signingKey = RUNTIME_CONTROL_KEY.privateKey, kid = "runtime-control-test-key"): string {
-  const now = Math.floor(Date.now() / 1000);
-  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const unsigned = `${encode({ alg: "ES256", kid, typ: "JWT" })}.${encode({
-    contractVersion: "praetorium-runtime-control/v1",
-    iss: HOSTED_ASSIGNMENT.controlServicePolicy.issuer,
-    sub: "test-control-plane",
-    aud: HOSTED_ASSIGNMENT.controlServicePolicy.audience,
-    instanceId: HOSTED_ASSIGNMENT.instanceId,
-    repositoryId: HOSTED_ASSIGNMENT.repositoryId,
-    runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-    operationId,
-    action,
-    payloadDigest,
-    iat: now,
-    nbf: now,
-    exp: now + 30,
-    jti: `${action}-${operationId}`,
-  })}`;
-  const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
-    key: signingKey,
-    dsaEncoding: "ieee-p1363",
-  });
-  return `${unsigned}.${signature.toString("base64url")}`;
-}
 
 async function startApi(staticDir: string, trustProxy = false) {
   return startCustomApi(makeStore(), staticDir, { trustProxy });
@@ -823,627 +577,6 @@ describe("Codexia HTTP boundary", () => {
       await api.close();
       assert.equal(closedPools, apiOwned ? 1 : 0, "Only a pool owned by the API lifecycle is released");
     }
-  });
-
-  it("distinguishes runtime-control key outages from invalid credentials and reuses verified JWKS", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-control-jwks-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted control JWKS");
-    let unavailable = true;
-    let requests = 0;
-    const rotated = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-    const rotatedKid = "runtime-control-rotated-key";
-    const rotatedJwk = { ...RUNTIME_CONTROL_PUBLIC_JWK, ...rotated.publicKey.export({ format: "jwk" }), kid: rotatedKid };
-    let keys = [RUNTIME_CONTROL_PUBLIC_JWK];
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      requests++;
-      if (unavailable) throw new Error("private upstream failure");
-      return Response.json({ keys });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, native.persistence, native.project.id);
-    t.after(apiServer.close);
-    const operationId = "control-key-outage";
-    const body = JSON.stringify({ operationId, instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy", contractVersion: "scriptorium-platform/v1", deadline: new Date(Date.now() + 60_000).toISOString() });
-    const statusToken = runtimeControlToken("status", operationId, sha256Digest(""));
-    const status = (token = statusToken) => fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${token}` } });
-    for (const action of ["status", "quiesce", "resume"] as const) {
-      const response = action === "status" ? await status() : await fetch(`${apiServer.base}${action === "quiesce" ? RUNTIME_QUIESCE_PATH : RUNTIME_RESUME_PATH}`, {
-        method: "POST", headers: { Authorization: `Bearer ${runtimeControlToken(action, operationId, sha256Digest(body))}`, "Content-Type": "application/json" }, body,
-      });
-      assert.equal(response.status, 503, action);
-      const failure = await response.json() as { code: string; message: string };
-      assert.equal(failure.code, "AUTHORIZATION_UNAVAILABLE");
-      assert.doesNotMatch(JSON.stringify(failure), /private upstream failure/u);
-    }
-    assert.equal((await status("invalid.token.value")).status, 401);
-    unavailable = false;
-    assert.equal((await status()).status, 200);
-    const afterFetch = requests;
-    unavailable = true;
-    assert.equal((await status()).status, 200, "a valid cached key survives a temporary upstream outage");
-    const signature = statusToken.split(".")[2]!;
-    const tampered = statusToken.slice(0, statusToken.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
-    assert.equal((await status(tampered)).status, 401);
-    assert.equal(requests, afterFetch, "verified JWKS is reused without relaxing credential validation");
-
-    unavailable = false;
-    keys = [rotatedJwk];
-    const rotatedToken = runtimeControlToken("status", operationId, sha256Digest(""), rotated.privateKey, rotatedKid);
-    assert.equal((await status(rotatedToken)).status, 200, "a previously unknown signing key triggers JWKS refresh");
-    assert.equal(requests, afterFetch + 1);
-    unavailable = true;
-    assert.equal((await status(rotatedToken)).status, 200, "the refreshed key is cached");
-    assert.equal(requests, afterFetch + 1);
-    assert.equal((await status(statusToken)).status, 401, "the replaced key is not accepted after refresh");
-  });
-
-  it("binds hosted API access and signed lifecycle controls to one PostgreSQL project and runtime epoch", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-api-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted API");
-    let projectReads = 0;
-    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    let delayNextProposal = false;
-    let announceProposalStarted!: () => void;
-    let releaseProposal!: () => void;
-    const proposalStarted = new Promise<void>((resolveStarted) => { announceProposalStarted = resolveStarted; });
-    const proposalGate = new Promise<void>((resolveGate) => { releaseProposal = resolveGate; });
-    const store = native.store;
-    const originalPropose = store.propose.bind(store);
-    store.propose = async (projectId, proposal) => {
-      if (delayNextProposal) {
-        delayNextProposal = false;
-        announceProposalStarted();
-        await proposalGate;
-      }
-      return originalPropose(projectId, proposal);
-    };
-    const operation: ChangeOperation = {
-      id: "hosted-api-proposal-op", generation: 0, projectId: native.project.id,
-      baseProjectVersion: native.project.version, effect: "metadata", reads: [],
-      writes: [{ path: "meta/hosted-api-test.md", revision: null, content: "A durable proposal.\n" }],
-      message: "Propose a bounded metadata update",
-    };
-    const proposalBody = JSON.stringify({ id: "hosted-api-proposal", snapshot: projectSnapshot, operations: [operation] });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(async () => { releaseProposal(); await apiServer.close(); });
-
-    const noGrant = await fetch(`${apiServer.base}/api/projects`);
-    assert.equal(noGrant.status, 401);
-    for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
-      const discovery = await fetch(`${apiServer.base}${path}`);
-      assert.equal(discovery.status, 200, `${path} must be public without a grant`);
-      assert.deepEqual(await discovery.json(), {
-        resource: HOSTED_ASSIGNMENT.grantPolicy.audience,
-        authorization_servers: [HOSTED_ASSIGNMENT.grantPolicy.issuer],
-        scopes_supported: ["read", "write"],
-      });
-    }
-    const mcpChallenge = await fetch(`${apiServer.base}/mcp`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
-    });
-    assert.equal(mcpChallenge.status, 401);
-    assert.match(mcpChallenge.headers.get("www-authenticate") ?? "", /oauth-protected-resource/u);
-    const readerHeaders = { Authorization: "Bearer read-grant" };
-    const mcpReader = await fetch(`${apiServer.base}/mcp`, { headers: readerHeaders });
-    assert.equal(mcpReader.status, 404, "a read grant must pass auth even if MCP was not packaged");
-    const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
-    assert.equal(projects.status, 200);
-    assert.deepEqual(await projects.json(), { projects: [native.project], nextCursor: null });
-    const projectPage = await fetch(`${apiServer.base}/api/projects?limit=20`, { headers: readerHeaders });
-    assert.equal(projectPage.status, 200);
-    assert.deepEqual(await projectPage.json(), { projects: [native.project], nextCursor: null });
-    const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
-    assert.equal(otherRepository.status, 404);
-    const ambiguous = await fetch(`${apiServer.base}/api/projects`, {
-      headers: { Authorization: "Bearer read-grant", Cookie: "__Host-praetorium_access=write-grant" },
-    });
-    assert.equal(ambiguous.status, 400);
-
-    const readAction = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/core.status`, {
-      method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
-    });
-    assert.equal(readAction.status, 200, "read-only MCP grants may invoke POST actions whose declared effect is read");
-    const deniedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(deniedProposal.status, 403);
-    assert.equal((await deniedProposal.json() as { code: string }).code, "WRITE_PERMISSION_REQUIRED");
-    const cookieHeaders = {
-      Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-      Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=csrf-value",
-    };
-    const missingCsrf = await rawHostedRequestStatus(`${apiServer.base}/api/inbox/read-all`, cookieHeaders);
-    assert.equal(missingCsrf, 403);
-    const cookieWrite = await rawHostedRequestStatus(`${apiServer.base}/api/inbox/read-all`, {
-      ...cookieHeaders, "X-CSRF-Token": "csrf-value",
-    });
-    assert.equal(cookieWrite, 200);
-
-    const statusWithoutControl = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`);
-    assert.equal(statusWithoutControl.status, 401);
-    const statusToken = runtimeControlToken("status", "status-operation", sha256Digest(""));
-    const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
-    assert.equal(statusResponse.status, 200);
-    const status = await statusResponse.json() as {
-      instanceId: string; projectId: string; runtimeEpoch: number;
-      persistence: { state: string; provider: string; projectVersion: number | null };
-    };
-    assert.deepEqual([status.instanceId, status.projectId, status.runtimeEpoch], ["instance-1", native.project.id, 3]);
-    assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.provider, "postgres");
-    assert.equal(status.persistence.projectVersion, native.project.version);
-    const readsBeforePreflight = projectReads;
-    assert.ok(readsBeforePreflight > 0, "hosted persistence status must read the assigned project through Persistence.read/getProject");
-
-    const quiesceRequest = {
-      operationId: "quiesce-safe",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const exactQuiesceBody = JSON.stringify(quiesceRequest);
-    const quiesceToken = runtimeControlToken("quiesce", quiesceRequest.operationId, sha256Digest(exactQuiesceBody));
-    const quiesceResponse = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(quiesceResponse.status, 200);
-    const safeReceipt = await quiesceResponse.json() as { disposition: string; activeMutations: number; projectVersion: number | null };
-    assert.equal(safeReceipt.disposition, "safe");
-    assert.equal(safeReceipt.activeMutations, 0);
-    assert.equal(safeReceipt.projectVersion, native.project.version);
-    assert.ok(projectReads > readsBeforePreflight, "quiesce performs a fresh PostgreSQL census after closing admission");
-    const blockedByGate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(blockedByGate.status, 503);
-    assert.equal((await blockedByGate.json() as { code: string }).code, "RUNTIME_QUIESCED");
-
-    const resumeToken = runtimeControlToken("resume", quiesceRequest.operationId, sha256Digest(exactQuiesceBody));
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(resumed.status, 204);
-    const resumedAgain = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
-    });
-    assert.equal(resumedAgain.status, 204, "the same epoch and completed operation may resume idempotently");
-    const unrelatedResumeBody = JSON.stringify({ ...quiesceRequest, operationId: "unrelated-resume" });
-    const unrelatedResumeToken = runtimeControlToken("resume", "unrelated-resume", sha256Digest(unrelatedResumeBody));
-    const unrelatedResume = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${unrelatedResumeToken}`, "Content-Type": "application/json" }, body: unrelatedResumeBody,
-    });
-    assert.equal(unrelatedResume.status, 409);
-    const allowedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(allowedProposal.status, 201);
-
-    delayNextProposal = true;
-    const inFlightProposal = fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    await proposalStarted;
-    const blockedRequest = {
-      ...quiesceRequest,
-      operationId: "quiesce-blocked",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const exactBlockedBody = JSON.stringify(blockedRequest);
-    const blockedToken = runtimeControlToken("quiesce", blockedRequest.operationId, sha256Digest(exactBlockedBody));
-    const blockedResponse = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${blockedToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
-    });
-    assert.equal(blockedResponse.status, 200);
-    const blockedReceipt = await blockedResponse.json() as { disposition: string; activeMutations: number; reasonCodes: string[] };
-    assert.equal(blockedReceipt.disposition, "blocked");
-    assert.equal(blockedReceipt.activeMutations, 1);
-    assert.ok(blockedReceipt.reasonCodes.includes("ACTIVE_MUTATIONS"));
-    const blockedResumeToken = runtimeControlToken("resume", blockedRequest.operationId, sha256Digest(exactBlockedBody));
-    const blockedResume = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${blockedResumeToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
-    });
-    assert.equal(blockedResume.status, 204, "resuming the exact blocked operation is an idempotent no-op");
-    releaseProposal();
-    assert.equal((await inFlightProposal).status, 201, "the active mutation may finish after quiesce reports blocked and reopens admission");
-  });
-
-  it("keeps a quiesce census unverified when a worker job starts and finishes during its local scan, then permits a stable retry", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-activity-race-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted activity race");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    let projectReads = 0;
-    let interleaveNextProjectRead = false;
-    const lifecycleCreatedAt = new Date().toISOString();
-    let lifecycleUpdatedAt = lifecycleCreatedAt;
-    let lifecycleStartedAt: string | null = null;
-    const lifecycle = async (state: WorkerJobLifecycleSnapshot["state"]): Promise<void> => {
-      lifecycleUpdatedAt = new Date(Date.parse(lifecycleUpdatedAt) + 1).toISOString();
-      if (state === "running") lifecycleStartedAt = lifecycleUpdatedAt;
-      await runtime.emitLifecycle({
-        jobId: "job-interleaving", module: "story", task: "runtime-activity-interleaving", snapshot: projectSnapshot,
-        state, createdAt: lifecycleCreatedAt, updatedAt: lifecycleUpdatedAt,
-        startedAt: lifecycleStartedAt,
-        finishedAt: state === "succeeded" || state === "failed" || state === "cancelled" ? lifecycleUpdatedAt : null,
-      });
-    };
-    const persistence = instrumentPersistence(native.persistence, {
-      async beforeProjectRead() {
-        if (!interleaveNextProjectRead) return;
-        interleaveNextProjectRead = false;
-        await lifecycle("queued");
-        await lifecycle("running");
-        await lifecycle("succeeded");
-      },
-      onProjectRead: () => { projectReads++; },
-    });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, resolve(staticDir, "usage"), persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const preflight = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-preflight", sha256Digest(""))}` },
-    });
-    assert.equal(preflight.status, 200);
-    const preflightStatus = await preflight.json() as { persistence: { state: string; projectVersion: number | null } };
-    assert.equal(preflightStatus.persistence.state, "verified");
-    assert.equal(preflightStatus.persistence.projectVersion, native.project.version);
-    const projectReadsAfterPreflight = projectReads;
-    assert.ok(projectReadsAfterPreflight > 0, "the signed preflight reads the assigned project from PostgreSQL");
-
-    const request = {
-      operationId: "quiesce-activity-race",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const body = JSON.stringify(request);
-    const quiesceHeaders = {
-      Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-      "Content-Type": "application/json",
-    };
-    interleaveNextProjectRead = true;
-    const first = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
-    assert.equal(first.status, 200);
-    const firstReceipt = await first.json() as { disposition: string; activeJobs: number; reasonCodes: string[] };
-    assert.equal(firstReceipt.activeJobs, 0, "the worker has already finished by the time the census returns");
-    assert.equal(firstReceipt.disposition, "unknown", "the monotonic activity version detects the completed job");
-    assert.ok(firstReceipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-    assert.ok(projectReads > projectReadsAfterPreflight, "the closed-admission census re-reads its PostgreSQL project version");
-
-    const stableStatus = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-stable-status", sha256Digest(""))}` },
-    });
-    assert.equal(stableStatus.status, 200);
-    assert.equal((await stableStatus.json() as { persistence: { state: string } }).persistence.state, "verified");
-
-    const retry = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
-    assert.equal(retry.status, 200);
-    const retryReceipt = await retry.json() as { disposition: string; projectVersion: number | null };
-    assert.equal(retryReceipt.disposition, "safe");
-    assert.equal(retryReceipt.projectVersion, native.project.version);
-
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${runtimeControlToken("resume", request.operationId, sha256Digest(body))}`, "Content-Type": "application/json" },
-      body,
-    });
-    assert.equal(resumed.status, 204);
-  });
-
-  it("waits for accepted private job-history writes before certifying safe quiesce", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-quiesce-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted history quiesce");
-    const usageDirectory = resolve(staticDir, "usage");
-    const migratedDirectory = resolve(staticDir, "migrated-usage");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const createdAt = new Date().toISOString();
-    const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
-    const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
-    const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-quiesce-race", module: "story", task: "history-quiesce-race", snapshot: projectSnapshot,
-      state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
-    });
-    await runtime.emitLifecycle(lifecycle("running", runningAt));
-    const historyPath = resolve(usageDirectory, "jobs", "jobs-state.json");
-    assert.equal(((JSON.parse(await readFile(historyPath, "utf8")) as { jobs: Array<{ job: { status: string } }> }).jobs[0]?.job.status), "running");
-
-    let releaseTerminal!: () => void;
-    const terminalGate = new Promise<void>((resolveGate) => { releaseTerminal = resolveGate; });
-    let terminalPersistStarted!: () => void;
-    const terminalStarted = new Promise<void>((resolveStarted) => { terminalPersistStarted = resolveStarted; });
-    let historyBarrierStarted!: () => void;
-    const historyBarrier = new Promise<void>((resolveStarted) => { historyBarrierStarted = resolveStarted; });
-    const prototype = JobHistoryStore.prototype as unknown as {
-      persist: (state: unknown) => Promise<void>;
-      listJobs: () => Promise<unknown[]>;
-    };
-    const originalPersist = prototype.persist;
-    const originalListJobs = prototype.listJobs;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ job?: { id?: string; status?: string } }> }).jobs ?? [];
-      if (jobs.some((record) => record.job?.id === "job-history-quiesce-race" && record.job.status === "done")) {
-        terminalPersistStarted();
-        return terminalGate.then(() => originalPersist.call(this, state));
-      }
-      return originalPersist.call(this, state);
-    };
-    prototype.listJobs = function (): Promise<unknown[]> {
-      historyBarrierStarted();
-      return originalListJobs.call(this);
-    };
-
-    let terminalCallback: Promise<void> | undefined;
-    try {
-      terminalCallback = runtime.emitLifecycle(lifecycle("succeeded", finishedAt, finishedAt));
-      await terminalStarted;
-      const request = {
-        operationId: "quiesce-history-write",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 60_000).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const quiesce = fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      let barrierTimeout: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          historyBarrier,
-          new Promise<never>((_resolve, reject) => {
-            barrierTimeout = setTimeout(() => reject(new Error("quiesce did not warm private job history")), 1_000);
-          }),
-        ]);
-      } finally { if (barrierTimeout) clearTimeout(barrierTimeout); }
-      const earlyResponse = await Promise.race([
-        quiesce.then(() => true),
-        new Promise<boolean>((resolveDelay) => setTimeout(() => resolveDelay(false), 25)),
-      ]);
-      assert.equal(earlyResponse, false, "quiesce must await the accepted terminal history write");
-
-      releaseTerminal();
-      const response = await quiesce;
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "safe");
-      assert.ok(!receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-
-      await cp(usageDirectory, migratedDirectory, { recursive: true });
-      const migrated = await new JobHistoryStore(migratedDirectory).listJobs();
-      assert.equal(migrated[0]?.status, "done");
-      assert.equal(migrated[0]?.errorCode, undefined, "first read after migration must not orphan a completed worker");
-    } finally {
-      releaseTerminal();
-      prototype.persist = originalPersist;
-      prototype.listJobs = originalListJobs;
-      await terminalCallback?.catch(() => undefined);
-    }
-  });
-
-  it("does not certify safe quiesce when a domain job terminal history write and fallback both fail", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-hosted-domain-history-quiesce-"));
-    tempDirs.push(root);
-    const staticDir = resolve(root, "static");
-    await mkdir(staticDir);
-    const native = await nativeProject(t, "Hosted domain history failure");
-    const usageDirectory = resolve(root, "usage");
-    const domain = sourceDomainJobRuntime(resolve(root, "module-cache"));
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, domain.runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(async () => { domain.releaseAsync(); await apiServer.close(); });
-    const prototype = JobHistoryStore.prototype as unknown as { persist: (state: unknown) => Promise<void> };
-    const originalPersist = prototype.persist;
-    let failedTerminalWrites = 0;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ kind?: string; job?: { status?: string } }> }).jobs ?? [];
-      if (jobs.some((entry) => entry.kind === "domain" && (entry.job?.status === "done" || entry.job?.status === "error"))) {
-        failedTerminalWrites += 1;
-        return Promise.reject(new Error("injected private history terminal write failure"));
-      }
-      return originalPersist.call(this, state);
-    };
-    try {
-      const action = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/speaker.evaluation.run`, {
-        method: "POST",
-        headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" },
-        body: JSON.stringify({ input: {} }),
-      });
-      assert.equal(action.status, 200);
-      assert.ok(action.headers.get("x-codexia-job-id"));
-      assert.equal(failedTerminalWrites, 2, "both the result and explicit retention-failure fallback writes must be exercised");
-      const request = {
-        operationId: "quiesce-domain-history-failure",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private domain history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 60_000).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const response = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "unknown");
-      assert.ok(receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-    } finally {
-      prototype.persist = originalPersist;
-    }
-  });
-
-  it("reports unknown when accepted private job history cannot drain before the quiesce deadline", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-deadline-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted history deadline");
-    const usageDirectory = resolve(staticDir, "usage");
-    const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
-    t.after(apiServer.close);
-    const createdAt = new Date().toISOString();
-    const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
-    const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
-    const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-deadline", module: "story", task: "history-deadline", snapshot: { projectId: native.project.id, projectVersion: native.project.version },
-      state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
-    });
-    await runtime.emitLifecycle(lifecycle("running", runningAt));
-    let releaseTerminal!: () => void;
-    const terminalGate = new Promise<void>((resolveGate) => { releaseTerminal = resolveGate; });
-    let terminalPersistStarted!: () => void;
-    const terminalStarted = new Promise<void>((resolveStarted) => { terminalPersistStarted = resolveStarted; });
-    let barrierStarted!: () => void;
-    const barrier = new Promise<void>((resolveStarted) => { barrierStarted = resolveStarted; });
-    const prototype = JobHistoryStore.prototype as unknown as {
-      persist: (state: unknown) => Promise<void>;
-      listJobs: () => Promise<unknown[]>;
-    };
-    const originalPersist = prototype.persist;
-    const originalListJobs = prototype.listJobs;
-    prototype.persist = function (state: unknown): Promise<void> {
-      const jobs = (state as { jobs?: Array<{ job?: { id?: string; status?: string } }> }).jobs ?? [];
-      if (jobs.some((record) => record.job?.id === "job-history-deadline" && record.job.status === "done")) {
-        terminalPersistStarted();
-        return terminalGate.then(() => originalPersist.call(this, state));
-      }
-      return originalPersist.call(this, state);
-    };
-    prototype.listJobs = function (): Promise<unknown[]> {
-      barrierStarted();
-      return originalListJobs.call(this);
-    };
-    let terminalCallback: Promise<void> | undefined;
-    try {
-      terminalCallback = runtime.emitLifecycle(lifecycle("succeeded", finishedAt, finishedAt));
-      await terminalStarted;
-      const request = {
-        operationId: "quiesce-history-deadline",
-        instanceId: HOSTED_ASSIGNMENT.instanceId,
-        runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-        reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
-        deadline: new Date(Date.now() + 100).toISOString(),
-      };
-      const body = JSON.stringify(request);
-      const startedAt = Date.now();
-      const quiesce = fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-      await barrier;
-      const response = await quiesce;
-      assert.equal(response.status, 200);
-      const receipt = await response.json() as { disposition: string; reasonCodes: string[] };
-      assert.equal(receipt.disposition, "unknown");
-      assert.ok(receipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-      assert.ok(Date.now() - startedAt < 2_000, "private-history drain must honor the signed quiesce deadline");
-    } finally {
-      releaseTerminal();
-      prototype.persist = originalPersist;
-      prototype.listJobs = originalListJobs;
-      await terminalCallback?.catch(() => undefined);
-    }
-  });
-
-  it("safely quiesces an untouched empty PostgreSQL project using the lifecycle request property order", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-empty-project-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Empty hosted project");
-    assert.deepEqual((await native.store.readTreeSnapshot(native.project.id)).tree.volumes, [], "the project has no manuscript hierarchy");
-    let projectReads = 0;
-    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const statusToken = runtimeControlToken("status", "empty-status", sha256Digest(""));
-    const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
-    assert.equal(statusResponse.status, 200);
-    const status = await statusResponse.json() as { projectId: string; persistence: { state: string; provider: string; projectVersion: number | null } };
-    assert.equal(status.projectId, native.project.id);
-    assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.provider, "postgres");
-    assert.equal(status.persistence.projectVersion, native.project.version);
-    const projectReadsAfterPreflight = projectReads;
-
-    // This matches Praetorium ControlHttpClient's insertion order exactly.
-    const request = {
-      operationId: "empty-quiesce",
-      instanceId: HOSTED_ASSIGNMENT.instanceId,
-      runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
-      reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const body = JSON.stringify(request);
-    const quiesceToken = runtimeControlToken("quiesce", request.operationId, sha256Digest(body));
-    const quiesced = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body,
-    });
-    assert.equal(quiesced.status, 200);
-    const receipt = await quiesced.json() as { disposition: string; projectVersion: number | null };
-    assert.equal(receipt.disposition, "safe");
-    assert.equal(receipt.projectVersion, native.project.version);
-    assert.ok(projectReads > projectReadsAfterPreflight, "quiesce verifies the empty project's PostgreSQL version after closing admission");
-
-    const resumeToken = runtimeControlToken("resume", request.operationId, sha256Digest(body));
-    const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
-      method: "POST", headers: { Authorization: `Bearer ${resumeToken}`, "Content-Type": "application/json" }, body,
-    });
-    assert.equal(resumed.status, 204);
   });
 
   it("keeps health public, protects project data, and serves the app shell", async (t) => {
@@ -2345,110 +1478,13 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(directSaveCalls, 0);
   });
 
-  it("keeps PostgreSQL availability separate from an expired hosted Browser Grant", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-auth-boundary-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted readiness");
-    let failHealthCheck = true;
-    const persistence = new Proxy(native.persistence, {
-      get(target, property, receiver) {
-        if (property === "checkHealth") {
-          return async () => {
-            if (failHealthCheck) {
-              failHealthCheck = false;
-              throw new Error("simulated PostgreSQL availability failure");
-            }
-            await target.checkHealth?.();
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    const controlFetch: typeof fetch = async (input) => {
-      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
-    };
-    const apiServer = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
-    t.after(apiServer.close);
-
-    const status = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
-      headers: { Authorization: `Bearer ${runtimeControlToken("status", "postgres-unavailable", sha256Digest(""))}` },
-    });
-    assert.equal(status.status, 200);
-    assert.equal((await status.json() as { persistence: { state: string } }).persistence.state, "unknown",
-      "a database health failure is reported as unavailable persistence, not as a rejected browser grant");
-
-    const session = await fetch(`${apiServer.base}/api/session`, {
-      headers: { Authorization: `Bearer ${hostedGrantToken()}` },
-    });
-    assert.equal(session.status, 200);
-    assert.deepEqual(await session.json(), {
-      authenticated: true,
-      authorScope: "hosted:hosted-user-1",
-      permissions: ["read", "write"],
-    });
-
-    const expiredGrant = await fetch(`${apiServer.base}/api/session`, {
-      headers: { Authorization: `Bearer ${hostedGrantToken(true)}` },
-    });
-    assert.equal(expiredGrant.status, 401);
-    assert.equal((await expiredGrant.json() as { code: string }).code, "UNAUTHORIZED");
-  });
-
-  it("closes Hosted project, job and MCP event streams at the admitting grant deadline", { timeout: 20000 }, async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-stream-expiry-"));
-    tempDirs.push(staticDir);
-    const native = await nativeProject(t, "Hosted stream expiry");
-    const api = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), undefined,
-      actionBoundaryRuntime(resolve(staticDir, "module-cache")), undefined, native.persistence, native.project.id);
-    t.after(api.close);
-    const abort = new AbortController();
-    t.after(() => abort.abort());
-    const endpoints = ["/api/projects/events", "/api/jobs/events", "/mcp"];
-    const headersFor = (path: string, token: string): Record<string, string> => path === "/mcp"
-      ? { Authorization: `Bearer ${token}` }
-      : { Cookie: `__Host-praetorium_access=${token}` };
-    const token = hostedGrantToken(false, 4);
-    const expiresAt = (JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8")) as { exp: number }).exp * 1000;
-    const deadline = setTimeout(() => abort.abort(), 10000);
-    try {
-      const responses = await Promise.all(endpoints.map(path => fetch(api.base + path, {
-        headers: headersFor(path, token), signal: abort.signal,
-      })));
-      for (const response of responses) {
-        assert.equal(response.status, 200);
-        assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/u);
-      }
-      const closedAt: number[] = [];
-      const results = await Promise.allSettled(responses.map(async (response, index) => {
-        try { return await response.text(); }
-        finally { closedAt[index] = Date.now(); }
-      }));
-      assert.ok(closedAt.every(at => at >= expiresAt), "streams must not close before the admitting grant deadline");
-      assert.equal(closedAt.length, endpoints.length);
-      assert.equal(abort.signal.aborted, false, "the server must close the streams, not the test timeout");
-      assert.equal(results[0]?.status, "fulfilled");
-      assert.deepEqual(results[1], { status: "fulfilled", value: ": ok\n\n" });
-      // Node pipeline abort terminates the module stream's socket at expiry.
-      assert.equal(results[2]?.status, "rejected");
-      for (const path of endpoints) {
-        const expired = await fetch(api.base + path, { headers: headersFor(path, token) });
-        assert.equal(expired.status, 401);
-        await expired.arrayBuffer();
-        const fresh = await fetch(api.base + path, { headers: headersFor(path, hostedGrantToken()) });
-        assert.equal(fresh.status, 200);
-        await fresh.body!.cancel();
-      }
-    } finally { clearTimeout(deadline); abort.abort(); }
-  });
-
   it("does not admit standalone Access assertions or legacy bearer credentials", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-retired-browser-identity-"));
     tempDirs.push(staticDir);
     const api = await startApi(staticDir, true);
     t.after(api.close);
     const retired: Record<string, string>[] = [
+      { Cookie: "__Host-praetorium_access=retired-fixture-grant" },
       { "CF-Access-Jwt-Assertion": "retired-fixture-assertion", "X-Forwarded-Proto": "https" },
       { Cookie: "scriptorium_session=retired-fixture-session" },
       { Authorization: `Bearer ${ACCESS_TOKEN}` },
@@ -2928,32 +1964,6 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(status.status, 503);
     assert.deepEqual(await status.json(), { error: "PostgreSQL persistence is not ready", code: "PERSISTENCE_UNAVAILABLE" });
-  });
-
-  it("serves immutable runtime metadata publicly in standalone mode", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-metadata-"));
-    tempDirs.push(staticDir);
-    const previousRevision = process.env.CODEXIA_PRODUCER_REVISION;
-    process.env.CODEXIA_PRODUCER_REVISION = "a".repeat(40);
-    const apiServer = await startCustomApi(makeStore(), staticDir);
-    t.after(async () => {
-      await apiServer.close();
-      if (previousRevision === undefined) delete process.env.CODEXIA_PRODUCER_REVISION;
-      else process.env.CODEXIA_PRODUCER_REVISION = previousRevision;
-    });
-    const response = await fetch(`${apiServer.base}/api/platform/v1/metadata`);
-    assert.equal(response.status, 200);
-    const metadata = await response.json() as {
-      contractVersion: string; producerRevision: string; listener: { port: number };
-      paths: { metadata: string; shutdown: string; status: string; quiesce: string; resume: string };
-    };
-    assert.equal(metadata.producerRevision, "a".repeat(40));
-    assert.ok(metadata.listener.port > 0 && metadata.listener.port <= 65_535);
-    assert.deepEqual(metadata.paths, {
-      liveness: "/health/live", readiness: "/health/ready", metadata: "/api/platform/v1/metadata",
-      shutdown: "/api/platform/v1/quiesce", status: "/api/platform/v1/status",
-      quiesce: "/api/platform/v1/quiesce", resume: "/api/platform/v1/resume",
-    });
   });
 
   it("exposes the source Core read surface through pinned routes and composed host actions", async (t) => {
@@ -3608,38 +2618,6 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed[1]?.source, "mcp");
   });
 
-  it("denies hosted read grants native proposals through direct and nested MCP calls", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-"));
-    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-cache-"));
-    tempDirs.push(staticDir, cacheDir);
-    const fixture = makeSnapshotStore();
-    const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir));
-    t.after(apiServer.close);
-    const input = { projectVersion: 1, idempotencyKey: "native-denied", operations: [] };
-    const direct = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.knowledge.propose`, {
-      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify({ input }),
-    });
-    assert.equal(direct.status, 403, "direct action admission requires a current Hosted write grant");
-
-    const nested = await fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
-      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify(input),
-    });
-    assert.equal(nested.status, 200);
-    const nestedResult = await nested.json() as ActionResult;
-    assert.equal(nestedResult.ok, false);
-    if (!nestedResult.ok) assert.equal(nestedResult.error.code, "WRITE_PERMISSION_REQUIRED");
-
-    const cookieMcp = await rawHostedRequest(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
-      Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-      Cookie: "__Host-praetorium_access=read-grant; __Host-praetorium_csrf=csrf-value", "X-CSRF-Token": "csrf-value", "Content-Type": "application/json",
-    }, JSON.stringify(input));
-    assert.equal(cookieMcp.status, 200);
-    const cookieResult = JSON.parse(cookieMcp.body) as ActionResult;
-    assert.equal(cookieResult.ok, false, "cookie-authenticated MCP still uses the host write authorization callback");
-    if (!cookieResult.ok) assert.equal(cookieResult.error.code, "WRITE_PERMISSION_REQUIRED");
-    assert.equal(fixture.proposed.length, 0, "native ChangeSet proposals never use the path-based proposal store");
-  });
-
   it("passes public module requests through the registered relative route with a fresh remote reader", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-module-"));
     const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-module-cache-"));
@@ -3918,120 +2896,7 @@ describe("Codexia HTTP boundary", () => {
 });
 
 
-for (const phase of ["read", "write"] as const) {
-  it(`Hosted ${phase} reports credential denial, permission denial, and provider outages distinctly`, async (t) => {
-    const directory = await mkdtemp(resolve(tmpdir(), "codexia-auth-outage-"));
-    const normal = hostedTestPolicy();
-    const privateDetail = "private upstream detail";
-    let upstreamFailure: Error;
-    const policy: HostedAuthorizationPolicy = {
-      ...normal,
-      async authenticate(token, permission = "read") {
-        if (permission === phase) throw upstreamFailure;
-        return normal.authenticate(token, permission);
-      },
-    };
-    const apiServer = await startHostedApi(makeStore(), directory, policy, undefined, undefined, resolve(directory, "history"));
-    t.after(async () => {
-      await apiServer.close();
-      await rm(directory, { recursive: true, force: true });
-    });
-    const permissionDenial = phase === "read" ? "FORBIDDEN" : "WRITE_PERMISSION_REQUIRED";
-    const cases = [
-      { upstreamStatus: 401, status: 401, code: "UNAUTHORIZED" },
-      { upstreamStatus: 403, status: 403, code: permissionDenial },
-      { upstreamStatus: 502, status: 502, code: "AUTHORIZATION_UNAVAILABLE" },
-      { upstreamStatus: 503, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
-      { upstreamStatus: undefined, status: 503, code: "AUTHORIZATION_UNAVAILABLE" },
-    ];
-    for (const { upstreamStatus, status, code } of cases) {
-      upstreamFailure = new Error(privateDetail);
-      if (upstreamStatus !== undefined) Object.assign(upstreamFailure, { status: upstreamStatus });
-      const path = phase === "read" ? "/api/session" : "/api/inbox/read-all";
-      const response = await fetch(`${apiServer.base}${path}`, {
-        method: phase === "read" ? "GET" : "POST", headers: { Authorization: "Bearer write-grant" },
-      });
-      assert.equal(response.status, status, `upstream status ${upstreamStatus}`);
-      assert.equal(response.headers.has("www-authenticate"), false);
-      const body = await response.json() as { code: string; error: string };
-      assert.equal(body.code, code);
-      assert.doesNotMatch(body.error, /private upstream detail/u);
-    }
-  });
-}
-
-
-it("Hosted Bearer write grants can propose but cannot perform author-only persistence, approval, or apply", async (t) => {
-  const fixture = makeSnapshotStore();
-  let documentWrites = 0;
-  const persistence = {
-    ...admissionPersistence(fixture.store),
-    async transaction<T>(work: (transaction: { createDocument(input: unknown): Promise<unknown> }) => Promise<T>): Promise<T> {
-      documentWrites += 1;
-      return work({ async createDocument(input) { return { id: "author-document", input }; } });
-    },
-  } as unknown as Persistence;
-  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-author-session-"));
-  const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, persistence);
-  t.after(async () => { await apiServer.close(); await rm(staticDir, { recursive: true, force: true }); });
-
-  const bearerHeaders = { Authorization: "Bearer write-grant", "Content-Type": "application/json" };
-  const documentPath = `${apiServer.base}/api/v1/persistence/projects/project-1/documents`;
-  const bearerDocument = await fetch(documentPath, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ kind: "scene", title: "Bearer document", markdown: "Denied." }),
-  });
-  assert.equal(bearerDocument.status, 403);
-  assert.equal((await bearerDocument.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  assert.equal(documentWrites, 0, "a bearer grant must be rejected before native Persistence.transaction");
-
-  const operation: ChangeOperation = {
-    id: "hosted-review-operation", generation: 0, projectId: "project-1", baseProjectVersion: 1,
-    effect: "metadata", reads: [], writes: [], message: "Reviewable hosted proposal",
-  };
-  const proposalResponse = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ id: "hosted-review-proposal", snapshot: SNAPSHOT, operations: [operation] }),
-  });
-  assert.equal(proposalResponse.status, 201, "a Hosted write grant may submit an MCP proposal");
-
-  const bearerApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
-    method: "POST", headers: bearerHeaders,
-    body: JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }),
-  });
-  assert.equal(bearerApproval.status, 403);
-  assert.equal((await bearerApproval.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  const bearerApply = await fetch(`${apiServer.base}/api/projects/project-1/apply`, {
-    method: "POST", headers: bearerHeaders, body: JSON.stringify(operation),
-  });
-  assert.equal(bearerApply.status, 403);
-  assert.equal((await bearerApply.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  const deniedScratch = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-    method: "POST", headers: bearerHeaders, body: JSON.stringify({ text: "Bearer scratch" }),
-  });
-  assert.equal(deniedScratch.status, 403);
-  assert.equal((await deniedScratch.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  assert.equal(fixture.approvals.length, 0);
-  assert.equal(fixture.proposed.length, 1);
-
-  const cookieHeaders = {
-    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=csrf-value",
-    "X-CSRF-Token": "csrf-value", "Content-Type": "application/json", "Idempotency-Key": "hosted-author-document-1",
-  };
-  const authorDocument = await rawHostedRequest(documentPath, cookieHeaders,
-    JSON.stringify({ kind: "scene", title: "Author document", markdown: "Saved by author." }));
-  assert.equal(authorDocument.status, 201, authorDocument.body);
-  assert.equal(documentWrites, 1);
-  const authorApproval = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/approvals`, cookieHeaders,
-    JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }));
-  assert.equal(authorApproval, 204);
-  assert.equal(fixture.approvals[0]?.authorScope, "hosted:writer-1");
-  const authorApply = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/apply`, cookieHeaders, JSON.stringify(operation));
-  assert.equal(authorApply, 201);
-});
-
-it("portable work API enforces authentication, author writes, origin, hosted assignment and replay", async (t) => {
+it("portable work API enforces authentication, author writes, origin, and replay", async (t) => {
   const native = await nativeProject(t, "Portable HTTP");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-archive-http-"));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
@@ -4054,7 +2919,7 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   const forbiddenOrigin = await fetch(endpoint, { method: "POST", headers: {
     Authorization: owner.Authorization, Origin: "https://other.example", "Content-Type": "application/json"
   }, body: requestBody });
-  assert.equal(forbiddenOrigin.status, 403, "Cookie writes require same origin");
+  assert.equal(forbiddenOrigin.status, 403, "Author writes honor browser origin policy");
   const headers = { Authorization: owner.Authorization, Origin: apiServer.base, "Content-Type": "application/json" };
   const importResponse = await fetch(endpoint, { method: "POST", headers, body: requestBody });
   assert.equal(importResponse.status, 201);
@@ -4070,19 +2935,10 @@ it("portable work API enforces authentication, author writes, origin, hosted ass
   assert.equal(importedExport.status, 200);
   assert.equal((await importedExport.json() as { project: { title: string } }).project.title, native.project.title);
 
-  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
-  t.after(hosted.close);
-  const hostedImport = await fetch(hosted.base + "/api/v1/persistence/import", { method: "POST", headers: {
-    Authorization: "Bearer write-grant", "Content-Type": "application/json"
-  }, body: requestBody });
-  assert.equal(hostedImport.status, 403);
-  const hostedOtherWork = await fetch(hosted.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", {
-    headers: { Authorization: "Bearer read-grant" }
-  });
-  assert.equal(hostedOtherWork.status, 404);
+
 });
 
-it("native actions use real PostgreSQL through standalone and Hosted composed admission", async (t) => {
+it("native actions use real PostgreSQL through direct and composed OAuth admission", async (t) => {
   const native = await nativeProject(t, "Native action review");
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-native-action-real-"));
   const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-native-action-cache-"));
@@ -4090,10 +2946,8 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
   const client = createSignedRequestFixture();
   const settings = testClientSettings(native.project.id, client.publicJwks, client.isActive);
-  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+  const standalone = await startCustomApi(native.store, staticDir, { persistence: native.persistence, runtime: actionBoundaryRuntime(cacheDir), ...settings });
   t.after(standalone.close);
-  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir), undefined, native.persistence, native.project.id);
-  t.after(hosted.close);
   const projectId = native.project.id as import("@codexia/persistence-contracts").ProjectId;
   const nodeId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId;
   const projectVersion = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
@@ -4125,12 +2979,12 @@ it("native actions use real PostgreSQL through standalone and Hosted composed ad
   assert.ok(list.ok && (list.data as Array<{ id: string }>).some(node => node.id === nodeId));
   const current = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const nestedId = randomUUID();
-  const nested = await fetch(hosted.base + "/api/projects/" + projectId + "/modules/mcp/native-propose", { method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, projectVersion: current, idempotencyKey: "nested-real", operations: [{ ...payload.operations[0], command: { ...payload.operations[0]!.command, id: nestedId } }] }) });
+  const nested = await fetch(standalone.base + "/api/projects/" + projectId + "/modules/mcp/native-propose", { method: "POST", headers, body: JSON.stringify({ ...payload, projectVersion: current, idempotencyKey: "nested-real", operations: [{ ...payload.operations[0], command: { ...payload.operations[0]!.command, id: nestedId } }] }) });
   const nestedResult = await nested.json() as ActionResult;
   assert.ok(nestedResult.ok, JSON.stringify(nestedResult));
   if (!nestedResult.ok) throw new Error("Nested proposal failed");
   const nestedChange = (nestedResult.data as { changeSet: import("@codexia/persistence-contracts").ChangeSet }).changeSet;
-  assert.equal(nestedChange.authorId, "writer-1");
+  assert.equal(nestedChange.authorId, "owner");
   assert.equal(nestedChange.provenance.details.origin, "external-agent");
   assert.equal(nestedChange.status, "proposed");
 });
@@ -4195,32 +3049,17 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
     persistence, ...testClientSettings(projectId, client.publicJwks, client.isActive),
   });
   t.after(standalone.close);
-  const hosted = await startHostedApi(store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, persistence, projectId);
-  t.after(hosted.close);
   const projectPath = "/api/projects/" + projectId;
   const nativePath = "/api/v1/persistence/projects/" + projectId + "/changesets";
-  const hostedBrowser = (grant: string) => ({
-    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    Cookie: `__Host-praetorium_access=${grant}; __Host-praetorium_csrf=fixture-csrf`,
-    "X-CSRF-Token": "fixture-csrf", "Content-Type": "application/json",
-  });
   const readers: Array<{ name: string; base: string; headers: Record<string, string>; author: boolean; directPersistence: boolean }> = [
     { name: "OAuth author", base: standalone.base, headers: client.ownerHeaders(), author: true, directPersistence: true },
     { name: "OAuth MCP reader", base: standalone.base, headers: client.mcpHeaders(), author: false, directPersistence: false },
-    { name: "Hosted write browser", base: hosted.base, headers: hostedBrowser("write-grant"), author: true, directPersistence: true },
-    { name: "Hosted read browser", base: hosted.base, headers: hostedBrowser("read-grant"), author: false, directPersistence: true },
-    { name: "Hosted write bearer", base: hosted.base, headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, author: false, directPersistence: true },
   ];
   for (const { name, base, headers, author, directPersistence } of readers) {
     await t.test(name, async () => {
       const invoke = async <Data>(action: string, input: unknown, selected?: SnapshotId): Promise<ActionResult<Data>> => {
         const url = base + projectPath + "/actions/" + action;
         const body = JSON.stringify({ input, snapshot: selected });
-        if (headers.Cookie) {
-          const response = await rawHostedRequest(url, headers, body);
-          assert.equal(response.status, 200, response.body);
-          return JSON.parse(response.body) as ActionResult<Data>;
-        }
         const response = await fetch(url, { method: "POST", headers, body });
         assert.equal(response.status, 200);
         return await response.json() as ActionResult<Data>;
@@ -4235,7 +3074,7 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
         const { proposals } = await response.json() as { proposals: ProposalStatus[] };
         assert.deepEqual(proposals.map(status => status.proposal.id).sort(), expectedIds);
       }
-      if (base === hosted.base) {
+      if (!author) {
         const globalQueue = await fetch(base + "/api/review-queue", { headers: getHeaders });
         assert.equal(globalQueue.status, 200);
         const queue = await globalQueue.json() as { unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> };
@@ -4328,8 +3167,6 @@ it("binds Publishing record ports to the requested snapshot and authenticated au
     persistence, runtime: fixtureRuntime(), ...testClientSettings(project.id, client.publicJwks, client.isActive),
   });
   t.after(standalone.close);
-  const hosted = await startHostedApi(store, directory, hostedTestPolicy(), undefined, fixtureRuntime(), undefined, persistence, project.id);
-  t.after(hosted.close);
   const base = "/api/projects/" + project.id;
   const actionUrl = (origin: string, action: string) => origin + base + "/actions/publishing.fixture-" + action;
   const body = (input: unknown = {}, snapshot?: SnapshotId) => JSON.stringify({ input, snapshot });
@@ -4353,24 +3190,15 @@ it("binds Publishing record ports to the requested snapshot and authenticated au
   const anon = await fetch(standalone.base + "/api/public/projects/" + project.id + "/modules/publishing/fixture-public");
   assert.equal(anon.status, 200);
   assert.deepEqual(await anon.json(), { version: 2, write: false });
-  const hostingAuthor = {
-    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
-    Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=fixture-csrf",
-    "X-CSRF-Token": "fixture-csrf", "Content-Type": "application/json",
-  };
-  const hostingResponse = await rawHostedRequest(actionUrl(hosted.base, "propose"), hostingAuthor, body());
-  assert.equal(hostingResponse.status, 200, hostingResponse.body);
-  const proposed = JSON.parse(hostingResponse.body) as ActionResult<{ changeSet: { id: string; projectId: string } }>;
-  assert.ok(proposed.ok, hostingResponse.body);
+  const proposed = await invoke(standalone.base, "propose", owner) as ActionResult<{ changeSet: { id: string; projectId: string } }>;
+  assert.ok(proposed.ok, JSON.stringify(proposed));
   assert.equal(proposed.data.changeSet?.projectId, project.id);
   const changeSet = await persistence.read(reader => reader.getChangeSet(project.id, proposed.data.changeSet.id as ChangeSetId));
-  assert.equal(changeSet?.authorId, "writer-1");
+  assert.equal(changeSet?.authorId, "owner");
   assert.equal(changeSet?.status, "proposed");
   assert.equal((await persistence.read(reader => reader.getModuleRecord(project.id, "publishing", key)))?.version, 2);
   const mcpWrite = await invoke(standalone.base, "propose", client.mcpHeaders());
-  const hostedBearerWrite = await invoke(hosted.base, "propose", { Authorization: "Bearer write-grant", "Content-Type": "application/json" });
   assert.ok(!mcpWrite.ok || (mcpWrite.data as { changeSet: unknown }).changeSet === null);
-  assert.ok(!hostedBearerWrite.ok || (hostedBearerWrite.data as { changeSet: unknown }).changeSet === null);
   assert.equal((await persistence.read(reader => reader.listChangeSets(project.id, 20))).length, 1);
 });
 
@@ -4467,8 +3295,6 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   const settings = testClientSettings(native.project.id, client.publicJwks, client.isActive);
   const instance = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
   t.after(instance.close);
-  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
-  t.after(hosted.close);
   const projectId = native.project.id;
   const [first, second] = await native.persistence.transaction(async tx => {
     const seed = (title: string, orderKey: string) => tx.createDocument({
@@ -4511,25 +3337,6 @@ it("reorders hierarchy only by approving a version-bound native ChangeSet", asyn
   const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
   const unauthorized = await post(actionPath, { input: { ...input, idempotencyKey: randomUUID() }, snapshot }, bearerHeaders);
   assert.equal(unauthorized.status, 401);
-  const postHosted = (path: string, body: unknown, grant: string) => fetch(hosted.base + path, {
-    method: "POST", headers: { Authorization: `Bearer ${grant}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  const hostedInput = { ...input, idempotencyKey: randomUUID() };
-  assert.equal((await postHosted(actionPath, { input: hostedInput, snapshot }, "read-grant")).status, 403);
-  const hostedResponse = await postHosted(actionPath, { input: hostedInput, snapshot }, "write-grant");
-  assert.equal(hostedResponse.status, 200);
-  const hostedResult = await hostedResponse.json() as ActionResult<ChangeSetResult>;
-  assert.ok(hostedResult.ok, JSON.stringify(hostedResult));
-  const hostedChangeSet = hostedResult.data.changeSet;
-  assert.equal(hostedChangeSet.authorId, "writer-1");
-  assert.equal(hostedChangeSet.provenance.details.origin, "external-agent");
-  assert.equal(hostedChangeSet.status, "proposed");
-  const hostedChangeSetPath = `${nativePath}/changesets/${hostedChangeSet.id}`;
-  for (const action of ["approve", "apply"]) {
-    const denied = await postHosted(`${hostedChangeSetPath}/${action}`, { expectedVersion: hostedChangeSet.version }, "write-grant");
-    assert.equal(denied.status, 403);
-    assert.equal((await denied.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
-  }
   const unapproved = await post(changeSetPath + "/apply", { expectedVersion: changeSet.version });
   assert.equal(unapproved.status, 409);
   assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
