@@ -4,6 +4,11 @@
 
 [Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する読み取り専用の SVG ビューアーで、原本に登録されたシステム・状態・画面遷移図すべてを表示する。詳細画面の全図を含む表示件数はビルド時のmanifestから取得し、文書更新に伴う追加にも対応する。左側のカテゴリから図を切替え、拡大・縮小・元の設計書への移動・SVG 単体表示ができる。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
 
+図はカテゴリと検索語で絞り込める。
+画面 ID に対応する操作台帳がある場合は、実装と設計目標の記載を SHA 固定の表の行と共に表示する。
+関連実装ファイルへの Code Map リンクは、同じ SHA の索引に対象パスがある場合に表示する。
+版不一致、索引外、確認できない状態はビューアー上で確認できる。
+
 ## 生成・権限
 
 - `scripts/architecture-diagrams/pack.mjs` が承認済みの7設計書から `mermaid` フェンスを抽出する。順序とタイトルは元の見出しに従う。対象文書を増やすときは所有設計書を明示してインベントリを更新する。
@@ -25,6 +30,8 @@ node scripts/architecture-diagrams/pack.mjs "$SITE" "$COMMIT_SHA" "$MMDC_PATH"
 node scripts/architecture-diagrams/smoke.mjs "$SITE/architecture" "$PLAYWRIGHT_CORE_PACKAGE_DIR"
 ```
 
-成功時、`$SITE/architecture/` に `index.html`、`atlas.js`、`atlas.css`、`manifest.json`、SVG 群とブラウザースモーク撮影 `preview.png` を出力する。PR では repository-audit-preview artifact に保存し、main だけを GitHub Pages に公開する。**設計書の Mermaid が GitHub で表示可能なこととは別に、生成済み SVG の実表示と操作を検証する。**
+生成物は `$SITE/architecture/` の `index.html`、`atlas.js`、`atlas.css`、`manifest.json` と SVG 群。
+ブラウザースモークは公開物の外に画像を保存し、生成済み SVG の描画、検索、キーボード操作、拡大、再読込、Graphify データ欠損時の表示を確認する。
+PR では統合サイトを `repository-audit-preview` に保存する。
 
 一つでも Mermaid の構文エラー、SVG 生成失敗、未読込、実ブラウザーエラーがあれば、Pages 成果物を成功として公開しない。PR プレビュー成功は main への統合や本番運用を示さない。

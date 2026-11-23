@@ -78,8 +78,10 @@ try {
     for (const destination of ['architecture/', 'graph/', 'ci/', 'audit/']) {
       await page.goto(base);
       const primary = page.locator('.cx-pages-navigation');
-      if (!(await primary.isVisible())) {
+      if (viewport.width === 320) {
+        assert.equal(await primary.isVisible(), false, 'The mobile navigation opens on demand');
         const menu = page.locator('.cx-pages-menu-button');
+        assert.equal(await menu.getAttribute('aria-expanded'), 'false');
         await menu.focus();
         await page.keyboard.press('Enter');
         assert.equal(await menu.getAttribute('aria-expanded'), 'true');
@@ -101,7 +103,10 @@ try {
     await page.goto(base + 'architecture/#admin-5');
     await page.reload();
     await page.locator('#svg-image:not([hidden])').waitFor();
-    await page.waitForFunction(() => document.querySelector('#svg-image').naturalWidth > 50);
+    await page.waitForFunction(() => {
+      const { naturalWidth, naturalHeight } = document.querySelector('#svg-image');
+      return naturalWidth > 0 && naturalHeight > 0;
+    });
     assert.equal(new URL(page.url()).hash, '#admin-5');
 
     assert.ok(source.files?.length, 'Graph source metadata must contain indexed paths');
@@ -110,9 +115,10 @@ try {
     graphLink.searchParams.set('file', firstFile);
     await page.goto(graphLink.href);
     await page.reload();
+    await page.waitForFunction(path => document.querySelector('#selected-path')?.textContent === path, firstFile);
+    await page.locator('#search').fill(firstFile);
     const selection = page.locator('#file-list .file-button[aria-current="true"]');
     await selection.waitFor();
-    assert.equal(await page.locator('#selected-path').textContent(), firstFile);
     assert.equal(new URL(page.url()).searchParams.get('file'), firstFile);
     assert.deepEqual(errors, [], 'Browser or generated asset errors at width ' + viewport.width);
     await page.close();

@@ -5,18 +5,13 @@
   if (!button || !navigation) return;
 
   const narrow = window.matchMedia('(max-width: 48rem)');
-  const updateLayout = () => {
-    if (narrow.matches) {
-      navigation.dataset.collapsed = button.getAttribute('aria-expanded') === 'true' ? 'false' : 'true';
-    } else {
-      delete navigation.dataset.collapsed;
-      button.setAttribute('aria-expanded', 'true');
-    }
+  const setExpanded = expanded => {
+    button.setAttribute('aria-expanded', String(expanded));
+    navigation.dataset.collapsed = String(!expanded);
   };
+  const updateLayout = () => setExpanded(!narrow.matches);
   button.addEventListener('click', () => {
-    const expanded = button.getAttribute('aria-expanded') === 'true';
-    button.setAttribute('aria-expanded', String(!expanded));
-    updateLayout();
+    setExpanded(button.getAttribute('aria-expanded') !== 'true');
   });
   narrow.addEventListener('change', updateLayout);
   updateLayout();
