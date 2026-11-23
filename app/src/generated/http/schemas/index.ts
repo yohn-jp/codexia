@@ -6,4 +6,10 @@
  */
 
 export * from './apiError.zod';
+export * from './persistenceAnchorCreatedResponse.zod';
+export * from './persistenceDocument.zod';
+export * from './persistenceDocumentAnchorsPostBody.zod';
+export * from './persistenceDocumentListResponse.zod';
+export * from './persistenceDocumentsGetParams.zod';
+export * from './persistenceEvidenceAnchor.zod';
 export * from './persistenceStatusResponse.zod';

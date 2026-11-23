@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -42,6 +42,62 @@ test('download rejects missing artifacts, invalid redirects, size and digest mis
     let call = 0;
     await assert.rejects(downloadArtifact(artifact, 'owner/repo', 'token', async () => ++call === 1 ? new Response(null, { status: 302, headers: { location: 'https://storage.example/archive' } }) : new Response(bad)), /size|digest/);
   }
+});
+
+test('certification materializes only the selected plan and reports for one or many groups', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-exact-evidence-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const { downloadSelectedArtifacts } = await import('./download-artifacts.mjs');
+
+  const archives = new Map();
+  async function fixture(id, name, filename, data) {
+    const directory = path.join(root, String(id));
+    await mkdir(directory);
+    await writeFile(path.join(directory, filename), JSON.stringify(data));
+    await writeFile(path.join(directory, 'diagnostic.txt'), 'available in the original artifact only');
+    execFileSync('zip', ['-q', 'fixture.zip', filename, 'diagnostic.txt'], { cwd: directory });
+    const archive = await readFile(path.join(directory, 'fixture.zip'));
+    archives.set(id, archive);
+    return { ...artifact, id, name, size_in_bytes: archive.length, digest: `sha256:${createHash('sha256').update(archive).digest('hex')}` };
+  }
+
+  const selectedPlan = await fixture(1, 'ci-plan', 'ci-plan.json', { sha: identity.sourceSha });
+  const selectedReport = await fixture(2, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 2 });
+  const olderReport = await fixture(9, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 1 });
+  const retainedReport = await fixture(3, 'ci-evidence-unit-core', 'report.json', { group: 'unit-core', workflowAttempt: 1 });
+  const requestedIds = [];
+  const options = {
+    inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport] },
+    identity, repository: 'owner/repo', token: 'fixture-token',
+    async request(url) {
+      const { hostname, pathname } = new URL(url);
+      if (hostname === 'api.github.com') {
+        const id = Number(pathname.split('/').at(-2));
+        requestedIds.push(id);
+        return new Response(null, { status: 302, headers: { location: `https://storage.example/${id}` } });
+      }
+      return new Response(archives.get(Number(pathname.slice(1))));
+    },
+  };
+
+  const planDirectory = path.join(root, 'plan');
+  await downloadSelectedArtifacts({ ...options, ids: [1], kind: 'plan', directory: planDirectory });
+  assert.deepEqual(await readdir(planDirectory), ['ci-plan.json']);
+  assert.deepEqual(JSON.parse(await readFile(path.join(planDirectory, 'ci-plan.json'), 'utf8')), { sha: identity.sourceSha });
+
+  for (const ids of [[2], [2, 3]]) {
+    const directory = path.join(root, `evidence-${ids.length}`);
+    await downloadSelectedArtifacts({ ...options, ids, kind: 'evidence', directory });
+    const groups = ids.length === 1 ? ['browser-full-webkit'] : ['browser-full-webkit', 'unit-core'];
+    assert.deepEqual((await readdir(directory)).sort(), groups.map(group => `ci-evidence-${group}`));
+    for (const group of groups) {
+      const groupDirectory = path.join(directory, `ci-evidence-${group}`);
+      assert.deepEqual(await readdir(groupDirectory), ['report.json']);
+      assert.deepEqual(JSON.parse(await readFile(path.join(groupDirectory, 'report.json'), 'utf8')),
+        { group, workflowAttempt: group === 'unit-core' ? 1 : 2 });
+    }
+  }
+  assert.deepEqual(requestedIds, [1, 2, 2, 3]);
 });
 
 test('extracts only one requested JSON entry and rejects missing or malformed JSON', async (t) => {

@@ -8,15 +8,15 @@ import { isRealDirectory, validateImageReference, validateModelCachePath, valida
 test("OCI lifecycle command and mount inputs preserve their supported forms", () => {
   assert.equal(validateOciEngine(undefined), "podman");
   assert.equal(validateOciEngine("podman"), "podman");
-  assert.equal(validateOciEngine("/home/runner/bin/podman"), "/home/runner/bin/podman");
+  assert.throws(() => validateOciEngine("/home/runner/bin/podman"), /trusted Podman executable/u);
   assert.equal(validateModelCachePath("/tmp/model-cache", "/unused"), "/tmp/model-cache");
   assert.equal(validateModelCachePath("./relative/model-cache", "/unused"), resolve("./relative/model-cache"));
   assert.equal(validateImageReference("localhost/codexia:test", "unused"), "localhost/codexia:test");
 });
 
 test("OCI lifecycle rejects unsupported executable and mount/image syntax", () => {
-  assert.throws(() => validateOciEngine("docker"), /installed Podman executable/u);
-  assert.throws(() => validateOciEngine("podman --help"), /installed Podman executable/u);
+  assert.throws(() => validateOciEngine("docker"), /trusted Podman executable/u);
+  assert.throws(() => validateOciEngine("podman --help"), /trusted Podman executable/u);
   assert.throws(() => validateModelCachePath("/tmp/models:/other", "/unused"), /mount delimiters/u);
   assert.throws(() => validateImageReference("--help", "unused"), /image reference/u);
 });

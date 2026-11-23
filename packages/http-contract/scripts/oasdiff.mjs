@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,8 +20,10 @@ function fail(message) {
   throw new Error(message);
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit" });
+function run(command, args, input) {
+  const result = spawnSync(command, args, input === undefined
+    ? { stdio: "inherit" }
+    : { input, stdio: ["pipe", "inherit", "inherit"] });
   if (result.error) throw result.error;
   if (result.status !== 0) fail(`${command} exited with status ${result.status ?? "unknown"}`);
 }
@@ -54,11 +56,10 @@ export async function resolveOasdiffBinary() {
     const digest = createHash("sha256").update(archive).digest("hex");
     if (digest !== asset.sha256) fail(`oasdiff ${VERSION} digest mismatch for ${asset.file}`);
 
-    const archivePath = path.join(temp, asset.file);
-    await writeFile(archivePath, archive, { mode: 0o600 });
     const extracted = path.join(temp, "extracted");
     await mkdir(extracted);
-    run("tar", ["-xzf", archivePath, "-C", extracted]);
+    // Integrity-bound archive bytes are streamed to tar; no downloaded archive is persisted.
+    run("tar", ["-xzf", "-", "-C", extracted], archive);
     const extractedBinary = path.join(extracted, asset.binary);
     await stat(extractedBinary);
     await chmod(extractedBinary, 0o755);

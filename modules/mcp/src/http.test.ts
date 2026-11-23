@@ -237,6 +237,100 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
   }
 });
 
+test("writing context and its metadata-only manifest expose saved-scene provenance over SDK HTTP", async () => {
+  const sceneSnapshot = { projectId: "project-one", projectVersion: 11 };
+  const title = "雪🌙";
+  const savedText = "港𠮷。";
+  const selection = { from: 2, to: 5, text: "選𠮷" };
+  const host = actionContext([], [{ id: "story.scene.context", module: "story", effect: "read" }]);
+  host.reader = { ...host.reader, snapshot: sceneSnapshot };
+  // Stub the admitted Story action; the SDK transport and MCP projection are real.
+  host.invoke = async (actionId, input) => {
+    assert.equal(actionId, "story.scene.context");
+    assert.deepEqual(input, { sceneId: "scene-one" });
+    return { ok: true, snapshot: sceneSnapshot, data: {
+      scene: { id: "scene-one", title },
+      sceneRevision: "scene-rev-1",
+      manuscript: { id: "manuscript-one" },
+      manuscriptRevision: "manuscript-rev-1",
+      manuscriptBody: savedText,
+    } };
+  };
+  const contribution = createMcpHttpContribution(new Map());
+  const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
+  const transport = new StreamableHTTPClientTransport(
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
+    { fetch },
+  );
+  const client = new Client({ name: "mcp-writing-context-test", version: "1.0.0" });
+
+  const sceneIdentity = { project_id: "project-one", scene_id: "scene-one" };
+  const expectedParts = [
+    { kind: "scene", source: "arcadia", source_identity: sceneIdentity, revision: "scene-rev-1", characters: 2, bytes: 7 },
+    { kind: "saved_manuscript", source: "arcadia",
+      source_identity: { ...sceneIdentity, manuscript_id: "manuscript-one" }, revision: "manuscript-rev-1", characters: 3, bytes: 10 },
+    { kind: "selection", source: "mcp_client",
+      source_identity: { ...sceneIdentity, from: 2, to: 5 }, revision: null, characters: 2, bytes: 7 },
+  ];
+  const args = { project_id: "project-one", scene_id: "scene-one", selection };
+
+  try {
+    await client.connect(transport);
+    for (const [tool, metadataOnly] of [["get_writing_context", false], ["get_context_manifest", true]] as const) {
+      const result = await client.callTool({ name: tool, arguments: args });
+      assert.equal(result.isError, undefined);
+      const response = result.structuredContent as {
+        snapshot: SnapshotId;
+        data: Record<string, unknown> & { parts?: Array<{ kind: string }>; manifest?: { parts: Array<{ kind: string }> } };
+      };
+      assert.deepEqual(response.snapshot, sceneSnapshot);
+      const manifest = metadataOnly ? response.data : response.data.manifest;
+      assert.ok(manifest);
+      assert.partialDeepStrictEqual(manifest, {
+        scope: "arcadia_provided_context",
+        external_host_final_prompt_observed: false,
+        draft: { status: "not_shared" },
+      });
+      assert.deepEqual(manifest.parts?.map(part => part.kind), expectedParts.map(part => part.kind), tool);
+      for (const [index, { characters, bytes, ...provenance }] of expectedParts.entries()) {
+        assert.partialDeepStrictEqual(manifest.parts?.[index], {
+          ...provenance,
+          metadata_included: true,
+          dropped: metadataOnly,
+          trimmed: false,
+          size: {
+            source_character_count: characters,
+            included_character_count: metadataOnly ? 0 : characters,
+            included_byte_count: metadataOnly ? 0 : bytes,
+            token_count: null,
+            token_count_status: "not_measured",
+          },
+        });
+      }
+
+      assert.ok(Array.isArray(result.content));
+      assert.equal(result.content.length, 1);
+      const [content] = result.content;
+      assert.ok(content?.type === "text" && typeof content.text === "string");
+      assert.deepEqual(JSON.parse(content.text), response, tool);
+      if (metadataOnly) {
+        assert.equal("manifest" in response.data, false);
+        for (const text of [title, savedText, selection.text]) assert.equal(content.text.includes(text), false, tool);
+      } else {
+        assert.partialDeepStrictEqual(response.data, {
+          scene: { id: "scene-one", title, revision: "scene-rev-1" },
+          saved_manuscript: { id: "manuscript-one", revision: "manuscript-rev-1", text: savedText },
+          selection: { ...selection, status: "client_provided" },
+          draft: { status: "not_shared" },
+        });
+      }
+    }
+  } finally {
+    await transport.terminateSession().catch(() => undefined);
+    await client.close().catch(() => undefined);
+  }
+});
+
 test("the canonical Story materializer is discoverable and reads the selected snapshot", async () => {
   const calls: string[] = [];
   const host = actionContext(calls);
