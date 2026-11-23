@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Publish a file-level explorer derived from Graphify's AST graph and preserve its native overview.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +24,8 @@ function safeLabel(value) {
   return typeof value === 'string' ? value.slice(0, 240) : '';
 }
 
-export function summarizeGraph(graph, sha) {
+export function summarizeGraph(graph, sha, trackedFiles) {
+  if (!(trackedFiles instanceof Set) || trackedFiles.size === 0) throw new Error('Git-tracked file inventory is required');
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.links)) {
     throw new Error('Graphify graph.json requires nodes and links arrays');
   }
@@ -32,7 +34,7 @@ export function summarizeGraph(graph, sha) {
   for (const node of graph.nodes) {
     if (!node || typeof node !== 'object') continue;
     const path = repoPath(node.source_file);
-    if (!path) continue;
+    if (!path || !trackedFiles.has(path)) continue;
     if (!files.has(path)) files.set(path, { path, symbols: new Set(), outgoing: new Map(), incoming: new Map() });
     const file = files.get(path);
     const label = safeLabel(node.label);
@@ -69,7 +71,14 @@ export function summarizeGraph(graph, sha) {
   };
 }
 
-export async function packGraph(sourceDir, pagesDir, sha) {
+export function trackedPathsFromGit(repoRoot = process.cwd()) {
+  const inventory = execFileSync('git', ['ls-files', '--cached', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const paths = new Set(inventory.split('\0').filter(Boolean));
+  if (paths.size === 0) throw new Error('Git returned no tracked files');
+  return paths;
+}
+
+export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = trackedPathsFromGit()) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Graph source must be a full commit SHA');
   const source = resolve(sourceDir);
   // Read once, validate, and publish the same native HTML bytes.
@@ -80,7 +89,7 @@ export async function packGraph(sourceDir, pagesDir, sha) {
 
   const graphBytes = await readFile(join(source, 'graph.json'));
   if (graphBytes.byteLength < 2 || graphBytes.byteLength > MAX_GRAPH_BYTES) throw new Error('Graph JSON empty or over 80 MiB limit');
-  const index = summarizeGraph(JSON.parse(graphBytes.toString('utf8')), sha);
+  const index = summarizeGraph(JSON.parse(graphBytes.toString('utf8')), sha, trackedFiles);
   // The JSON is part of the HTML, but source snippets, graph.json and raw graph edges aren't published separately.
   const payload = JSON.stringify(index).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const template = await readFile(new URL('./explorer.html', import.meta.url), 'utf8');

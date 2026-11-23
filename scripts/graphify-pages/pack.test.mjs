@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { packGraph, summarizeGraph } from './pack.mjs';
 
 const sha = 'a'.repeat(40);
+const trackedFiles = new Set(['packages/api/server.ts', 'packages/core/db.ts', 'modules/story/scene.ts']);
 const graph = {
   nodes: [
     { id: 'a', label: 'server.ts', source_file: 'packages/api/server.ts', file_type: 'code' },
@@ -14,6 +15,8 @@ const graph = {
     { id: 'c', label: '</script><script>alert(1)</script>', source_file: 'modules/story/scene.ts', file_type: 'code' },
     { id: 'external', label: 'pkg', file_type: 'concept', external: true },
     { id: 'bad', label: 'secret', source_file: '/private/home/secret.ts' },
+    { id: 'artifact', label: 'dist file', source_file: 'packages/core/dist/index.js' },
+    { id: 'dependency', label: 'node:fs', source_file: 'node:fs' },
   ],
   links: [
     { source: 'a', target: 'b', relation: 'imports' },
@@ -23,19 +26,21 @@ const graph = {
     { source: 'external', target: 'a', relation: 'imports' },
     { source: 'missing', target: 'a', relation: 'calls' },
     { source: 'b', target: 'c', relation: 'related_to' },
+    { source: 'a', target: 'artifact', relation: 'imports' },
+    { source: 'dependency', target: 'a', relation: 'imports' },
   ],
 };
 
 test('indexes source files, symbols and directed cross-file references without claiming unused', () => {
-  const result = summarizeGraph(graph, sha);
-  assert.deepEqual(result.stats, { files: 3, nodes: 6, links: 7, crossFileLinks: 3 });
+  const result = summarizeGraph(graph, sha, trackedFiles);
+  assert.deepEqual(result.stats, { files: 3, nodes: 8, links: 9, crossFileLinks: 3 });
   const api = result.files.find(f => f.path === 'packages/api/server.ts');
   const core = result.files.find(f => f.path === 'packages/core/db.ts');
   assert.deepEqual(api.symbols, ['startServer']);
   assert.deepEqual(api.incoming.map(x => x.path), ['modules/story/scene.ts']);
   assert.deepEqual(api.outgoing, [{ path: 'packages/core/db.ts', count: 2, relations: ['calls', 'imports'] }]);
   assert.deepEqual(core.incoming.map(x => x.path), ['packages/api/server.ts']);
-  assert.ok(!result.files.some(f => f.path.includes('private')));
+  assert.ok(!result.files.some(f => f.path.includes('private') || f.path.includes('/dist/') || f.path.startsWith('node:')));
 });
 
 test('publishes a searchable file explorer and keeps native community graph intact', async t => {
@@ -46,7 +51,7 @@ test('publishes a searchable file explorer and keeps native community graph inta
   const generatedHtml = Buffer.from('<!doctype html><html><body>' + 'original Graphify native '.repeat(20) + '</body></html>\r\n');
   await writeFile(join(source, 'graph.html'), generatedHtml);
   await writeFile(join(source, 'graph.json'), JSON.stringify(graph));
-  const result = await packGraph(source, join(root, 'site'), sha);
+  const result = await packGraph(source, join(root, 'site'), sha, trackedFiles);
   const published = join(root, 'site', 'graph');
   assert.deepEqual((await readdir(published)).sort(), ['communities.html', 'index.html', 'source.json']);
   assert.equal(result.path, join(published, 'index.html'));
@@ -67,11 +72,11 @@ test('rejects invalid or incomplete inputs without publishing output', async t =
   const root = await mkdtemp(join(tmpdir(), 'graphify-pages-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'graph.html'), 'not HTML'.repeat(30));
-  await assert.rejects(packGraph(root, join(root, 'site'), 'main'), /full commit SHA/);
-  await assert.rejects(packGraph(root, join(root, 'site'), sha), /complete HTML/);
+  await assert.rejects(packGraph(root, join(root, 'site'), 'main', trackedFiles), /full commit SHA/);
+  await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /complete HTML/);
   await writeFile(join(root, 'graph.html'), '<html>' + 'ok '.repeat(40) + '</html>');
-  await assert.rejects(packGraph(root, join(root, 'site'), sha), /ENOENT/);
+  await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /ENOENT/);
   await writeFile(join(root, 'graph.json'), '{}');
-  await assert.rejects(packGraph(root, join(root, 'site'), sha), /nodes and links arrays/);
+  await assert.rejects(packGraph(root, join(root, 'site'), sha, trackedFiles), /nodes and links arrays/);
   assert.deepEqual(await readdir(root), ['graph.html', 'graph.json']);
 });

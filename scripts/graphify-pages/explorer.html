@@ -108,7 +108,9 @@
   const byPath = new Map(files.map(f => [f.path, f]));
   const $ = id => document.getElementById(id);
   const nf = new Intl.NumberFormat('ja-JP');
-  let selected = byPath.get(new URLSearchParams(location.search).get('file')) || files[0];
+  const usage = f => f.incoming.length + f.outgoing.length;
+  const firstChoice = files.filter(f => /^(packages|modules|app)\//.test(f.path)).sort((a,b) => usage(b) - usage(a))[0] || files[0];
+  let selected = byPath.get(new URLSearchParams(location.search).get('file')) || firstChoice;
   for (const [name, value] of Object.entries({ 'stat-files': data.stats.files, 'stat-nodes': data.stats.nodes, 'stat-links': data.stats.links, 'stat-cross': data.stats.crossFileLinks })) $(name).textContent = nf.format(value);
   const areas = [...new Set(files.map(f => f.path.split('/')[0]))].sort();
   for (const area of areas) { const opt=document.createElement('option');opt.value=area;opt.textContent=area;$('area').append(opt); }
@@ -128,7 +130,7 @@
     const q = $('search').value.toLocaleLowerCase().trim();
     const area = $('area').value;
     const noInbound = $('no-inbound').checked;
-    const filtered = files.filter(f => (!area || f.path.split('/')[0] === area) && (!noInbound || f.incoming.length === 0) && (!q || f.path.toLocaleLowerCase().includes(q) || f.symbols.some(s => s.toLocaleLowerCase().includes(q))));
+    const filtered = files.filter(f => (!area || f.path.split('/')[0] === area) && (!noInbound || f.incoming.length === 0) && (!q || f.path.toLocaleLowerCase().includes(q) || f.symbols.some(s => s.toLocaleLowerCase().includes(q)))).sort((a,b) => usage(b) - usage(a) || a.path.localeCompare(b.path));
     $('file-count').textContent = nf.format(filtered.length) + '件 / ' + nf.format(files.length) + '件（最大200件を表示）';
     const root = $('file-list'); root.replaceChildren();
     for (const f of filtered.slice(0, 200)) {
