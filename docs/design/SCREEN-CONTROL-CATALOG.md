@@ -10,7 +10,7 @@
 | 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` **目標のみ** | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
 | 公開読者 | 共有された内容を読む | `/r/:module/:project/:slug`のみ | 非公開原稿/設定/履歴、書込、作者登録 |
 | 外部AI/MCP | 許可された作品を参照・解析して提案 | `/mcp`と登録済みtool。**Web画面は不要** | 作者の変更承認/適用、直接persistence、資格情報 |
-| 運用者 | 初期VM構築、証明済み更新、バックアップ/復旧 | 保護済みGitHub Actions/Tailscale SSH/Ansible。**作者用Web UIではない** | ブラウザー上で機微secretを配布、導入キーでSSH認証 |
+| 運用者 | 初期VM構築、証明済み更新、特権バックアップ/本番復旧 | 保護済みGitHub Actions/Tailscale SSH/Ansible。**作者用Web UIからはS3保存先の指定・検証・保全要求/結果の参照のみ** | WebにVM/IAM権限や復号秘密鍵を渡すこと、導入キーでSSH認証 |
 
 今回「閲覧者」「初回owner候補」「MCP client」を同じ`user`として扱わない。想定利用者ごとに入口・失敗時の挙動・権限が違う。単一ownerの契約を、未合意の一般編集者・管理者グループへ勝手に拡張しない。
 
@@ -50,7 +50,12 @@
 | CON-11 | `/console/security` session管理 | OWNER-SESSION＋fresh確認（操作による） | 他端末終了、全他セッション終了→CON-00 | 目標 |
 | CON-20 | `/console/identity` OIDC管理 | OWNER-SESSION＋fresh確認 | issuer/client登録・検証・リンク・有効化/無効化→CON-00 | 目標 |
 | CON-21 | `/console/identity` OAuth client/grants | OWNER-SESSION＋object/scope認可 | クライアント・同意の参照/許可された失効→CON-00 | 目標 |
-| OPS-01 | Webではなくprotected workflow/SSH | OPERATOR | VM構築・更新・復旧（設計はデプロイ文書に委任） | 実装/目標分離 |
+| CON-30 | `/console/backups` | OWNER-SESSION | S3保存先/適用状態・off-VM保全・復旧検証の状態→各バックアップ画面 | 目標・未実装 |
+| CON-31 | `/console/backups/destination` | OWNER-SESSION＋fresh（secret/active変更時） | S3 provider/endpoint/bucket/prefix/credential（write-only）を編集→CON-32 | 目標・未実装 |
+| CON-32 | `/console/backups/verification` | OWNER-SESSION＋fresh（activate時） | probe→revision照合→activeの適用結果再取得→CON-30 | 目標・未実装 |
+| CON-33 | `/console/backups/history` | OWNER-SESSION | backup run/暗号文receiptと失敗・未確認を表示→CON-30/34 | 目標・未実装 |
+| CON-34 | `/console/backups/recovery` | OWNER-SESSIONのread-only | 隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない | 目標・未実装 |
+| OPS-01 | Webではなくprotected workflow/SSH | OPERATOR | VM構築・更新・**本番**復旧（設計はデプロイ文書に委任）。保管先設定はCON-30〜34のowner UI、実際のhost backup/restoreはprotected executor/operator | 実装/目標分離 |
 
 **インストール版iOS**はMobileの同じ文章・作品/Revision/回復契約を共有し、OAuthはsystem browser、token storageはKeychain。`capacitor://localhost`内で既存Webを読み直すだけでは認証が成立しない。別の原稿DBやSwiftUI画面を設けない。
 
@@ -116,6 +121,15 @@
 | CON-11.A | 他セッション終了 | OWNER-SESSION＋対象確認 | 最新session一覧を再取得 | 自分の現在session個別終了は無効 |
 | CON-20.A | OIDC登録/検証/有効化 | OWNER-SESSION＋fresh、issuer/sub不変 | verified owner linkを保持 | 未検証providerをactiveにしない |
 | CON-21.A | OAuth client/grantを確認・revoke | OWNER-SESSION、owner＋client/scope対象 | revoke receipt/状態再取得 | 既存access JWTの有効性をlogoutだけで偽らない |
+| CON-00.B | バックアップ管理へ | OWNER-SESSION。保管先変更の権限とは別 | CON-30へ | 401/403時は認証・拒否表示。元のdraftは保持 |
+| CON-30.A | 現在の保管先・保全状態を更新 | `GET /api/console/backups/status`、OWNER-SESSION | 設定/検証/DR証拠を区別してCON-30 | API未到達ならUNKNOWN、成功とみなさない |
+| CON-30.B | 手動バックアップを要求 | `POST /api/console/backups/runs`、OWNER-SESSION＋fresh、停止の影響・確認 | 202＋run IDを保存しCON-33へ | 既存runを二重生成しない。停止・拒否・不明を区別 |
+| CON-31.A | S3設定案を保存 | `PUT /api/console/backups/config/draft`、If-Match、secretはwrite-only | 設定revision取得→CON-32 | 412/422なら同じ入力を保持、秘密値を再表示しない |
+| CON-32.A | S3接続検証 | `POST /api/console/backups/config/probes`、draft revision | probe IDで状態を再取得、結果がPASSEDならactivateへ | probe失敗や応答不明を保全済みにしない |
+| CON-32.B | 検証済み設定を有効化 | `POST /api/console/backups/config/activate`、OWNER-SESSION＋fresh＋同一revisionのPASSED probe | 202後はoperation結果再取得→ACTIVE後CON-30 | 202をACTIVEと誤表示しない。stale/失効probeを拒否 |
+| CON-30.C | S3設定を無効化 | `POST /api/console/backups/config/disable`、fresh＋影響確認 | サーバー確定後CON-30、保全済み遠隔objectは削除しない | requiredに代替が無いなら拒否、DR保証を偽装しない |
+| CON-33.A | backup runとreceiptを開く | `GET /api/console/backups/runs`と`GET .../runs/:id`、OWNER-SESSION | 同じrun IDの状態と暗号文receiptを表示 | UNKNOWN/FAILED/接続断を成功扱いしない |
+| CON-34.A | 独立restore証拠を表示 | `GET /api/console/backups/recovery`、OWNER-SESSION | 証拠と保護された運用手順を表示 | 実本番restore/SSH/Ansibleを実行しない |
 | OPS-01.A | デプロイ/復旧を承認・実行 | OPERATOR、別管理planeと署名ではない証明書/backup | 保護されたworkflowの結果へ | Webのボタンに実装しない |
 
 ## 画面ごとの操作優先順位・視覚表示
@@ -129,6 +143,7 @@
 | Console setup | キー確認→Passkey作成→状態確認 | 説明・再試行・登録中断 | キーの平文再表示、成功未確認でowner作成を再実行しない |
 | Console security | 追加/確認/セッション終了 | 名称変更・一覧再取得 | 最後の認証器削除不可、fresh proofと結果照合 |
 | Console identity | provider検証・client同意確認 | 設定の説明 | 未検証のissuer/subjectをactiveにしない |
+| Console backups | S3保存先の設定→probe→再認証→有効化 | 暗号化保全点/独立DR証拠とrun履歴の参照 | secretの再表示、未確認202の成功化、公開API経由の本番復元、保全object削除を禁止 |
 
 ## 状態ごとのUIルール（商用品質の受入基準）
 
@@ -151,4 +166,4 @@
 
 本書の各CTRL IDについて、最低限 **(A) 未認証/不適切principal、(B)正常、(C)入力不正、(D)stale・競合、(E)通信断/応答不明、(F)離脱/戻る、(G)キーボード/モバイル** を分類して記録する。すべての画面を単一E2Eへ詰めず、principal・session・project・revision・operation receiptの実値を証拠とする。
 
-受入時に控えるのは `screen ID / control ID / URL / principal / request(method,path) / outcome HTTP / DB結果 / screenshot / source SHA`。目標画面は実装前なら`NOT_IMPLEMENTED`と記録し、モックの成功をPASSにしない。操作フローの正本は [Screen State Atlas](SCREEN-STATE-ATLAS.md) で更新する。
+受入時に控えるのは `screen ID / control ID / URL / principal / request(method,path) / outcome HTTP / DB結果 / screenshot / source SHA`。**CON-30〜34ではさらにbackup configuration revision、probe/run/receipt IDと遠隔保全・独立restoreの異なる合否を記録する。**目標画面は実装前なら`NOT_IMPLEMENTED`と記録し、モックの成功をPASSにしない。操作フローの正本は [Screen State Atlas](SCREEN-STATE-ATLAS.md) で更新する。
