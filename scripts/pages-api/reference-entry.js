@@ -7,6 +7,7 @@ createApiReference('#scalar-api-reference', {
   showSidebar: true,
   hideTestRequestButton: true,
   hideClientButton: true,
+  documentDownloadType: 'none',
   showDeveloperTools: 'never',
   persistAuth: false,
   showExtensions: true,

@@ -35,7 +35,7 @@ export function renderSecuritySchemes(schemes) {
     let description = `${esc(scheme.type)} authentication`;
     if (scheme.type === 'http' && typeof scheme.scheme === 'string') description = `HTTP ${esc(scheme.scheme)}`;
     if (scheme.type === 'apiKey' && typeof scheme.in === 'string' && typeof scheme.name === 'string') {
-      description = `API key in ${esc(scheme.in)}; name: <code>${esc(scheme.name)}</code>`;
+      description = `API key in ${esc(scheme.in)}; name: <code class="cx-pages-code">${esc(scheme.name)}</code>`;
     }
     return `<li><strong>${esc(name)}</strong>: ${description}</li>`;
   }).join('\n');
