@@ -68,7 +68,7 @@ test('generates and verifies sitemap, SHA landing pages and review integrity aft
   try {
     const auditManifest=readFileSync(join(site,'manifest.json'),'utf8');
     const registry=generate(site,sha,origin);
-    assert.equal(registry.routes.length,9);
+    assert.equal(registry.routes.length,10);
     assert.equal(registry.routes.find(route=>route.route==='/ci/').sourceSha,undefined);
     assert.equal(registry.routes.find(route=>route.route==='/audit/').sourceSha,undefined);
     assert.equal(registry.routes.find(route=>route.route==='/architecture/').sourceSha,sha);
@@ -82,11 +82,11 @@ test('generates and verifies sitemap, SHA landing pages and review integrity aft
     assert.match(home,new RegExp(`reviews/${sha}/index.html`,'u'));
     assert.match(readFileSync(join(site,'snapshots',sha,'index.html'),'utf8'),/download="codexia-[a-f0-9]{40}-repomix\.json"/u);
     assert.equal(readFileSync(join(site,'manifest.json'),'utf8'),auditManifest);
-    assert.deepEqual(verify(site,origin).routes,9);
+    assert.deepEqual(verify(site,origin).routes,10);
     put(join(site,'reviews',sha,'index.html'),readFileSync(join(site,'reviews',sha,'index.html'),'utf8')+'<nav>Shared navigation</nav>');
     assert.throws(()=>verify(site,origin),/Output (?:size|digest) mismatch/u);
     assert.deepEqual(finalize(site,origin),{finalizedReviews:1});
-    assert.equal(verify(site,origin).routes,9);
+    assert.equal(verify(site,origin).routes,10);
   } finally { cleanup(site); }
 });
 
@@ -172,6 +172,6 @@ test('review finalization rejects symlinked files before updating integrity meta
       renameSync(original, path);
     }
     assert.deepEqual(finalize(site, origin), { finalizedReviews: 1 });
-    assert.equal(verify(site, origin).routes, 9);
+    assert.equal(verify(site, origin).routes, 10);
   } finally { cleanup(site); }
 });
