@@ -109,6 +109,8 @@ for ((attempt=0; attempt<60; attempt++)); do
   sleep 1
 done
 [[ "$(psql_admin -h 127.0.0.1 -c 'SHOW server_version_num')" =~ ^17[0-9]{4}$ ]]
+timeout 120s podman wait --interval 250ms --condition healthy codexia-db >/dev/null
+[[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-db)" == healthy ]]
 record rootless_podman_postgresql_17
 
 # The shared smoke fixture creates the schema and enrolls the owner through its

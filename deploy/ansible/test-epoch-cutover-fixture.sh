@@ -21,10 +21,13 @@ mkdir -p "$report_dir"
 work=$(mktemp -d "${RUNNER_TEMP}/codexia-epoch-cutover.XXXXXXXX")
 created_user=false
 fixture_uid=
+manager_dropin=
+environment_generator=
 
 run_as_codexia() {
   sudo -n -u codexia env -i HOME="$fixture_home" USER=codexia LOGNAME=codexia \
     PATH="$(dirname -- "$(command -v node)"):/usr/bin:/bin" \
+    XDG_CONFIG_HOME="$fixture_home/.config" \
     XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
     /bin/bash -c 'cd -- "$HOME"; exec "$@"' bash "$@"
 }
@@ -44,6 +47,12 @@ cleanup() {
     sudo -n loginctl disable-linger codexia || status=1
     sudo -n loginctl terminate-user codexia >/dev/null 2>&1
     sudo -n userdel --remove codexia >/dev/null || status=1
+  fi
+  if [[ -n "$environment_generator" ]]; then sudo -n rm -f -- "$environment_generator" || status=1; fi
+  if [[ -n "$manager_dropin" ]]; then
+    sudo -n rm -f -- "$manager_dropin" || status=1
+    sudo -n rmdir -- "$(dirname -- "$manager_dropin")" || status=1
+    sudo -n systemctl daemon-reload || status=1
   fi
   rm -rf -- "$work" || status=1
   docker image rm "$fixture_tag:prior" "$fixture_tag:candidate" >/dev/null 2>&1
@@ -75,9 +84,36 @@ created_user=true
 fixture_uid=$(id -u codexia)
 grep -q '^codexia:' /etc/subuid
 grep -q '^codexia:' /etc/subgid
+
+# Configure the user manager before loginctl starts it. Quadlet reads the
+# user manager's generated environment, independently of sudo's shell env.
+dropin_directory="/etc/systemd/system/user@$fixture_uid.service.d"
+generator_path=/etc/systemd/user-environment-generators/98-codexia-epoch-fixture
+[[ ! -e "$dropin_directory" && ! -L "$dropin_directory" && ! -e "$generator_path" && ! -L "$generator_path" ]]
+sudo -n install -d -m 0755 "$dropin_directory" "$(dirname -- "$generator_path")"
+manager_dropin="$dropin_directory/95-codexia-epoch-fixture.conf"
+cat <<SYSTEMD | sudo -n tee "$manager_dropin" >/dev/null
+[Service]
+Environment=HOME=$fixture_home
+Environment=XDG_CONFIG_HOME=$fixture_home/.config
+Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
+SYSTEMD
+sudo -n install -m 0755 /dev/null "$generator_path"
+environment_generator=$generator_path
+cat <<GENERATOR | sudo -n tee "$environment_generator" >/dev/null
+#!/bin/sh
+if [ "\$(id -u)" = "$fixture_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$fixture_home/.config' 'XDG_RUNTIME_DIR=/run/user/$fixture_uid'
+fi
+GENERATOR
+sudo -n systemctl daemon-reload
 sudo -n loginctl enable-linger codexia
 sudo -n systemctl start "user@$fixture_uid.service"
-run_as_codexia systemctl --user show --property=Version >/dev/null
+run_as_codexia systemctl --user import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
+run_as_codexia systemctl --user daemon-reload
+manager_environment=$(run_as_codexia systemctl --user show-environment)
+grep -Fxq "XDG_CONFIG_HOME=$fixture_home/.config" <<< "$manager_environment"
+grep -Fxq "XDG_RUNTIME_DIR=/run/user/$fixture_uid" <<< "$manager_environment"
 [[ "$(run_as_codexia podman info --format '{{.Host.Security.Rootless}}')" == true ]]
 
 run_as_codexia mkdir -m 0700 "$fixture_home/fixture"
