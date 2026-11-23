@@ -2,6 +2,8 @@
 
 **Normative lifecycle transitions:** [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) and [Compatible backend update / rollback](UPDATE-FLOW.md) define the required state machines. Runbooks describe how to operate the approved transition; the current script is implementation evidence, not the design authority.
 
+**Protected production entrypoints:** [GitHub Actions Bootstrap workflow](PRODUCTION-BOOTSTRAP.md) handles approved initial host, database and Better Auth convergence. [Push deployment](PUSH-DEPLOYMENT.md) handles independently certified application activation and compatible updates. Neither bootstrap nor ordinary backend deployment performs the Frontend/Backend epoch pair cutover.
+
 This directory implements the deployable boundary specified by [System design](../architecture/SYSTEM-DESIGN.md) and [Infrastructure as code](IAC.md). The React/Vite application is released as Cloudflare Workers Static Assets. The API is a separate rootless Podman service; Cloudflare Tunnel is its only public origin path.
 
 ## Request and release paths

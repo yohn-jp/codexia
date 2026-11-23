@@ -129,6 +129,488 @@ model AuthMethodsResponse {
   @body body: AuthMethodsBody;
 }
 
+// Response details are optional/open where compatibility requires the previous
+// unconstrained JSON object schema. These DTOs record observed wire members.
+model OAuthConsentContextBody {
+  client?: { name?: string; ...Record<unknown>; };
+  requestedScopes?: string[];
+  redirectUri?: string;
+  ...Record<unknown>;
+}
+
+model ApiSessionBody {
+  authenticated?: boolean;
+  authorScope?: string;
+  ...Record<unknown>;
+}
+
+model PublicJobBody {
+  id?: string;
+  type?: string;
+  status?: "queued" | "running" | "done" | "error";
+  progress?: float64 | null;
+  result?: unknown;
+  error?: string | null;
+  errorCode?: string;
+  retryable?: boolean;
+  createdAt?: utcDateTime;
+  updatedAt?: utcDateTime;
+  finishedAt?: utcDateTime | null;
+  ...Record<unknown>;
+}
+
+model InboxItemBody {
+  id?: string;
+  kind?: "job-complete";
+  jobId?: string;
+  jobType?: string;
+  title?: string;
+  body?: string;
+  status?: "done" | "error";
+  read?: boolean;
+  userId?: string | null;
+  projectKey?: string;
+  createdAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model InboxListBody {
+  items?: InboxItemBody[];
+  unreadCount?: int32;
+  ...Record<unknown>;
+}
+
+model InboxReadAllBody {
+  marked?: int32;
+  ...Record<unknown>;
+}
+
+model InboxReadItemBody {
+  item?: InboxItemBody;
+  ...Record<unknown>;
+}
+
+model RecentActivityItemBody {
+  sceneId?: string;
+  sentenceOffset?: int32 | null;
+  pageIndex?: int32 | null;
+  deviceType?: "desktop" | "mobile";
+  updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model RecentActivityBody {
+  items?: RecentActivityItemBody[];
+  ...Record<unknown>;
+}
+
+model ProjectObservationBody {
+  snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
+  observedAt?: utcDateTime;
+  state?: "fresh" | "failed" | "unknown";
+  ...Record<unknown>;
+}
+
+model ProjectReadBody {
+  project?: Project;
+  observation?: ProjectObservationBody;
+  ...Record<unknown>;
+}
+
+model ProjectTreeSceneBody {
+  id?: string;
+  title?: string;
+  ...Record<unknown>;
+}
+
+model ProjectTreeChapterBody {
+  id?: string;
+  title?: string;
+  scenes?: ProjectTreeSceneBody[];
+  ...Record<unknown>;
+}
+
+model ProjectTreeVolumeBody {
+  id?: string;
+  title?: string;
+  chapters?: ProjectTreeChapterBody[];
+  ...Record<unknown>;
+}
+
+model ProjectTreeBody {
+  title?: string;
+  volumes?: ProjectTreeVolumeBody[];
+  ...Record<unknown>;
+}
+
+model ProjectTreeResponse {
+  snapshot?: JsonObject;
+  tree?: ProjectTreeBody;
+  ...Record<unknown>;
+}
+
+model ProjectSceneBody {
+  id?: string;
+  title?: string;
+  text?: string;
+  revision?: string;
+  ...Record<unknown>;
+}
+
+model ProjectSceneResponse {
+  snapshot?: JsonObject;
+  scene?: ProjectSceneBody;
+  document?: { path?: string; content?: string; revision?: string; ...Record<unknown>; };
+  metadata?: { path?: string; content?: string; revision?: string; ...Record<unknown>; };
+  ...Record<unknown>;
+}
+
+model ProjectSnapshotResponse {
+  snapshot?: JsonObject;
+  document?: { path?: string; revision?: string; ...Record<unknown>; } | null;
+  ...Record<unknown>;
+}
+
+model ProjectStatusBody {
+  projectId?: string;
+  projectVersion?: int32;
+  state?: "durable";
+  ...Record<unknown>;
+}
+
+model KnowledgeNodeBody {
+  id?: string; projectId?: string; type?: string; name?: string; attributes?: JsonObject;
+  status?: "proposed" | "confirmed" | "retired"; version?: int32;
+  deletedAt?: utcDateTime | null; createdAt?: utcDateTime; updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model KnowledgeAliasBody {
+  id?: string; projectId?: string; nodeId?: string; surface?: string; normalized?: string;
+  scope?: string | null; status?: "proposed" | "confirmed" | "ambiguous" | "retired";
+  createdAt?: utcDateTime; updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model KnowledgeRelationBody {
+  id?: string; projectId?: string; sourceId?: string; targetId?: string; type?: string;
+  attributes?: JsonObject; validity?: JsonObject;
+  status?: "proposed" | "confirmed" | "rejected" | "retired"; version?: int32;
+  createdAt?: utcDateTime; updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model PersistenceNodeListBody {
+  nodes?: KnowledgeNodeBody[];
+  nextCursor?: string | null;
+  ...Record<unknown>;
+}
+
+model PersistenceNodeBody {
+  node?: KnowledgeNodeBody;
+  aliases?: KnowledgeAliasBody[];
+  relations?: KnowledgeRelationBody[];
+  ...Record<unknown>;
+}
+
+model EvidenceAnchorBody {
+  id?: string; projectId?: string; documentId?: string; revisionId?: string;
+  fromUtf16?: int32; toUtf16?: int32; quoteSha256?: string;
+  status?: "proposed" | "confirmed" | "needs_review" | "orphaned"; version?: int32;
+  createdAt?: utcDateTime; updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model EvidenceQuoteSourceBody {
+  revisionId?: string; fromUtf16?: int32; toUtf16?: int32; quoteSha256?: string;
+  status?: "proposed" | "confirmed" | "needs_review" | "orphaned"; historical?: boolean;
+  ...Record<unknown>;
+}
+
+model EvidenceMentionBody {
+  link?: PersistenceMentionLink;
+  node?: KnowledgeNodeBody | null;
+  ...Record<unknown>;
+}
+
+model EvidenceAssertionLinkBody {
+  link?: JsonObject;
+  assertion?: JsonObject | null;
+  ...Record<unknown>;
+}
+
+model EvidenceAnchorDetailBody {
+  anchor?: EvidenceAnchorBody;
+  quote?: string;
+  quoteSource?: EvidenceQuoteSourceBody | null;
+  mentions?: EvidenceMentionBody[];
+  assertions?: EvidenceAssertionLinkBody[];
+  history?: JsonObject[];
+  ...Record<unknown>;
+}
+
+model DocumentEvidenceListBody {
+  revisionId?: string | null;
+  anchors?: EvidenceAnchorDetailBody[];
+  ...Record<unknown>;
+}
+
+model NodeEvidenceListBody {
+  evidence?: EvidenceAnchorDetailBody[];
+  ...Record<unknown>;
+}
+
+model PersistenceAssertionBody {
+  id?: string; projectId?: string; proposition?: JsonObject; modality?: string; perspective?: string;
+  narrativeTime?: JsonObject; confidence?: float64 | null;
+  status?: "proposed" | "confirmed" | "rejected" | "retired"; version?: int32;
+  createdAt?: utcDateTime; updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model AssertionResponseBody {
+  assertion?: PersistenceAssertionBody;
+  evidence?: JsonObject[];
+  ...Record<unknown>;
+}
+
+model AssertionEvidenceListBody {
+  evidence?: JsonObject[];
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetBody {
+  id?: string; projectId?: string; authorId?: string;
+  status?: "proposed" | "approved" | "applied" | "rejected";
+  operations?: JsonObject[]; readSet?: JsonObject[]; writeSet?: JsonObject[]; provenance?: JsonObject;
+  version?: int32; idempotencyKey?: string; createdAt?: utcDateTime;
+  approvedAt?: utcDateTime | null; approvedBy?: string | null; appliedAt?: utcDateTime | null;
+  rejectedAt?: utcDateTime | null; rejectedBy?: string | null;
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetListBody {
+  changeSets?: PersistenceChangeSetBody[];
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetResponseBody {
+  changeSet?: PersistenceChangeSetBody;
+  receipt?: JsonObject | null;
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetResultBody {
+  changeSet?: PersistenceChangeSetBody;
+  replayed?: boolean;
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetApplicationBody {
+  changeSet?: PersistenceChangeSetBody;
+  results?: JsonObject[];
+  replayed?: boolean;
+  ...Record<unknown>;
+}
+
+model PersistenceChangeSetApprovalBody {
+  changeSet?: PersistenceChangeSetBody;
+  ...Record<unknown>;
+}
+
+model KnowledgeMergePreviewBody {
+  projectVersion?: int32;
+  source?: KnowledgeNodeBody;
+  target?: KnowledgeNodeBody;
+  sourceAliases?: KnowledgeAliasBody[];
+  targetAliases?: KnowledgeAliasBody[];
+  sourceRelations?: KnowledgeRelationBody[];
+  targetRelations?: KnowledgeRelationBody[];
+  sourceMentions?: JsonObject[];
+  targetMentions?: JsonObject[];
+  assertions?: PersistenceAssertionBody[];
+  conflicts?: string[];
+  previewDigest?: string;
+  ...Record<unknown>;
+}
+
+model KnowledgeMergeResultBody {
+  target?: KnowledgeNodeBody;
+  source?: KnowledgeNodeBody;
+  auditId?: string;
+  ...Record<unknown>;
+}
+
+model CoreProposalStatusBody {
+  proposal?: JsonObject;
+  payloadComplete?: boolean;
+  originalDigest?: string;
+  operationIds?: string[];
+  state?: "proposed" | "partially_approved" | "approved" | "applied";
+  approvedOperationIds?: string[];
+  approvedByOperationId?: Record<string>;
+  applications?: JsonObject[];
+  appliedOperationIds?: string[];
+  stale?: boolean;
+  ...Record<unknown>;
+}
+
+model CoreChangeProposalBody {
+  id?: string;
+  snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
+  operations?: JsonObject[];
+  source?: "author" | "module" | "mcp";
+  evidence?: JsonObject[];
+  ...Record<unknown>;
+}
+
+model ProposalListBody {
+  proposals?: CoreProposalStatusBody[];
+  ...Record<unknown>;
+}
+
+model ProjectReviewQueueBody {
+  snapshot?: JsonObject;
+  proposals?: CoreProposalStatusBody[];
+  ...Record<unknown>;
+}
+
+model GlobalReviewQueueItemBody {
+  projectId?: string;
+  proposal?: CoreProposalStatusBody;
+  ...Record<unknown>;
+}
+
+model GlobalReviewQueueBody {
+  unresolvedCount?: int32;
+  items?: GlobalReviewQueueItemBody[];
+  ...Record<unknown>;
+}
+
+model ProjectActionDescriptorBody {
+  id?: string;
+  module?: string;
+  effect?: "read" | "compute" | "propose";
+  job?: boolean;
+  ...Record<unknown>;
+}
+
+model ProjectActionsBody {
+  actions?: ProjectActionDescriptorBody[];
+  ...Record<unknown>;
+}
+
+model ManuscriptSnapshotMetaBody {
+  id?: string; sceneId?: string; manuscriptId?: string; createdAt?: int64;
+  charCount?: int32; source?: "postgres"; label?: string;
+  trigger?: "manual" | "submit" | "idle";
+  ...Record<unknown>;
+}
+
+model ManuscriptSnapshotListBody {
+  snapshot?: JsonObject;
+  snapshots?: ManuscriptSnapshotMetaBody[];
+  ...Record<unknown>;
+}
+
+model ManuscriptSnapshotReadBody {
+  snapshot?: JsonObject;
+  manuscriptSnapshot?: {
+    id?: string; sceneId?: string; manuscriptId?: string; createdAt?: int64; charCount?: int32;
+    source?: "postgres"; label?: string; trigger?: "manual" | "submit" | "idle";
+    body?: string; document?: { path?: string; content?: string; revision?: string; ...Record<unknown>; };
+    ...Record<unknown>;
+  };
+  ...Record<unknown>;
+}
+
+model SearchResultBody {
+  id?: string; type?: "scene" | "chapter" | "volume" | "manuscript";
+  name?: string; snippet?: string; filePath?: string; score?: float64;
+  field?: "body" | "name"; offset?: int32; length?: int32;
+  ...Record<unknown>;
+}
+
+model ProjectSearchBody {
+  snapshot?: JsonObject;
+  query?: string;
+  results?: SearchResultBody[];
+  ...Record<unknown>;
+}
+
+model SceneWritingStatsBody {
+  sceneId?: string; charCount?: int32; pages400?: float64; status?: string;
+  ...Record<unknown>;
+}
+
+model ChapterWritingStatsBody {
+  chapterId?: string; charCount?: int32; pages400?: float64; scenes?: SceneWritingStatsBody[];
+  ...Record<unknown>;
+}
+
+model VolumeWritingStatsBody {
+  volumeId?: string; charCount?: int32; pages400?: float64; chapters?: ChapterWritingStatsBody[];
+  ...Record<unknown>;
+}
+
+model WritingStatsBody {
+  totalCharCount?: int32; totalPages400?: float64; volumes?: VolumeWritingStatsBody[];
+  sceneById?: Record<SceneWritingStatsBody>;
+  ...Record<unknown>;
+}
+
+model WritingStatsResponseBody {
+  snapshot?: JsonObject;
+  stats?: WritingStatsBody;
+  ...Record<unknown>;
+}
+
+model ProposalApplyReceiptBody {
+  operationId?: string; generation?: int32; projectVersion?: int32; revisions?: JsonObject[];
+  ...Record<unknown>;
+}
+
+model AuthorReviewItemBody {
+  kind?: "core-proposal" | "native-change-set";
+  id?: string; projectId?: string; createdAt?: utcDateTime;
+  state?: "proposed" | "partially_approved" | "approved" | "applied" | "rejected";
+  approvalModel?: "per-operation" | "whole-change-set";
+  applicationModel?: "per-operation" | "transaction";
+  status?: CoreProposalStatusBody;
+  receipts?: JsonObject[];
+  stale?: boolean;
+  changeSet?: PersistenceChangeSetBody;
+  receipt?: PersistenceChangeSetApplicationBody | null;
+  ...Record<unknown>;
+}
+
+model PersistenceReviewFeedBody {
+  items?: AuthorReviewItemBody[];
+  ...Record<unknown>;
+}
+
+model ScratchAttachmentBody {
+  filename?: string; path?: string; mimeType?: string;
+  ...Record<unknown>;
+}
+
+model ScratchCreateBody {
+  id?: string; path?: string; createdAt?: utcDateTime;
+  source?: "voice" | "camera" | "text"; sceneId?: string | null;
+  attachments?: ScratchAttachmentBody[];
+  proposal?: JsonObject; receipt?: ProposalApplyReceiptBody;
+  ...Record<unknown>;
+}
+
+model ActionResultBody {
+  ok?: boolean;
+  snapshot?: JsonObject;
+  data?: unknown;
+  proposals?: JsonObject[];
+  error?: JsonObject;
+  ...Record<unknown>;
+}
+
 model CoreProjectCreateRequest {
   @pattern(".*\\S.*")
   @minLength(1)

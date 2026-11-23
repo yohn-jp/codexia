@@ -473,8 +473,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/OAuthConsentContextBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -530,6 +529,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - auth-adapter
+      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
       x-codexia-security-deviation: The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.
       x-codexia-principal: OWNER-SESSION; same-origin request
       x-codexia-contract-status: incomplete
@@ -1057,8 +1057,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/InboxListBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1078,8 +1077,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/InboxReadAllBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1104,8 +1102,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/InboxReadItemBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1147,6 +1144,8 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - jobs
+      x-codexia-runtime-response-deviation: Runtime serializes the public job collection as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/jobs/events:
     get:
@@ -1194,8 +1193,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PublicJobBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1321,8 +1319,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectReadBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -1347,8 +1344,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectActionsBody'
       tags:
         - actions
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1372,8 +1368,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ActionResultBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1411,8 +1406,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProposalApplyReceiptBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1428,6 +1422,8 @@ paths:
             schema:
               type: object
               additionalProperties: {}
+      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects/{projectId}/approvals:
     post:
@@ -1461,6 +1457,8 @@ paths:
             schema:
               type: object
               additionalProperties: {}
+      x-codexia-runtime-response-deviation: Runtime returns HTTP 204 with no body after approval; the approved baseline documents a JSON response. The status and body discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects/{projectId}/contributions:
     get:
@@ -1481,6 +1479,8 @@ paths:
                 additionalProperties: {}
       tags:
         - projects
+      x-codexia-runtime-response-deviation: Runtime emits an array of HTTP contribution descriptors; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
   /api/projects/{projectId}/history:
     get:
@@ -1507,6 +1507,8 @@ paths:
                 additionalProperties: {}
       tags:
         - projects
+      x-codexia-runtime-response-deviation: Runtime emits an array of commit records; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
   /api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots:
     get:
@@ -1528,8 +1530,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ManuscriptSnapshotListBody'
       tags:
         - snapshots
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1558,8 +1559,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ManuscriptSnapshotReadBody'
       tags:
         - snapshots
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1582,6 +1582,8 @@ paths:
                 additionalProperties: {}
       tags:
         - projects
+      x-codexia-runtime-response-deviation: Runtime emits an array of module status objects; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
   /api/projects/{projectId}/modules/mcp/streamable:
     get:
@@ -1786,8 +1788,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectObservationBody'
       tags:
         - projects
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1806,8 +1807,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/CoreChangeProposalBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1844,8 +1844,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProposalListBody'
       tags:
         - proposals
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1869,8 +1868,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/CoreProposalStatusBody'
       tags:
         - proposals
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1889,8 +1887,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/RecentActivityBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1919,8 +1916,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/RecentActivityBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1958,8 +1954,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectReviewQueueBody'
         '503':
           description: Service unavailable.
           content:
@@ -1989,8 +1984,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectSceneResponse'
       tags:
         - projects
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2009,8 +2003,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ScratchCreateBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2032,6 +2025,8 @@ paths:
             schema:
               type: object
               additionalProperties: {}
+      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects/{projectId}/search:
     get:
@@ -2067,8 +2062,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectSearchBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2099,8 +2093,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectSnapshotResponse'
       tags:
         - projects
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2119,8 +2112,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectStatusBody'
       tags:
         - projects
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2139,8 +2131,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectTreeResponse'
       tags:
         - projects
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2165,8 +2156,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/WritingStatsResponseBody'
       tags:
         - search
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2344,8 +2334,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/GlobalReviewQueueBody'
         '503':
           description: Service unavailable.
           content:
@@ -2365,8 +2354,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ApiSessionBody'
       tags:
         - owner
       x-codexia-principal: OWNER-API
@@ -2565,8 +2553,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/WorkArchive'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2603,8 +2590,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/AssertionResponseBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2688,8 +2674,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/AssertionEvidenceListBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2768,8 +2753,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetListBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2798,8 +2782,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetResultBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2841,8 +2824,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetResponseBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2872,8 +2854,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetApplicationBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2921,8 +2902,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetApprovalBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2970,8 +2950,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceChangeSetApprovalBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3275,8 +3254,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/DocumentEvidenceListBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3703,8 +3681,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceNodeListBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3747,8 +3724,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceNodeBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3881,8 +3857,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/NodeEvidenceListBody'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3912,8 +3887,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/KnowledgeMergeResultBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3961,8 +3935,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/KnowledgeMergePreviewBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -4054,8 +4027,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceReviewFeedBody'
         '403':
           description: Access is forbidden.
           content:
@@ -4425,6 +4397,24 @@ security:
   - BearerAuth: []
 components:
   schemas:
+    ActionResultBody:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        snapshot:
+          type: object
+          additionalProperties: {}
+        data: {}
+        proposals:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        error:
+          type: object
+          additionalProperties: {}
+      additionalProperties: {}
     ApiError:
       type: object
       required:
@@ -4442,6 +4432,34 @@ components:
             - type: 'null'
       unevaluatedProperties:
         not: {}
+    ApiSessionBody:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        authorScope:
+          type: string
+      additionalProperties: {}
+    AssertionEvidenceListBody:
+      type: object
+      properties:
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      additionalProperties: {}
+    AssertionResponseBody:
+      type: object
+      properties:
+        assertion:
+          $ref: '#/components/schemas/PersistenceAssertionBody'
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      additionalProperties: {}
     AuthMethodsBody:
       type: object
       required:
@@ -4456,6 +4474,55 @@ components:
           type: boolean
       unevaluatedProperties:
         not: {}
+    AuthorReviewItemBody:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - core-proposal
+            - native-change-set
+        id:
+          type: string
+        projectId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum:
+            - proposed
+            - partially_approved
+            - approved
+            - applied
+            - rejected
+        approvalModel:
+          type: string
+          enum:
+            - per-operation
+            - whole-change-set
+        applicationModel:
+          type: string
+          enum:
+            - per-operation
+            - transaction
+        status:
+          $ref: '#/components/schemas/CoreProposalStatusBody'
+        receipts:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        stale:
+          type: boolean
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetBody'
+        receipt:
+          anyOf:
+            - $ref: '#/components/schemas/PersistenceChangeSetApplicationBody'
+            - type: 'null'
+      additionalProperties: {}
     AwsS3BackupConfigDraft:
       type: object
       required:
@@ -4609,6 +4676,22 @@ components:
           minimum: 1
       unevaluatedProperties:
         not: {}
+    ChapterWritingStatsBody:
+      type: object
+      properties:
+        chapterId:
+          type: string
+        charCount:
+          type: integer
+          format: int32
+        pages400:
+          type: number
+          format: double
+        scenes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SceneWritingStatsBody'
+      additionalProperties: {}
     CompatibleS3BackupConfigDraft:
       type: object
       required:
@@ -4654,6 +4737,37 @@ components:
           additionalProperties: {}
       unevaluatedProperties:
         not: {}
+    CoreChangeProposalBody:
+      type: object
+      properties:
+        id:
+          type: string
+        snapshot:
+          type: object
+          properties:
+            projectId:
+              type: string
+            projectVersion:
+              type: integer
+              format: int32
+          additionalProperties: {}
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        source:
+          type: string
+          enum:
+            - author
+            - module
+            - mcp
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      additionalProperties: {}
     CoreProjectCreateRequest:
       type: object
       required:
@@ -4665,6 +4779,47 @@ components:
           pattern: .*\S.*
       unevaluatedProperties:
         not: {}
+    CoreProposalStatusBody:
+      type: object
+      properties:
+        proposal:
+          type: object
+          additionalProperties: {}
+        payloadComplete:
+          type: boolean
+        originalDigest:
+          type: string
+        operationIds:
+          type: array
+          items:
+            type: string
+        state:
+          type: string
+          enum:
+            - proposed
+            - partially_approved
+            - approved
+            - applied
+        approvedOperationIds:
+          type: array
+          items:
+            type: string
+        approvedByOperationId:
+          type: object
+          additionalProperties:
+            type: string
+        applications:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        appliedOperationIds:
+          type: array
+          items:
+            type: string
+        stale:
+          type: boolean
+      additionalProperties: {}
     DocumentChange:
       type: object
       required:
@@ -4684,6 +4839,18 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    DocumentEvidenceListBody:
+      type: object
+      properties:
+        revisionId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        anchors:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceAnchorDetailBody'
+      additionalProperties: {}
     DocumentRevisionPageResponse:
       type: object
       required:
@@ -4699,6 +4866,131 @@ components:
             - type: string
             - type: 'null'
       additionalProperties: {}
+    EvidenceAnchorBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        documentId:
+          type: string
+        revisionId:
+          type: string
+        fromUtf16:
+          type: integer
+          format: int32
+        toUtf16:
+          type: integer
+          format: int32
+        quoteSha256:
+          type: string
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - needs_review
+            - orphaned
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    EvidenceAnchorDetailBody:
+      type: object
+      properties:
+        anchor:
+          $ref: '#/components/schemas/EvidenceAnchorBody'
+        quote:
+          type: string
+        quoteSource:
+          anyOf:
+            - $ref: '#/components/schemas/EvidenceQuoteSourceBody'
+            - type: 'null'
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceMentionBody'
+        assertions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceAssertionLinkBody'
+        history:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      additionalProperties: {}
+    EvidenceAssertionLinkBody:
+      type: object
+      properties:
+        link:
+          type: object
+          additionalProperties: {}
+        assertion:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
+      additionalProperties: {}
+    EvidenceMentionBody:
+      type: object
+      properties:
+        link:
+          $ref: '#/components/schemas/PersistenceMentionLink'
+        node:
+          anyOf:
+            - $ref: '#/components/schemas/KnowledgeNodeBody'
+            - type: 'null'
+      additionalProperties: {}
+    EvidenceQuoteSourceBody:
+      type: object
+      properties:
+        revisionId:
+          type: string
+        fromUtf16:
+          type: integer
+          format: int32
+        toUtf16:
+          type: integer
+          format: int32
+        quoteSha256:
+          type: string
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - needs_review
+            - orphaned
+        historical:
+          type: boolean
+      additionalProperties: {}
+    GlobalReviewQueueBody:
+      type: object
+      properties:
+        unresolvedCount:
+          type: integer
+          format: int32
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalReviewQueueItemBody'
+      additionalProperties: {}
+    GlobalReviewQueueItemBody:
+      type: object
+      properties:
+        projectId:
+          type: string
+        proposal:
+          $ref: '#/components/schemas/CoreProposalStatusBody'
+      additionalProperties: {}
     HealthResponse:
       type: object
       required:
@@ -4710,6 +5002,142 @@ components:
             - ok
       unevaluatedProperties:
         not: {}
+    InboxItemBody:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - job-complete
+        jobId:
+          type: string
+        jobType:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        status:
+          type: string
+          enum:
+            - done
+            - error
+        read:
+          type: boolean
+        userId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        projectKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    InboxListBody:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InboxItemBody'
+        unreadCount:
+          type: integer
+          format: int32
+      additionalProperties: {}
+    InboxReadAllBody:
+      type: object
+      properties:
+        marked:
+          type: integer
+          format: int32
+      additionalProperties: {}
+    InboxReadItemBody:
+      type: object
+      properties:
+        item:
+          $ref: '#/components/schemas/InboxItemBody'
+      additionalProperties: {}
+    KnowledgeAliasBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        nodeId:
+          type: string
+        surface:
+          type: string
+        normalized:
+          type: string
+        scope:
+          anyOf:
+            - type: string
+            - type: 'null'
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - ambiguous
+            - retired
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    KnowledgeMergePreviewBody:
+      type: object
+      properties:
+        projectVersion:
+          type: integer
+          format: int32
+        source:
+          $ref: '#/components/schemas/KnowledgeNodeBody'
+        target:
+          $ref: '#/components/schemas/KnowledgeNodeBody'
+        sourceAliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeAliasBody'
+        targetAliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeAliasBody'
+        sourceRelations:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeRelationBody'
+        targetRelations:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeRelationBody'
+        sourceMentions:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        targetMentions:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        assertions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceAssertionBody'
+        conflicts:
+          type: array
+          items:
+            type: string
+        previewDigest:
+          type: string
+      additionalProperties: {}
     KnowledgeMergePreviewRequest:
       type: object
       required:
@@ -4748,6 +5176,197 @@ components:
           pattern: ^[0-9a-f]{64}$
       unevaluatedProperties:
         not: {}
+    KnowledgeMergeResultBody:
+      type: object
+      properties:
+        target:
+          $ref: '#/components/schemas/KnowledgeNodeBody'
+        source:
+          $ref: '#/components/schemas/KnowledgeNodeBody'
+        auditId:
+          type: string
+      additionalProperties: {}
+    KnowledgeNodeBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: {}
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - retired
+        version:
+          type: integer
+          format: int32
+        deletedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    KnowledgeRelationBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        sourceId:
+          type: string
+        targetId:
+          type: string
+        type:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: {}
+        validity:
+          type: object
+          additionalProperties: {}
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - rejected
+            - retired
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    ManuscriptSnapshotListBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManuscriptSnapshotMetaBody'
+      additionalProperties: {}
+    ManuscriptSnapshotMetaBody:
+      type: object
+      properties:
+        id:
+          type: string
+        sceneId:
+          type: string
+        manuscriptId:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+        charCount:
+          type: integer
+          format: int32
+        source:
+          type: string
+          enum:
+            - postgres
+        label:
+          type: string
+        trigger:
+          type: string
+          enum:
+            - manual
+            - submit
+            - idle
+      additionalProperties: {}
+    ManuscriptSnapshotReadBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        manuscriptSnapshot:
+          type: object
+          properties:
+            id:
+              type: string
+            sceneId:
+              type: string
+            manuscriptId:
+              type: string
+            createdAt:
+              type: integer
+              format: int64
+            charCount:
+              type: integer
+              format: int32
+            source:
+              type: string
+              enum:
+                - postgres
+            label:
+              type: string
+            trigger:
+              type: string
+              enum:
+                - manual
+                - submit
+                - idle
+            body:
+              type: string
+            document:
+              type: object
+              properties:
+                path:
+                  type: string
+                content:
+                  type: string
+                revision:
+                  type: string
+              additionalProperties: {}
+          additionalProperties: {}
+      additionalProperties: {}
+    NodeEvidenceListBody:
+      type: object
+      properties:
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceAnchorDetailBody'
+      additionalProperties: {}
+    OAuthConsentContextBody:
+      type: object
+      properties:
+        client:
+          type: object
+          properties:
+            name:
+              type: string
+          additionalProperties: {}
+        requestedScopes:
+          type: array
+          items:
+            type: string
+        redirectUri:
+          type: string
+      additionalProperties: {}
     OAuthConsentContextRequest:
       type: object
       required:
@@ -4974,6 +5593,45 @@ components:
           minimum: 1
       additionalProperties: {}
       x-codexia-validation-status: Shape documented; runtime requires all update fields. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.
+    PersistenceAssertionBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        proposition:
+          type: object
+          additionalProperties: {}
+        modality:
+          type: string
+        perspective:
+          type: string
+        narrativeTime:
+          type: object
+          additionalProperties: {}
+        confidence:
+          anyOf:
+            - type: number
+              format: double
+            - type: 'null'
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - rejected
+            - retired
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
     PersistenceAssertionEnvelope:
       type: object
       required:
@@ -5036,6 +5694,118 @@ components:
             - type: 'null'
       additionalProperties: {}
       x-codexia-validation-status: Shape documented; runtime requires proposition, modality, perspective and status; expectedVersion is nullable. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.
+    PersistenceChangeSetApplicationBody:
+      type: object
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetBody'
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        replayed:
+          type: boolean
+      additionalProperties: {}
+    PersistenceChangeSetApprovalBody:
+      type: object
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetBody'
+      additionalProperties: {}
+    PersistenceChangeSetBody:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        authorId:
+          type: string
+        status:
+          type: string
+          enum:
+            - proposed
+            - approved
+            - applied
+            - rejected
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        readSet:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        writeSet:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        provenance:
+          type: object
+          additionalProperties: {}
+        version:
+          type: integer
+          format: int32
+        idempotencyKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        approvedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        approvedBy:
+          anyOf:
+            - type: string
+            - type: 'null'
+        appliedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        rejectedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        rejectedBy:
+          anyOf:
+            - type: string
+            - type: 'null'
+      additionalProperties: {}
+    PersistenceChangeSetListBody:
+      type: object
+      properties:
+        changeSets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceChangeSetBody'
+      additionalProperties: {}
+    PersistenceChangeSetResponseBody:
+      type: object
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetBody'
+        receipt:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
+      additionalProperties: {}
+    PersistenceChangeSetResultBody:
+      type: object
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetBody'
+        replayed:
+          type: boolean
+      additionalProperties: {}
     PersistenceDocument:
       type: object
       required:
@@ -5451,6 +6221,32 @@ components:
           format: date-time
       unevaluatedProperties:
         not: {}
+    PersistenceNodeBody:
+      type: object
+      properties:
+        node:
+          $ref: '#/components/schemas/KnowledgeNodeBody'
+        aliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeAliasBody'
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeRelationBody'
+      additionalProperties: {}
+    PersistenceNodeListBody:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeNodeBody'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+      additionalProperties: {}
     PersistenceProjectCreateRequest:
       type: object
       required:
@@ -5487,6 +6283,14 @@ components:
           additionalProperties: {}
       unevaluatedProperties:
         not: {}
+    PersistenceReviewFeedBody:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthorReviewItemBody'
+      additionalProperties: {}
     PersistenceStatusResponse:
       type: object
       required:
@@ -5531,6 +6335,52 @@ components:
           format: date-time
       unevaluatedProperties:
         not: {}
+    ProjectActionDescriptorBody:
+      type: object
+      properties:
+        id:
+          type: string
+        module:
+          type: string
+        effect:
+          type: string
+          enum:
+            - read
+            - compute
+            - propose
+        job:
+          type: boolean
+      additionalProperties: {}
+    ProjectActionsBody:
+      type: object
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectActionDescriptorBody'
+      additionalProperties: {}
+    ProjectObservationBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          properties:
+            projectId:
+              type: string
+            projectVersion:
+              type: integer
+              format: int32
+          additionalProperties: {}
+        observedAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum:
+            - fresh
+            - failed
+            - unknown
+      additionalProperties: {}
     ProjectPageResponse:
       type: object
       required:
@@ -5547,6 +6397,14 @@ components:
             - type: 'null'
       unevaluatedProperties:
         not: {}
+    ProjectReadBody:
+      type: object
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        observation:
+          $ref: '#/components/schemas/ProjectObservationBody'
+      additionalProperties: {}
     ProjectResponse:
       type: object
       required:
@@ -5556,6 +6414,177 @@ components:
           $ref: '#/components/schemas/Project'
       unevaluatedProperties:
         not: {}
+    ProjectReviewQueueBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoreProposalStatusBody'
+      additionalProperties: {}
+    ProjectSceneBody:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        text:
+          type: string
+        revision:
+          type: string
+      additionalProperties: {}
+    ProjectSceneResponse:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        scene:
+          $ref: '#/components/schemas/ProjectSceneBody'
+        document:
+          type: object
+          properties:
+            path:
+              type: string
+            content:
+              type: string
+            revision:
+              type: string
+          additionalProperties: {}
+        metadata:
+          type: object
+          properties:
+            path:
+              type: string
+            content:
+              type: string
+            revision:
+              type: string
+          additionalProperties: {}
+      additionalProperties: {}
+    ProjectSearchBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResultBody'
+      additionalProperties: {}
+    ProjectSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        document:
+          anyOf:
+            - type: object
+              properties:
+                path:
+                  type: string
+                revision:
+                  type: string
+              additionalProperties: {}
+            - type: 'null'
+      additionalProperties: {}
+    ProjectStatusBody:
+      type: object
+      properties:
+        projectId:
+          type: string
+        projectVersion:
+          type: integer
+          format: int32
+        state:
+          type: string
+          enum:
+            - durable
+      additionalProperties: {}
+    ProjectTreeBody:
+      type: object
+      properties:
+        title:
+          type: string
+        volumes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTreeVolumeBody'
+      additionalProperties: {}
+    ProjectTreeChapterBody:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        scenes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTreeSceneBody'
+      additionalProperties: {}
+    ProjectTreeResponse:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        tree:
+          $ref: '#/components/schemas/ProjectTreeBody'
+      additionalProperties: {}
+    ProjectTreeSceneBody:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+      additionalProperties: {}
+    ProjectTreeVolumeBody:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTreeChapterBody'
+      additionalProperties: {}
+    ProposalApplyReceiptBody:
+      type: object
+      properties:
+        operationId:
+          type: string
+        generation:
+          type: integer
+          format: int32
+        projectVersion:
+          type: integer
+          format: int32
+        revisions:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      additionalProperties: {}
+    ProposalListBody:
+      type: object
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoreProposalStatusBody'
+      additionalProperties: {}
     ProposeChangeSetRequest:
       type: object
       required:
@@ -5575,6 +6604,46 @@ components:
           maxItems: 50
       unevaluatedProperties:
         not: {}
+    PublicJobBody:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - done
+            - error
+        progress:
+          anyOf:
+            - type: number
+              format: double
+            - type: 'null'
+        result: {}
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+        errorCode:
+          type: string
+        retryable:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+      additionalProperties: {}
     PublicShareIndexBody:
       type: object
       required:
@@ -5712,6 +6781,38 @@ components:
           type: boolean
       unevaluatedProperties:
         not: {}
+    RecentActivityBody:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecentActivityItemBody'
+      additionalProperties: {}
+    RecentActivityItemBody:
+      type: object
+      properties:
+        sceneId:
+          type: string
+        sentenceOffset:
+          anyOf:
+            - type: integer
+              format: int32
+            - type: 'null'
+        pageIndex:
+          anyOf:
+            - type: integer
+              format: int32
+            - type: 'null'
+        deviceType:
+          type: string
+          enum:
+            - desktop
+            - mobile
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
     SaveConflictResponse:
       type: object
       required:
@@ -5783,6 +6884,93 @@ components:
           type: boolean
       unevaluatedProperties:
         not: {}
+    SceneWritingStatsBody:
+      type: object
+      properties:
+        sceneId:
+          type: string
+        charCount:
+          type: integer
+          format: int32
+        pages400:
+          type: number
+          format: double
+        status:
+          type: string
+      additionalProperties: {}
+    ScratchAttachmentBody:
+      type: object
+      properties:
+        filename:
+          type: string
+        path:
+          type: string
+        mimeType:
+          type: string
+      additionalProperties: {}
+    ScratchCreateBody:
+      type: object
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+            - voice
+            - camera
+            - text
+        sceneId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScratchAttachmentBody'
+        proposal:
+          type: object
+          additionalProperties: {}
+        receipt:
+          $ref: '#/components/schemas/ProposalApplyReceiptBody'
+      additionalProperties: {}
+    SearchResultBody:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - scene
+            - chapter
+            - volume
+            - manuscript
+        name:
+          type: string
+        snippet:
+          type: string
+        filePath:
+          type: string
+        score:
+          type: number
+          format: double
+        field:
+          type: string
+          enum:
+            - body
+            - name
+        offset:
+          type: integer
+          format: int32
+        length:
+          type: integer
+          format: int32
+      additionalProperties: {}
     VersionResponse:
       type: object
       required:
@@ -5824,6 +7012,22 @@ components:
             additionalProperties: {}
       unevaluatedProperties:
         not: {}
+    VolumeWritingStatsBody:
+      type: object
+      properties:
+        volumeId:
+          type: string
+        charCount:
+          type: integer
+          format: int32
+        pages400:
+          type: number
+          format: double
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterWritingStatsBody'
+      additionalProperties: {}
     WorkArchive:
       type: object
       properties:
@@ -6179,6 +7383,33 @@ components:
           format: int32
       unevaluatedProperties:
         not: {}
+    WritingStatsBody:
+      type: object
+      properties:
+        totalCharCount:
+          type: integer
+          format: int32
+        totalPages400:
+          type: number
+          format: double
+        volumes:
+          type: array
+          items:
+            $ref: '#/components/schemas/VolumeWritingStatsBody'
+        sceneById:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/SceneWritingStatsBody'
+      additionalProperties: {}
+    WritingStatsResponseBody:
+      type: object
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: {}
+        stats:
+          $ref: '#/components/schemas/WritingStatsBody'
+      additionalProperties: {}
   securitySchemes:
     BearerAuth:
       type: http
