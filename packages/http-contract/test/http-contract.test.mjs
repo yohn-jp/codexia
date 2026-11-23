@@ -145,6 +145,39 @@ test("the admitted inventory gate rejects omission of a live persistence revisio
   );
 });
 
+test("document read and write responses use the PostgreSQL persistence DTOs", (t) => {
+  const outputDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-document-responses-"));
+  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
+  const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
+  const responseSchema = (method, route, status = "200") => openapi.paths[route][method].responses[status].content["application/json"].schema;
+  const expected = [
+    ["get", "/api/v1/persistence/projects/{projectId}/documents", "PersistenceDocumentListResponse"],
+    ["patch", "/api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata", "PersistenceDocumentEnvelope"],
+    ["delete", "/api/v1/persistence/projects/{projectId}/documents/{documentId}", "PersistenceDocumentEnvelope"],
+    ["get", "/api/v1/persistence/projects/{projectId}/documents/{documentId}", "PersistenceDocumentGetResponse"],
+    ["post", "/api/v1/persistence/projects/{projectId}/documents", "SaveDocumentResponse", "201"],
+    ["patch", "/api/v1/persistence/projects/{projectId}/documents/{documentId}", "SaveDocumentResponse"],
+    ["post", "/api/v1/persistence/projects/{projectId}/documents/{documentId}/restore", "SaveDocumentResponse"],
+    ["get", "/api/v1/persistence/projects/{projectId}/documents/{documentId}/revisions", "DocumentRevisionPageResponse"],
+  ];
+
+  for (const [method, route, model, status = "200"] of expected) {
+    assert.equal(responseSchema(method, route, status).$ref, `#/components/schemas/${model}`, `${method.toUpperCase()} ${route} must use ${model}`);
+  }
+
+  const schemas = openapi.components.schemas;
+  assert.ok(schemas.PersistenceDocument.properties.headRevisionId.anyOf.some(({ type }) => type === "string"));
+  assert.ok(schemas.PersistenceDocument.properties.headRevisionId.anyOf.some(({ type }) => type === "null"));
+  assert.equal(schemas.PersistenceDocumentRevision.properties.sha256.pattern, "^[0-9a-f]{64}$");
+  assert.deepEqual(schemas.PersistenceDocument.additionalProperties, {});
+  assert.deepEqual(schemas.PersistenceDocumentGetResponse.additionalProperties, {});
+  const conflictCurrent = schemas.SaveConflictResponse.properties.current.anyOf.find(({ type }) => type === "object");
+  assert.ok(schemas.SaveConflictResponse.properties.current.anyOf.some(({ type }) => type === "null"));
+  assert.deepEqual(Object.keys(conflictCurrent.properties).sort(), ["document", "revision"]);
+  assert.equal(conflictCurrent.properties.document.$ref, "#/components/schemas/PersistenceDocument");
+  assert.deepEqual(conflictCurrent.additionalProperties, {});
+});
+
 test("generated request and response schemas preserve null, oneOf, closed objects, and formats", (t) => {
   const outputDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-schema-"));
   t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
@@ -343,4 +376,37 @@ test("Fastify conversion fails when a schema keyword cannot preserve OpenAPI 3.1
   };
 
   assert.throws(() => toFastifyRoutes(contract), /unevaluatedProperties.*cannot be translated without changing schema semantics/u);
+});
+
+test("contract validation rejects duplicate operation IDs", () => {
+  const contract = {
+    openapi: "3.1.0",
+    info: { title: "Duplicate operation fixture", version: "1.0.0" },
+    paths: {
+      "/first": { get: { operationId: "get_resource", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+      "/second": { get: { operationId: "get_resource", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+    },
+  };
+
+  assert.throws(() => assertOpenApiContract(contract), /duplicate operationId get_resource/u);
+});
+
+test("Fastify conversion rejects unresolved local component references", () => {
+  const contract = {
+    openapi: "3.1.0",
+    info: { title: "Unresolved schema fixture", version: "1.0.0" },
+    paths: {
+      "/example": {
+        post: {
+          operationId: "create_example",
+          "x-codexia-contract-status": "complete",
+          requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/MissingRequest" } } } },
+          responses: { "204": { description: "created" } },
+        },
+      },
+    },
+    components: { schemas: {} },
+  };
+
+  assert.throws(() => toFastifyRoutes(contract), /unresolved OpenAPI schema reference.*MissingRequest/u);
 });
