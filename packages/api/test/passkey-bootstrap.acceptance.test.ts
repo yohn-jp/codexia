@@ -9,6 +9,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "nod
 import { test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
 import { Pool } from "pg";
+import { verifyAuthSchema } from "../src/auth-schema.js";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
 import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "../src/better-auth.js";
 import { createServer as createApiServer, type ApiServerOptions } from "../src/server.js";
@@ -375,6 +376,15 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.notEqual(unappliedMigration.status, 0, "auth schema migration must require --apply");
   const migration = runPackageCli("migrate-auth", ["--apply"], migrationEnvironment);
   assert.equal(migration.status, 0, "OIDC-free explicit auth migration must succeed against the disposable PostgreSQL schema");
+  const readOnlyPool = new Pool({
+    connectionString: runtimeDatabase.toString(),
+    options: "-c search_path=codexia_auth -c default_transaction_read_only=on",
+  });
+  try {
+    await verifyAuthSchema(readOnlyPool);
+  } finally {
+    await readOnlyPool.end();
+  }
 
   const grantWithoutApply = runPackageCli("grant-passkey-owner", [], migrationEnvironment);
   assert.notEqual(grantWithoutApply.status, 0, "operator grant command must require --apply");

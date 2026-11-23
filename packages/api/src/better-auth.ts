@@ -16,10 +16,10 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
+import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
 export { CODEXIA_OWNER_SCOPE };
 
-export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
 export const CODEXIA_MCP_SCOPES = MCP_OAUTH_SCOPES;
 export const OIDC_PROVIDER_ID = "workspace-oidc";
 

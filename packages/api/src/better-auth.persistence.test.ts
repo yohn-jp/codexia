@@ -8,6 +8,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, jwtVerify, SignJWT } fro
 import { Pool } from "pg";
 import { createBetterAuthRuntime } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
+import { verifyAuthSchema } from "./auth-schema.js";
 
 const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
 const disposableDatabaseOptIn = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1";
@@ -209,8 +210,26 @@ test("Better Auth PostgreSQL restart preserves JWKS signing key, session and ref
 
     firstRuntime = createBetterAuthRuntime(config);
     const firstContext = await firstRuntime.auth.$context;
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
     await firstContext.runMigrations();
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
     await migrateJwtAccessTokenRevocationSchema(firstRuntime.pool);
+    await verifyAuthSchema(firstRuntime.pool);
+    assert.equal((await firstRuntime.pool.query("SELECT * FROM codexia_auth.oauth_jwt_access_token_revocation")).rowCount, 0);
+
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey ALTER COLUMN counter TYPE text");
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey ALTER COLUMN counter TYPE integer USING counter::integer");
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey ADD COLUMN removed_field text");
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey DROP COLUMN removed_field");
+    await firstRuntime.pool.query("DROP INDEX codexia_auth.oauth_jwt_access_token_revocation_expiry_idx");
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
+    await migrateJwtAccessTokenRevocationSchema(firstRuntime.pool);
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey ADD CONSTRAINT counter_nonnegative CHECK (counter >= 0)");
+    await assert.rejects(verifyAuthSchema(firstRuntime.pool), /requires explicit maintenance/u);
+    await firstRuntime.pool.query("ALTER TABLE codexia_auth.passkey DROP CONSTRAINT counter_nonnegative");
+    await verifyAuthSchema(firstRuntime.pool);
 
     const authBase = `${publicOrigin}/api/auth`;
     const cookies = cookieJar();

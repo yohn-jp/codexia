@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import { CODEXIA_AUTH_SCHEMA } from "./better-auth.js";
+import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { pruneExpiredJwtAccessTokenRevocations } from "./jwt-access-token-revocation.js";
 import { assertAuthMigrationDatabaseIdentity } from "./migrate-auth.js";
