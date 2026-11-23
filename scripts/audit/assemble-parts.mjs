@@ -2,7 +2,10 @@
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-const [parts, destination] = process.argv.slice(2).map(resolve);
+const [partsArg, destinationArg] = process.argv.slice(2);
+assert.ok(partsArg && destinationArg && process.argv.length === 4, 'Expected artifact source and Pages destination');
+const parts = resolve(partsArg);
+const destination = resolve(destinationArg);
 const sha = process.env.CODEXIA_EXPECTED_SHA;
 assert.match(sha ?? '', /^[a-f0-9]{40}$/u);
 mkdirSync(destination, { recursive: true });
