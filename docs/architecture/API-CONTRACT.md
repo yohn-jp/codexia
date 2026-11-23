@@ -59,7 +59,7 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 | API-PUBLIC-001 | GET /api/public/projects/:p/modules/:module/* | SHARE-READER | packages/api/src/server.ts、各公開module | INCOMPLETE |
 | API-BACKUP-CONSOLE-001 | GET /api/console/backups/status、GET /api/console/backups/config、PUT /api/console/backups/config/draft | OWNER-SESSION、If-Matchと書込時のfresh | [Backup console](BACKUP-CONSOLE-CONTRACT.md)・将来のFastify route | **目標/未実装。BKC-001〜003** |
 | API-BACKUP-CONSOLE-002 | POST /api/console/backups/config/probes、GET .../config/probes/:id、POST .../config/{activate,disable} | OWNER-SESSION＋probe/revisionとfreshの適用 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-004〜007** |
-| API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET .../runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-008〜010** |
+| API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET /api/console/backups/runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-008〜010** |
 | API-SETUP-001 | /api/auth/codexia/setup/* | SETUP等・厳密な状態別 | [AuthN/AuthZ](API-AUTHN-AUTHZ.md) | **ACCEPTED TARGET / NOT IMPLEMENTED** |
 
 **展開必須:** 集約表の波括弧表記・wildcardは設計概要でしかない。最終版では全メソッド＋実pathに対してID、schema、権限、code symbol、testを独立に記録する。現在の family IDで全ルートをカバーしたと報告しない。既存の [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) には全般の個別認可表があり、それを漏れ検査の入力にする。
