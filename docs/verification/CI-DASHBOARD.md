@@ -1,5 +1,7 @@
 # CI Observatory — GitHub Pages timing dashboard
 
+> **ポータルの導線・版表示案:** [Pages機能棚卸し](PAGES-FUNCTION-INVENTORY.md)と[サイトマップ/CI画面遷移](../design/DEVELOPMENT-PAGES-UX.md#5-ci分析のux)を参照。CI Observatoryは現状どおり公開Actions metadataの限定観測であり、site全体のナビ統合やtask-level telemetryは未実装。
+
 Status: **implemented as read-only observability; the first live Actions collection and Pages deployment require a main-branch run**. This page does not certify, shorten or replace required checks.
 
 ## Deployment and ownership
