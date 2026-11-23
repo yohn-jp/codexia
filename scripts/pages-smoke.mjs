@@ -110,13 +110,21 @@ try {
       most_recent_instance: { location: { path: '-unsafe.ts', start_line: 5 }, message: { text: '=FORMULA(1)' } },
     }];
     await page.route('https://api.github.com/**', route => {
+      const cors = {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, OPTIONS',
+        'access-control-allow-headers': 'Authorization, X-GitHub-Api-Version, Accept',
+      };
+      if (route.request().method() === 'OPTIONS') {
+        return route.fulfill({ status: 204, headers: cors });
+      }
       if (route.request().url().includes('/code-scanning/alerts')) {
         scanningRequests++;
         assert.equal(route.request().headers().authorization, 'Bearer test-read-only-token');
-        return route.fulfill(scanningStatus === 200 ? { status: 200, json: findings } : { status: scanningStatus, json: { message: 'invalid' } });
+        return route.fulfill(scanningStatus === 200 ? { status: 200, headers: cors, json: findings } : { status: scanningStatus, headers: cors, json: { message: 'invalid' } });
       }
       apiRequests++;
-      return route.fulfill({ status: apiStatus, json: { message: 'API fixture (' + apiStatus + ')' } });
+      return route.fulfill({ status: apiStatus, headers: cors, json: { message: 'API fixture (' + apiStatus + ')' } });
     });
     const home = await page.goto(base);
     assert.equal(home.status(), 200);
