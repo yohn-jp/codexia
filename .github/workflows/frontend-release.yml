@@ -186,6 +186,11 @@ jobs:
     needs: source
     if: always() && (github.event_name == 'pull_request' || (needs.source.result == 'success' && needs.source.outputs.affected == 'true'))
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/yohn-jp/playwright-ubuntu-chromium@sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -232,8 +237,10 @@ jobs:
         run: npm ci --prefix edge/frontend
       - name: Validate Wrangler assets-only bundle
         run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
-      - name: Install browser for static delivery verification
-        run: pnpm exec playwright install --with-deps chromium
+      - name: Confirm preinstalled Chromium runtime
+        run: |
+          test -d /ms-playwright
+          node -e 'const {chromium}=require("@playwright/test"); chromium.launch({headless:true}).then(async b=>{await b.close()}).catch(e=>{console.error(e);process.exitCode=1})'
       - name: Exercise actual static asset server and browser entrypoints
         env:
           VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
