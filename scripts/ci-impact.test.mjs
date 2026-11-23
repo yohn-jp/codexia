@@ -168,7 +168,6 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     ['MCP unit test in src', ['modules/mcp/src/tool-catalog.test.ts'], false],
     ['Declared module test fixture outside src', ['modules/assistant/tests/browser-workflow.acceptance.mjs'], false],
     ['Declared package fixture outside src', ['packages/api/test/fixtures/better-auth-server.ts'], false],
-    ['Unknown nested path even if named test', ['app/unknown/test/new-fixture.mjs'], true],
     ['Core unit test in src', ['packages/core/src/snapshot-reuse.test.ts'], false],
     ['Desktop unit test', ['app/src/api-generated.test.ts'], false],
     ['Native Swift source', ['ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift'], false],
@@ -210,6 +209,14 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
   assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
+  // An undeclared nested fixture is not a standalone main-push model input,
+  // but an unclassified PR path cannot prove the real-model test is irrelevant.
+  const unknownNestedFixture = ['app/unknown/test/new-fixture.mjs'];
+  assert.equal(matchesWorkflowPaths(pushPaths, unknownNestedFixture), false);
+  const unknownNestedPlan = await plan(unknownNestedFixture);
+  assert.equal(unknownNestedPlan.mode, 'full');
+  assert.equal(unknownNestedPlan.full_model_oci, true);
+
   // A valid but unclassified path selects full verification; Full-model OCI cannot
   // silently disappear merely because it was absent from the older allowlist.
   for (const unknown of ['scripts/new-unclassified-ci-helper.mjs', 'tests/new-domain/acceptance.mjs', 'docs/new-executable-policy.json']) {
