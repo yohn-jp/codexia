@@ -3,6 +3,7 @@ import { readCodexiaEnvironment } from "./environment.js";
 import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
+import { migrateOwnerSetupConstraints, ownerSetupTableExists } from "./owner-setup-store.js";
 import type { Pool } from "pg";
 import { fileURLToPath } from "node:url";
 
@@ -77,8 +78,16 @@ export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()
   const runtime = createBetterAuthRuntime(config);
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
+    if (config.installOwnerSetupSchema && !await ownerSetupTableExists(runtime.pool)) {
+      const data = await runtime.pool.query<{ pristine: boolean }>(
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = $1) AS pristine",
+        [CODEXIA_AUTH_SCHEMA],
+      );
+      if (!data.rows[0]?.pristine) throw new Error("Setup-only cannot replace an existing auth installation");
+    }
     await (await runtime.auth.$context).runMigrations();
     await migrateJwtAccessTokenRevocationSchema(runtime.pool);
+    if (config.installOwnerSetupSchema) await migrateOwnerSetupConstraints(runtime.pool);
   } finally {
     await runtime.pool.end();
   }
@@ -86,7 +95,12 @@ export async function migrateBetterAuth(config = readBetterAuthMigrationConfig()
 
 async function main(): Promise<void> {
   requireExplicitApply(process.argv.slice(2));
-  await migrateBetterAuth();
+  const installOwnerSetupSchema = readCodexiaEnvironment("AUTH_MODE") === "setup-only";
+  const config = readBetterAuthMigrationConfig(!installOwnerSetupSchema);
+  if (installOwnerSetupSchema && (config.ownerSubject || config.passkeyBootstrap || config.oidcIssuer)) {
+    throw new Error("The setup-only auth migration requires a fresh install");
+  }
+  await migrateBetterAuth({ ...config, installOwnerSetupSchema });
   process.stdout.write(`Better Auth PostgreSQL migrations completed for schema ${CODEXIA_AUTH_SCHEMA}.\n`);
 }
 

@@ -45,9 +45,9 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 ### OPS-01 transfer adapter
 
-`deploy/backup/s3_transfer.py` は既存の `backup.sh` が作成したv2 artifact一式だけを読み、`database.dump.age`、`history.tar.age`、`manifest.age`、`SHA256SUMS` をアップロードする。第二のdumpや暗号化形式は作らない。AWS S3署名・retryはhash-locked Boto3 SDKへ委譲する。
+`deploy/backup/s3_transfer.py` は既存の `backup.sh` が作成したv2 artifact一式だけを読み、`database.dump.age`、`history.tar.age`、`manifest.age`、`SHA256SUMS` をアップロードする。転送と復元ドリルは、生成時の `SHA256SUMS` と照合結果がバイト単位で一致することを要求する。第二のdumpや暗号化形式は作らない。AWS S3署名・retryはhash-locked Boto3 SDKへ委譲する。
 
-Profileは `schemaVersion`, `provider`, `region`, `bucket`, `prefix`, `endpointUrl`, `allowedOrigins`, `addressingStyle` を含むprivate JSON fileで、所有者が実行user、mode `0400` または `0600` であることを検査する。Credentialはprofileに置かず、Boto3の標準credential provider chainから取得する。HTTPS検証とredirect拒否を維持し、S3側のETagをSHA-256の代用にしない。
+Profileは `schemaVersion`, `provider`, `region`, `bucket`, `prefix`, `endpointUrl`, `allowedOrigins`, `addressingStyle` を含むprivate JSON fileで、所有者が実行user、mode `0400` または `0600` であることを検査する。Credentialはprofileに置かず、Boto3の標準credential provider chainから取得する。S3リクエストは環境のHTTPプロキシ設定を使用せず、選択したHTTPS endpointへ直接送信する。HTTPS検証とredirect拒否を維持し、S3側のETagをSHA-256の代用にしない。
 
 例として、operatorが保護設定したprofile、artifact directory、独立したreceipt pathから実行する。
 
@@ -75,7 +75,9 @@ bash deploy/backup/backup.sh drill \
 
 `upload` verifies each uploaded object's size and SHA-256 by downloading it again. It publishes a commit marker only after every artifact object passes readback, then writes the independent receipt outside S3. Receipt directories must be private; receipt files are created mode `0600`. Retries use conditional object creation and refuse changed ciphertext under the same backup ID. Multipart upload IDs are held in a private local journal so the helper can abort the exact unfinished upload without `ListBucketMultipartUploads`; a provider lifecycle rule should also abort incomplete uploads left by a host loss before the local upload ID is recorded. The helper does not require object or bucket delete permissions.
 
-The writer needs `s3:PutObject`, `s3:GetObject`, and `s3:AbortMultipartUpload` on the fixed object prefix, plus `s3:ListBucket` scoped by `s3:prefix` to return an unambiguous missing-object result for conditional creation. It also reads bucket location, versioning, and Object Lock configuration to report observed capabilities. `s3:PutObjectRetention` is needed only when a retention mode is requested. The adapter never calls `ListMultipartUploads`, `DeleteObject`, or `DeleteBucket`.
+When the profile requests retention, readback must confirm the requested Object Lock mode and a retain-until date at least as late as requested on each exact object version. This includes reused objects on retry. The adapter verifies the commit marker's retention before issuing the independent receipt.
+
+The writer needs `s3:PutObject`, `s3:GetObject`, and `s3:AbortMultipartUpload` on the fixed object prefix, plus `s3:ListBucket` scoped by `s3:prefix` to return an unambiguous missing-object result for conditional creation. It also reads bucket location, versioning, and Object Lock configuration to report observed capabilities. The writer and recovery reader need `s3:GetObjectVersion` for versioned readback. Explicit retention additionally requires `s3:PutObjectRetention` and `s3:GetObjectRetention` for the writer on that same prefix. The adapter never calls `ListMultipartUploads`, `DeleteObject`, or `DeleteBucket`.
 
 Run the separate synthetic-provider fixture with:
 

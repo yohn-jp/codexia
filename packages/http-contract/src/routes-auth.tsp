@@ -21,3 +21,116 @@ op getOAuthConsentContext(@body body: OAuthConsentContextRequest): JsonResponse 
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
 @route("/api/auth/oauth2/get-consents") @get @operationId("auth_list_consents_get")
 op listOAuthConsents(): JsonResponse | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+
+model OwnerSetupKeyInput {
+  @pattern("^[A-Za-z0-9_-]{43}$")
+  key: string;
+  ...Record<never>;
+}
+
+model OwnerSetupProfileInput {
+  @minLength(1)
+  @maxLength(120)
+  name: string;
+
+  @format("email")
+  @maxLength(254)
+  email: string;
+  ...Record<never>;
+}
+
+model OwnerSetupTransaction {
+  transaction: string;
+  ...Record<never>;
+}
+
+model OwnerSetupState {
+  state: "waiting" | "setup-pending" | "expired" | "blocked" | "active";
+  ...Record<never>;
+}
+
+model OwnerSetupEnrolled {
+  state: "owner-enrolled";
+  clientsReady: boolean;
+  ...Record<never>;
+}
+
+model OwnerSetupCompleted {
+  state: "owner-enrolled";
+  clientsReady: true;
+  sessionConfirmed: boolean;
+  ...Record<never>;
+}
+
+model OwnerSetupSuccess<Body> {
+  @statusCode statusCode: 200;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: Body;
+}
+
+model OwnerSetupError {
+  code: "SETUP_SAME_ORIGIN_REQUIRED" | "SETUP_KEY_INVALID" | "SETUP_TRANSACTION_INVALID" | "SETUP_PROFILE_INVALID" |
+    "SETUP_CLOSED" | "SETUP_REQUEST_INVALID" | "SETUP_RATE_LIMIT" | "SETUP_UNAVAILABLE" | "SETUP_ONLY";
+  ...Record<never>;
+}
+
+model OwnerSetupInvalid {
+  @statusCode statusCode: 400;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: OwnerSetupError;
+}
+
+model OwnerSetupDenied {
+  @statusCode statusCode: 403;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: OwnerSetupError;
+}
+
+model OwnerSetupBodyTooLarge {
+  @statusCode statusCode: 413;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: OwnerSetupError;
+}
+
+model OwnerSetupRateLimited {
+  @statusCode statusCode: 429;
+  @header("Cache-Control") cacheControl: "no-store";
+  @header("Retry-After") retryAfter: string;
+  @body body: OwnerSetupError;
+}
+
+model OwnerSetupUnavailable {
+  @statusCode statusCode: 503;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: OwnerSetupError;
+}
+
+@tag("auth-adapter") @useAuth(NoAuth)
+@extension("x-codexia-principal", "ANON; no OAuth bearer; same-origin status")
+@route("/api/auth/codexia/setup/status") @get @operationId("owner_setup_status_get")
+op getOwnerSetupStatus(): OwnerSetupSuccess<OwnerSetupState | OwnerSetupEnrolled> | OwnerSetupDenied | OwnerSetupRateLimited | OwnerSetupUnavailable;
+
+@tag("auth-adapter") @useAuth(NoAuth)
+@extension("x-codexia-principal", "SETUP grant; same-origin JSON; setup-only runtime")
+@route("/api/auth/codexia/setup/authorize") @post @operationId("owner_setup_authorize_post")
+op authorizeOwnerSetup(@body body: OwnerSetupKeyInput):
+  OwnerSetupSuccess<OwnerSetupTransaction> | OwnerSetupInvalid | OwnerSetupDenied | OwnerSetupBodyTooLarge |
+  OwnerSetupRateLimited | OwnerSetupUnavailable;
+
+@tag("auth-adapter") @useAuth(NoAuth)
+@extension("x-codexia-principal", "SETUP transaction; same-origin JSON; setup-only runtime")
+@route("/api/auth/codexia/setup/profile") @post @operationId("owner_setup_profile_post")
+op setOwnerSetupProfile(
+  @header("x-codexia-setup-transaction") transaction: string,
+  @body body: OwnerSetupProfileInput,
+): OwnerSetupSuccess<OwnerSetupTransaction> | OwnerSetupInvalid | OwnerSetupDenied | OwnerSetupBodyTooLarge |
+  { @statusCode statusCode: 409; @header("Cache-Control") cacheControl: "no-store"; @body body: OwnerSetupError; } |
+  OwnerSetupUnavailable;
+
+@tag("auth-adapter") @useAuth(NoAuth)
+@extension("x-codexia-principal", "SETUP transaction matched to committed owner; same-origin JSON; setup-only runtime")
+@route("/api/auth/codexia/setup/complete") @post @operationId("owner_setup_complete_post")
+op completeOwnerSetup(
+  @header("x-codexia-setup-transaction") transaction: string,
+  @body body: Record<never>,
+): OwnerSetupSuccess<OwnerSetupCompleted> | OwnerSetupInvalid | OwnerSetupDenied | OwnerSetupBodyTooLarge | OwnerSetupUnavailable;

@@ -81,7 +81,7 @@ flowchart TD
 
 **採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、別途承認された本番`deploy`に進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。
 
-**現行実装とのギャップ:** `deploy/ansible/site.yml`は`bootstrap`で`host`、`secrets`、`base`、承認済み`auth-runtime`を実行できる。一方、現時点のowner初回登録は[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)のSSHポートフォワード・一時コンテナー方式であり、**setup-only公開API、Ansible管理の一回限りキー配送、Workersの`/console/setup`、登録後の自動的な状態収束は未実装**。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill`は維持する。本書の設計はこれらが実装済み・本番受入済みであるとの主張ではない。
+**運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。SSH ポートフォワード方式は移行中の既存手順として維持する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 
 初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。
 

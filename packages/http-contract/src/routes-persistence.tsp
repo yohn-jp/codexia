@@ -35,7 +35,12 @@ op exportPersistenceArchive(@path projectId: string): JsonResponse | { @statusCo
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
-op listPersistenceDocuments(@path projectId: string, @query parentId?: string, @query projectVersion?: int32): PersistenceDocumentListResponse | { @statusCode _: 400; @body body: ApiError; };
+op listPersistenceDocuments(
+  @path projectId: string,
+  @query parentId?: string,
+  @query projectVersion?: int32,
+  @query @minValue(1) @maxValue(1000) limit?: int32 = 500,
+): PersistenceDocumentListResponse | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @post @operationId("persistence_documents_post")
