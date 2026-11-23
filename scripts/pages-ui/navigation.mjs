@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   ['graph', 'Code Map', 'graph/'],
   ['ci', 'CI', 'ci/'],
   ['audit', 'Source Audit', 'audit/'],
+  ['docs', 'GitHub Docs', 'https://github.com/yohn-jp/codexia/tree/main/docs'],
 ];
 
 function escapeHtml(value) {
@@ -41,7 +42,7 @@ function breadcrumbsFor(pagePath, page) {
       { label: '概要', href: '' },
       { label: 'Source Audit', href: 'audit/' },
       { label: type, href: `audit/` },
-      { label: page.sha, current: true },
+      { label: page.id === 'snapshot' ? 'Snapshot detail' : 'Review detail', current: true },
     ];
   }
   return [
@@ -53,21 +54,34 @@ function breadcrumbsFor(pagePath, page) {
 function renderShell(pagePath, page, skipTarget) {
   const nav = NAV_ITEMS.map(([id, label, target]) => {
     const current = page.id === id || ((page.id === 'snapshot' || page.id === 'review') && id === 'audit');
-    return `<li><a href="${escapeHtml(pathFromPage(pagePath, target))}"${current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a></li>`;
+    const href = target.startsWith('https://') ? target : pathFromPage(pagePath, target);
+    return '<li><a href="' + escapeHtml(href) + '"' + (current ? ' aria-current="page"' : '') + '>' + escapeHtml(label) + '</a></li>';
   }).join('');
   const crumbs = breadcrumbsFor(pagePath, page).map(item => item.current
-    ? `<li aria-current="page"><span>${escapeHtml(item.label)}</span></li>`
-    : `<li><a href="${escapeHtml(pathFromPage(pagePath, item.href))}">${escapeHtml(item.label)}</a></li>`).join('');
-  const context = `<div class="cx-pages-context" aria-label="ページ情報"><span class="cx-pages-page-title">${escapeHtml(page.title)}</span><span class="cx-pages-source">${escapeHtml(page.source)}</span><span class="cx-pages-mode">${escapeHtml(page.mode)}${page.sha ? ` · ${escapeHtml(page.sha)}` : ''}</span></div>`;
-  return `<a class="cx-pages-skip" href="#${escapeHtml(skipTarget)}">本文へ移動</a>
-<header class="cx-pages-header">
-  <a class="cx-pages-brand" href="${escapeHtml(pathFromPage(pagePath, ''))}" aria-label="Codexia Development Portal">Codexia <span>/ Development</span></a>
-  <button class="cx-pages-menu-button" type="button" aria-expanded="true" aria-controls="cx-pages-navigation">メニュー</button>
-  <nav class="cx-pages-navigation" id="cx-pages-navigation" aria-label="サイト内">
-    <ul>${nav}</ul>
-  </nav>
-</header>
-<div class="cx-pages-subheader">${crumbs ? `<nav class="cx-pages-breadcrumbs" aria-label="パンくず"><ol>${crumbs}</ol></nav>` : '<span class="cx-pages-breadcrumbs" aria-hidden="true">Overview</span>'}${context}</div>`;
+    ? '<li aria-current="page"><span>' + escapeHtml(item.label) + '</span></li>'
+    : '<li><a href="' + escapeHtml(pathFromPage(pagePath, item.href)) + '">' + escapeHtml(item.label) + '</a></li>').join('');
+  const provenanceSha = page.id === 'snapshot' || page.id === 'review' ? '' : page.sha;
+  const context = '<div class="cx-pages-context" aria-label="ページ情報"><span class="cx-pages-page-title">' + escapeHtml(page.title) +
+    '</span><span class="cx-pages-source">' + escapeHtml(page.source) + '</span><span class="cx-pages-mode">' + escapeHtml(page.mode) +
+    (provenanceSha ? ' · <code class="cx-pages-code">' + escapeHtml(provenanceSha) + '</code>' : '') + '</span></div>';
+  const breadcrumb = crumbs
+    ? '<nav class="cx-pages-breadcrumbs" aria-label="パンくず"><ol>' + crumbs + '</ol></nav>'
+    : '<span class="cx-pages-breadcrumbs" aria-hidden="true">概要</span>';
+  return '<a class="cx-pages-skip" href="#' + escapeHtml(skipTarget) + '">本文へ移動</a>\n' +
+    '<header class="cx-pages-header">\n' +
+    '  <a class="cx-pages-brand" href="' + escapeHtml(pathFromPage(pagePath, '')) + '" aria-label="Codexia Development Portal">Codexia <span>/ Development</span></a>\n' +
+    '  <button class="cx-pages-menu-button" type="button" aria-expanded="true" aria-controls="cx-pages-navigation">メニュー</button>\n' +
+    '  <nav class="cx-pages-navigation" id="cx-pages-navigation" aria-label="サイト内"><ul>' + nav + '</ul></nav>\n' +
+    '</header>\n' +
+    '<div class="cx-pages-subheader">' + breadcrumb + context + '</div>';
+}
+
+function addPageClass(attributes) {
+  const match = attributes.match(/\bclass\s*=\s*(["'])(.*?)\1/i);
+  const classes = match ? match[2].split(/\s+/u).filter(Boolean) : [];
+  if (!classes.includes('cx-pages-page')) classes.push('cx-pages-page');
+  if (match) return attributes.replace(match[0], 'class="' + escapeHtml(classes.join(' ')) + '"');
+  return attributes + ' class="cx-pages-page"';
 }
 
 export function decoratePage(html, { pagePath, page }) {
@@ -98,7 +112,7 @@ export function decoratePage(html, { pagePath, page }) {
     const bodyFocusable = /\btabindex\s*=/i.test(attributes);
     const bodyAttributes = mainOpening ? attributes : `${attributes}${bodyId ? '' : ' id="cx-pages-content"'}${bodyFocusable ? '' : ' tabindex="-1"'}`;
     if (!mainOpening && bodyId) skipTarget = bodyId;
-    return `<body${bodyAttributes}>\n${renderShell(pagePath, page, skipTarget)}`;
+    return '<body' + addPageClass(bodyAttributes) + '>\n' + renderShell(pagePath, page, skipTarget);
   });
   if (withHeader === withStyles) throw new Error(`No <body> element found in ${pagePath}`);
   return withHeader.replace(/<\/body\s*>/i, `<script src="${jsPath}" defer></script>\n</body>`);

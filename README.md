@@ -2,7 +2,7 @@
 
 **Architecture authority:** The [canonical system design](docs/architecture/SYSTEM-DESIGN.md) and [documentation governance](docs/architecture/DOCUMENTATION-AUTHORITY.md) govern changes; the [PostgreSQL data model](docs/architecture/DATA-MODEL.md) defines persistent domain ownership. Code and CI provide conformance evidence, not a competing specification. The [documentation index](docs/README.md) includes user, owner-security, first-deployment and update state diagrams.
 
-A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. Desktop and Mobile share authoring and browser recovery while retaining their own shells. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
+A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. **Accepted frontend target: Desktop React Web and independent native SwiftUI iOS with UIKit/TextKit editing.** They do not share UI components or client-side state; Core/API/Revision semantics are shared. Mobile Web/PWA and Capacitor WebView authoring are legacy pending removal (see [iOS architecture](docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)). The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
 Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One server serves one trusted owner. Registered MCP clients operate within their assigned projects and OAuth scopes.
 
@@ -12,14 +12,14 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 
 ## Run locally
 
-Use the [local UI preview](docs/verification/UI-PREVIEW.md) to try Desktop and Mobile. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
+Use the [local UI preview](docs/verification/UI-PREVIEW.md) to try the currently implemented Desktop React Web. The existing Mobile Web preview is legacy, not a native iOS deliverable. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm ui:preview --no-capture
 ```
 
-Open `http://127.0.0.1:4173/desktop/` or `http://127.0.0.1:4173/mobile/` and choose OAuth sign-in with the local preview identity provider. Stopping the preview removes its database.
+Open `http://127.0.0.1:4173/desktop/` and choose OAuth sign-in with the local preview identity provider. The old `/mobile/` URL is not native iOS acceptance. Stopping the preview removes its database.
 
 For a persistent standalone installation, follow [Better Auth provisioning and owner enrollment](deploy/ansible/AUTH-RUNTIME.md) and [protected first activation](docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation). The API requires migrated PostgreSQL storage and an enrolled owner with registered OAuth clients. [.env.example](.env.example) lists runtime settings. The process reads its environment directly.
 

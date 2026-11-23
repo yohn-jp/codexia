@@ -20,7 +20,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 | 単体・モデル | 純粋計算、分岐、境界値、不変条件、決定的な状態遷移 | packages/modules/appの既存unit suite |
 | コンポーネント | 描画状態・表示条件、イベント、shared controller、エラー表示の結線 | appの既存テスト基盤。必要なら既存ブラウザ環境で局所テスト |
 | 実DB結合・API E2E | 永続化、Revision、トランザクション、認可、冪等、契約間の整合 | persistence-postgres、core、api、MCP integration |
-| ブラウザE2E | UIから正本までの結合、実操作、IndexedDB、再起動、IME、Desktop/Mobile、実ブラウザ差 | tests/e2e、Core/Full、Chromium/WebKit |
+| ブラウザE2E | Desktop React Web/console/readerから正本までの結合、IndexedDB、再起動、IMEと実ブラウザ差。**Mobile React専用viewportは対象外** | tests/e2e、Core/Full、Chromium/WebKit |
 | 実行環境・パッケージング | OCI startup/drain、migration identity、Core/Fullの構成分離 | verify-oci、profile-package |
 | 特殊資源・運用受入 | 実モデル推論、native workerの解放、物理端末、バックアップ復元、実配備 | [Integration](INTEGRATION.md)、[OCI](OCI.md)、運用契約 |
 
@@ -35,7 +35,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 | ChangeSet/Proposal | 遷移可能性、入力契約、digest、stale/replayの分岐 | 実DBで同一操作の競合、原子的適用、承認境界、receipt永続化・再起動 |
 | MCP | named/generic schema、scope決定、結果型 | stdioとStreamable HTTPの実接続、PostgreSQL、認可・provider非実行 |
 | エディタ | Draft状態、revision acknowledgement、ナビゲーション世代、純粋なreducer | 実IMEイベント、保存中入力、遅延応答、reload/別タブ、実IndexedDB quotaと復旧 |
-| ワークスペース | 表示状態、アクション利用可否、画面内操作 | Desktop/Mobileの執筆・参照・復帰、モジュール有無、WebKitの契約 |
+| ワークスペース | 表示状態、アクション利用可否、画面内操作 | Desktop Webの執筆・参照・復帰、モジュール有無。SwiftUIはnative実機で別の受入 |
 | 配備 | 解析・構成選択・artifact identity | Core/Full実イメージ、起動・停止 |
 | モデル | capability leaseや設定の論理分岐 | 実モデルの推論、キャンセル、release、派生索引再構築と置換後の正本照合 |
 
@@ -46,7 +46,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 例ベースE2Eは、少なくとも次の契約を代表する既存シナリオを維持する。ケース数の目標を先に設定して削減しない。
 
 - 作者のログイン、原稿編集、保存、Revision再読込、Draft復旧。複数文書・別タブ・競合・応答順序逆転を含む。
-- Desktop/Mobileで場面を切り替え、参照・修正して原稿へ復帰する。IMEの合成中の遷移、保存保護、明示的navigationの優先を確認する。
+- Desktop Webの場面切替・参照・編集・原稿復帰を実ブラウザで確認する。iOS SwiftUIの同等操作、IME、選択、保護draft、ナビゲーションを物理iPhoneと実APIで独立確認する。現行Mobile React E2Eはネイティブの代替証拠にならず、移行時に廃止する。
 - 外部MCPによる作品参照・提案、作者UIによるレビュー・承認、PostgreSQL適用とreceipt、拒否された操作が正本を変更しないこと。
 - Knowledgeの根拠、Story Contextの視点、Scenarioの仮説と承認後の確定状態。実装の横断的な結合を証明する。
 - Core/Fullとブラウザ固有の差、実OCIライフサイクルの証明。

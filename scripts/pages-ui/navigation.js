@@ -15,4 +15,21 @@
   });
   narrow.addEventListener('change', updateLayout);
   updateLayout();
+
+  const revealHashTarget = () => {
+    if (!window.location.hash) return;
+    let id;
+    try { id = decodeURIComponent(window.location.hash.slice(1)); }
+    catch { return; }
+    const target = document.getElementById(id);
+    if (!target) return;
+    let current = target;
+    while (current && current !== document.body) {
+      if (current instanceof HTMLDetailsElement) current.open = true;
+      current = current.parentElement;
+    }
+    requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
+  };
+  revealHashTarget();
+  window.addEventListener('hashchange', revealHashTarget);
 })();

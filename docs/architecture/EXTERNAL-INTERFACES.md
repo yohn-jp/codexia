@@ -8,7 +8,7 @@
 
 | ID | 通信・データの向き | protocol / 入口 | 資格・境界 | 正本・実装の所有先 |
 | --- | --- | --- | --- | --- |
-| EXT-EDGE-001 | Browser → Cloudflare Workers Static Assets | HTTPS /、/desktop/*、/mobile/*、/oauth/*、将来の/console/* | AccessでUI入口を保護。ただしUIのAccess認証はAPIのproject認可にならない | [Deployment](../deployment/README.md)、deploy/cloudflare/ui-routes.json、app/ |
+| EXT-EDGE-001 | Browser → Cloudflare Workers Static Assets | HTTPS /、/desktop/*、/oauth/*、/console/*。既存`/mobile/*`は撤去対象 | AccessでUI入口を保護。ただしUIのAccess認証はAPIのproject認可にならない | [Deployment](../deployment/README.md)、deploy/cloudflare/ui-routes.json、app/ |
 | EXT-EDGE-002 | Browser/iOS/MCP client → Cloudflare Tunnel → VM Fastify | HTTPS /api*、/health*、/mcp*、/.well-known/* | TLS/Edge audienceとアプリ内OAuth・resource authorizationを分離 | deploy/cloudflare/ui-routes.json、public-protocol-paths.json、packages/api/src/server.ts |
 | EXT-AUTH-001 | Browser/iOS → Codexia Better Auth | OAuth 2.0 code + PKCE S256、sign-in/consent、JWKS/metadata | 登録済みpublic client、exact redirect URI、issuer/audience、session/CSRF | [Auth](API-AUTHN-AUTHZ.md)、packages/api/src/better-auth.ts、app/src/oauth.ts |
 | EXT-AUTH-002 | Better Auth ↔ optional external OIDC IdP | OIDC discovery、authorization、callback、token/identity | 外部IdP credentialをCodexia API bearerとみなさない。設定なしでもPasskey利用可能 | [Auth](API-AUTHN-AUTHZ.md)、packages/api/src/auth-mode.ts、better-auth.ts |
@@ -20,7 +20,7 @@
 | EXT-OPS-004 | Owner browser console → Fastify /api/console/backups/* → restricted backup executor | owner session protected HTTPS、運用schemaの設定/ジョブ/receipt。**目標・未実装** | S3 destinationだけをownerが指定。APIはVM/SSH/IAM/operator credentialを渡さない。任意RPC・SSRF・MCP bearer不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md)、[Admin UI](../design/ADMIN-SCREEN-FLOW.md)、[Route auth](ROUTE-AUTHORIZATION-CONTRACT.md) |
 | EXT-OPS-003 | VM/backup job → local/remote backup保護先・**S3互換オブジェクトストレージ**と隔離restore | age encrypted backup/restore、S3 HTTPS API（追加機能は未実装） | 原稿・認証・host historyの扱い、鍵・宛先・保管/復旧権限を分離。S3 writerに削除権限を与えない | [Backup](../deployment/BACKUP.md)、deploy/backup/、.github/workflows/push-backup.yml |
 | EXT-SHARE-001 | Reader → 公開コンテンツAPI | HTTPS GET /api/public/projects/:p/modules/:module/* | share capability、公開版、失効確認。原稿/private Evidenceへ到達禁止 | [Publishing](../design/PUBLISHING.md)、[Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) |
-| EXT-IOS-001 | Installed iOS Capacitor → Codexia API/OAuth | HTTPS/OAuth public client、OS browser callback | bundleにclient secretを埋め込まない、native token handling、同一Core権限 | [iOS](../deployment/IOS-CLIENT.md)、app/native/、app/src/auth-client.ts |
+| EXT-IOS-001 | **Target**: Installed native iOS SwiftUI → Codexia API/OAuth | HTTPS/Swift typed client from shared OpenAPI、OS OAuth public client/PKCE callback、URLSession | bundleにclient secretを埋め込まない、Keychain refresh、native protected journal、同一Core/API権限 | [iOS SwiftUI](IOS-SWIFTUI-ARCHITECTURE.md)、[delivery](../deployment/IOS-CLIENT.md)（旧Capacitor bridgeは移行未完了） |
 
 この台帳には認証が成功した/通信可能であるという判定を含めない。EXT-OPS-003の具体的な保管先など、保護情報は公開Markdownへ平文で書かない。Secretの**名称、責任、参照元、更新/失効方式**を記述し、値は環境のsecret managerに置く。
 

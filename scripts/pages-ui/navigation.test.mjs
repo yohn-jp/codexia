@@ -15,8 +15,10 @@ test('decoratePage uses project-subpath-safe relative assets and destination lin
   assert.match(decorated, /href="\.\.\/architecture\/"/);
   assert.match(decorated, /href="\.\.\/"/);
   assert.match(decorated, /class="cx-pages-skip" href="#main-content"/);
+  assert.match(decorated, /class="cx-pages-page"/);
   assert.match(decorated, /<main id="main-content" tabindex="-1">/);
   assert.match(decorated, /aria-current="page"/);
+  assert.match(decorated, /href="https:\/\/github\.com\/yohn-jp\/codexia\/tree\/main\/docs">GitHub Docs<\/a>/);
 });
 
 test('decoratePage adds a focusable main target without duplicating landmarks', () => {
@@ -52,7 +54,10 @@ test('decoratePage requires complete standalone HTML documents', () => {
 
 test('shared metadata allows unbroken SHA text to wrap on narrow screens', async () => {
   const css = await readFile(new URL('./navigation.css', import.meta.url), 'utf8');
-  assert.match(css, /\.cx-pages-source, \.cx-pages-mode\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.cx-pages-source,\s*\.cx-pages-mode\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.cx-pages-hero\s*>\s*\*\s*\{[^}]*min-inline-size:\s*0[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.cx-pages-branch-main\s*>\s*strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.doesNotMatch(css, /!important/u);
 });
 
 test('CLI decorates only selected entry points and preserves community HTML bytes', async () => {

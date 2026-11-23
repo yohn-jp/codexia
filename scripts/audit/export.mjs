@@ -195,37 +195,57 @@ function downloadLink(base, name, filename, label, className = '') {
 }
 export function renderIndex(manifest, { base = '' } = {}) {
   const anchored = new Set();
-  const rows = manifest.branches.map(branch => {
+  const statusBadge = status => '<span class="cx-pages-badge" data-state="' + escapeHtml(['ready', 'partial', 'blocked', 'no-diff'].includes(status) ? status : 'unavailable') + '">' + escapeHtml(status) + '</span>';
+  const branches = manifest.branches.map(branch => {
     const snap = manifest.snapshots[branch.sha];
     const snapshotBase = base + 'snapshots/' + branch.sha + '/';
     const prefix = 'codexia-' + branch.sha + '-';
-    const rowId = anchored.has(branch.sha) ? '' : ' id="sha-' + escapeHtml(branch.sha) + '"';
+    const branchId = anchored.has(branch.sha) ? '' : ' id="sha-' + escapeHtml(branch.sha) + '"';
     anchored.add(branch.sha);
-    let links = 'Not published';
+    let snapshotActions = '<p class="cx-pages-footnote">No source snapshot is published for this branch.</p>';
+    let partLinks = '';
     if (snap.status !== 'blocked') {
       const full = snap.outputs.find(x => x.name === 'repomix.json');
       assert.ok(full, 'Missing full export');
       const parts = snap.outputs.filter(x => x.name.startsWith('part-'));
-      links = '<div class="actions"><a href="' + snapshotBase + '">Snapshot details</a>' +
-        downloadLink(snapshotBase, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
-        downloadLink(snapshotBase, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
-        '<a href="' + snapshotBase + 'repomix.json">View JSON</a></div>' +
-        '<div class="actions review-parts">' +
-        parts.map((item, i) => downloadLink(snapshotBase, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
-        '</div>';
+      snapshotActions = '<div class="cx-pages-actions"><a class="cx-pages-action" href="' + escapeHtml(snapshotBase) + '">Snapshot details</a>' +
+        downloadLink(snapshotBase, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'cx-pages-action cx-pages-action--primary') +
+        downloadLink(snapshotBase, 'manifest.json', prefix + 'manifest.json', 'Download manifest', 'cx-pages-action') +
+        '<a class="cx-pages-action" href="' + escapeHtml(snapshotBase + 'repomix.json') + '">View JSON</a></div>';
+      if (parts.length) {
+        partLinks = '<details class="cx-pages-disclosure"><summary>Download snapshot parts (' + parts.length + ')</summary><div class="cx-pages-disclosure-content"><p class="cx-pages-footnote">Each part contains complete files grouped by responsibility.</p><ul class="cx-pages-output-list">' +
+          parts.map(item => '<li>' + downloadLink(snapshotBase, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes), 'cx-pages-action') + '</li>').join('') +
+          '</ul></div></details>';
+      }
     }
     const review = manifest.reviews?.[branch.sha];
+    let reviewContent = '<p class="cx-pages-footnote">No separate review packet is available for this branch.</p>';
     if (review && (review.status === 'ready' || review.status === 'partial')) {
-      links += '<div class="actions review-parts">' +
-      downloadLink(base + 'reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
-          'Gemini review · 1 Markdown (' + review.published + ' source files)' + (review.status === 'partial' ? ' · partial' : ''), 'primary') +
-        '<a href="' + base + 'reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
+      const reviewState = statusBadge(review.status);
+      reviewContent = '<div class="cx-pages-card-meta">' + reviewState + '<span>' + review.published + ' source files included' + (review.omitted ? ' · ' + review.omitted + ' omitted' : '') + '</span></div>' +
+        '<div class="cx-pages-actions">' + downloadLink(base + 'reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
+          'Gemini review · 1 Markdown (' + review.published + ' source files)' + (review.status === 'partial' ? ' · partial' : ''), 'cx-pages-action cx-pages-action--primary') +
+        '<a class="cx-pages-action" href="' + escapeHtml(base + 'reviews/' + branch.sha + '/index.html') + '">Review coverage</a></div>';
     } else if (review?.status === 'blocked') {
-      links += '<div>OCR review inputs unavailable</div>';
+      reviewContent = '<p class="cx-pages-footnote">OCR review inputs unavailable for this branch.</p>';
+    } else if (review?.status === 'no-diff') {
+      reviewContent = '<p class="cx-pages-footnote">This is the base branch; no review comparison is generated.</p>';
     }
-    return '<tr' + rowId + '><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
+    const snapshotState = statusBadge(snap.status);
+    const branchTitle = '<span class="cx-pages-branch-main"><strong>' + escapeHtml(branch.branch) + '</strong>' + snapshotState +
+      '<span class="cx-pages-branch-count">' + (snap.fileCount ?? '—') + ' files</span></span><code class="cx-pages-code">' + escapeHtml(branch.sha) + '</code>';
+    return '<li><details class="cx-pages-branch"' + branchId + '><summary class="cx-pages-branch-summary">' + branchTitle + '</summary>' +
+      '<div class="cx-pages-branch-content"><section class="cx-pages-branch-section"><h2>Source snapshot</h2>' + snapshotActions + partLinks + '</section>' +
+      '<section class="cx-pages-branch-section"><h2>Review materials</h2>' + reviewContent +
+      '<p class="cx-pages-footnote">Review input only; this is not an AI review result.</p></section></div></details></li>';
   }).join('\n');
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style></head><body><main><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink(base, 'manifest.json', 'codexia-branches.json', 'Download branch index') + '</p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></main></body></html>';
+  const empty = manifest.branches.length ? '' : '<div class="cx-pages-empty"><h2>No branch snapshots</h2><p>No remote branch snapshots were recorded in this generation.</p></div>';
+  const mainBranch = manifest.branches.find(branch => branch.branch === 'main');
+  const mainSnapshot = mainBranch && manifest.snapshots[mainBranch.sha];
+  const mainAction = mainBranch && mainSnapshot?.status !== 'blocked'
+    ? '<div class="cx-pages-actions"><a class="cx-pages-action" href="' + escapeHtml(base + 'snapshots/' + mainBranch.sha + '/') + '">Open main snapshot</a></div>'
+    : '';
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title></head><body><main><div class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Source Audit</h1><p class="cx-pages-lede">Branch source snapshots and selected review materials.</p><details class="cx-pages-disclosure"><summary>How to read these exports</summary><div class="cx-pages-disclosure-content"><p>This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; manifests list excluded files. Partial exports omit additional files, and blocked snapshots have no downloadable source. Branches may advance between refreshes.</p></div></details><div class="cx-pages-meta"><span class="cx-pages-meta-label">Observed</span><time datetime="' + escapeHtml(manifest.observedAt) + '">' + escapeHtml(manifest.observedAt) + '</time><span class="cx-pages-meta-label">Repomix</span><span>' + REPOMIX_VERSION + '</span></div><div class="cx-pages-actions">' + downloadLink(base, 'manifest.json', 'codexia-branches.json', 'Download branch index', 'cx-pages-action cx-pages-action--primary') + '</div></header><section aria-label="Observed branches"><h2>Observed branches</h2>' + mainAction + empty + (manifest.branches.length ? '<ul class="cx-pages-branch-list">' + branches + '</ul>' : '') + '</section></div></main></body></html>';
 }
 
 export function buildPortal({ root, site, cache, executable, heads, observedAt = new Date().toISOString() }) {

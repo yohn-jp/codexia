@@ -9,13 +9,13 @@
 
 ## Decision and trust boundaries
 
-Codexia has one API authorization boundary regardless of client presentation. Browser/PWA and installed iOS clients obtain an **API-specific OAuth access token** from Codexia's embedded Better Auth OAuth Provider. Better Auth authenticates the human through a Passkey or, optionally, a configured upstream OIDC provider. The API authenticates the token, resolves a principal, and independently authorizes each operation and its target objects. It does not delegate data authorization to Cloudflare Access, the Tunnel, a UI bundle, an application signature, or a client-supplied project ID.
+Codexia has one API authorization boundary regardless of client presentation. Desktop Web and installed SwiftUI native iOS clients obtain an **API-specific OAuth access token** from Codexia's embedded Better Auth OAuth Provider. Better Auth authenticates the human through a Passkey or, optionally, a configured upstream OIDC provider. The API authenticates the token, resolves a principal, and independently authorizes each operation and its target objects. It does not delegate data authorization to Cloudflare Access, the Tunnel, a UI bundle, an application signature, or a client-supplied project ID.
 
 | Component | Responsibility |
 | --- | --- |
 | Cloudflare Access on the static Workers UI | Optional **UI entry** restriction; not an API authorization grant |
-| Browser/PWA | OAuth public client; obtain API access without bundling secrets |
-| iOS Capacitor shell | Separate OAuth public client; OS-mediated sign-in and protected token storage |
+| Desktop Web | OAuth public client; obtain API access without bundling secrets |
+| Native SwiftUI iOS | Separate OAuth public client; system sign-in and Keychain protected refresh token |
 | Optional upstream OIDC provider | Alternative human sign-in; validated assertions are mapped to the existing Better Auth owner, never directly to API author grants |
 | Better Auth inside Fastify | Maintain Codexia sessions, OAuth clients/consent, authorization codes, refresh state, API JWT signing keys and OAuth metadata |
 | Cloudflare Edge/Tunnel | HTTPS routing and transport to the private API; not proof of application identity |
@@ -89,7 +89,7 @@ Cross-origin Web requests are optional and use `CODEXIA_CORS_ALLOWED_ORIGINS`, a
 
 ### Outcome and identity invariants
 
-- A person never enters, copies, generates, or persists a static Codexia API token to use Desktop Web, Mobile Web, installed iOS, or remote MCP. "Remove access tokens" means **remove manually managed long-lived standalone tokens**; short-lived OAuth access JWTs, rotating refresh tokens, server-side sessions and OAuth grants remain protocol requirements.
+- A person never enters, copies, generates, or persists a static Codexia API token to use Desktop Web, native iOS, or remote MCP. "Remove access tokens" means **remove manually managed long-lived standalone tokens**; short-lived OAuth access JWTs, rotating refresh tokens, server-side sessions and OAuth grants remain protocol requirements.
 - Better Auth in the existing Fastify process and PostgreSQL `codexia_auth` schema is the single standalone identity authority. A durable internal Better Auth `user.id` is the accepted owner subject. Passkeys and optional OIDC `(issuer, subject)` accounts attach to that same internal user; changing a device or an IdP does not change author/project ownership.
 - Passkey is the default human sign-in, independent of any OIDC service. OIDC is optional, must be explicitly configured by the already authenticated owner, and must never be needed for Passkey-only startup. No public self-registration, unapproved owner creation, implicit email-account linking, automatic second owner or downgrade to legacy token login.
 - Retain distinct registered OAuth public clients for Web and iOS, short-lived API-audience `at+jwt` tokens, PKCE S256, signed metadata, audience and scope checks, online introspection, exact-token revocation and the existing CSRF/origin boundaries. The browser retains the current in-memory access token; iOS retains its AppAuth system session and Keychain-protected refresh token. Neither needs a new native Passkey bridge or a cookie-based API rewrite.
@@ -157,7 +157,7 @@ The existing production deployment uses an Access-protected hostname and an orig
 ### Legacy token retirement and rollout
 
 - Phase A — Add maintained Passkey plugin, explicit auth-schema migration, owner-preserving enrollment and recovery. Remove upstream OIDC as a **configuration prerequisite** only after Passkey-only bootstrap and existing-owner continuity are proven.
-- Phase B — Complete Desktop/Mobile settings and optional owner-controlled OIDC registration, linking, test/activation and recovery. Preserve the fixed OIDC path until existing accounts are safely linked; then remove `genericOAuth` as a separate login authority. Do not use email-linked account migration.
+- Phase B — Complete Desktop Web /console settings and optional owner-controlled OIDC registration, linking, test/activation and recovery. Preserve the fixed OIDC path until existing accounts are safely linked; then remove `genericOAuth` as a separate login authority. Do not use email-linked account migration.
 - Phase C — Prove Browser, iOS and remote MCP against Better Auth with only OAuth credentials. Implement and separately verify Access-independent API reachability, complete consent/grants, limited MCP clients, scope/project restrictions and publisher/deployment contracts. No unrestricted dynamic OAuth client registration is added.
 - Phase D — Retire static-token issuance and admission, legacy grant issuers, and Access-derived API owner authorization. Update Quadlet, Ansible, environment, secrets, CI, docs and tests together. Cutover requires a tested one-way rollout, a protected database backup and operator recovery.
 
@@ -168,7 +168,7 @@ The existing production deployment uses an Access-protected hostname and an orig
 | AUTH-01 | Fresh empty `codexia_auth` schema, no `CODEXIA_OIDC_*`: operator-granted Passkey-first owner registration, restart, sign-in and author API authorization succeed; public signup, duplicate owner and replayed/expired bootstrap challenge fail. |
 | AUTH-02 | Existing OIDC owner, projects and signed tokens survive auth-schema migration; registering Passkey attaches to same internal owner; missing/forged/wrong RP/origin/challenge/user-verification WebAuthn assertions fail, duplicate and last-method removal are denied. |
 | AUTH-03 | OIDC owner registration, rotation, disabled state and re-enable work; unknown `issuer + sub`, fabricated email match, `requestSignUp: true`, non-owner SSO registration/mutation, unapproved/SSRF issuer and failed discovery all fail closed. Prior working provider and Passkey remain usable after error. |
-| AUTH-04 | Chromium and WebKit Desktop/Mobile settings, 320 CSS px, keyboard and focus, actual Passkey UI, session/consent revocation, expiry/reauth and draft-preserving OAuth redirects pass. Installed iOS AppAuth + system-browser Passkey and Keychain refresh work on a suitable device or are explicitly recorded **unverified**, not assumed. |
+| AUTH-04 | Desktop Web/console browser settings, focus/keyboard, Passkey, session/consent revocation, expiry/reauth and draft-preserving OAuth redirects pass. Native SwiftUI PKCE/system authentication, Passkey, Keychain rotation and draft protection work on a physical iPhone or are explicitly **unverified**. Mobile React/Capacitor viewport E2E is not the release gate. |
 | AUTH-05 | Web/iOS public-client PKCE, exact redirect, issuer/resource, token class, scopes, signed keys, JWT profile, online introspection and logout/revocation behave as specified; wrong audience, replay, expiry, altered scopes, unauthorized owner and dependency outage fail closed. |
 | AUTH-06 | A remote MCP OAuth client without Access credentials receives discovery and the expected 401, completes consent/PKCE/token refresh and invokes only assigned `mcp:read/compute/propose` on permitted projects. Author approval/apply, owner-wide lists and cross-project objects remain denied. CI integration uses disposable resources and records actual results. |
 | AUTH-07 | Cloudflare rule tests prove UI entry behavior, public protocol metadata and unauthorized API rejection; frontend/Backend release compatibility, Tunnel, production preflight and documented rollback/recovery have verified evidence. No Cloudflare Access assertion changes owner authority. |

@@ -21,7 +21,14 @@ test('all branch refs, including slash and HTML characters, are data only', () =
   assert.equal([...html.matchAll(new RegExp('id="sha-' + sha + '"','gu'))].length, 1);
   assert.match(html, /<main>/u);
   const readyHtml=renderIndex({ observedAt:'now', branches:[{branch:'main',sha}], snapshots:{[sha]:{status:'ready',outputs:[{name:'repomix.json',bytes:10}]}} });
-  assert.ok(readyHtml.includes('<a href="snapshots/' + sha + '/">Snapshot details</a>'));
+  assert.ok(readyHtml.includes('<a class="cx-pages-action" href="snapshots/' + sha + '/">Snapshot details</a>'));
+  assert.match(readyHtml, /<details class="cx-pages-branch" id="sha-[a-f0-9]{40}">/u);
+  assert.doesNotMatch(readyHtml, /<table/u);
+  const chunkedHtml=renderIndex({ observedAt:'now', branches:[{branch:'main',sha}], snapshots:{[sha]:{status:'ready',fileCount:3,outputs:[
+    {name:'repomix.json',bytes:10},{name:'part-0001.json',bytes:5,scope:'02-frontend'},
+  ]}} });
+  assert.match(chunkedHtml, /<details class="cx-pages-disclosure"><summary>Download snapshot parts \(1\)<\/summary>/u);
+  assert.match(chunkedHtml, /href="snapshots\/[a-f0-9]{40}\/part-0001\.json" download="codexia-[a-f0-9]{40}-part-0001\.json"/u);
 });
 test('only regular source blobs, not credentials, data or branch-controlled packer configuration', () => {
   for (const path of ['.env.production', 'nested/.npmrc', 'secret.pem', 'data/work.md', 'evidence/run/output.json', 'evidence/README.md', 'evidence/performance/run/seed/scene.md', '.repomixignore', 'repomix.config.ts', '../escape', '.git/config']) assert.ok(exclusion(path, '100644', 1), path);
@@ -193,6 +200,7 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
     const page = await browser.newPage({ acceptDownloads: true });
     const url = 'http://127.0.0.1:' + server.address().port + '/';
     await page.goto(url);
+    await page.locator('details.cx-pages-branch > summary').click();
     const verify = async (name, filename, content) => {
       const pending = page.waitForEvent('download');
       await page.getByRole('link', { name, exact: false }).click();
@@ -204,6 +212,7 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
     await verify('Download full JSON', 'codexia-' + sha + '-repomix.json', full);
     await verify('Gemini review', 'codexia-' + sha + '-review.md', geminiMarkdown);
     await verify('Download manifest', 'codexia-' + sha + '-manifest.json', snapshotManifest);
+    await page.getByText('Download snapshot parts (1)', { exact: true }).click();
     await verify('frontend ·', 'codexia-' + sha + '-part-0001.json', part);
     await verify('Download branch index', 'codexia-branches.json', '{"branches":[]}');
   } finally {
