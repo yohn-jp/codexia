@@ -38,6 +38,21 @@ generator_dir_created=false
 generator_wrapper_installed=false
 fixture_quadlet_installed=false
 fixture_unit_dropin_installed=false
+declare -A mitogen_traversal_paths=()
+grant_mitogen_traversal() {
+  [[ "$proof_mode" == actions-fixture && "${ANSIBLE_STRATEGY:-}" == mitogen_linear ]] || return 0
+  local dir
+  for dir in "$(pwd -P)/deploy/ansible" "$tmp"; do
+    while [[ "$dir" != /home && "$dir" != / ]]; do
+      if [[ -d "$dir" && -O "$dir" && ! -L "$dir" && ! -v mitogen_traversal_paths["$dir"] ]]; then
+        sudo setfacl -m "u:$uid:--x" "$dir"
+        mitogen_traversal_paths["$dir"]=1
+      fi
+      dir=${dir%/*}
+      [[ -n "$dir" ]] || dir=/
+    done
+  done
+}
 if getent passwd "$user" || getent passwd "$uid" || getent group "$user" || getent group "$uid"; then
   echo 'Fixture identity already exists; refusing adoption' >&2; exit 1
 fi
@@ -124,6 +139,10 @@ cleanup() {
     fi
   fi
   if [[ "$manager_dropin_dir_created" == true ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_status=1; fi
+  local acl_path
+  for acl_path in "${!mitogen_traversal_paths[@]}"; do
+    sudo setfacl -x "u:$uid" "$acl_path" || cleanup_status=1
+  done
   rm -rf -- "$tmp" || cleanup_status=1
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
   printf 'Ansible host fixture cleanup finished with test status %s, cleanup status %s, final status %s.\n' "$test_status" "$cleanup_status" "$status" >&2
@@ -146,12 +165,20 @@ EOF
   sudo systemctl daemon-reload
 fi
 host_identity_expected=true
+grant_mitogen_traversal
+started_ms=$(date +%s%3N)
 apply | tee "$tmp/first.log"
+printf 'HOST_ANSIBLE_TIMING phase=first duration_ms=%s\n' "$(( $(date +%s%3N) - started_ms ))"
 grep -Eq 'changed=[1-9][0-9]*' "$tmp/first.log"
+started_ms=$(date +%s%3N)
 apply | tee "$tmp/second.log"
+printf 'HOST_ANSIBLE_TIMING phase=idempotent duration_ms=%s\n' "$(( $(date +%s%3N) - started_ms ))"
 grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
 test "$(id -g "$user")" = "$gid"
+test "$(stat -c %a "$home")" = 700
+test "$(stat -c %u "$home")" = "$uid"
+test "$(stat -c %g "$home")" = "$gid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
 # Check the actual inherited paths; an unset/empty XDG_CONFIG_HOME means
 # the standard HOME/.config default, not a missing configuration.

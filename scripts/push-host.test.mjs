@@ -41,8 +41,50 @@ test('push-host fixture is a manual, isolated Ansible bootstrap proof', async ()
   assert.match(hostHelper, /codexia_service_user: \$user/u);
   assert.match(hostHelper, /CODEXIA_HOST_CONVERGENCE/u);
   assert.match(hostHelper, /"\$CODEXIA_HOST_CONVERGENCE" "\$tmp\/inventory\.yml" host/u);
-  for (const marker of ['pull requests', 'codexia', 'NOT_CHECKED', 'reboot', 'CODEXIA_HOST_CONVERGENCE']) {
+  for (const marker of ['pull requests', 'codexia', 'NOT_CHECKED', 'reboot', 'CODEXIA_HOST_CONVERGENCE', 'mitogen_linear']) {
     assert.ok(doc.toLowerCase().includes(marker.toLowerCase()), `Missing evidence boundary: ${marker}`);
+  }
+});
+
+test('disposable host CI selects pinned Mitogen without changing production SSH', async () => {
+  for (const name of ['ansible-host.yml', 'push-host.yml']) {
+    const workflow = await readFile(path.join(root, '.github/workflows', name), 'utf8');
+    assert.match(workflow, /mitogen==0\.3\.55/u, name);
+    assert.match(workflow, /ANSIBLE_STRATEGY=mitogen_linear/u, name);
+    assert.match(workflow, /ANSIBLE_STRATEGY_PLUGINS=\$plugin_dir/u, name);
+    assert.match(workflow, /mitogen_linear\.py/u, name);
+    assert.doesNotMatch(workflow, /ansible-doc.*mitogen_linear/u,
+      'Mitogen strategy does not include ansible-doc metadata');
+  }
+  const fixture = await readFile(path.join(root, 'deploy/ansible/test-host-integration.sh'), 'utf8');
+  assert.match(fixture, /setfacl -m "u:\$uid:--x"/u);
+  assert.match(fixture, /setfacl -x "u:\$uid"/u);
+  assert.match(fixture, /\[\[ -n "\$dir" \]\] \|\| dir=\//u,
+    'private /tmp parent traversal must terminate at root, never loop on an empty path');
+  assert.match(fixture, /HOST_ANSIBLE_TIMING phase=first/u);
+  assert.match(fixture, /HOST_ANSIBLE_TIMING phase=idempotent/u);
+  assert.match(fixture, /\$proof_mode" == actions-fixture/u);
+});
+
+test('new service account does not copy /etc/skel and gets an owned private empty home', async () => {
+  const host = await readFile(path.join(root, 'deploy/ansible/host.yml'), 'utf8');
+  const createAccount = host.split('    - name: Create explicitly authorized service account when absent')[1]
+    ?.split('    - name: Create an empty private home only for a newly authorized service account')[0];
+  assert.ok(createAccount, 'authorized service account creation task must exist');
+  assert.match(createAccount, /create_home: false/u, 'a new account must not copy the runner skeleton');
+  assert.match(createAccount, /when: host_identity\.results\[0\]\.rc == 2/u);
+  const createHome = host.split('    - name: Create an empty private home only for a newly authorized service account')[1]
+    ?.split('    - name: Verify system-allocated subordinate ID mappings')[0];
+  assert.ok(createHome, 'new private home creation task must exist');
+  for (const expected of [
+    'ansible.builtin.file:', 'path: "{{ codexia_service_home }}"', 'state: directory',
+    'owner: "{{ codexia_service_user }}"', 'group: "{{ codexia_service_group }}"',
+    "mode: '0700'", 'when: host_identity.results[0].rc == 2',
+  ]) assert.ok(createHome.includes(expected), `missing new-home invariant: ${expected}`);
+  const fixture = await readFile(path.join(root, 'deploy/ansible/test-host-integration.sh'), 'utf8');
+  for (const property of ['%a', '%u', '%g']) {
+    assert.ok(fixture.includes(`stat -c ${property} "$home"`),
+      `disposable integration must verify actual home ${property}`);
   }
 });
 

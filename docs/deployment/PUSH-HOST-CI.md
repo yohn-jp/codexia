@@ -4,6 +4,8 @@ The dedicated [push-host workflow](../../.github/workflows/push-host.yml) is man
 
 The fixture executes the canonical `host` stage twice under a dedicated bootstrap account, checks the `codexia` rootless account, systemd lingering, network generator and rootless Podman. It emits source-SHA/run-bound JSON evidence, a bounded redacted log and verifies cleanup of the fixture-owned account.
 
+The disposable host CI pins Ansible Core 2.21.6 and Mitogen 0.3.55, activates `mitogen_linear`, and records first and idempotent convergence durations. Temporary execute-only directory ACLs for the fixture UID are removed during cleanup. This does not change the production Ansible controller or SSH connection strategy.
+
 This is **not** acceptance of production deployment, backup restoration, application health, or reboot recovery. Reboot is explicitly `NOT_CHECKED`. The production deployment workflow and the backup/restore acceptance are separate proof boundaries.
 
 No polling, signed update channel or alternate deployment controller is present.
