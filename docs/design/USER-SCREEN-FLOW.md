@@ -8,7 +8,9 @@
 
 ```mermaid
 flowchart TD
-    START["起動"] --> PATH{"URLは公開 reader /r/* か"}
+    START["起動"] --> CONSOLE{"URLは /console または /console/* か"}
+    CONSOLE -->|はい| ADMIN["所有者管理コンソール<br/>/console/setup または認証・設定"]
+    CONSOLE -->|いいえ| PATH{"URLは公開 reader /r/* か"}
     PATH -->|はい| READER["公開 reader<br/>読み取り専用"]
     PATH -->|いいえ| OAUTH_PAGE{"OAuth login / consent の専用URLか"}
     OAUTH_PAGE -->|はい| OA["Better Auth ログインまたは同意"]
@@ -31,6 +33,8 @@ flowchart TD
     PROJ -->|文書を選択・作成| WRITING
     WRITING -->|作品を切替| LIB
 ```
+
+`/console`以下の画面・遷移・初回登録の認可は[管理画面の遷移設計](ADMIN-SCREEN-FLOW.md)が正本となる。Workersが静的ルートを配信し、VM上のBetter Authが認証・owner確認を担当する。通常の執筆用モード選択へ迂回させない。
 
 未認証と PostgreSQL 不可を同じ「作品なし」画面へ変換しない。サインイン時・サインアウト時・作者 scope 変更時には未保存の原稿と回復 journal を保護し、失敗しても別作者の作業領域を表示しない。ログインと認可は [API 認証仕様](../architecture/API-AUTHN-AUTHZ.md) を正本とする。公開 reader は作者用エディターと独立し、書込操作へ進ませない。
 
