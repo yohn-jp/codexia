@@ -194,6 +194,14 @@ test("same-origin stale tabs cannot replace an equal-generation journal draft", 
 
 test("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
+  await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
+  const blockedUnload = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(blockedUnload).toBe(true);
+  await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "", bubbles: true })));
   await page.evaluate(() => {
     window.print = () => {
       document.documentElement.dataset.printedManuscript = document.querySelector(".pg-print-manuscript")?.textContent ?? "";
