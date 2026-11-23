@@ -103,6 +103,23 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
+test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
+  const owners = [
+    ['packages/api/src/server.ts', 'unit-api'],
+    ['packages/api/src/persistence-routes.ts', 'unit-api'],
+    ['packages/api/src/owner-setup.ts', 'unit-api'],
+    ['packages/api/src/better-auth.ts', 'unit-api'],
+    ['modules/mcp/src/http.ts', 'unit-mcp'],
+    ['modules/publishing/src/http.ts', 'unit-publishing'],
+  ];
+  for (const [file, owner] of owners) {
+    const selection = await plan([file]);
+    assert.ok(selection.tasks.includes('unit-http-contract'), `${file} selects source-to-contract verification`);
+    assert.ok(selection.tasks.includes(owner), `${file} retains its runtime source owner`);
+    assert.ok(selection.groups.includes('unit-core'), `${file} runs the HTTP contract task’s existing Verify group`);
+  }
+});
+
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
   const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
@@ -424,7 +441,9 @@ test('known operational inputs retain root proof without unrelated browser or OC
       ? ['unit-root', 'db-contract', 'coverage']
       : file.startsWith('docs/deployment/')
         ? ['unit-root', 'coverage', 'architecture-g5']
-        : ['unit-root','coverage'];
+        : file.startsWith('edge/frontend/') && /\.[cm]?[jt]sx?$/u.test(file)
+          ? ['unit-root', 'coverage', 'biome-ci']
+          : ['unit-root','coverage'];
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
@@ -581,7 +600,7 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
 });
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
-  const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage'];
+  const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage', 'biome-ci'];
   for (const [file, expectedModelOci] of [
     ['packages/api/test/passkey-bootstrap.acceptance.test.ts', false],
     ['packages/api/scripts/run-passkey-acceptance.mjs', true],

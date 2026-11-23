@@ -65,6 +65,15 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.github/workflows/verify.yml',
 ]);
 
+const HTTP_CONTRACT_ROUTE_SOURCE_PATHS = new Set([
+  'packages/api/src/server.ts',
+  'packages/api/src/persistence-routes.ts',
+  'packages/api/src/owner-setup.ts',
+  'packages/api/src/better-auth.ts',
+  'modules/mcp/src/http.ts',
+  'modules/publishing/src/http.ts',
+]);
+
 /** @param {string} file */
 export function matchesFullModelOciPath(file) {
   if (typeof file !== 'string') return false;
@@ -225,6 +234,9 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
+    // Fail closed on changed JS/TS sources; native Swift-only PRs retain their Xcode owner.
+    if (file === 'biome.json' ||
+        (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
@@ -259,6 +271,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
       continue;
     }
+    if (HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('unit-http-contract');
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
     if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
@@ -395,6 +408,7 @@ export function verificationPlanOutputs(plan) {
   validateVerificationPlan(plan);
   return {
     plan: JSON.stringify(plan),
+    biome: String(plan.groups.includes('biome')),
     unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
     types: JSON.stringify(['sources', 'tests', 'trace'].filter(id => plan.groups.includes(`types-${id}`))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),

@@ -67,8 +67,11 @@ function rootlessPodman(args, options = {}) {
   const { timeout } = options;
   return execFileSync('sudo', ['-u', 'codexia', 'env', `HOME=${home}`, `XDG_CONFIG_HOME=${home}/.config`,
     `XDG_DATA_HOME=${home}/.local/share`, `XDG_STATE_HOME=${home}/.local/state`, `XDG_RUNTIME_DIR=/run/user/${uid}`,
-    `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus`, '/usr/bin/podman', ...args],
-  { encoding: 'utf8', timeout, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus`,
+    // The unprivileged runner must not chdir into the private (0700) home.
+    // Change directory only after sudo has switched to the service UID.
+    '/bin/bash', '-c', 'cd "$HOME" && exec "$@"', 'bash', '/usr/bin/podman', ...args],
+  { encoding: 'utf8', timeout, cwd: '/', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 export function publicError(error) {
   const message = error instanceof Error ? error.message : 'Lifecycle evidence preparation failed';

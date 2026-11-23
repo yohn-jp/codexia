@@ -351,8 +351,8 @@ test("contract validation rejects omitted routes and Fastify path collisions", (
     openapi: "3.1.0",
     info: { title: "Inventory fixture", version: "1.0.0" },
     paths: {
-      "/resources/{resourceId}": { get: { operationId: "get_resource", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
-      "/resources/{id}": { get: { operationId: "get_resource_alias", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+      "/resources/{resourceId}": { parameters: [{ name: "resourceId", in: "path", required: true, schema: { type: "string" } }], get: { operationId: "get_resource", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+      "/resources/{id}": { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], get: { operationId: "get_resource_alias", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
     },
   };
 

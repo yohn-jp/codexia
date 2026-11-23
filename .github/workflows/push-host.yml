@@ -45,7 +45,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends python3-venv
           sudo python3 -m venv /opt/codexia-ansible
-          sudo /opt/codexia-ansible/bin/pip install -r deploy/ansible/requirements.txt
+          sudo /opt/codexia-ansible/bin/pip install -r deploy/ansible/requirements.txt mitogen==0.3.55
+          plugin_dir=$(/opt/codexia-ansible/bin/python -c 'import ansible_mitogen, os; print(os.path.join(os.path.dirname(ansible_mitogen.__file__), "plugins", "strategy"))')
+          test -f "$plugin_dir/mitogen_linear.py"
+          /opt/codexia-ansible/bin/python -c 'from importlib.metadata import version; assert version("mitogen") == "0.3.55"'
+          {
+            echo "ANSIBLE_STRATEGY=mitogen_linear"
+            echo "ANSIBLE_STRATEGY_PLUGINS=$plugin_dir"
+          } >> "$GITHUB_ENV"
+          echo "HOST_ANSIBLE_PROFILE strategy=mitogen_linear"
       - name: Converge and observe the disposable codexia host identity
         env:
           CODEXIA_DISPOSABLE_HOST: push-host

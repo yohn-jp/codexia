@@ -131,10 +131,18 @@
         uid: "{{ codexia_service_uid }}"
         group: "{{ codexia_service_group }}"
         home: "{{ codexia_service_home }}"
-        create_home: true
+        create_home: false
         shell: /bin/bash
         password_lock: true
         state: present
+      when: host_identity.results[0].rc == 2
+    - name: Create an empty private home only for a newly authorized service account
+      ansible.builtin.file:
+        path: "{{ codexia_service_home }}"
+        state: directory
+        owner: "{{ codexia_service_user }}"
+        group: "{{ codexia_service_group }}"
+        mode: '0700'
       when: host_identity.results[0].rc == 2
     - name: Verify system-allocated subordinate ID mappings
       ansible.builtin.command:

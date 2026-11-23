@@ -15,6 +15,17 @@ const backendWorkflow = parse(readFileSync(new URL('../../../.github/workflows/b
 const site = parse(readFileSync(new URL('../../../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const deploy = parse(readFileSync(new URL('../../../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
 
+test('rootless Podman changes into the private service home after dropping privileges', () => {
+  const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8');
+  const rootless = source.split('function rootlessPodman(args, options = {}) {')[1]
+    ?.split('export function publicError(error) {')[0];
+  assert.ok(rootless, 'the rootless Podman invocation must be present');
+  assert.ok(rootless.includes(`'/bin/bash', '-c', 'cd "$HOME" && exec "$@"'`),
+    'the private home chdir must happen after sudo switches to the rootless service UID');
+  assert.ok(rootless.includes("cwd: '/'"), 'runner must start sudo from a traversable working directory');
+  assert.doesNotMatch(rootless, /cwd:\s*home/u, 'runner cannot enter a 0700 service home before invoking sudo');
+});
+
 function completedBackendProducer() {
   const sourceSha = 'a'.repeat(40);
   const run = { id: 123, run_attempt: 1, status: 'completed', conclusion: 'success',
@@ -150,6 +161,40 @@ test('both lifecycle shells and the prebuild shell parse as executable Bash', ()
   }
 });
 
+test('lifecycle CI activates pinned Mitogen and profiles stage-specific Ansible work', () => {
+  const lifecycle = workflow.jobs.lifecycle;
+  const install = lifecycle.steps.find(step => step.name === 'Install disposable host and filesystem capabilities');
+  assert.ok(install, 'the fixture must configure its Ansible controller');
+  assert.match(install.run, /mitogen==0\.3\.55/u);
+  assert.match(install.run, /ANSIBLE_STRATEGY=mitogen_linear/u);
+  assert.match(install.run, /ANSIBLE_STRATEGY_PLUGINS=\$plugin_dir/u);
+  assert.match(install.run, /mitogen_linear\.py/u);
+  assert.match(install.run, /-m py_compile.*codexia_profile\.py/u);
+  assert.doesNotMatch(install.run, /ansible-doc.*mitogen_linear/u,
+    'Mitogen has no ansible-doc metadata; its pinned strategy file is the contract');
+  assert.match(install.run, /ANSIBLE_CALLBACKS_ENABLED=codexia_profile/u);
+  assert.ok(workflow.on.pull_request.paths.includes('deploy/ansible/callback_plugins/**'));
+
+  const gather = site.tasks.find(task => task.name === 'Gather target host facts');
+  assert.ok(gather, 'host fact collection remains explicit');
+  assert.match(gather['ansible.builtin.setup'].gather_subset, /'distribution', 'architecture', 'service_mgr'/u);
+  assert.match(gather['ansible.builtin.setup'].gather_subset, /'!all', '!min', 'user'/u);
+  assert.doesNotMatch(gather['ansible.builtin.setup'].gather_subset, /\['all'\]/u,
+    'repeated lifecycle deployment must not discover the entire host');
+
+  const fixture = readFileSync(new URL('../../../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
+  assert.match(fixture, /grant_mitogen_traversal/u);
+  assert.match(fixture, /setfacl -m "u:\$fixture_uid:--x"/u);
+  assert.match(fixture, /setfacl -x "u:\$fixture_uid"/u);
+  assert.match(fixture, /\[\[ -n "\$dir" \]\] \|\| dir=\//u,
+    'Mitogen fixture directory traversal must terminate at the filesystem root');
+  assert.match(fixture, /LIFECYCLE_ANSIBLE_TIMING stage=/u);
+  const profile = readFileSync(new URL('../../../deploy/ansible/callback_plugins/codexia_profile.py', import.meta.url), 'utf8');
+  assert.match(profile, /CODEXIA_ANSIBLE_TASK_TIME/u);
+  assert.doesNotMatch(profile, /result\._result|module_args|env\[/u,
+    'task timing must not expose secret-bearing arguments or results');
+});
+
 test('real app and Better Auth transitions execute independently and missing states cannot pass', () => {
   const fixture = readFileSync(new URL('../../../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   const image = readFileSync(new URL('../../../deploy/fixtures/sshfs-server/Dockerfile', import.meta.url), 'utf8');
@@ -192,6 +237,11 @@ test('lifecycle readiness uses real conditions without time-based sleep loops', 
   const db = readFileSync(new URL('../../../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
   assert.match(api, /^Notify=healthy$/mu);
   assert.match(api, /^HealthStartupInterval=2s$/mu);
+  const healthCommand = api.match(/^HealthCmd=(.+)$/mu)?.[1];
+  const startupCommand = api.match(/^HealthStartupCmd=(.+)$/mu)?.[1];
+  assert.ok(healthCommand && startupCommand, 'startup requires an explicit healthcheck command');
+  assert.equal(startupCommand, healthCommand,
+    'the faster startup readiness probe must be identical to the regular API readiness probe');
   assert.match(api, /^StartLimitBurst=3$/mu);
   assert.match(db, /^Tmpfs=\/run\/postgresql:rw,nosuid,nodev,noexec,size=16m$/mu);
   assert.doesNotMatch(db, /^Tmpfs=\/var\/run\/postgresql:/mu);
