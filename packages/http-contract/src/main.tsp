@@ -35,7 +35,14 @@ using TypeSpec.OpenAPI;
     source: "Better Auth official runtime OpenAPI generation",
     pathPrefix: "/api/auth/",
     libraryOperationsIncludedHere: false,
-    applicationAdaptersHere: #["POST /api/auth/oauth2/consent-context", "GET /api/auth/oauth2/get-consents"]
+    applicationAdaptersHere: #[
+      "POST /api/auth/oauth2/consent-context",
+      "GET /api/auth/oauth2/get-consents",
+      "GET /api/auth/codexia/setup/status",
+      "POST /api/auth/codexia/setup/authorize",
+      "POST /api/auth/codexia/setup/profile",
+      "POST /api/auth/codexia/setup/complete"
+    ]
   },
   betterAuthMetadataPaths: #["/.well-known/oauth-authorization-server/api/auth", "/.well-known/openid-configuration/api/auth"],
   reason: "Library-managed authentication operations and discovery metadata come from the official Better Auth generator; only Codexia-owned adapters are defined here."

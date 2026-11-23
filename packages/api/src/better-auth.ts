@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
 import { getCurrentAdapter, runWithTransaction } from "@better-auth/core/context";
 import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { setSessionCookie } from "better-auth/cookies";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import {
@@ -16,6 +17,7 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
+import { consumeOwnerSetupGrant, ownerSetupSchema, ownerSetupTableExists, type SetupRegistration } from "./owner-setup-store.js";
 import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
 export { CODEXIA_OWNER_SCOPE };
@@ -27,6 +29,8 @@ export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
   /** Prevent plugin initialization from writing during deployment verification. */
   readonly readOnlyDatabase?: boolean;
+  /** Set only for the offline migration on protected, fresh setup installations. */
+  readonly installOwnerSetupSchema?: boolean;
   readonly publicOrigin: string;
   /** Explicit Passkey RP ID for an isolated setup listener on a production-host subdomain. */
   readonly passkeyRpId?: string;
@@ -62,10 +66,11 @@ const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", 
 const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
 
-function codexiaAuthMethodsPlugin(oidcConfigured: boolean) {
+function codexiaAuthMethodsPlugin(oidcConfigured: boolean, ownerSetupEnabled: boolean) {
   return {
     id: "codexia-auth-methods",
     schema: {
+      ...(ownerSetupEnabled ? { ownerSetup: ownerSetupSchema } : {}),
       passkeyRecoveryAudit: {
         modelName: "passkey_recovery_audit",
         fields: {
@@ -85,6 +90,25 @@ function codexiaAuthMethodsPlugin(oidcConfigured: boolean) {
     },
   };
 }
+function setupProvisioningSessionPlugin(provisioningOwner: () => string | undefined) {
+  return {
+    id: "codexia-setup-provisioning",
+    endpoints: {
+      setupProvisioningSession: createAuthEndpoint("/codexia/setup-internal-session", {
+        method: "POST", metadata: { SERVER_ONLY: true },
+      }, async (ctx) => {
+        const ownerId = provisioningOwner();
+        const user = ownerId && await ctx.context.internalAdapter.findUserById(ownerId);
+        if (!user) throw new Error("No enrolled setup owner is approved for client provisioning");
+        const session = await ctx.context.internalAdapter.createSession(user.id);
+        if (!session) throw new Error("Could not start the setup provisioning session");
+        await setSessionCookie(ctx, { user, session });
+        return ctx.json({ token: session.token });
+      }),
+    },
+  };
+}
+
 const PASSKEY_BOOTSTRAP_VERIFICATION_ID = "codexia:first-owner-passkey:v1";
 const PASSKEY_BOOTSTRAP_CONTEXT = "codexia-first-owner-v1";
 const PASSKEY_OWNER_RECOVERY_CONTEXT = "codexia-owner-recovery-v1";
@@ -255,6 +279,8 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
 interface BetterAuthBootstrapRegistration {
   readonly ownerOidcSubject?: string;
   readonly passkeyRecoveryOwnerId?: string;
+  readonly ownerSetup?: () => SetupRegistration | undefined;
+  readonly setupProvisioningOwner?: () => string | undefined;
   readonly nextClientId: () => string;
 }
 
@@ -314,6 +340,11 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     secret: config.authSecret,
     disabledPaths: ["/oauth2/get-consent", "/oauth2/get-consents", "/oauth2/update-consent", "/oauth2/delete-consent"],
     account: { accountLinking: { enabled: false } },
+    ...(bootstrap?.ownerSetup ? {
+      logger: { disabled: true },
+      advanced: { cookiePrefix: "codexia-setup", defaultCookieAttributes: { sameSite: "strict" } },
+      session: { expiresIn: 10 * 60, disableSessionRefresh: true },
+    } : {}),
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         const path = ctx.path;
@@ -335,15 +366,24 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       }),
     },
     plugins: [
-      codexiaAuthMethodsPlugin(Boolean(oidcIssuer)),
+      codexiaAuthMethodsPlugin(Boolean(oidcIssuer), Boolean(bootstrap?.ownerSetup || config.installOwnerSetupSchema)),
+      setupProvisioningSessionPlugin(() => bootstrap?.setupProvisioningOwner?.()),
       passkey({
         rpID: passkeyRpId,
         rpName: "Codexia",
         origin: publicOrigin.origin,
         authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
         registration: {
-          requireSession: !config.passkeyBootstrap && !bootstrap?.passkeyRecoveryOwnerId,
-          ...(config.passkeyBootstrap ? {
+          requireSession: !config.passkeyBootstrap && !bootstrap?.passkeyRecoveryOwnerId && !bootstrap?.ownerSetup,
+          ...(bootstrap?.ownerSetup ? {
+            async resolveUser({ context }) {
+              const registration = bootstrap.ownerSetup?.();
+              if (!registration || context !== registration.ceremonyContext) {
+                throw new Error("An authorized setup transaction is required");
+              }
+              return { id: registration.ownerId, name: registration.name, displayName: registration.name };
+            },
+          } : config.passkeyBootstrap ? {
             async resolveUser({ ctx, context }) {
               const suppliedToken = ctx.request?.headers.get("x-codexia-owner-enrollment") ?? "";
               if (context !== PASSKEY_BOOTSTRAP_CONTEXT || !suppliedToken) {
@@ -379,6 +419,22 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
             },
           } : {}),
           async afterVerification({ ctx, user, context }) {
+            if (bootstrap?.ownerSetup) {
+              const registration = bootstrap.ownerSetup();
+              if (!registration || context !== registration.ceremonyContext ||
+                  user.id !== registration.ownerId || ctx.body.createSession !== true) {
+                throw new Error("The verified ceremony does not match the authorized setup transaction");
+              }
+              // This adapter is the maintained Passkey plugin's PostgreSQL transaction.
+              // A failed owner, credential, or session insertion rolls grant consumption back.
+              await consumeOwnerSetupGrant(await getCurrentAdapter(ctx.context.adapter), registration);
+              const owner = await ctx.context.internalAdapter.createUser({
+                id: registration.ownerId, name: registration.name,
+                email: registration.email, emailVerified: false,
+              }, { method: "passkey" });
+              if (owner.id !== registration.ownerId) throw new Error("The owner identity changed during registration");
+              return;
+            }
             if (config.passkeyBootstrap) {
               if (context !== PASSKEY_BOOTSTRAP_CONTEXT) throw new Error("Owner enrollment context is invalid");
               // The plugin accepts createSession=false, which skips its PostgreSQL transaction.
@@ -391,6 +447,9 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
               if (!grant || grant.expiresAt.getTime() <= Date.now() || !suppliedToken ||
                   !constantTimeEqual(grant.value, createHash("sha256").update(suppliedToken).digest("hex"))) {
                 throw new Error("The owner enrollment grant was already used or expired");
+              }
+              if (await ownerSetupTableExists(pool)) {
+                throw new Error("A first-owner setup deployment is already recorded");
               }
               const existingOwner = await ctx.context.internalAdapter.findUserById(user.id);
               const anyUser = await ctx.context.adapter.findMany({ model: "user", limit: 1 });
@@ -508,6 +567,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       if (!config.passkeyBootstrap) throw new Error("Passkey first-owner enrollment is not configured");
       const context = await auth.$context;
       const users = await context.adapter.findMany({ model: "user", limit: 1 });
+      if (await ownerSetupTableExists(pool)) throw new Error("A first-owner setup deployment is already recorded");
       if (users.length > 0) {
         throw new Error("Passkey first-owner enrollment requires an empty authentication database");
       }

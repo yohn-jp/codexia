@@ -1,0 +1,29 @@
+---
+- name: Stage the private nonsecret setup-only OAuth configuration
+  ansible.builtin.copy:
+    content: "CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS={{ codexia_owner_setup_web_redirect_uris | join(',') }}\n"
+    dest: "{{ home }}/.config/codexia-auth/owner-setup.env"
+    mode: '0600'
+
+- name: Stage the exact immutable setup-only Quadlet for the protected API slot
+  ansible.builtin.template:
+    src: "{{ repo_root }}/deploy/ansible/owner-setup.container.j2"
+    dest: "{{ home }}/.config/codexia-auth/owner-setup.container"
+    mode: '0600'
+
+- name: Install the protected owner setup operator operation
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/owner-setup.sh"
+    dest: "{{ home }}/.local/bin/codexia-owner-setup"
+    mode: '0700'
+
+- name: Converge owner setup without passing the key to Ansible
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-owner-setup"
+      - --converge
+      - "{{ codexia_auth_bootstrap_image }}"
+      - "{{ 'NEW_APPROVED' if owner_setup_fresh_database else 'OBSERVE_ONLY' }}"
+      - "{{ codexia_owner_setup_age_recipient }}"
+    expand_argument_vars: false
+  changed_when: owner_setup_fresh_database
