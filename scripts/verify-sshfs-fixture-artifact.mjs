@@ -52,8 +52,8 @@ async function fileHash(filename) {
 export async function verifyFixtureArtifact(folder, identity, { root = ROOT } = {}) {
   const manifestPath = path.join(folder, 'manifest.json');
   const archive = path.join(folder, 'sshfs-fixture.tar');
-  const manifest = assertFixtureManifest(JSON.parse(await readFile(manifestPath, 'utf8')), identity);
   await regularFile(manifestPath);
+  const manifest = assertFixtureManifest(JSON.parse(await readFile(manifestPath, 'utf8')), identity);
   const stat = await regularFile(archive);
   assert.equal(stat.size, manifest.archiveBytes, 'Fixture archive byte count mismatch');
   for (const [relative, field] of [
