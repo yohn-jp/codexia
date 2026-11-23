@@ -24,13 +24,19 @@
 - **更新の可否は「連動更新」「再現された阻害による一時保留」「更新待ち」「削除・再評価」「制約根拠未確認」に区別する。** 依存している実行環境・peer API・型・生成物を切り離して更新しない。古い版が必要な場合は、再現できる阻害・保持範囲・解除条件を当該PRへ、継続的な採用条件を[台帳](DEPENDENCY-INVENTORY.md)へ記録する。
 - **非JS依存も対象**とする。SwiftPMのexact、Ansibleの`==`、GitHub Actions、OCIイメージdigest、Node/pnpmおよび複数のlockfileの整合を同様に審査する。
 
+## Desktop Web技術選定（確定・未実装）
+
+Desktop Reactは **TypeScript 7 + Vite 8 + vanilla-extract** を正本とする。TypeScript 7のnative型検査を必須とし、既知のNode型解決障害を修正する。Vite 8を維持し、Rsbuild/StyleX/Tailwind/Panda/Bootstrapは本移行の採用対象としない。CSSは `@vanilla-extract/css` の型付きテーマ／トークン、`@vanilla-extract/recipes` のvariants、`@vanilla-extract/vite-plugin` のビルド統合を採用する。既存CSSは段階的に置換して不要分を削除し、重複した恒久スタイル正本を設けない。SwiftUI Nativeは独立したフロントエンドである。
+
+これは採用契約であって導入完了の宣言ではない。最新版・peer互換・TS7/Vite8の統合、CSS成果物、テーマ、Desktop E2E、CIは実装PRで検証する。
+
 ## 3. 選定済みライブラリ台帳
 
 次の選定は**設計上の採用決定**であり、コードへの依存追加・置換・CI実行が完了したという意味ではない。具体的な実装・CI適合の状態はPRと検証証拠で判定し、この設計台帳へ時系列の進捗を記載しない。
 
 | 用途 | 選定済みパッケージ／初期基準版 | 適用対象／責務 | バージョン・互換性制約 |
 | --- | --- | --- | --- |
-| ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop/Mobile Webは対応ブラウザーで検証する |
+| ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop Webは対応ブラウザーで検証する |
 | 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/download-ci-artifacts.mjs`の独自ZIP構文解析を置換する対象 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
 | API・MCP・外部データの実行時検証 | [`zod`](https://zod.dev/) `4.6.7` | API、MCP、Assistant等の境界検証の正本。手動検査の統一対象 | Zod 4はTypeScript 5.5以上で検証されている。`strict`設定・Core-only依存閉包を維持 |
 | GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
@@ -43,7 +49,7 @@
 
 - 保持する制約: PKCE S256、予測困難な`state`、タブ単位・有効期限付きトランザクション、callbackでの`state`・`iss`（RFC 9207）・redirect照合、`resource`（RFC 8707）・API audience、認可サーバーとendpointの厳密な同一オリジン、tokenのメモリ保持、誤応答時のfail-closed。
 - 比較対象の[`openid-client`](https://github.com/panva/openid-client) `6.9.1`はプロトコル処理を高レベルに抽象化するが、この用途では既存の個別制約を明示して監査することを優先し、**採用しない**。セキュリティ品質が劣るという判断ではない。
-- iOSネイティブのAppAuth-iOSはOSの認証セッションとKeychainを担当するため維持し、WebView内のOAuthライブラリへ統合しない。Better Authのclient helperはAPIアクセストークン取得契約の置換対象として選ばない。
+- iOSのAppAuth-iOS資産はSwiftUI Native認証での再利用可否を検証する。OS認証とKeychainを維持するためにCapacitor bridgeを残さない。iOSのSwift typed clientはWeb Orvalとは別に同じOpenAPIから生成する。Better Authのclient helperはAPIアクセストークン取得契約の置換対象として選ばない。
 - 受入: 正常なAuthorization Code + PKCEに加え、state不一致・リプレイ・期限切れ・iss不一致・endpoint変更・不正token type・redirect逸脱・token漏えいが拒否されることをブラウザーで確認する。
 
 ### ZIP：`@zip.js/zip.js`を採用

@@ -6,7 +6,7 @@
 
 | 利用者 | 目的 | 許可する作業面 | 絶対に到達させない操作 |
 | --- | --- | --- | --- |
-| 作者（owner） | 続きを書く、構成・知識・提案の管理、公開、認証器管理 | Desktop/Mobile/iOS、OAuth、本人管理`/console`目標 | 管理画面からVM・SSH・DB credentialへ直接アクセス |
+| 作者（owner） | 続きを書く、構成・知識・提案の管理、公開、認証器管理 | Desktop React Web/iOS Native SwiftUI、OAuth、本人管理`/console`目標 | 管理画面からVM・SSH・DB credentialへ直接アクセス |
 | 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` **目標のみ** | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
 | 公開読者 | 共有された内容を読む | `/r/:module/:project/:slug`のみ | 非公開原稿/設定/履歴、書込、作者登録 |
 | 外部AI/MCP | 許可された作品を参照・解析して提案 | `/mcp`と登録済みtool。**Web画面は不要** | 作者の変更承認/適用、直接persistence、資格情報 |
@@ -19,28 +19,28 @@
 画面IDは [情報設計](INFORMATION-ARCHITECTURE.md) の従来カタログと整合させる。特に **WRT-02＝Revision履歴、REV-01＝提案一覧、REV-02＝提案詳細**。CFG-01は表示設定（DISPLAY-01）と本人セキュリティ設定（PREF-01）を束ねる概念的なカテゴリであり、別のデータ正本やURLを作らない。KNO-03の局所グラフは情報設計で検討された**未採用提案**として明示し、実装済みの関係一覧/詳細に見せかけない。
 
 
-**画面IDは安定した論理識別子。** 【実装】は現行mainの機能／【目標】は採用済み仕様だが専用画面やAPIの受入が未完了。shell内パネルに独立URLを強制しない。
+**画面IDは安定した論理識別子。** 【実装】は現行React Web実装の状態であり、iOS Nativeの実装・受入を意味しない。【目標】は採用済みで未受入。旧Mobile Web `/mobile/`/Ionic/Capacitorは**廃止対象**であり、下表の現行ルートを製品の新規受入条件として扱わない。iOS Nativeの表示は[SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い論理IDのみ共通化する。
 
 | 画面ID | 入口・表示形態 | principal | 主タスクと通常の戻り先 | 種別 |
 | --- | --- | --- | --- | --- |
-| ENTRY-01 | `/` | ANON | Desktop/Mobileの選択 → 同じoriginの明示shell | 実装 |
+| ENTRY-01 | `/`（現行legacy選択あり）→目標は`/desktop/` | ANON | Desktop React Webを起動。iOSはnative app entry | 実装 |
 | AUTH-01 | `/oauth/login` | 正しいsigned request→OWNER-SESSION | Passkey/連携IdPログイン → AUTH-02／中止→ENTRY | 実装 |
 | AUTH-02 | `/oauth/consent` | OWNER-SESSION＋登録済みclient | scopeとclientを確認→許可/拒否→検証済みcallback | 実装 |
-| LIB-01 | `/desktop/`・`/mobile/?view=library`、`/projects/:id` | OWNER-API | 作品を選択/作成/取込/書出→構成・本文 | 実装 |
-| OUT-01 | 同じshellの構成panel・Mobile参照sheet | OWNER-API | 巻/章/シーン選択・移動・検索 → 本文 | 実装 |
+| LIB-01 | Desktop Web `/desktop/`・iOS Native Library（旧`/mobile/`廃止） | OWNER-API | 作品を選択/作成/取込/書出→構成・本文 | 実装 |
+| OUT-01 | Desktop構成panel・iOS native Outline | OWNER-API | 巻/章/シーン選択・移動・検索 → 本文 | 実装 |
 | WRT-01 | `/<shell>/projects/:projectId/scenes/:documentId` | OWNER-API | 編集、保存、閲覧、根拠、Revision。元の本文へ | 実装 |
-| READ-01 | WRT-01の読書表示、Mobileページャー | OWNER-API | 文字組み/縦横/参照→同じRevisionの編集位置へ | 実装 |
+| READ-01 | Desktop reader・iOS native Reader | OWNER-API | 文字組み/縦横/参照→同じRevisionの編集位置へ | 実装 |
 | WRT-02 | WRT-01のRevision履歴・差分 | OWNER-API | 差分表示・履歴復元→元の本文 | 実装 |
 | REC-01 | WRT-01の保存状態・競合/回復/失効 | OWNER-API＋browser local journal | 確定状態を照合・復旧→同じ文書 | 実装 |
-| KNO-01 | Desktop Knowledge panel / Mobile `view=inspection` | OWNER-API | 候補一覧、検索、確定→KNO-02／原稿へ | 実装 |
+| KNO-01 | Desktop Knowledge panel・iOS Native Knowledge | OWNER-API | 候補一覧、検索、確定→KNO-02／原稿へ | 実装 |
 | KNO-02 | Knowledge node詳細・Evidence inspector | OWNER-API | Relation/Assertion/Text Anchor/根拠への遷移→元の文書 | 実装 |
 | KNO-03 | 選択nodeを中心にした局所関係グラフ/一覧 | OWNER-API（当該projectのreadのみ） | KNO-02から開き、同じnode/元原稿へ戻す | **情報設計の未採用提案**。専用UI/URLは未実装 |
-| REV-01 | Native ChangeSet・Module proposal一覧 / Mobile `view=tools` | OWNER-API | 内容・作者の判断対象を選択 → REV-02 | 実装 |
+| REV-01 | Desktop ChangeSet/Module proposal・iOS Native Review | OWNER-API | 内容・作者の判断対象を選択 → REV-02 | 実装 |
 | REV-02 | 提案の前後差分・承認/却下/適用 | OWNER-API | receiptを照合し反映された原稿/知識へ | 実装 |
 | TOOL-01 | Workspaceの`module:*`可変panel | OWNER-API、MCPは独立tool側 | Moduleのread/compute/proposeと非同期job→同じ作品 | 実装 |
 | JOB-01 | ヘッダーの受信箱/ジョブdialog | OWNER-API | 通知とjob確認/既読 → 元の作業 | 実装 |
 | DISPLAY-01 | Theme、組版、Workspace配置 | 本人のbrowser UI state | 見た目・レイアウト変更→元の作業。原稿は無変更 | 実装 |
-| PREF-01 | Desktop認証dialog、Mobile`view=settings` | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | 実装 |
+| PREF-01 | Desktop認証dialog→`/console/security`目標・iOS Native設定 | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | 実装 |
 | PUB-01 | `/r/:module/:project/:slug` | SHARE-READER | 許された公開版の読書→公開画面内で終了 | 実装 |
 | CON-00 | `/console` | OWNER-SESSION | 認証状況・各管理項目へのハブ | 目標 |
 | CON-01 | `/console/setup`開始・登録キー入力 | SETUP | 状態確認、キー認可→CON-02 | 目標 |
@@ -57,16 +57,16 @@
 | CON-34 | `/console/backups/recovery` | OWNER-SESSIONのread-only | 隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない | 目標・未実装 |
 | OPS-01 | Webではなくprotected workflow/SSH | OPERATOR | VM構築・更新・**本番**復旧（設計はデプロイ文書に委任）。保管先設定はCON-30〜34のowner UI、実際のhost backup/restoreはprotected executor/operator | 実装/目標分離 |
 
-**インストール版iOS**はMobileの同じ文章・作品/Revision/回復契約を共有し、OAuthはsystem browser、token storageはKeychain。`capacitor://localhost`内で既存Webを読み直すだけでは認証が成立しない。別の原稿DBやSwiftUI画面を設けない。
+**iOS採用目標は独立したSwiftUI画面とUIKit/TextKit 2編集面。** Core/API、作品、Revision、receipt/回復契約を共有するがReact/Ionic部品を共有しない。OAuthはsystem authentication、refresh tokenはKeychainに置き、第二原稿DBは作らない。現在のCapacitorは未撤去の旧実装。
 
 ## グローバルな状態・離脱ガード
 
 すべての画面は`initializing`、`loading`、`ready`、`empty`、`recoverable-error`、`unauthorized`、`forbidden`、`not-found`を扱う。mutationを行う画面には`submitting`、`unknown-result`、`conflict`、`confirmed`を必要に応じて追加する。**空状態は通信失敗でも権限拒否でもない。**
 
-- 保存/文書/作品切替、読書↔編集、Desktop↔Mobile、logout、コンソール遷移の前には共有の下書き・IME composition guardを通す。守れない場合は遷移を取り消し、その場に本文と明示エラーを残す。
+- 保存/文書/作品切替、読書↔編集、logout、コンソール遷移の前には各クライアント固有の下書き・IME composition guardを通す。守れない場合は遷移を取り消し、その場に本文と明示エラーを残す。
 - バック/キャンセルは原則として**元のURL・project・document・cursor・selection・scroll・参照元**を復元する。対象が既に削除・権限失効なら同じ作品の目次/ライブラリへ戻し、理由を明示する。
 - 検索、panelの開閉、参照シートの往復は同じRevisionで行い、局所的なUI状態を失わない。古いnetwork応答はnavigation generationで破棄する。
-- **保存済み**の表示条件はDBのidempotent receiptと対応するbrowser journal確定。保存要求送信後の入力は先のreceiptに含めない。競合を自動merge・上書きしない。
+- **保存済み**の表示条件はDBのidempotent receiptと対応する端末固有journal確定。保存要求送信後の入力は先のreceiptに含めない。競合を自動merge・上書きしない。
 - destructive操作は対象名/件数/差分/戻し方、fresh verification、明示的な確認、double submit防止を必要とする。単なるtoast成功ではなく実状態を再取得して表示する。
 - optional moduleが無効・読み込めない場合はTOOL-01だけを部分停止させ、原稿WRT-01を利用可能にする。Moduleはreader/compute/proposeの上限とserver approval境界を維持する。
 
@@ -76,7 +76,7 @@
 
 | CTRL / 入口 | ラベル・トリガー | 前提・権限 | 正常遷移 | エラー・取消時の復帰 |
 | --- | --- | --- | --- | --- |
-| ENTRY-01.A | Desktop/Mobileを選択 | ANON/LOCAL | 選択した`/desktop`/`/mobile`、明示選択を記憶 | storage拒否でも選択できる |
+| ENTRY-01.A | Desktop Webを起動 | ANON/LOCAL | `/desktop/`へ移動。iOSはNative app entry | 選択状態保存へ依存しない |
 | AUTH-01.A | Passkeyでサインイン | signed OAuth request、WebAuthn | Better Auth session→AUTH-02 | cancel/UV失敗はログインのまま、鍵は残さない |
 | AUTH-01.B | 外部IdPでサインイン | ownerがリンクしたactive IdP | issuer/sub確認→AUTH-02 | 未リンク・認証失敗はowner作成なし |
 | AUTH-02.A | 許可して続ける | client/redirect/scope確認、OWNER-SESSION | 認可コード→登録済みcallback | 不明scopeならdisabled、grantなし |
@@ -160,7 +160,7 @@
 | lost connectivity | recoverable local内容と「サーバー未保存」を区別 | Offlineを正本同期済みと偽装 |
 | unimplemented target | 画面やAPIが存在しない間は明示的に未提供 | 偽ボタン、静的モックで認可成功と表示 |
 
-キーボードのみ・スクリーンリーダー・200%拡大・320CSS px・IME・Touch・WebKit/iOSで操作の順序と戻り先が成立すること。modalやsheetを閉じたら発火したボタンへフォーカスを戻す。save status、本人認証、進捗、失敗は色だけに依存せず`aria-live`の過剰通知を避ける。各画面のPC/Mobile視覚基準は [UX contract](UX-CONTRACT.md) に従う。
+Desktop Webのキーボード/スクリーンリーダー/zoom/IMEと、iOS NativeのVoiceOver/Dynamic Type/Touch/IMEを**別々に**検証する。Mobile React 320px専用E2Eは対象外。modalやsheetを閉じたら発火したボタンへフォーカスを戻す。save status、本人認証、進捗、失敗は色だけに依存せず`aria-live`の過剰通知を避ける。各画面のPC/Mobile視覚基準は [UX contract](UX-CONTRACT.md) に従う。
 
 ## E2E受入トレーサビリティ
 

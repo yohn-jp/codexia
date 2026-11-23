@@ -24,7 +24,7 @@
 | REQ-API-002 | 作者向けMutationでrequest identity・precondition・receiptを確認し、競合/応答不明を偽成功にしない | [Core](../architecture/CORE.md)、[Interaction contract](../design/INTERACTION-CONTRACT.md) | ACCEPTED／適合未認定 |
 | REQ-MCP-001 | stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writerを持たない | [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md) | ACCEPTED／適合未認定 |
 | REQ-MCP-002 | 外部AIによる推論とCodexia内のCore編集を分離し、内部LLM API拡張を再開しない | [MCP-first](../architecture/MCP-FIRST.md) | ACCEPTED／適合未認定 |
-| REQ-UI-001 | Desktop/Mobileは同じ原稿とCore契約を使い、表示shellを自動的に勝手に変更しない | [UX contract](../design/UX-CONTRACT.md)、[User flows](../design/USER-SCREEN-FLOW.md) | ACCEPTED／適合未認定 |
+| REQ-UI-001 | Desktop React WebとiOS SwiftUIはUIを共有せず、共通のCore/API・Revision・保存/復旧契約を満たす。Mobile Web/PWA作者UIは対象外 | [UX contract](../design/UX-CONTRACT.md)、[iOS architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md) | ACCEPTED／iOS実装・実機未検証 |
 | REQ-UI-002 | 未送信/保存中/DB確定/応答不明を区別し、下書きを黙って捨てない | [Interaction contract](../design/INTERACTION-CONTRACT.md)、[UX contract](../design/UX-CONTRACT.md) | ACCEPTED／適合未認定 |
 | REQ-UI-003 | 画面、操作、遷移、戻り先、エラー、principalを画面ID/CTRL IDで特定する | [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md) | ACCEPTED／設計済み・適合未認定 |
 | REQ-UI-004 | IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可能性を保持する | [UX contract](../design/UX-CONTRACT.md) | ACCEPTED／適合未認定 |

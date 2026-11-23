@@ -4,7 +4,7 @@
 
 ## 変更しない不変条件
 
-1. Fastify v5を維持しHonoへ切替えない。TypeSpec→OpenAPI 3.1→Fastify JSON Schema/Ajv。Orvalはclient生成、Zod v4は業務/MCP/生成clientに使用する。
+1. Fastify v5を維持しHonoへ切替えない。TypeSpec→OpenAPI 3.1→Fastify JSON Schema/Ajv。OrvalはWeb TypeScript用client生成、Zod v4は業務/MCP/生成Web clientに使用する。Native iOSは同一OpenAPI 3.1からSwift clientを生成し、[iOS Native設計](IOS-SWIFTUI-ARCHITECTURE.md)が所有する。
 2. PostgreSQLは原稿等の唯一の永続正本。SQL migration/Better Auth管理schema、原稿Revision・receipt、Core単独利用可能性を保持する。
 3. owner、MCP-CLIENT、SHARE-READER、SETUP、OPERATORを昇格・混同しない。MCPはread/compute/proposeまで、承認・適用は作者のみ。
 4. Web UIとTailscale/SSH/Ansible管理面を分離し、Webから任意VM/Podmanコマンドや本番DB復元を提供しない。オフVMバックアップ先の指定はowner UIからできるが、実行はoperator provisioned executorと既存host lock/backup.shを再利用する。
@@ -22,7 +22,7 @@
 | OPS-01 | age v2 artifactのS3互換送受信、checksum、独立receipt、isolated restore fixture | deploy/backup/、S3 fixture tests | なし |
 | ARCH-01 | LikeC4構造とThreagile脅威/対策、既存Mermaidとのownership維持 | architecture/security models・生成scripts | なし |
 | HTTP-01 | Fastify明示routeとAjv/response schema・central admissionへ移行、catch-allを撤去 | packages/api/src/server.ts、persistence-routes.ts | SPEC-02 |
-| HTTP-02 | Orval生成clientをWeb/iOSへ導入し、手書きHTTP DTO重複を除去 | app API client/生成出力 | SPEC-02、STATE-01との対象ファイル分離 |
+| HTTP-02 | Orval生成clientをDesktop Webへ導入し、手書きWeb HTTP DTO重複を除去。iOS Swift生成clientは別workstream | app Web API client/生成出力 | SPEC-02、STATE-01との対象ファイル分離 |
 | MCP-01 | 公式MCP SDK v2、2026 protocol、Fastify接続、conformance/権限受入 | modules/mcp/、API MCP adapter | HTTP-01（同一admission境界の固定） |
 | CON-01 | /consoleのowner-session shell・認証入口・深いURL/戻り・管理ナビ | app console route shell/Workers route | なし |
 | CON-02 | /console/setupの一回限りowner登録とsetup-only API/Ansible整合 | auth/setup API、console setup UI、bootstrap | CON-01 |
@@ -36,6 +36,8 @@
 | TRACE-01 | G0〜G7と実行source/run/artifact証拠、全REQと逆引き・未認定一覧の完成 | scripts/ci-contract等、trace evidence | SPEC-01/02/03と各実装完了 |
 
 ## 並列性・統合順序
+
+**スコープ整合が必要:** Issue #660の旧「Orval Web/iOS」はSwiftUI Native採用目標と矛盾する。HTTP-02実装着手前にそのIssueの所有範囲をWebに限定し、iOS Swift生成を独立した作業へ移すこと。設計変更だけで#652完了とはみなさない。
 
 **初期並列6系列:** SPEC-01、SPEC-02、SPEC-03、STATE-01、OPS-01、ARCH-01。それぞれ専用branch/worktreeを使用してownerパスを競合させない。CON-01は画面・routerのファイル所有者を固定できれば第7系列として独立着手してよい。
 

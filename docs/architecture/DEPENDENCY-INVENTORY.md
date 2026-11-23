@@ -27,7 +27,7 @@
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
-| `typescript` | `~5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
+| `typescript` | 現行 `~5.9.3` → **採用目標 TypeScript 7 最新安定版** | root・型検査 | **移行必須・未実装**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。型設定・依存型を修正し、全workspaceでnative型検査を受入。5系への恒久フォールバックは禁止 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 
@@ -41,20 +41,22 @@
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | `^5.12.8` | API・単一認可境界 | **既存採用**: Fastify 5。最新版・major互換性の証拠は別途評価 |
-| `jose` | `6.2.17` | API・JWT検証 | **更新対象**: 6.2.18へのDependabot PRあり。ローカルのJWTプロファイル・失効判定の契約を維持 |
-| `pg` | API `8.16.3` / persistence `^8.23.1` | API/Auth・PostgreSQL | **更新対象**: API側が遅れている。8.23.1への更新と、二つのDB接続主体の動作を確認 |
-| `@types/pg` | API `8.15.6` / persistence `^8.23.1` | PostgreSQL型 | **更新対象**: 型定義もAPI側を8.23.1系列へ合わせる。ランタイムとの型整合を検証 |
+| `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
+| `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
+| `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
 | `zod` | `4.6.7` | API/MCP/Assistant/Speaker・境界入力 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
 ### Web UI・ルーター・エディター
 
+**Platform decision / inventory status:** 以下のIonic/Capacitor依存は**現行legacy実装の観測値**であり、採用目標ではない。DesktopはReact、iOSはSwiftUI Nativeであり、Mobile Web/PWA authoringは廃止対象。旧依存の更新・CI維持を新規製品要件として扱わず、ネイティブ実機受入後に旧ビルドとともに撤去する。Native Swiftの依存選定は [iOS SwiftUI設計](IOS-SWIFTUI-ARCHITECTURE.md) を参照する。
+
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
 | `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
-| `react-router-dom` | `7.18.5` | app・画面遷移 | **更新対象**: 7.18.6へのPRあり。画面遷移・リロード・保護ルートを検証 |
-| `react-resizable-panels` | `4.24.0` | app・パネル | **更新対象**: 4.24.1へのPRあり。Desktop配置・ドラッグ・復元を検証 |
+| `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
+| `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
 | `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
 | `@codemirror/state` | `^6.7.6` | app・編集状態 | **要検証** |
@@ -66,7 +68,17 @@
 | `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
 | `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
-| `vite` | `^8.3.8` | app・フロントビルド | **要検証**: ビルド・Workers配信成果物の一致を検証 |
+| `vite` | 現行 `^8.3.8` → **Vite 8継続採用** | app・フロントビルド | **採用確定**: 最新8系への追従、Reactプラグイン・CSS生成・Workers配信・OAuth分離を検証。バンドラー変更は本契約の対象外 |
+
+### Desktop CSS基盤（採用目標・未導入）
+
+| パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
+| --- | --- | --- | --- |
+| `@vanilla-extract/css` | 未導入 → 最新安定版 | Desktop Web・型付きテーマ／静的CSS | **採用確定・未実装**: Light/Dark/Paperのtheme contractとsemantic tokensを正本化 |
+| `@vanilla-extract/vite-plugin` | 未導入 → 最新安定版 | Vite 8・CSSビルド統合 | **採用確定・未実装**: Vite 8との互換性、CSS出力とOAuthビルド分離を実証 |
+| `@vanilla-extract/recipes` | 未導入 → 最新安定版 | Desktop UI・型付きvariants | **採用確定・未実装**: 再利用可能なvariantsのみ採用し、重複スタイルを撤去 |
+
+既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
 ### Optional modules・ファイル形式
 
@@ -107,6 +119,6 @@
 1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
 2. **判定**: 更新対象／連動／制約／整理対象／要検証を振り分ける。「今のビルドは通る」「過去から固定されている」だけで意図的なピンとしない。廃止予定の機能・不要な直接依存なら先に削除を評価する。
 3. **制約の証拠**: 固定する場合、対象パッケージ・許可範囲、最新候補、具体的な再現条件・失敗ログ・依存境界、解除条件をPRに記録する。期限なしの例外は設けない。代替案や上流の修正を評価する。
-4. **更新の単位**: 同期必須の依存（Better Auth群、Capacitor群、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
+4. **更新の単位**: 同期必須の依存（Better Auth群、**既存Capacitor群はNative SwiftUI cutoverまでの旧実装としてのみ検証**、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
 5. **受入**: main HEADに更新して差分・実行時依存・型／unit／E2E／OCI・CodeQL・GitHub Actionsを検証する。古いbranchのチェックを現在のmainの合格とみなさない。CodeQLの抑制、依存除外、セキュリティ規約の緩和で通さない。
 6. **台帳の同期**: マニフェスト変更に合わせ、該当行の宣言と判定・制約根拠を改訂する。異なるバージョンが正当に共存する場合は用途と移行基準を記録する。過去の失敗ログ、SHA、日付、個別PR番号等の経時証拠は**当該PR**に保存し、製品の規範文書へ混入させない。

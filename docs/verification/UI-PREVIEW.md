@@ -1,6 +1,6 @@
 # UI preview and Impeccable Detector (Windows / Linux / macOS)
 
-The preview serves the built Desktop and Mobile UIs using the shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+**Current implementation note:** the preview still serves Desktop and *legacy* Mobile React UIs with a shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. The accepted product target is **Desktop React Web + native SwiftUI iOS**; the Mobile Web preview is not future product acceptance or native evidence. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
 
 ## Design checks on GitHub
 
@@ -42,7 +42,7 @@ In a second PowerShell at the repository root, while preview is running:
 corepack pnpm ui:scan
 ```
 
-The scanner executes a **pinned Impeccable version** against `app/` and the frozen Desktop/Mobile snapshot URLs at `1440x900` and `390x844`. Reports are written to `artifacts/ui-preview/detector/{source,desktop,mobile,summary}.json` (ignored by git). Exit code **2** from Impeccable is findings, **1** is a failed scan; only a successful scan is included in the summary. There is no inference that an empty JSON from a failed HTTP request means a clean UI. Runs do not alter source or a design-system file.
+**Current scanner implementation (legacy):** the scanner executes a pinned Impeccable version against `app/` and frozen Desktop/Mobile snapshots at `1440x900` and `390x844`. The target scanner/CI should keep Desktop Web coverage and **remove the Mobile React 390px gate at native cutover**, replacing iOS acceptance with Simulator/physical-device tests per [native design](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). This text does not claim the existing scanner has already changed. Reports are written to `artifacts/ui-preview/detector/{source,desktop,mobile,summary}.json` (ignored by git). Exit code **2** from Impeccable is findings, **1** is a failed scan; only a successful scan is included in the summary. There is no inference that an empty JSON from a failed HTTP request means a clean UI. Runs do not alter source or a design-system file.
 
 The snapshots preserve the seeded, authenticated layout but **are not interactive**. They do not prove end-to-end behavior, permissions, animations or native iOS rendering. Those remain covered by existing E2E tests and manual UX review. A separate browser scan of the real interactive URLs would only examine the sign-in state in a new unauthenticated browser; do not count that as an editor audit.
 

@@ -55,21 +55,22 @@
 | 配置変更／保存 | Workspace guardとcatalog | 現配置の変化／明示的なlayout保存 | 元layout保持、原稿保存成功と表示しない |
 | サインアウト・shell変更 | `protectTransition`で現在の作者の下書きを保護 | OAuthサインアウトまたはshell切替 | 保護できない時は遷移拒否。復帰時は同じ作者で照合 |
 
-DesktopとMobileはBetter AuthのOAuthで作者としてサインインする。OAuthサインアウトや再認証のためのページ遷移に先立ち、`protectTransition`で下書きを回復用Journalに保存できることを確認する。Webのサインアウトはメモリ内のAPIアクセス・トークンを破棄し、Better Authにブラウザーセッションの終了を要求する。終了を確認できなければ画面に伝える。Cloudflare Accessは静的UIの入口を制御する。APIは作者用クライアント、本人、対象作品への権限を検証する。
+Desktop WebとiOS Nativeは別public OAuth clientで同じBetter Auth/API認可を利用する。Webでは`protectTransition`でIndexedDB draftを保護し、iOSではSwift coordinatorで保護されたdraft journalを確定してから破壊的遷移する。Webのサインアウトはメモリ内のAPIアクセス・トークンを破棄し、Better Authにブラウザーセッションの終了を要求する。終了を確認できなければ画面に伝える。Cloudflare Accessは静的UIの入口を制御する。APIは作者用クライアント、本人、対象作品への権限を検証する。
 
 ## 実装境界
 
 | 所有者 | 変えてよいpresentation | 保持すべき契約 |
 | --- | --- | --- |
-| launcher / PersistenceEntry | 入り口、状態表示 | 既存shell選択、auth mode、scope |
+| Web launcher / PersistenceEntry | Desktop Web入口と状態表示 | Web auth mode、scope。旧Mobile選択は撤去対象 |
 | PersistenceWorkspace controller | 表示用projection、画面構成 | canonical input、journal、guard、save/recovery、API |
-| DesktopShell / MobileShell | 各プラットフォームの操作面 | shell identity、Mobile route/history、IMEとfocus |
+| DesktopShell (Web) | Desktop React操作面 | Web route/history、CodeMirror IMEとfocus |
 | Workspace | 初期preset、chrome、操作配置 | schema、catalog、layout persistence、lifetime |
-| ManuscriptInput / MobileReadingPager | chromeと既存組版の見せ方 | CodeMirror state、ルビ、読み方向、位置 |
+| ManuscriptInput (Web) | Desktop編集・表示 | CodeMirror state、ルビ、読み方向、位置 |
+| SwiftUI app + UIKit TextKit editor (iOS target) | ネイティブ画面と本文編集 | Native IME/undo/selection、draft journal、API receipt、scope |
 | KnowledgeContextInspector / NativeChangeSetReview | 一覧・詳細・人が読める差分 | native ID、scope、version、preview、receipt、author authority |
 | module contributions | 登録済み道具の提示 | availability、effect、snapshot、Core/Full、内部LLM freeze |
 
-コンポーネント分割は責務の分離に役立つ範囲で許容するが、同じ状態と操作を別実装することは避ける。React stateの整理を理由に新規状態管理ライブラリを追加しない。
+**同じクライアント内**で同じ状態を二重実装しない。Desktop ReactとiOS SwiftUIは独立クライアントとして状態管理を別実装するが、Core/API保存と認可の意味論は一致させる。
 
 ## 受入マトリクス
 
@@ -83,14 +84,14 @@ DesktopとMobileはBetter AuthのOAuthで作者としてサインインする。
 | 配置 | 3プリセット、カスタム、壊れた保存値、Core-only | 復元可能、原稿非変更、全操作への代替手段 | modular-workspace.acceptance.spec.ts |
 | 根拠 | 確定・古い・曖昧・孤立anchor、同名ノード | 正確な対象、偽の位置確定なし | persistence-database.acceptance.spec.ts |
 | レビュー | 未承認、承認のみ、適用、stale、応答損失、replay | 正本とreceipt一致、許可されない変更なし | native-review.acceptance.spec.ts / review-contributions.acceptance.spec.ts |
-| Mobile | 参照sheet、戻る、IME、キーボード、狭幅 | 同一editor、位置保持、守られた遷移 | ui-v1.acceptance.spec.ts / modular-workspace.acceptance.spec.ts |
+| iOS Native | SwiftUI sheet、TextKit IME、back、背景復帰、長文編集 | editor/draft/selection保持、receipt/guard、物理iPhone受入 | [iOS SwiftUI設計](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)（未検証） |
 | 表示 | 長い日本語、3テーマ、Core/Full、module無効 | 実レンダリングで重心、contrast、focus、overflow確認 | [Visual system](VISUAL-SYSTEM.md) |
 
 全体の受入はUX-CONTRACTのS-A各条件と[Verification](../verification/README.md)を維持する。ブラウザの実操作、DB状態・receipt、スクリーンショットを別種の証拠として確認する。外部IdP・本番Tunnel、物理端末・実IME等の環境固有要件はシミュレーション結果と区別する。
 
 ### 確定した版とその後の入力を確かめる
 
-DesktopとMobileの保存詳細は、現在の入力をこのブラウザーで回復できるかと、作品で確かめた版を分けて示す。
+Desktop WebとiOS Nativeの保存詳細は、現在の入力を**この端末**で回復できるかと、作品で確かめた版を分けて示す。
 保存応答を待っている詳細には送信時点を示し、その後の編集が今回の保存に含まれないことを伝える。
 短い状態表示と詳細は既存の開閉操作を使う。
 通常の記録中や入力ごとの更新は読み上げず、通常保存の通知は入力やフォーカスを移さない。

@@ -148,14 +148,24 @@ jobs:
           node scripts/pages-ui/navigation.mjs "$SITE"
           node scripts/audit/portal.mjs finalize "$SITE" "$PAGES_ORIGIN"
       - name: Verify generated Pages in Chromium
+        env:
+          PAGES_SCREENSHOTS: ${{ github.event_name == 'pull_request' && format('{0}/pages-screenshots', runner.temp) || '' }}
         run: |
           node scripts/architecture-diagrams/smoke.mjs \
             "$RUNNER_TEMP/audit-site/architecture" \
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core"
           node scripts/pages-smoke.mjs "$RUNNER_TEMP/audit-site" \
-            "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM"
+            "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM" "$PAGES_SCREENSHOTS"
       - name: Verify manifests, links and public artifact scope
         run: node scripts/audit/portal.mjs verify "$RUNNER_TEMP/audit-site" "$PAGES_ORIGIN"
+      - name: Upload Chromium screenshots for PR review
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: repository-audit-screenshots
+          path: ${{ runner.temp }}/pages-screenshots
+          if-no-files-found: error
+          retention-days: 3
       - name: Save verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/save@v6.1.0

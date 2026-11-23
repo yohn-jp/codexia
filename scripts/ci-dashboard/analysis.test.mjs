@@ -293,6 +293,13 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   releaseInventory();
   const timeline = page.getByRole('region', { name: 'Job timeline' });
   await timeline.getByText('browser-core-webkit', { exact: false }).first().waitFor();
+  assert.equal(await page.locator('#selection-result').textContent(), 'success');
+  assert.match(await page.locator('#selection-bottleneck').textContent(), /browser-core-webkit/u);
+  assert.equal(await page.getByRole('link', { name: '最新Verifyを開く' }).count(), 1);
+  const stepsRegion = page.locator('.table-scroll');
+  assert.equal(await stepsRegion.getAttribute('tabindex'), '0');
+  await stepsRegion.focus();
+  assert.equal(await stepsRegion.evaluate(element => document.activeElement === element), true);
   const history = page.getByRole('region', { name: 'PR revision history' });
   await history.getByRole('button', { name: /#42/u }).waitFor();
   assert.equal(new URL(page.url()).searchParams.get('pr'), '42');
@@ -305,7 +312,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   const skippedDetails = timeline.locator('details').filter({ hasText: 'Skipped command' });
   await skippedDetails.locator('summary').press('Enter');
   await skippedDetails.getByText('Skipped command').waitFor();
-  await skippedDetails.getByText('skipped · —').waitFor();
+  await skippedDetails.getByText('skipped · 未計測').waitFor();
   const workflowLink = page.getByRole('link', { name: 'GitHubでVerifyを開く' });
   assert.match(await workflowLink.getAttribute('href'), /^https:\/\/github\.com\/yohn-jp\/codexia\/actions\/runs\/1$/u);
   const workflowListLink = page.getByRole('link', { name: 'Verify Codexia · attempt #1' });
@@ -324,6 +331,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     await page.reload();
     await page.getByRole('status').filter({ hasText: new RegExp('CIデータを読み込めませんでした.*' + status, 'u') }).waitFor();
     assert.equal(await copyButton.isDisabled(), true);
+    assert.equal(await page.locator('#selection-result').textContent(), '未計測');
     assert.equal(await page.getByRole('button', { name: '再試行' }).isVisible(), true);
     if (status === '403') {
       mode = 'measured';
@@ -340,6 +348,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.reload();
   await page.getByRole('status').filter({ hasText: 'Bounded recent pull_request workflow sample' }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
+  assert.equal(await timeline.getByText('この観測範囲にPRデータがありません。').count(), 1);
   mode = 'incomplete';
   await page.reload();
   await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();

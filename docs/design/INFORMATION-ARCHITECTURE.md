@@ -24,7 +24,7 @@ Codexiaは、作品を書く、世界を理解する、外部エージェント�
 - レビュー：Native ChangeSetと既存module proposalを権限・状態別に整理し、対象と影響を理解する。異なる適用契約を見かけ上の一括操作にしない。
 - 設定：外観、組版、レイアウト、接続、任意module、アカウント。管理用の情報を通常の操作列から分離する。
 
-執筆・知識・レビューの切替えは同じ author/project/document scope、既存の journal／navigation guard とレイアウト基盤を使う。別のルーティングライブラリ、データ正本、保存セッションを導入することは本設計の要件ではない。既存の明示的な Desktop/Mobile shell、記憶した選択と公開readerを保持する。どの領域からも現在の作品と本文へ戻れる。
+執筆・知識・レビューの切替えは同じ author/project/document scope、既存の journal／navigation guard とレイアウト基盤を使う。別のルーティングライブラリ、データ正本、保存セッションを導入することは本設計の要件ではない。Desktop React WebとSwiftUI Native iOSを独立したUIとして採用し、公開readerとCore/APIの意味論を維持する。旧Mobile Web shell/モード選択は撤去対象とする。どの領域からも現在の作品と本文へ戻れる。
 
 ## 表示の語彙
 
@@ -50,7 +50,7 @@ PostgreSQL、ID、read/write set、version、receipt等は技術詳細を必要�
 - 新しい利用者が作品を開き、シーンを選び、本文を編集できる。設定やパネル組立ては不要。
 - 既存利用者が再開位置へ戻り、参照・検索・提案確認を経ても入力位置と保護状態を失わない。
 - 同名の知識、同名シーン、空の状態、取得失敗、権限拒否、未導入module、長い日本語ラベルに対して誤った対象や成功を表示しない。
-- Core/Full、Desktop/Mobileの既存対応機能を維持し、外部MCP・DB・保存・承認境界に変更を持ち込まない。
+- Core/FullとDesktop Web、iOS Nativeの共通API契約を維持し、外部MCP・DB・保存・承認境界に変更を持ち込まない。
 
 詳細：[Desktop執筆](DESKTOP-AUTHORING.md)、[知識・レビュー](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)。
 
@@ -76,7 +76,7 @@ PostgreSQL、ID、read/write set、version、receipt等は技術詳細を必要�
 
 ### URLと作業文脈
 
-正規の文書ルートは既存の `/<shell>/projects/<projectId>/scenes/<documentId>`、作品ルートは `/<shell>/projects/<projectId>`。shellはdesktopまたはmobile。既存query/pathの読取互換とdeep linkを維持する。Mobileの `view=library|writing|inspection|tools|settings` は既存の導線として保持し、知識・レビューの新しい表示名や詳細表示を追加してもこれらのリンクを壊さない。新しい永続URL設計は本提案の必須条件ではない。
+Desktop Webの正規文書URLは`/desktop/projects/<projectId>/scenes/<documentId>`、作品URLは`/desktop/projects/<projectId>`。iOS NativeはSwiftUIの独立NavigationStack/deep linkで同じproject/document IDを扱う。`/mobile/`・`?view=`の互換は要求しない。
 
 作業文脈はauthor、project、document、revision、navigation generation、選択範囲・scroll、開いている参照対象に分ける。作品／文書の選択は既存selection storeとルート、本文と復旧はcoordinator／journal、パネル配置はWorkspace、参照対象と一覧条件は表示stateに属する。別のglobal storeに本文を複製しない。再読込で復元できる範囲と同じ画面の往復で保持する範囲を区別する。
 
@@ -86,7 +86,7 @@ PostgreSQL、ID、read/write set、version、receipt等は技術詳細を必要�
 
 Desktopでは「執筆」「知識」「レビュー」を常設の第一階層とし、作品の切替・設定を分離する。執筆が初期の第一候補であり、保存済みのカスタム配置や正規リンクを上書きしない。作品一覧は現在の作品名から明示的に開く。任意moduleを上位ナビゲーションに自動で大量追加せず、関連する道具／パネル一覧へ分類する。
 
-Mobileの上位導線はMobile設計書に従う。同じ作業面を示すため、DesktopのタブとMobileのsheetが同じURLや同一のDOMを持つ必要はない。
+iOS Nativeの導線は[iOS執筆設計](MOBILE-AUTHORING.md)と[SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従う。DesktopタブとネイティブsheetはURL、DOM、React componentを共有しない。
 
 ### 命令の分類と表示権限
 

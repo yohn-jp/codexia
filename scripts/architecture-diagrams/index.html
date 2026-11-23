@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="description" content="Codexia canonical architecture diagrams and transition states">
@@ -12,73 +12,124 @@
   <script type="module" src="./atlas.js"></script>
 </head>
 <body>
-<a class="skip" href="#main-content">図へ移動</a>
 <div class="page">
   <header class="masthead">
-    <div class="masthead-upper">
-      <a href="../" class="wordmark" aria-label="Codexia Repository Auditへ戻る">CODEXIA <span>/ ARCHITECTURE</span></a>
-      <span class="eyebrow">DESIGN REFERENCE</span>
-    </div>
     <div class="masthead-title">
       <div>
-        <p class="eyebrow">NORMATIVE DESIGN / READ-ONLY</p>
-        <h1>Architecture Atlas<span class="period">.</span></h1>
-        <p class="intro">画面、認証、初期デプロイ、更新・復旧。設計書のMermaidをSVGとして可視化し、実装とは独立した正本を参照する。</p>
+        <h1>Architecture Atlas</h1>
+        <p class="intro">正本Markdownから生成した設計図です。実装の受入確認には使えません。</p>
       </div>
-      <div class="revision">
-        <span>Source revision</span>
-        <code id="source-sha">読み込み中</code>
-        <span id="diagram-total" class="count">—</span>
-      </div>
+      <dl class="revision" aria-label="Atlas source revision">
+        <div>
+          <dt>Design source SHA</dt>
+          <dd><code id="source-sha">読み込み中</code></dd>
+        </div>
+        <div>
+          <dt>図</dt>
+          <dd id="diagram-total">読み込み中</dd>
+        </div>
+      </dl>
     </div>
   </header>
+
   <div class="workspace">
-    <aside class="rail" aria-labelledby="index-title">
-      <div class="rail-head">
-        <p class="eyebrow">DESIGN CATALOG</p>
-        <h2 id="index-title">設計図一覧</h2>
-      </div>
-      <search class="diagram-search" aria-label="設計図を検索">
-        <label for="diagram-query">キーワード</label>
-        <input id="diagram-query" type="search" name="q" autocomplete="off" placeholder="画面ID、図名、文書">
-        <label for="diagram-category">カテゴリ</label>
-        <select id="diagram-category" name="category"><option value="all">すべてのカテゴリ</option></select>
-        <p id="result-count" role="status" aria-live="polite"></p>
-      </search>
-      <nav id="diagram-list" aria-label="設計図を選択"></nav>
-      <p class="rail-note">図はリポジトリの正本Markdownからビルド時に生成。ここからの操作で設計書や本番環境は変更されません。</p>
+    <aside class="rail" aria-labelledby="catalog-summary">
+      <details id="catalog-results" class="catalog-results" open>
+        <summary id="catalog-summary">
+          <span>図を探す</span>
+          <span id="catalog-count">—</span>
+        </summary>
+        <div class="catalog-tools">
+          <p class="catalog-intro">画面ID、図名、設計書、関連ファイルで検索できます。</p>
+          <search class="diagram-search" aria-label="設計図を検索">
+            <label for="diagram-query">キーワード</label>
+            <div class="search-control">
+              <input id="diagram-query" type="search" name="q" autocomplete="off"
+                     placeholder="例: AUTH-01、デプロイ" aria-describedby="result-count">
+              <button type="button" id="clear-search" aria-label="検索条件を消去">クリア</button>
+            </div>
+            <label for="diagram-category">カテゴリ</label>
+            <select id="diagram-category" name="category">
+              <option value="all">すべてのカテゴリ</option>
+            </select>
+            <p id="result-count" role="status" aria-live="polite">図の一覧を準備しています。</p>
+          </search>
+        </div>
+        <nav id="diagram-list" aria-label="カテゴリ別の設計図"></nav>
+        <div id="empty-results" class="empty-results" hidden role="status" aria-live="polite">
+          <p>条件に一致する図はありません。</p>
+          <button type="button" id="clear-empty-search">条件をクリア</button>
+        </div>
+      </details>
+      <p class="rail-note">読み取り専用です。図はビルド時に正本Markdownから生成されます。</p>
     </aside>
+
     <main id="main-content" class="main" tabindex="-1">
-      <div class="diagram-head">
-        <div>
-          <p id="diagram-group" class="eyebrow">SELECT A DIAGRAM</p>
-          <h2 id="diagram-title">図を読み込んでいます</h2>
-          <p class="diagram-meta"><span id="diagram-kind"></span> <a id="source-link" target="_blank" rel="noopener noreferrer">設計書の原文を見る</a></p>
+      <section class="viewer" aria-labelledby="diagram-title">
+        <header class="diagram-head">
+          <div class="diagram-heading">
+            <h2 id="diagram-title" tabindex="-1">図を読み込んでいます</h2>
+            <p class="diagram-meta">
+              <span id="diagram-group" class="group-label"></span>
+              <span id="diagram-kind" class="diagram-kind"></span>
+              <a id="source-link" target="_blank" rel="noopener noreferrer">原文Markdownを見る</a>
+            </p>
+          </div>
+          <div class="controls" aria-label="図の表示操作">
+            <div class="zoom-controls" role="group" aria-label="表示倍率">
+              <button type="button" id="zoom-out" aria-label="縮小" title="縮小" disabled>−</button>
+              <output id="zoom-value" aria-live="polite">100%</output>
+              <button type="button" id="zoom-reset" title="図の幅を表示領域に合わせる" disabled>幅に合わせる</button>
+              <button type="button" id="fit-diagram" title="図全体を表示領域に合わせる" disabled>全体を表示</button>
+              <button type="button" id="zoom-in" aria-label="拡大" title="拡大" disabled>+</button>
+            </div>
+            <a id="svg-link" class="open-svg" target="_blank" rel="noopener noreferrer">SVGを開く</a>
+          </div>
+        </header>
+
+        <p id="canvas-description" class="canvas-description">図全体は上下左右にスクロールして確認できます。</p>
+        <div id="canvas" class="canvas" tabindex="0" role="region"
+             aria-label="選択した設計図" aria-describedby="canvas-description">
+          <div id="loading" class="loading" role="status" aria-live="polite">
+            <p id="loading-message">図を準備しています。</p>
+            <div id="loading-actions" class="loading-actions" hidden>
+              <button type="button" id="retry-load" hidden>一覧を再読み込み</button>
+              <button type="button" id="retry-diagram" hidden>図を再読み込み</button>
+              <a id="canonical-docs-link" href="https://github.com/yohn-jp/codexia/tree/main/docs"
+                 target="_blank" rel="noopener noreferrer">GitHubの設計書を見る</a>
+            </div>
+          </div>
         </div>
-        <div class="controls" aria-label="図の表示倍率を変更">
-          <button type="button" id="zoom-out" aria-label="縮小">−</button>
-          <button type="button" id="zoom-reset">100%</button>
-          <button type="button" id="zoom-in" aria-label="拡大">＋</button>
-          <a id="svg-link" class="open-svg" target="_blank" rel="noopener noreferrer">SVGを開く</a>
+        <div class="canvas-foot">
+          <span id="view-status" role="status" aria-live="polite">—</span>
+          <span>原本はMarkdown / 表示はビルド時生成SVG</span>
         </div>
-      </div>
-      <section class="evidence" aria-labelledby="evidence-title">
-        <h3 id="evidence-title">設計契約と実装根拠</h3>
-        <p id="screen-contract">この図に論理画面IDがある場合、状態と実装状況は正本の画面状態遷移図から表示します。</p>
-        <p id="graph-state" role="status" aria-live="polite">Graph索引を確認しています。</p>
-        <div id="implementation-evidence" role="status">Graph索引を確認しています。</div>
+
+        <details id="evidence-details" class="evidence-details">
+          <summary>
+            <span>設計契約と実装根拠</span>
+            <span id="evidence-summary-status" class="evidence-summary-status">確認中</span>
+          </summary>
+          <div class="evidence-grid">
+            <section aria-labelledby="contract-heading">
+              <h3 id="contract-heading">画面契約</h3>
+              <div id="screen-contract"></div>
+            </section>
+            <section aria-labelledby="source-heading">
+              <h3 id="source-heading">関連ソース</h3>
+              <p id="graph-state" role="status" aria-live="polite">Graphify索引を確認しています。</p>
+              <div id="implementation-evidence"></div>
+            </section>
+          </div>
+        </details>
       </section>
-      <div id="canvas" class="canvas" tabindex="0" aria-label="選択中の状態遷移図、拡大縮小とスクロールに対応">
-        <div id="loading" class="loading" role="status">図を準備しています。</div>
-        <img id="svg-image" alt="" hidden>
-      </div>
-      <div class="canvas-foot">
-        <span id="view-status" role="status" aria-live="polite">—</span>
-        <span>原本はMarkdown / 表示はビルド生成されたSVG</span>
-      </div>
     </main>
   </div>
-  <footer class="footer">CANONICAL DESIGN · SOURCE-BOUND SVG · No runtime Mermaid CDN · <a href="https://github.com/yohn-jp/codexia/tree/main/docs">Documentation</a></footer>
+
+  <footer class="footer">
+    <span>CANONICAL DESIGN · SOURCE-BOUND SVG · NO RUNTIME MERMAID CDN</span>
+    <a href="https://github.com/yohn-jp/codexia/tree/main/docs">Documentation</a>
+  </footer>
 </div>
 </body>
 </html>

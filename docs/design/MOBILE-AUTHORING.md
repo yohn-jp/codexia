@@ -1,112 +1,23 @@
-# Codexia — Mobile執筆・読書の設計
+# iOSネイティブ執筆・読書の設計
 
-**画面遷移の正本:** [利用画面の遷移設計](USER-SCREEN-FLOW.md)。Mobile の `?view=` と参照シートは原稿保護と同じ作者 scope を共有し、専用の保存正本を持たない。
+**種別: 採用済みSwiftUI目標・実装未検証。** このパスは既存リンクのため維持するが、Mobile Web/PWAの継続サポートを意味しない。実装設計の正本は [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)、作者の体験・遷移・保存は [UX contract](UX-CONTRACT.md) と [User flow](USER-SCREEN-FLOW.md) が所有する。
 
-## 位置付け
+## 製品境界
 
-[情報設計](INFORMATION-ARCHITECTURE.md)、[UX contract](UX-CONTRACT.md) と [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) の具体化。既存の独立Mobile shell、Ionic React、CodeMirror、共通authoring/recovery coordinatorを維持する。Desktopの縮小表示ではない。
+- DesktopはReact/CodeMirror、iOSはSwiftUI + UIKit UITextView/TextKit 2の原稿編集面。両者のUIコンポーネント、画面遷移、クライアント状態を共有しない。
+- iOSはLibrary、Outline、Writing/Reading、Knowledge、Review、History、Settingsをネイティブ画面とsheetで構成する。Ionic、Capacitor、WebView内CodeMirror、/mobile/?view=... は旧実装であり正式製品の対象ではない。
+- 共通化するのはauthor/project/document/revision、サーバーのAPI認可、保存receipt、競合・回復の意味論だけ。iOSに独立Core/DBを置かない。
 
-## 主要な体験
+## 操作と原稿保護
 
-通常の画面は現在のシーンと原稿がほぼ全域を占める。上部に作品／シーンの現在位置、読み書き切替と簡潔な保存状態を配置する。キーボードが開いている間は書くために必要な操作を優先し、頻度の低い画面切替や管理操作を押し込まない。
-
-主要な移動先は「作品」「書く」「知識」「レビュー」の4つ。設定はtitle barのgearから開く。PostgreSQLの保護状態はtitle barに短く示し、Journal・Revision・receiptの詳細は参照sheetで確認する。対処が必要な状態はbottom navigationの位置を動かさずdockの上へ重ねて知らせる。構成・Knowledge・Evidenceは参照sheetから開く。既存の設定・ツール・状態確認・パネル配置の機能を削除するという意味ではなく、第一の操作面と補助操作を分ける。CoreとFullの提供機能の違いを明示する。
-
-## 参照と復帰
-
-| 意図 | 振る舞い |
+| 操作 | iOSで保証すること |
 | --- | --- |
-| シーン構成を一時確認 | Ionic sheetで現在位置を起点に階層を表示。開閉のみでeditorをunmountしない |
-| 別シーンに移動 | 既存の入力・journal・navigation guardを通してから遷移 |
-| 語句や人物を調べる | 選択語句またはシーンの文脈から知識詳細・根拠を表示。元の位置へ戻る |
-| 保存状態を確認 | 現在の保護状態と対象Revisionの詳細を一時表示。エラー・競合を消えたtoastだけで扱わない |
-| 提案を確認 | 対象と差分を読める画面。承認と適用を明確に分離し、本文へ戻る手段を保持 |
-| 読む | 既存の横書き／縦書き、ルビ、読書位置を保持。編集へ戻れる |
+| 日本語入力・再変換 | marked text、選択、caret、undo、scrollをTextKit編集面で維持。SwiftUI再描画で未確定文字を壊さない |
+| 参照sheet開閉 | 原稿の編集面・下書き・undoを維持。別文書へ遷移する前にlocal draft保護guardを実行 |
+| 保存 | 端末保護draft、要求送信、結果不明、競合、PostgreSQL receipt確定を区別し、後続入力を旧成功に含めない |
+| 背景・強制終了 | OS終了前に送信が完了する前提を置かず、native journalから復旧可能にする |
+| 読書・組版 | Markdownの表示変更と本文書込を分離。TextKit 2採用のみでは縦書き・ルビ品質を証明しない |
 
-別シーン、別作品、知識詳細、レビューなどの画面間遷移は同じscopeに束縛し、復帰位置を明示的に保持する。参照だけの操作に新規作業セッションを作らない。
+Dynamic Type、VoiceOver、safe area、ソフト/ハードキーボード、native back、IME、長文・長い構成名を実機で検証する。競合・応答喪失・401/403/409/412・force quitを実APIと隔離DBで確認する。
 
-## タッチ・IME・画面の安定
-
-CodeMirror/browserが本文操作とIME、Ionicがsheetのgestureとfocusを担当する。全画面swipe listenerや独自選択操作で競合させない。画面の向き、keyboard表示、pinch zoomでDesktop/Mobileを勝手に切り替えない。safe area、keyboard、固定操作面がcaretや主操作を隠さない。
-
-通常の通知は位置を変えず、入力中にfocusを奪わない。sheetを閉じた際は適切なinvokerへfocusを返し、keyboardを勝手に開かない。主なタッチ操作は44×44 CSS pxを目標とし、戻る・閉じる・実行・確認がラベルから分かる。詳細な設定や配置編集は意図的に開く。
-
-## 実装した画面と検証
-
-初期WritingはCodeMirrorと日本語原稿を中心にし、構成・知識／保存の参照dockと4項目のbottom navigationから移動する。通常の参照はIonic sheetで開き、CodeMirrorのnodeを維持したまま閉じられる。320pxで横方向にoverflowしないこと、390×844pxでsheetが表示完了した後の構成／知識内容、Light／Darkの実レンダリングは[視覚受入記録](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md)に記録した。
-
-![Mobile Writing](https://raw.githubusercontent.com/yohn-jp/codexia/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-mobile-writing.png)
-
-## 受入
-
-- 320 CSS px相当の幅、390×844 CSS px、横向き、文字拡大、長い日本語タイトルで主要操作と原稿が利用可能。横方向のはみ出しやkeyboardによるcaretの隠れを確認する。
-- 日本語の変換・選択・長押し・スクロール・undo中に、sheet、通知、保存、バックグラウンド処理を操作しても本文と選択を保持する。
-- シーン切替、知識／根拠への往復、横書き・縦書き閲覧、読書位置の再開で保護状態を失わない。
-- 保存中の追加入力、通信断、認証失効、競合、下書き復旧の表示が実際のjournalとDBの結果に一致する。
-- Core/Full、既存の配置・設定・外観を維持する。エミュレーションと物理端末の証拠を区別し、ビルド成功だけで操作品質を証明しない。
-
-## 画面構成と導線
-
-基準画面は390×844 CSS px。通常執筆時の上部約56pxに戻る、作品／シーン名、保存状態、設定をまとめる。保存状態は本文を押し下げず、詳細は参照sheetに置く。下部は44px以上の主要ナビゲーションとsafe area。残りのviewportを本文と既存の読み書き操作に割り当てる。入力欄を縦に並べたDesktopの管理画面を採用しない。
-
-```text
-┌────────────────────────┐
-│ ‹ 薄明の羅針盤 保存済   ⚙ │
-├────────────────────────┤
-│ 第一巻　潮が満ちる       │
-│ 一　薄明の羅針盤         │
-│ 保存済       読む  その他 │
-│                        │
-│ 日本語の本文が視界の大半 │
-│ を占め、組版の設定を保つ │
-│                        │
-├────────────────────────┤
-│ [構成]      [知識・保存] │
-│ 作品   書く   知識   レビュー│
-└────────────────────────┘
-```
-
-この配置は標準Writingの画面案。任意のモバイルpanel配置・選択や既存URLを破壊しない。従来の `view=library` を作品、`view=writing` を執筆、`view=inspection` を知識、`view=tools` をレビュー／道具、`view=settings` を設定として解決できるよう維持する。settingsはbottom navigationからtitle barのgearへ移るが、設定routeと設定内容は保つ。保存詳細とsettingsへは通常の執筆中も一操作で到達できる。現在のモバイルroute transition、history state、generation fenceを維持する。
-
-### 作品から執筆へ
-
-作品一覧では選択対象名と最近の作業の明示情報、作成／取込を表示する。作品を開くと構成が展開され、現在シーンの選択・追加・順序変更はDesktopと同じ正規APIを使う。シーンの選択を確定した後だけ原稿へ遷移する。通信失敗時は選択元の画面と入力を保持し、空作品扱いにしない。
-
-### 執筆から参照へ
-
-参照sheetは既存Ionicのbreakpoint（0、0.56、0.88、1）と閉じる／戻る操作を使う。構成と保存状態の参照を維持し、知識の一時参照を同じ仕組みに追加する場合も、開く前のguardとrender対象のcatalogに従う。原稿上の語句から知識を開く導線は、選択の文脈・候補の曖昧性・元の入力を保持する。
-
-| sheet状態 | 表示 | 閉じる・戻る |
-| --- | --- | --- |
-| 構成 | 現在の階層、シーン選択、必要な展開 | 閉じれば同一editor。シーン確定時のみ正規遷移 |
-| 知識参照 | 選択語句、関連node、状態、引用 | 同一原稿・選択へ復帰。詳細に進むときだけ作業面遷移 |
-| 保存詳細 | journal/DB/競合の状態、必要な行動 | 非破壊的な参照。競合比較は明示遷移 |
-
-一時参照sheetと別作業面での完全な知識編集・レビューを区別する。sheetの高さを操作で無限に増やすのではなく、長い詳細は既存の主画面へ移り、元の原稿へ戻れるようにする。
-
-### 知識・レビュー画面
-
-知識は一覧→詳細→根拠／関係の順に一画面一対象を基本とし、Desktopの2ペインを並べない。行は名前・型・状態・出典の有無を必要な範囲で示す。関係は一覧を既定とし、局所グラフは明示的に開く。画面が狭くても関係の方向・状態を読み取れる。元の文書へ戻る際は同じproject/document/revisionのguardに従う。
-
-レビューは一覧→対象差分→承認判断→承認済み状態→明示適用→receiptの順序を保つ。変更前後は縦に並べることができるが、どちらが前か後かをスクロール後も分かるようにする。長い差分を読むことと最下部の操作を区別し、固定の承認／適用ボタンは本文やfocusを覆わない。手前のシーンへ戻る時は未確定操作を自動実行しない。
-
-### ソフトキーボード状態
-
-本文の入力中は既存 `useWritingKeyboardVisibility` を使用し、ナビゲーションや低頻度chromeを視覚的に縮小する。DOMを外して状態を消さない。caretが隠れたらスクロール所有者が必要な範囲で追従する。Ionicの公開CSS変数・公開Shadow Partsを利用し、内部DOMの仮定による上書きを避ける。横向き・拡大・ブラウザバーの変動だけでキーボード開閉やshell切替と判断しない。
-
-### 戻ると割込み
-
-シート開放中の戻るはsheetを閉じ、detailの戻るは元の一覧／参照へ、文書変更の戻るは既存のnavigation guardで扱う。ブラウザhistoryと独自backを二重実行しない。権限失効、保存競合、別タブによる回復記録の競合は [操作と復旧](INTERACTION-CONTRACT.md) の表示契約を使う。入力中の画面で通知を増設してcaretを移動させない。
-
-## 参照シートで元のシーンを確かめる
-
-執筆ヘッダーにはシーン名と所属を示す。
-シート上では資料の見出しと出典を先に読み、「閉じる」から執筆に戻れる。
-既存のIonicシートは閉じると呼び出し元の操作にフォーカスを戻し、原稿の選択を保持する。
-その後、作者が本文にフォーカスして入力を再開する。
-
-[同名シーンの比較課題](DESKTOP-AUTHORING.md#同名シーンを参照して執筆に戻る)で、既存の「閉じる」と、戻る先を「第三章 / 帰港」と併記する案を比べる。
-初回は、シート内の資料と編集中の章を区別して読めるかを見る。
-無効な引用では理由をたどり、現在のシーンへ戻れるかを見る。
-参照先を明示的に開く場合は、閉じる操作と区別し、既存の遷移ガードで編集対象を切り替える。
-狭いWebではTab移動とEscape、iPhoneでは閉じる操作とスワイプを観察し、復帰時のフォーカスとキーボードの表示を記録する。
+**Mobile Reactの320/375/390/430 CSS px、Ionic sheet、WebKitモバイルエミュレーションは製品受入対象外。** 旧コードとテストは別の移行PRで撤去し、設計のみで実装完了としない。
