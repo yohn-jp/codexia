@@ -29,7 +29,18 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   assert.ok(manifest.diagrams.some(d => d.id === 'first-3' && d.title.includes('VMの再構築')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
-  assert.ok(manifest.diagrams.some(d => d.id === 'screen-23' && d.title.includes('Cross-shell')));
+  const screenSection = DIAGRAM_DOCUMENTS.find(section => section.id === 'screen');
+  assert.ok(screenSection, 'The screen state atlas must remain registered');
+  const crossShellSources = parseMermaidDiagrams(
+    readFileSync(join(root, screenSection.path), 'utf8'),
+    screenSection,
+  ).filter(diagram => diagram.title.includes('Cross-shell'));
+  assert.equal(crossShellSources.length, 1, 'The cross-shell contract must have one source diagram');
+  const crossShell = manifest.diagrams.find(diagram =>
+    diagram.group === 'screen' && diagram.title === crossShellSources[0].title);
+  assert.ok(crossShell, 'The cross-shell contract must be rendered from the screen state atlas');
+  assert.equal(crossShell.markdown, screenSection.path);
+  assert.equal(crossShell.line, crossShellSources[0].line);
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
     /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));
