@@ -46,6 +46,28 @@ test("visible term slices are sorted, clipped, and bounded", () => {
   ]);
 });
 
+test("long visible term ranges are split without skipping text or exceeding the budget", () => {
+  assert.deepEqual(selectVisibleTermSlices([
+    { from: 0, to: 20 },
+    { from: 12, to: 28 },
+  ], 28, { maxTotalChars: 25, maxSliceChars: 8 }), [
+    { from: 0, to: 8 },
+    { from: 8, to: 16 },
+    { from: 16, to: 20 },
+    { from: 20, to: 25 },
+  ]);
+  assert.deepEqual(selectVisibleTermSlices([{ from: 0, to: 20 }], 20, {
+    maxTotalChars: 19, maxSliceChars: 8,
+  }), [
+    { from: 0, to: 8 },
+    { from: 8, to: 16 },
+    { from: 16, to: 19 },
+  ]);
+  assert.deepEqual(selectVisibleTermSlices([{ from: 0, to: 20 }], 20, {
+    maxTotalChars: 20, maxSliceChars: 0,
+  }), []);
+});
+
 test("resolver spans use UTF-16 positions and malformed or overlapping results are discarded", () => {
   const text = "🙂猫";
   const spans: EditorTermSpan[] = [
