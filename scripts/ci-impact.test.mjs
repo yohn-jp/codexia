@@ -125,7 +125,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
 });
 
 test('Full-model OCI selection follows the standalone workflow and the Verify caller', async () => {
-  const { FULL_MODEL_OCI_PATHS } = await import('./ci-impact.mjs');
+  const { FULL_MODEL_OCI_PATHS, matchesFullModelOciPath } = await import('./ci-impact.mjs');
   const standalone = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
   const pushPaths = standalone.on.push.paths;
   assert.equal(Object.hasOwn(standalone.on, 'workflow_call'), true);
