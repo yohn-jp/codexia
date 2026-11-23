@@ -18,7 +18,7 @@ jobs:
   api:
     name: Generated API and native transport
     runs-on: xcode-27
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -41,11 +41,21 @@ jobs:
         run: >-
           xcodebuild -scheme CodexiaTransport -destination 'generic/platform=iOS Simulator'
           -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
-      - name: Exercise refresh token rotation on iOS Simulator
+      - name: Run Swift package tests on iOS Simulator
         timeout-minutes: 18
         working-directory: ios/CodexiaTransport
         run: |
           device_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for runtime,group in devices.items() if ".iOS-" in runtime for d in group if d["name"].startswith("iPhone")))')
-          xcodebuild -list
+          echo "CODEXIA_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
           xcodebuild -scheme CodexiaTransport-Package -destination "platform=iOS Simulator,id=$device_id" \
             -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO test
+      - name: Exercise Keychain rotation in a signed Simulator host
+        timeout-minutes: 15
+        working-directory: ios/CodexiaTransport
+        run: |
+          workspace=KeychainProbe/KeychainProbe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          mkdir -p "$workspace"
+          cp Package.resolved "$workspace/Package.resolved"
+          xcodebuild -project KeychainProbe/KeychainProbe.xcodeproj -scheme KeychainProbe \
+            -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
+            -parallel-testing-enabled NO test
