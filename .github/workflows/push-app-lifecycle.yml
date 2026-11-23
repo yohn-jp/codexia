@@ -8,6 +8,8 @@ on:
       - .dockerignore
       - Dockerfile.backend.dockerignore
       - deploy/backend/**
+      - deploy/fixtures/sshfs-server/**
+      - scripts/verify-sshfs-fixture-artifact*.mjs
       - packages/**
       - modules/**
       - '!modules/story/src/browser.tsx'
@@ -66,8 +68,44 @@ concurrency:
   group: push-app-lifecycle-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 jobs:
+  fixture:
+    name: Prebuild and smoke-test source-bound SSHFS fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.archive.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Build and test SSHFS image with temporary SSH credentials
+        env:
+          CODEXIA_LIFECYCLE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash deploy/fixtures/sshfs-server/build.sh
+      - name: Upload immutable producer archive and manifest
+        id: archive
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: sshfs-fixture-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/lifecycle-sshfs/sshfs-fixture.tar
+            ${{ runner.temp }}/lifecycle-sshfs/manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
   lifecycle:
-    name: Verify app deployment state transitions on a disposable rootless host
+    name: Verify ${{ matrix.scenario }} state transitions on disposable rootless host
+    needs: fixture
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [app, auth]
     runs-on: ubuntu-26.04
     timeout-minutes: 150
     permissions:
@@ -78,6 +116,7 @@ jobs:
       - name: Initialize run-bound lifecycle outcome artifact
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCENARIO: ${{ matrix.scenario }}
           REPORT_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
         run: |
           mkdir -p "$(dirname "$REPORT_FILE")"
@@ -89,7 +128,7 @@ jobs:
                   'better_auth_compatible_update', 'better_auth_rollback', 'fixture_cleanup']
           value = {'schemaVersion': 1, 'sourceSha': os.environ['SOURCE_SHA'],
                    'runId': int(os.environ['GITHUB_RUN_ID']), 'runAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
-                   'status': 'NOT_CHECKED', 'detail': 'workflow bootstrap; lifecycle fixture has not started',
+                   'status': 'NOT_CHECKED', 'scenario': os.environ['SCENARIO'], 'detail': 'workflow bootstrap; lifecycle fixture has not started',
                    'states': {key: {'status': 'NOT_CHECKED'} for key in keys}, 'images': [],
                    'observations': {}, 'capabilities': {}, 'logs': []}
           with open(os.environ['REPORT_FILE'], 'w', encoding='utf8') as target:
@@ -106,6 +145,15 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Download source-bound prebuilt SSHFS archive
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: ${{ needs.fixture.outputs.artifact_id }}
+          path: ${{ runner.temp }}/lifecycle-sshfs
+      - name: Verify exact-run archive manifest and digest
+        env:
+          CODEXIA_LIFECYCLE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/verify-sshfs-fixture-artifact.mjs "$RUNNER_TEMP/lifecycle-sshfs"
       - name: Install disposable host and filesystem capabilities
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -146,10 +194,6 @@ jobs:
             record_unavailable 'runner could not provision the Ansible deployment capability'
             exit 78
           fi
-          if ! docker info --format '{{.ServerVersion}}' >>"$setup_log" 2>&1; then
-            record_unavailable 'runner rootful Docker builder is unavailable for preparing the isolated SSHFS fixture image'
-            exit 78
-          fi
           rm -f "$setup_log"
           echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" >> "$GITHUB_ENV"
           for script in deploy/ansible/test-push-{app,auth}-lifecycle.sh; do bash -n "$script"; done
@@ -158,6 +202,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_LIFECYCLE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_LIFECYCLE_SCENARIO: ${{ matrix.scenario }}
+          CODEXIA_LIFECYCLE_FIXTURE_DIR: ${{ runner.temp }}/lifecycle-sshfs
           CODEXIA_LIFECYCLE_REPORT_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
           CODEXIA_LIFECYCLE_EVIDENCE_FILE: ${{ runner.temp }}/codexia-push-app-lifecycle/evidence.json
         run: bash deploy/ansible/test-push-app-lifecycle.sh
@@ -165,7 +211,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: push-app-lifecycle-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          name: push-app-lifecycle-${{ github.run_id }}-attempt-${{ github.run_attempt }}-${{ matrix.scenario }}
           path: |
             ${{ runner.temp }}/codexia-push-app-lifecycle/outcome.json
             ${{ runner.temp }}/codexia-push-app-lifecycle/evidence.json
