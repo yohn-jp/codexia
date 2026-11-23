@@ -58,6 +58,7 @@ function quantile(numbers, p) {
 }
 let all = [], selected = null, coverage = {}, verifySource = '';
 let inventoryRuns = [], groups = [], inventoryPage = 0, hasMore = true, reportedTotal = null;
+let windowPage = 0, windowBefore = null, inventoryLimitReason = null;
 let observed = new Map(), selectionVersion = 0;
 const revisionKey = item => item.number + ':' + item.sha;
 const groupSignature = group => group.runs.map(run => run.id + '/' + run.run_attempt).join(',');
@@ -358,17 +359,20 @@ function updateCoverage() {
     selectedPRs: all.length,
     scannedPages: inventoryPage,
     unresolvedRunCount,
-    historyTruncated: hasMore || (reportedTotal !== null && inventoryRuns.length < reportedTotal) ||
-      unresolvedRunCount > 0,
+    historyTruncated: hasMore || inventoryLimitReason !== null ||
+      (reportedTotal !== null && inventoryRuns.length < reportedTotal) || unresolvedRunCount > 0,
     note: 'Public pull_request run inventory. Pages are loaded on demand; only selected PR revisions have job/step observations. Unmapped runs and unavailable GitHub history are not represented as complete.',
     observedAt: new Date().toISOString(),
   };
 }
 function inventoryStatus() {
   updateCoverage();
-  const incomplete = hasMore || (reportedTotal !== null && inventoryRuns.length < reportedTotal);
-  const suffix = incomplete ? ' · 履歴は未取得分があります。全件読み込みを選択してください。'
-    : ' · GitHub APIが返した履歴の読み込みが完了しました。';
+  const incomplete = hasMore || inventoryLimitReason !== null ||
+    (reportedTotal !== null && inventoryRuns.length < reportedTotal);
+  const suffix = inventoryLimitReason ? ' · 履歴取得の制限: ' + inventoryLimitReason
+    : hasMore ? ' · 履歴は未取得分があります。全件読み込みを選択してください。'
+      : incomplete ? ' · GitHub APIの履歴範囲に未取得分があります。'
+        : ' · GitHub APIが返した履歴の読み込みが完了しました。';
   setStatus('Collected ' + formatTime(coverage.observedAt) + ' · ' + inventoryRuns.length +
     (reportedTotal === null ? '' : ' / ' + reportedTotal) + ' workflow runs · ' + all.length +
     ' PR revisions · PR対応不明 ' + coverage.unresolvedRunCount + ' runs' + suffix +
@@ -412,14 +416,31 @@ function refreshInventory() {
   inventoryStatus();
 }
 async function appendInventoryPage() {
-  const result = await collectInventoryPage(request, inventoryPage + 1);
+  const page = windowPage + 1;
+  const result = await collectInventoryPage(request, page, windowBefore);
   const seen = new Set(inventoryRuns.map(run => run.id));
   for (const run of result.runs) {
     if (!seen.has(run.id)) { inventoryRuns.push(run); seen.add(run.id); }
   }
   inventoryPage++;
+  windowPage = page;
+  if (windowBefore === null && result.reportedTotal !== null) reportedTotal = result.reportedTotal;
   hasMore = result.hasMore;
-  if (result.reportedTotal !== null) reportedTotal = result.reportedTotal;
+  // GitHub caps filtered Actions searches at 1,000 results. Advance the created_at
+  // window rather than pretending that page 10 is the end of repository history.
+  if (hasMore && windowPage === 10) {
+    const timestamps = result.runs.map(run => Date.parse(run.created_at ?? ''))
+      .filter(Number.isFinite);
+    const oldest = timestamps.length ? new Date(Math.min(...timestamps))
+      .toISOString().replace('.000Z', 'Z') : null;
+    if (!oldest || (windowBefore !== null && Date.parse(oldest) >= Date.parse(windowBefore))) {
+      inventoryLimitReason = '日時カーソルを進められません。未取得履歴があります。';
+      hasMore = false;
+    } else {
+      windowBefore = oldest;
+      windowPage = 0;
+    }
+  }
   refreshInventory();
 }
 async function chooseRevision(item) {
@@ -489,7 +510,8 @@ async function loadDashboard() {
   setStatus('実測データを読み込んでいます。', 'loading');
   ++selectionVersion;
   inventoryRuns = []; groups = []; all = []; selected = null;
-  inventoryPage = 0; hasMore = true; reportedTotal = null; observed = new Map();
+  inventoryPage = 0; windowPage = 0; windowBefore = null; inventoryLimitReason = null;
+  hasMore = true; reportedTotal = null; observed = new Map();
   resetPanels('データを読み込んでいます。');
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
