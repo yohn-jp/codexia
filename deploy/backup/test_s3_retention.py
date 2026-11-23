@@ -142,6 +142,19 @@ class S3RetentionTests(unittest.TestCase):
         self.assertIn(("codexia-fixture", marker_key), self.client.objects)
         self.assertFalse(self.receipt.exists())
 
+    def test_retry_refuses_marker_version_drift_without_replacing_the_receipt(self):
+        self.write_artifact()
+        first_receipt = self.upload()
+        original_receipt_bytes = self.receipt.read_bytes()
+        marker_key = first_receipt["markerKey"]
+        self.client.objects[("codexia-fixture", marker_key)]["VersionId"] = "new-marker-version"
+
+        with self.assertRaisesRegex(s3_transfer.TransferError, "Existing external receipt conflicts"):
+            self.upload()
+
+        self.assertEqual(self.client.readbacks[-1], (marker_key, "new-marker-version"))
+        self.assertEqual(self.receipt.read_bytes(), original_receipt_bytes)
+
     def test_unsupported_lock_remains_distinct_from_disabled_or_unobservable_lock(self):
         self.write_artifact()
         for code, support, enabled in (

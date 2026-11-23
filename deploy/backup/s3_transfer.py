@@ -270,7 +270,10 @@ def _write_receipt(path: Path, value: dict[str, Any]) -> dict[str, Any]:
         if not stat.S_ISREG(existing.st_mode) or stat.S_ISLNK(existing.st_mode) or existing.st_uid != os.getuid() or stat.S_IMODE(existing.st_mode) not in (0o400, 0o600):
             _fail("Existing external receipt is not a protected regular file")
         prior = _read_json(path, require_private_file=True)
-        for field in ("format", "backupId", "sourceIdentity", "bucket", "prefix", "markerKey", "markerSha256", "objects"):
+        for field in (
+            "format", "backupId", "sourceIdentity", "bucket", "prefix",
+            "markerKey", "markerSha256", "markerVersionId", "objects",
+        ):
             if prior.get(field) != value.get(field):
                 _fail("Existing external receipt conflicts with this backup ID")
         return prior
