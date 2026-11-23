@@ -111,6 +111,7 @@
 | AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
 | Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
+| StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 | AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |

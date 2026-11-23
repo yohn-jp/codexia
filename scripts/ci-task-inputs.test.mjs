@@ -103,6 +103,26 @@ test('a deployment document checked by root tests is included in the task source
   assert.notEqual(changed.source, original.source);
 });
 
+test('StrictDoc requirement and grammar Markdown are executable inputs only for the trace task', async t => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, 'docs/requirements'), { recursive: true });
+  await writeFile(path.join(root, 'docs/requirements/REQUIREMENT-REGISTER.md'), 'requirement source\n');
+  await writeFile(path.join(root, 'docs/requirements/STRICTDOC-GRAMMAR.gra.md'), 'grammar source\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'add StrictDoc requirements inputs');
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const traceBefore = capture('requirements-trace');
+  const unitBefore = capture('unit-core');
+  await writeFile(path.join(root, 'docs/requirements/REQUIREMENT-REGISTER.md'), 'requirement source changed\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'change StrictDoc requirement source');
+  const changedSha = await git(root, 'rev-parse', 'HEAD');
+  const changed = captureTaskInputSource({ root, sha: changedSha, runtime });
+  assert.notEqual(changed('requirements-trace').source, traceBefore.source);
+  assert.equal(changed('unit-core').source, unitBefore.source);
+});
+
 test('task proof identities distinguish shared Git inputs from actual invocation inputs', async t => {
   const root = await fixture(t);
   const sha = await git(root, 'rev-parse', 'HEAD');
@@ -186,5 +206,13 @@ test('Passkey browser shard binds the dedicated acceptance environment', () => {
     environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL',
       'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
       'CODEXIA_PASSKEY_ACCEPTANCE'],
+  });
+});
+
+test('requirements trace invocation is canonical and captures runtime identity inputs', () => {
+  assert.deepEqual(taskInvocation('requirements-trace', '/opt/node/bin/node'), {
+    executable: '/opt/node/bin/node',
+    arguments: ['scripts/strictdoc/verify.mjs'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_CI_SOURCE_SHA', 'CODEXIA_CI_TASK', 'STRICTDOC_BIN'],
   });
 });
