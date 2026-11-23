@@ -155,11 +155,17 @@ test('uncommitted worktree changes cannot influence proof for a pinned Git SHA',
 test('browser input proofs bind the lane image for both browsers in the shared WebKit lane', async t => {
   const root = await fixture(t);
   const sha = await git(root, 'rev-parse', 'HEAD');
-  const mutatedScripts = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
-  t.after(() => rm(mutatedScripts, { recursive: true, force: true }));
+  const mutatedRoot = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
+  const mutatedScripts = path.join(mutatedRoot, 'scripts');
+  await mkdir(mutatedScripts, { recursive: true });
+  t.after(() => rm(mutatedRoot, { recursive: true, force: true }));
   for (const file of ['ci-task-inputs.mjs', 'ci-contract.mjs', 'ci-browser-image-digests.mjs']) {
     await cp(new URL(file, import.meta.url), path.join(mutatedScripts, file));
   }
+  const toolchainDirectory = path.join(mutatedRoot, 'packages/persistence-postgres/tests/db-contract');
+  await mkdir(toolchainDirectory, { recursive: true });
+  await cp(new URL('../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url),
+    path.join(toolchainDirectory, 'toolchain.json'));
   const digestsFile = path.join(mutatedScripts, 'ci-browser-image-digests.mjs');
   const digests = await readFile(digestsFile, 'utf8');
   await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
@@ -187,4 +193,19 @@ test('Passkey browser shard binds the dedicated acceptance environment', () => {
       'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
       'CODEXIA_PASSKEY_ACCEPTANCE'],
   });
+});
+
+test('database contract proof records its isolated PG17/pgTAP/tbls/age verification command', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  assert.deepEqual(taskInvocation('db-contract', runtime.execPath), {
+    executable: 'pnpm',
+    arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR'],
+  });
+  const closure = captureTaskInputClosure({ root, sha, task: 'db-contract', runtime });
+  for (const field of ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
+    assert.match(closure[field], /^[0-9a-f]{64}$/u, field);
+  }
+  assert.notEqual(closure.producers, captureTaskInputClosure({ root, sha, task: 'unit-core', runtime }).producers);
 });

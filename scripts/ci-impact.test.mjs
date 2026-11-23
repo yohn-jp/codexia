@@ -160,6 +160,7 @@ test('main, manual, shared contracts, lockfiles, manifests and unknown files fai
     [['packages/contracts/src/index.ts'], 'pull_request'],
     [['packages/persistence-contracts/src/index.ts'], 'pull_request'],
     [['packages/persistence-postgres/src/postgres-store.ts'], 'pull_request'],
+    [['packages/persistence-postgres/migrations/0002-anchor-ranges.sql'], 'pull_request'],
     [['pnpm-lock.yaml'], 'pull_request'],
     [['modules/search/package.json'], 'pull_request'], [['new-root-file'], 'pull_request'],
     [null, 'pull_request'],
@@ -174,6 +175,19 @@ test('test-only changes select their owner while non-executable documentation se
   assert.ok(selected.tasks.includes('test-types-modules'));
   assert.ok(!selected.tasks.includes('build-full'));
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+});
+
+test('PostgreSQL contract fixture changes select the real database contract lane', async () => {
+  for (const file of [
+    'packages/persistence-postgres/tests/db-contract/application-contract.sql',
+    'scripts/postgres-contract/contract-runner.mjs',
+  ]) {
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('db-contract'), file);
+    assert.ok(selected.tasks.includes('unit-persistence-postgres'), file);
+    assert.ok(selected.tasks.includes('typecheck-foundations'), file);
+    assert.equal(selected.mode, 'affected', file);
+  }
 });
 
 test('proof ineligibility can expand an affected PR plan to the complete task inventory without losing its actual diff', async () => {

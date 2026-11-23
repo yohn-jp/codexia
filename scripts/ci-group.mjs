@@ -82,6 +82,11 @@ async function executeTaskInContext(task, index, scope) {
   if (!blocked) {
     try {
       if (task.startsWith('unit-')) await node('scripts/ci-workspace.mjs', 'unit', task.slice(5));
+      else if (task === 'db-contract') {
+        await run('pnpm', ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], {
+          CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task),
+        });
+      }
       else if (task.startsWith('typecheck-')) {
         await node('scripts/ci-workspace.mjs', 'typecheck', task.slice(10));
       } else if (task.startsWith('test-types-')) {

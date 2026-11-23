@@ -19,6 +19,9 @@ test('the certified graph covers every declared obligation within the twenty-job
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
+  assert.ok(VERIFICATION_GROUPS['unit-core'].includes('db-contract'));
+  assert.ok(VERIFICATION_TASKS.includes('db-contract'));
+  assert.match(readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);
   assert.deepEqual(REQUIRED_VERIFICATION_JOBS, ['plan', ...Object.keys(VERIFICATION_GROUPS), 'certification']);
   for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile']]) {
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');

@@ -284,6 +284,17 @@ test('real workspace preparation overlaps independent builds and blocks dependen
     assert.equal(failureReport[2].error, undefined);
     const failureEvents = (await readFile(events, 'utf8')).trim().split('\n').map(JSON.parse);
     assert.equal(failureEvents.some(event => event.id === 'persistence-postgres'), false);
+    await rm(events);
+    const databaseTasks = ['db-contract'];
+    const databaseEnv = { ...env, CODEXIA_CI_GROUP_TASKS: JSON.stringify(databaseTasks) };
+    const databasePreparation = runProject(fixture.projectRoot, args, databaseEnv);
+    assert.equal(databasePreparation.status, 0, databasePreparation.stderr);
+    const databaseReport = JSON.parse(await readFile(reportPath, 'utf8'));
+    assert.deepEqual(databaseReport.map(entry => entry.task), databaseTasks);
+    assert.equal(databaseReport[0].error, undefined);
+    const databaseEvents = (await readFile(events, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.ok(databaseEvents.some(event => event.id === 'api' && event.event === 'end'));
+    assert.ok(databaseEvents.some(event => event.id === 'persistence-postgres' && event.event === 'end'));
   } finally {
     await rm(fixture.projectRoot, { recursive: true, force: true });
   }

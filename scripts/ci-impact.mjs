@@ -160,6 +160,10 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
+      add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
+      continue;
+    }
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
       continue;

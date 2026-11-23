@@ -113,6 +113,10 @@
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v6.1.0` | **更新対象**: v7.1.0 PRあり。配布元・ランナー互換性と該当ジョブの実行を検証 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
+| PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
+| Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
+| PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
+| Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
 
 ## アップデートの審査・記録
 
