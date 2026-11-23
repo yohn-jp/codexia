@@ -655,27 +655,24 @@ test('native ownership fails closed for unsupported or mixed inputs and main', a
 });
 
 
-test('Impeccable admission excludes isolated unit/spec changes but retains shipped UI and configuration', () => {
+test('Impeccable retains its existing workflow triggers and guards only unneeded heavy steps', () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/impeccable.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
   for (const file of [
     'app/src/workspace/persistence.test.ts',
-    'app/src/editorial.spec.tsx',
-    'app/src/editor/test/fixture.ts',
     'modules/publishing/src/publishing.test.ts',
-    'modules/mcp/src/http.spec.ts',
-    'modules/mcp/src/entry/tests/fixture.ts',
-  ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
-  for (const file of [
     'app/src/editor/ManuscriptEditor.tsx',
-    'app/src/shells/editorial.css',
-    'modules/publishing/src/browser.tsx',
-    '.impeccable/overrides.json',
     '.github/workflows/impeccable.yml',
   ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  const steps = workflow.jobs.scan.steps;
+  const scopeIndex = steps.findIndex(step => step.name === 'Select exact-source design scope');
+  assert.ok(scopeIndex > 0);
+  assert.match(steps[scopeIndex].run, /design-admission\\.mjs/u);
+  for (const name of ['Scan application and module source', 'Upload design findings']) {
+    assert.equal(steps.find(step => step.name === name).if, "steps.scope.outputs.design == 'true'");
+  }
   assert.deepEqual(workflow.on.push.paths, paths);
 });
-
 
 test('native-owned input admission requires the Xcode workflow while its Swift source tree exists', () => {
   const owners = [

@@ -108,6 +108,12 @@ CodeQL/Trivy net-change closure. The stable check jobs remain present, but
 scanner steps are omitted for proven unrelated inputs. Missing history,
 checkout identity disagreement, unexpected extensions or unresolved scope
 runs both scans. Main/scheduled scans and Gitleaks are never filtered here.
+`scripts/ci/impact/design-admission.mjs` uses the same verified PR
+merge-result identity to keep the existing Impeccable check job while skipping
+the actual scan and SARIF upload for isolated `app` or `modules/*/src`
+test/spec changes. The existing workflow event `paths` are retained because
+effective legacy required-check policy could not be read through the connector.
+
 The admission decision is recorded in the job log and step summary; a skipped
 scanner must never be reported as having analyzed changed code.
 
