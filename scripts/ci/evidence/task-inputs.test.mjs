@@ -294,6 +294,9 @@ await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, sou
   assert.deepEqual(observed, { report: path.join(report, 'requirements-trace'), source: sha,
     task: 'requirements-trace', tool, cwd: root, node: process.execPath });
   const result = JSON.parse(await readFile(path.join(report, 'report.json'), 'utf8'));
+  const traceResult = result.results.find(item => item.task === 'requirements-trace');
+  assert.deepEqual(traceResult.invocations, [taskInvocation('requirements-trace', process.execPath)],
+    'Observed execution must match the certified task recipe');
   assert.deepEqual(Object.fromEntries(result.results.map(({ task, status }) => [task, status])),
     { coverage: 'passed', 'requirements-trace': 'passed' });
 });
