@@ -65,6 +65,15 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.github/workflows/verify.yml',
 ]);
 
+const HTTP_CONTRACT_ROUTE_SOURCE_PATHS = new Set([
+  'packages/api/src/server.ts',
+  'packages/api/src/persistence-routes.ts',
+  'packages/api/src/owner-setup.ts',
+  'packages/api/src/better-auth.ts',
+  'modules/mcp/src/http.ts',
+  'modules/publishing/src/http.ts',
+]);
+
 /** @param {string} file */
 export function matchesFullModelOciPath(file) {
   if (typeof file !== 'string') return false;
@@ -259,6 +268,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
       continue;
     }
+    if (HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('unit-http-contract');
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
     if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
