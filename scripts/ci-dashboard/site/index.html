@@ -19,6 +19,8 @@
       <div class="control">
         <label for="pr">対象PR・リビジョン</label>
         <select id="pr" disabled><option>データを取得しています</option></select>
+        <button id="load-all" class="copy-diagnostics" type="button" hidden>残りのPR・リビジョンを全件読み込む</button>
+        <small id="inventory-hint">初期表示は直近100 Workflow run。全件読み込みではGitHub APIが提供する履歴を追加取得します。ジョブ詳細は選択時のみ取得します。</small>
         <button id="copy-diagnostics" class="copy-diagnostics" type="button" disabled aria-describedby="copy-hint">診断JSONをコピー</button>
         <small id="copy-hint">選択したPRの実測値と比較サンプルをコピー</small>
         <span id="copy-status" role="status" aria-live="polite"></span>
@@ -93,7 +95,7 @@
         </div>
       </section>
       <section class="panel" aria-labelledby="history-title">
-        <div class="panel-head"><div><h2 id="history-title">PR revision history</h2><p class="panel-subtitle">取得できた比較サンプル</p></div></div>
+        <div class="panel-head"><div><h2 id="history-title">PR revision history</h2><p class="panel-subtitle">詳細を取得したリビジョンの比較サンプル</p></div></div>
         <p class="panel-note">完了した観測範囲を比較します。Workflowの欠落、再実行、異なる検証計画に注意してください。</p>
         <div class="history-stat" id="history-stat">—</div>
         <div class="history" id="history" role="region" tabindex="0" aria-labelledby="history-title"></div>
