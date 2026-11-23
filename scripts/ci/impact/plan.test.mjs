@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
@@ -674,4 +674,24 @@ test('Impeccable admission excludes isolated unit/spec changes but retains shipp
     '.github/workflows/impeccable.yml',
   ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
   assert.deepEqual(workflow.on.push.paths, paths);
+});
+
+
+test('native-owned input admission requires the Xcode workflow while its Swift source tree exists', () => {
+  const owners = [
+    { dir: 'ios/CodexiaTransport/', workflow: 'ios-api.yml', paths: ['ios/CodexiaTransport/**'], job: 'api' },
+    { dir: 'ios/CodexiaEditor/', workflow: 'ios-editor.yml',
+      paths: ['ios/CodexiaEditor/**', 'ios/CodexiaApp/**'], job: 'editor' },
+  ];
+  for (const owner of owners) {
+    const directory = new URL('../../../' + owner.dir, import.meta.url);
+    if (!existsSync(directory)) continue; // Native implementation may be in a separate unmerged workstream.
+    const workflowFile = new URL('../../../.github/workflows/' + owner.workflow, import.meta.url);
+    assert.ok(existsSync(workflowFile), owner.dir + ' requires its native workflow');
+    const workflow = parse(readFileSync(workflowFile, 'utf8'));
+    for (const input of owner.paths) assert.ok(workflow.on.pull_request.paths.includes(input), input);
+    assert.equal(workflow.jobs[owner.job]['runs-on'], 'xcode-27', owner.workflow);
+    assert.ok(workflow.jobs[owner.job].steps.some(step => String(step.run ?? '').includes('swift test') ||
+      String(step.run ?? '').includes('xcodebuild')), owner.workflow + ' must execute a native build/test');
+  }
 });
