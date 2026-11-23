@@ -65,6 +65,11 @@ public struct APITransport: Sendable {
             }
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
+        for value in [idempotencyKey, ifMatch, contentType].compactMap({ $0 }) {
+            guard !value.isEmpty, !value.contains("\r"), !value.contains("\n") else {
+                throw Failure.insecureRequest
+            }
+        }
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
         if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
         if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
