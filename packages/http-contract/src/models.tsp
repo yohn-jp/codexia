@@ -10,10 +10,100 @@ namespace Codexia.Http;
 alias JsonObject = Record<unknown>;
 
 model ApiError {
+  error: string;
   code: string;
-  message: string;
-  retryable?: boolean;
   details?: JsonObject | null;
+  ...Record<never>;
+}
+
+model Project {
+  id: string;
+  title: string;
+  settings: JsonObject;
+  version: int32;
+  createdAt: utcDateTime;
+  updatedAt: utcDateTime;
+  ...Record<never>;
+}
+
+model ProjectPageResponse {
+  projects: Project[];
+  nextCursor: string | null;
+  ...Record<never>;
+}
+
+model PersistenceStatusResponse {
+  available: boolean;
+  provider: "postgres" | null;
+  ...Record<never>;
+}
+
+model CoreProjectCreateRequest {
+  @pattern(".*\\S.*")
+  @minLength(1)
+  title: string;
+  ...Record<never>;
+}
+
+model PersistenceProjectCreateRequest {
+  id?: string;
+  @pattern(".*\\S.*")
+  @minLength(1)
+  @maxLength(256)
+  title: string;
+  settings?: JsonObject;
+  ...Record<never>;
+}
+
+model PersistenceProjectUpdateRequest {
+  @minValue(1)
+  expectedVersion: int32;
+  @pattern(".*\\S.*")
+  @minLength(1)
+  @maxLength(256)
+  title?: string;
+  settings?: JsonObject;
+  ...Record<never>;
+}
+
+model ProjectResponse {
+  project: Project;
+  ...Record<never>;
+}
+
+model ProposeChangeSetRequest {
+  @minValue(1)
+  projectVersion: int32;
+  @minItems(1)
+  @maxItems(50)
+  operations: JsonObject[];
+  ...Record<never>;
+}
+
+model ChangeSetActionRequest {
+  @minValue(1)
+  expectedVersion: int32;
+  ...Record<never>;
+}
+
+model KnowledgeMergePreviewRequest {
+  @minLength(1)
+  @maxLength(512)
+  targetId: string;
+  ...Record<never>;
+}
+
+model KnowledgeMergeRequest {
+  @minLength(1)
+  @maxLength(512)
+  targetId: string;
+  confirm: true;
+  @minValue(0)
+  projectVersion: int32;
+  @minLength(64)
+  @maxLength(64)
+  @pattern("^[0-9a-f]{64}$")
+  previewDigest: string;
   ...Record<never>;
 }
 

@@ -131,7 +131,12 @@ function objectParameters(parameters, location) {
     properties[name] = mapSchema(parameter.schema ?? {}, `${location}.${parameter.name}`);
     if (parameter.required) required.push(name);
   }
-  return { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: false };
+  return {
+    type: "object",
+    properties,
+    ...(required.length ? { required } : {}),
+    ...(location.endsWith(".headers") ? {} : { additionalProperties: false }),
+  };
 }
 
 function contentSchemas(contents, location) {

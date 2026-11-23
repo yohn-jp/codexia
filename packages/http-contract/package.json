@@ -8,8 +8,8 @@
     "check-breaking": "node scripts/check-breaking.mjs",
     "check-generated": "node scripts/check-generated.mjs",
     "lint": "redocly lint openapi/codexia.openapi.yaml --config redocly.yaml",
-    "typecheck": "tsp compile src/main.tsp --no-emit",
-    "test": "node --test test/*.test.mjs && pnpm run lint && pnpm run check-generated && pnpm run check-breaking",
+    "typecheck": "tsp compile src/main.tsp --no-emit && tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs test/*.test.ts && pnpm run lint && pnpm run check-generated && pnpm run check-breaking",
     "generate": "tsp compile src/main.tsp"
   },
   "devDependencies": {

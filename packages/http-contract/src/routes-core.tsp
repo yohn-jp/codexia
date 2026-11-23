@@ -68,11 +68,11 @@ op readInboxItem(@path inboxId: string): JsonResponse | { @statusCode _: 403; @b
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | MCP-CLIENT(mcp:read)")
 @route("/api/projects") @get @operationId("projects_list_get")
-op listProjects(@query limit?: int32, @query cursor?: string): JsonResponse;
+op listProjects(@query limit?: int32, @query cursor?: string): ProjectPageResponse | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-SESSION")
 @route("/api/projects") @post @operationId("projects_create_post")
-op createProject(@body body: JsonObject): { @statusCode _: 201; @body body: JsonObject; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+op createProject(@body body: CoreProjectCreateRequest): { @statusCode _: 201; @body body: Project; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("reviews") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/review-queue") @get @operationId("review_queue_get")

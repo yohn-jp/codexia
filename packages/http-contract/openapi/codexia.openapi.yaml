@@ -750,8 +750,13 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectPageResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       tags:
         - projects
       x-codexia-principal: OWNER-API | MCP-CLIENT(mcp:read)
@@ -764,8 +769,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/Project'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -785,8 +789,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/CoreProjectCreateRequest'
       x-codexia-principal: OWNER-SESSION
   /api/projects/events:
     get:
@@ -1811,10 +1814,15 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectPageResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Service unavailable.
           content:
             application/json:
               schema:
@@ -1831,10 +1839,15 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
           content:
             application/json:
               schema:
@@ -1846,8 +1859,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/PersistenceProjectCreateRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}:
     get:
@@ -1864,8 +1876,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectResponse'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -1889,8 +1900,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/ProjectResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1916,8 +1926,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/PersistenceProjectUpdateRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/archive:
     get:
@@ -2192,8 +2201,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/ProposeChangeSetRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}:
     get:
@@ -2273,8 +2281,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/ChangeSetActionRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve:
     post:
@@ -2323,8 +2330,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/ChangeSetActionRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject:
     post:
@@ -2373,8 +2379,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/ChangeSetActionRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/documents:
     get:
@@ -3309,8 +3314,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/KnowledgeMergeRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview:
     post:
@@ -3359,8 +3363,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: {}
+              $ref: '#/components/schemas/KnowledgeMergePreviewRequest'
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations:
     post:
@@ -3449,8 +3452,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceStatusResponse'
         '503':
           description: Service unavailable.
           content:
@@ -3650,15 +3652,13 @@ components:
     ApiError:
       type: object
       required:
+        - error
         - code
-        - message
       properties:
+        error:
+          type: string
         code:
           type: string
-        message:
-          type: string
-        retryable:
-          type: boolean
         details:
           anyOf:
             - type: object
@@ -3808,6 +3808,17 @@ components:
           format: date-time
       unevaluatedProperties:
         not: {}
+    ChangeSetActionRequest:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int32
+          minimum: 1
+      unevaluatedProperties:
+        not: {}
     CompatibleS3BackupConfigDraft:
       type: object
       required:
@@ -3853,6 +3864,17 @@ components:
           additionalProperties: {}
       unevaluatedProperties:
         not: {}
+    CoreProjectCreateRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: .*\S.*
+      unevaluatedProperties:
+        not: {}
     DocumentChange:
       type: object
       required:
@@ -3881,6 +3903,44 @@ components:
             - ok
       unevaluatedProperties:
         not: {}
+    KnowledgeMergePreviewRequest:
+      type: object
+      required:
+        - targetId
+      properties:
+        targetId:
+          type: string
+          minLength: 1
+          maxLength: 512
+      unevaluatedProperties:
+        not: {}
+    KnowledgeMergeRequest:
+      type: object
+      required:
+        - targetId
+        - confirm
+        - projectVersion
+        - previewDigest
+      properties:
+        targetId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        confirm:
+          type: boolean
+          enum:
+            - true
+        projectVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        previewDigest:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: ^[0-9a-f]{64}$
+      unevaluatedProperties:
+        not: {}
     OAuthConsentContextRequest:
       type: object
       required:
@@ -3888,6 +3948,130 @@ components:
       properties:
         oauth_query:
           type: string
+      unevaluatedProperties:
+        not: {}
+    PersistenceProjectCreateRequest:
+      type: object
+      required:
+        - title
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: .*\S.*
+        settings:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    PersistenceProjectUpdateRequest:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int32
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: .*\S.*
+        settings:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    PersistenceStatusResponse:
+      type: object
+      required:
+        - available
+        - provider
+      properties:
+        available:
+          type: boolean
+        provider:
+          anyOf:
+            - type: string
+              enum:
+                - postgres
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    Project:
+      type: object
+      required:
+        - id
+        - title
+        - settings
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        settings:
+          type: object
+          additionalProperties: {}
+        version:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      unevaluatedProperties:
+        not: {}
+    ProjectPageResponse:
+      type: object
+      required:
+        - projects
+        - nextCursor
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    ProjectResponse:
+      type: object
+      required:
+        - project
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+      unevaluatedProperties:
+        not: {}
+    ProposeChangeSetRequest:
+      type: object
+      required:
+        - projectVersion
+        - operations
+      properties:
+        projectVersion:
+          type: integer
+          format: int32
+          minimum: 1
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          minItems: 1
+          maxItems: 50
       unevaluatedProperties:
         not: {}
     ReadinessResponse:
