@@ -427,10 +427,11 @@ test("publishing keeps Core's string order-key sequence in volume, chapter, text
   assert.equal(publishing.volumes[0]?.chapters[0]?.scenes[0]?.order, "0000000002");
 
   const plaintext = buildPlaintextExport(publishing, { scope: "all" }).text;
-  assert.ok(plaintext.indexOf("# Zulu scene") < plaintext.indexOf("# Alpha scene"));
-  assert.ok(plaintext.indexOf("# Alpha chapter") < 0, "chapter titles are not substituted for scenes");
-  assert.ok(plaintext.indexOf("本文 Zulu。") < plaintext.indexOf("本文 Alpha scene。"));
-  assert.ok(plaintext.indexOf("本文 Alpha scene。") < plaintext.indexOf("本文 Alpha。"));
+  assert.deepEqual(plaintext.split("\n").filter(Boolean), [
+    "# Zulu scene", "本文 Zulu。",
+    "# Alpha scene", "本文 Alpha scene。",
+    "# Alpha scene", "本文 Alpha。",
+  ]);
 
   const exported = await buildEpubExport(publishing, { scope: "all" }, reader, []);
   const zip = await JSZip.loadAsync(exported.buffer);
