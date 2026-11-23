@@ -33,7 +33,7 @@
 | REQ-EXT-002 | OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を個別に検証する | [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[External interfaces](../architecture/EXTERNAL-INTERFACES.md) | ACCEPTED／適合未認定 |
 | REQ-OPS-001 | 新規VMのbootstrap、owner登録、公開、復旧を明示した別状態として扱う | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | ACCEPTED／一部目標・適合未認定 |
 | REQ-OPS-002 | 更新はexact-source検証、互換性、snapshot保全、失敗時停止/rollback規則を守る | [Update flow](../deployment/UPDATE-FLOW.md)、[CI/CD](../verification/CI-CD.md) | ACCEPTED／適合未認定 |
-| REQ-OPS-003 | バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する | [Backup](../deployment/BACKUP.md) | ACCEPTED／適合未認定 |
+| REQ-OPS-003 | バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。**S3互換ストレージへのage暗号化済みバックアップの転送・検証・取得・隔離復元をサポートする（追加機能は未実装）** | [Backup](../deployment/BACKUP.md) | ACCEPTED／S3対応は未実装・適合未認定 |
 | REQ-QUAL-001 | テストは契約の正常/異常/境界と実DB/API/UI/hostを分け、モックでは境界統合を証明しない | [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) | ACCEPTED／適合未認定 |
 | REQ-QUAL-002 | CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未実行/欠落をPASSとしない | [CI/CD](../verification/CI-CD.md) | ACCEPTED／適合未認定 |
 | REQ-QUAL-003 | INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別々の実測で評価する | [UX contract](../design/UX-CONTRACT.md)、[Performance](../performance/README.md) | ACCEPTED／計測状態未認定 |
