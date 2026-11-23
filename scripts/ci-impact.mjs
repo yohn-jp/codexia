@@ -38,6 +38,9 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '!packages/**/tests/**',
   '!packages/**/*.test.*',
   '!packages/**/*.spec.*',
+  // api and persistence-contracts package their entire compiled source trees, including tests/specs.
+  'packages/api/src/**',
+  'packages/persistence-contracts/src/**',
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',

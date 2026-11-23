@@ -26,6 +26,8 @@ on:
       - '!packages/**/tests/**'
       - '!packages/**/*.test.*'
       - '!packages/**/*.spec.*'
+      # Build-emitted source and test files remain runtime package inputs.
+      - 'packages/persistence-contracts/src/**'
       - deploy/cloudflare/**
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
