@@ -5,8 +5,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { nativeApiOrigin, nativeOAuthConfig, nativeReaderOrigin } from "../../app/native/plugins/codexia-auth/src/native-config.mjs";
-import { inspectHtml } from "../html-document.mjs";
-import { readRegularFile } from "../read-regular-file.mjs";
+import { inspectHtml } from "../shared/html-document.mjs";
+import { readRegularFile } from "../shared/read-regular-file.mjs";
 
 export async function validateWebBundle(directory, { mode, env = process.env } = {}) {
   if (mode !== undefined && mode !== "native" && mode !== "web") throw new Error("Mobile bundle mode must be native or web");

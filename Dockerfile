@@ -23,7 +23,7 @@ RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
 FROM source AS build
 ARG PROFILE
 ENV CODEXIA_PROFILE=${PROFILE}
-RUN node scripts/profile-package.mjs --profile "${PROFILE}" --out /runtime
+RUN node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --out /runtime
 
 FROM ${NODE_IMAGE} AS runtime
 ARG PROFILE

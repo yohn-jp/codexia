@@ -190,7 +190,7 @@ export function selectPriorPublication(releases, identity) {
 }
 
 export function selectLifecycleTransition(head, prior) {
-  if (!prior) return { from: 'head', to: 'auth-update', kind: 'test-only-digest' };
+  if (!prior) return { from: 'head', to: 'app-update', kind: 'test-only-digest' };
   check(prior.profile === 'full' && compareComponentVersions(prior.version, head.version) < 0 &&
     prior.apiEpoch === head.apiEpoch && prior.persistenceFormat === head.persistenceFormat &&
     prior.migrationFingerprint === head.migrationFingerprint,
@@ -365,7 +365,7 @@ async function recordFailedCandidate(image) {
 async function recordAuthCandidate(scenario, image) {
   check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
     'Better Auth test image proof must remain bound to the current Actions run');
-  check(['auth-primary', 'auth-update', 'auth-failed'].includes(scenario) &&
+  check(['auth-primary', 'auth-update', 'auth-failed', 'app-update'].includes(scenario) &&
     /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image || ''), 'Invalid Better Auth test image');
   const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
   check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && evidence.sourceSha === sourceSha &&

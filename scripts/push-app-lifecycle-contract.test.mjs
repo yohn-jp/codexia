@@ -121,11 +121,51 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
   assert.equal(workflow.jobs.lifecycle['runs-on'], 'ubuntu-26.04');
   assert.equal(workflow.jobs.lifecycle.environment, undefined);
   assert.deepEqual(workflow.jobs.lifecycle.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
-  assert.equal(workflow.jobs.lifecycle.needs, undefined);
-  assert.ok(workflow.jobs.lifecycle.steps.some(step => step.run === 'bash deploy/ansible/test-push-app-lifecycle.sh'));
-  assert.ok(workflow.jobs.lifecycle.steps.some(step => step.uses?.startsWith('actions/upload-artifact@')));
-  assert.match(workflow.jobs.lifecycle.steps.find(step => step.name === 'Install disposable host and filesystem capabilities').run, /docker info --format/u,
-    'the disposable fixture must verify the host Docker builder before use');
+  assert.equal(workflow.jobs.lifecycle.needs, 'fixture');
+  assert.deepEqual(workflow.jobs.lifecycle.strategy.matrix.scenario, ['app', 'auth']);
+  assert.equal(workflow.jobs.lifecycle.strategy['fail-fast'], false);
+  assert.deepEqual(workflow.jobs.fixture.permissions, { contents: 'read' });
+  const producer = workflow.jobs.fixture.steps;
+  assert.ok(producer.some(step => step.run === 'bash deploy/fixtures/sshfs-server/build.sh'));
+  assert.ok(producer.some(step => step.uses?.startsWith('actions/upload-artifact@') && step.id === 'archive'));
+  const consumer = workflow.jobs.lifecycle.steps;
+  assert.ok(consumer.some(step => step.run === 'bash deploy/ansible/test-push-app-lifecycle.sh'));
+  assert.ok(consumer.some(step => step.uses?.startsWith('actions/download-artifact@') &&
+    step.with['artifact-ids'] === '${{ needs.fixture.outputs.artifact_id }}'));
+  assert.ok(consumer.some(step => step.run?.includes('verify-sshfs-fixture-artifact.mjs')));
+  assert.ok(consumer.some(step => step.uses?.startsWith('actions/upload-artifact@') &&
+    step.with.name.includes('${{ matrix.scenario }}')));
+  assert.doesNotMatch(consumer.find(step => step.name === 'Install disposable host and filesystem capabilities').run,
+    /docker info|docker build/u, 'lifecycle consumers must not rebuild the key-free fixture');
+});
+
+test('both lifecycle shells and the prebuild shell parse as executable Bash', () => {
+  for (const filename of ['../deploy/ansible/test-push-app-lifecycle.sh',
+    '../deploy/ansible/test-push-auth-lifecycle.sh', '../deploy/fixtures/sshfs-server/build.sh']) {
+    const source = new URL(filename, import.meta.url);
+    const result = spawnSync('bash', ['-n', source.pathname], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
+test('real app and Better Auth transitions execute independently and missing states cannot pass', () => {
+  const fixture = readFileSync(new URL('../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
+  const image = readFileSync(new URL('../deploy/fixtures/sshfs-server/Dockerfile', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../deploy/fixtures/sshfs-server/entrypoint.sh', import.meta.url), 'utf8');
+  const producer = readFileSync(new URL('../deploy/fixtures/sshfs-server/build.sh', import.meta.url), 'utf8');
+  assert.ok(fixture.includes('case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in'));
+  assert.ok(fixture.includes('run_application_lifecycle'));
+  assert.ok(fixture.includes('run_better_auth_lifecycle'));
+  assert.ok(fixture.includes("r.status=required.length>0&&[...required,'fixture_cleanup'].every"));
+  assert.ok(fixture.includes('Lifecycle report has unverified required transitions'));
+  assert.ok(fixture.includes('run_deploy "$initial_key" false "$fault_dir"'));
+  assert.ok(fixture.includes('verify-sshfs-fixture-artifact.mjs'));
+  assert.ok(fixture.includes('authorized_keys:ro'));
+  assert.doesNotMatch(fixture, /docker build|docker save|docker pull/u);
+  assert.match(producer, /docker build --platform linux\/amd64/u);
+  assert.ok(producer.includes('codexia-backup@127.0.0.1 true'));
+  assert.doesNotMatch(image, /COPY.*authorized_keys/u, 'per-run keys must never be packaged into the image');
+  assert.ok(entry.includes('test -s /home/codexia-backup/.ssh/authorized_keys'));
 });
 
 test('every lifecycle PR path also produces an exact-source backend artifact', () => {
@@ -221,7 +261,7 @@ test('published transitions require an upwards version and matching certified da
   const head = { version: '1.0.101', profile: 'full', apiEpoch: 2, persistenceFormat: 3, migrationFingerprint: 'sha256:' + 'a'.repeat(64) };
   const prior = { ...head, version: '1.0.100' };
   assert.deepEqual(selectLifecycleTransition(head, prior), { from: 'prior', to: 'head', kind: 'published-upgrade' });
-  assert.deepEqual(selectLifecycleTransition(head), { from: 'head', to: 'auth-update', kind: 'test-only-digest' });
+  assert.deepEqual(selectLifecycleTransition(head), { from: 'head', to: 'app-update', kind: 'test-only-digest' });
   for (const mismatch of [{ version: head.version }, { version: '1.0.102' }, { profile: 'core' },
     { apiEpoch: 3 }, { persistenceFormat: 4 }, { migrationFingerprint: 'sha256:' + 'b'.repeat(64) }]) {
     assert.throws(() => selectLifecycleTransition(head, { ...prior, ...mismatch }), /compatible database and API/u);
