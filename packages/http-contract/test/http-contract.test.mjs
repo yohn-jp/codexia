@@ -1,0 +1,260 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
+import test from "node:test";
+import Fastify from "fastify";
+import { assertOpenApiContract, toFastifyRoutes } from "../src/fastify-schema.mjs";
+
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const compiler = path.join(packageRoot, "node_modules", ".bin", process.platform === "win32" ? "tsp.cmd" : "tsp");
+
+function compile(outputDirectory) {
+  execFileSync(compiler, [
+    "compile",
+    path.join(packageRoot, "src", "main.tsp"),
+    "--output-dir",
+    path.join(outputDirectory, "compiler"),
+    "--options",
+    `@typespec/openapi3.emitter-output-dir=${path.join(outputDirectory, "openapi")}`,
+  ], { cwd: packageRoot, stdio: "pipe" });
+  return path.join(outputDirectory, "openapi", "codexia.openapi.yaml");
+}
+
+test("TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs", (t) => {
+  const firstDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-a-"));
+  const secondDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-b-"));
+  t.after(() => {
+    rmSync(firstDirectory, { recursive: true, force: true });
+    rmSync(secondDirectory, { recursive: true, force: true });
+  });
+
+  const firstPath = compile(firstDirectory);
+  const secondPath = compile(secondDirectory);
+  const firstBytes = readFileSync(firstPath);
+  const openapi = parse(firstBytes.toString("utf8"));
+
+  assert.deepEqual(readFileSync(secondPath), firstBytes);
+  assert.deepEqual(readFileSync(path.join(packageRoot, "openapi", "codexia.openapi.yaml")), firstBytes);
+  assert.equal(openapi.openapi, "3.1.0");
+  assert.equal(openapi.info.version, "2.0.0");
+  assert.equal(openapi["x-codexia-api-epoch"], 2);
+  assert.equal(openapi["x-codexia-cors"].credentials, false);
+  assert.match(openapi["x-codexia-cors"].originPolicy, /wildcard origins are forbidden/u);
+  assert.ok(openapi["x-codexia-cors"].mcpExposeHeaders.includes("Mcp-Session-Id"));
+  assert.equal(openapi["x-codexia-external-contracts"].betterAuth.libraryOperationsIncludedHere, false);
+  assert.ok(!openapi.paths["/api/auth/codexia/auth-methods"]);
+  assert.ok(!openapi.paths["/api/auth/sign-in/email"]);
+  assert.ok(openapi.paths["/api/auth/oauth2/consent-context"].post);
+  assert.ok(openapi.paths["/api/auth/oauth2/get-consents"].get);
+  assert.equal(openapi.paths["/api/health"].get.operationId, "api_health_get");
+  assert.ok(openapi.paths["/api/health"].get.responses["200"]);
+  assert.ok(openapi.paths["/api/health"].get.responses["503"]);
+});
+
+test("the generated contract inventories current persistence, Core, module, public, and backup routes", (t) => {
+  const outputDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-inventory-"));
+  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
+  const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
+  const methods = new Set(["get", "post", "put", "patch", "delete", "options"]);
+  const operations = Object.entries(openapi.paths).flatMap(([pathname, pathItem]) =>
+    Object.entries(pathItem)
+      .filter(([method]) => methods.has(method))
+      .map(([method, operation]) => ({ method, pathname, operation })));
+  const index = new Map(operations.map(({ method, pathname, operation }) => [`${method.toUpperCase()} ${pathname}`, operation]));
+
+  for (const required of [
+    "GET /api/health",
+    "GET /api/ready",
+    "GET /health/live",
+    "GET /api/session",
+    "GET /api/projects",
+    "POST /api/projects",
+    "GET /api/projects/events",
+    "GET /api/jobs/events",
+    "GET /api/v1/persistence/status",
+    "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}",
+    "POST /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply",
+    "GET /api/public/projects/{projectId}/modules/publishing/share/{token}",
+    "GET /api/projects/{projectId}/modules/mcp/streamable",
+    "POST /api/projects/{projectId}/modules/mcp/streamable",
+    "DELETE /api/projects/{projectId}/modules/mcp/streamable",
+    "GET /api/console/backups/config",
+    "PUT /api/console/backups/config/draft",
+    "POST /api/console/backups/config/probes",
+    "GET /api/console/backups/runs/{runId}",
+  ]) assert.ok(index.has(required), `missing current/accepted operation ${required}`);
+
+  assert.ok(!index.has("POST /api/projects/{projectId}/modules/assistant/rewrite/stream"));
+  assert.ok(!index.has("POST /api/projects/{projectId}/modules/assistant/qa/stream"));
+  const ids = operations.map(({ operation }) => operation.operationId);
+  assert.ok(ids.every((id) => typeof id === "string" && id.length > 0));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(openapi["x-codexia-contract-status"] === "incomplete" || operations.some(({ operation }) => operation["x-codexia-contract-status"] === "incomplete"));
+  assert.ok(operations.some(({ operation }) => operation["x-codexia-contract-status"] === "target"));
+});
+
+test("generated request and response schemas preserve null, oneOf, closed objects, and formats", (t) => {
+  const outputDirectory = mkdtempSync(path.join(tmpdir(), "codexia-http-contract-schema-"));
+  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
+  const openapi = parse(readFileSync(compile(outputDirectory), "utf8"));
+  const schemas = openapi.components.schemas;
+  const schemaNodes = [];
+  const visitSchema = (value) => {
+    if (Array.isArray(value)) return value.forEach(visitSchema);
+    if (value === null || typeof value !== "object") return;
+    schemaNodes.push(value);
+    Object.values(value).forEach(visitSchema);
+  };
+  visitSchema(schemas);
+
+  assert.ok(schemaNodes.some((schema) =>
+    Array.isArray(schema.anyOf) && schema.anyOf.some((branch) => branch.type === "null")));
+  assert.ok(Object.values(schemas).some((schema) => Array.isArray(schema.oneOf)));
+  assert.ok(schemaNodes.some((schema) => schema.type === "object" && schema.unevaluatedProperties?.not && Object.keys(schema.unevaluatedProperties.not).length === 0));
+  assert.ok(schemaNodes.some((schema) => schema.format === "date-time"));
+  const converted = toFastifyRoutes(openapi);
+  assert.ok(converted.schemas.some((schema) => schema.additionalProperties === false));
+  const projectEvents = converted.routes.find(({ method, url }) => method === "GET" && url === "/api/projects/events");
+  const mcpPost = converted.routes.find(({ method, url }) => method === "POST" && url === "/mcp");
+  assert.deepEqual(projectEvents.contentTypes["200"], ["text/event-stream"]);
+  assert.deepEqual(mcpPost.requestContentTypes, ["application/json"]);
+  assert.deepEqual(mcpPost.contentTypes["200"].sort(), ["application/json", "text/event-stream"]);
+  assert.equal(openapi.paths["/api/console/backups/config/draft"].put.responses["412"].content["application/json"].schema.$ref, "#/components/schemas/ApiError");
+  assert.equal(openapi.paths["/api/console/backups/config/probes"].post.responses["202"].content["application/json"].schema.$ref, "#/components/schemas/BackupProbeReceipt");
+  assert.equal(openapi.paths["/api/console/backups/runs"].post.responses["202"].content["application/json"].schema.$ref, "#/components/schemas/BackupRunReceipt");
+  const save = openapi.paths["/api/v1/persistence/projects/{projectId}/documents/{documentId}"].patch;
+  assert.ok(save.parameters.some((parameter) => parameter.name === "Idempotency-Key" && parameter.in === "header"));
+  assert.ok(save.responses["409"]);
+  assert.ok(openapi.paths["/api/console/backups/config/draft"].put.parameters.some((parameter) => parameter.name === "If-Match" && parameter.in === "header"));
+  assert.ok(openapi.paths["/api/projects/events"].get.responses["200"].content["text/event-stream"]);
+});
+
+test("OpenAPI 3.1 routes convert to Fastify schemas without losing closed, nullable, union, or format constraints", async (t) => {
+  const contract = {
+    openapi: "3.1.0",
+    info: { title: "Schema conversion fixture", version: "1.0.0" },
+    paths: {
+      "/documents/{documentId}": {
+        patch: {
+          operationId: "update_document",
+          "x-codexia-contract-status": "complete",
+          parameters: [{ name: "documentId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { $ref: "#/components/schemas/SaveRequest" } } },
+          },
+          responses: {
+            "200": { description: "Saved", content: { "application/json": { schema: { $ref: "#/components/schemas/SaveReceipt" } } } },
+            "409": { description: "Conflict", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        SaveRequest: {
+          oneOf: [
+            {
+              type: "object",
+              required: ["kind", "body"],
+              properties: {
+                kind: { const: "replace" },
+                body: { type: "string" },
+                title: { anyOf: [{ type: "string" }, { type: "null" }] },
+              },
+              unevaluatedProperties: { not: {} },
+            },
+            {
+              type: "object",
+              required: ["kind", "body"],
+              properties: { kind: { const: "patch" }, body: { type: "string" } },
+              unevaluatedProperties: { not: {} },
+            },
+          ],
+        },
+        SaveReceipt: {
+          type: "object",
+          required: ["revisionId", "createdAt"],
+          properties: { revisionId: { type: "string" }, createdAt: { type: "string", format: "date-time" } },
+          unevaluatedProperties: { not: {} },
+        },
+        ApiError: { type: "object", properties: { code: { type: "string" } } },
+      },
+    },
+  };
+
+  assertOpenApiContract(contract, { requiredOperations: ["PATCH /documents/{documentId}"] });
+  const { routes, schemas } = toFastifyRoutes(contract);
+  const route = routes[0];
+  const requestSchema = schemas.find(({ $id }) => $id.endsWith(":SaveRequest"));
+  const receiptSchema = schemas.find(({ $id }) => $id.endsWith(":SaveReceipt"));
+  assert.equal(route.url, "/documents/:documentId");
+  assert.equal(requestSchema.oneOf[0].additionalProperties, false);
+  assert.equal(requestSchema.oneOf[0].properties.title.anyOf[1].type, "null");
+  assert.equal(requestSchema.oneOf.length, 2);
+  assert.equal(receiptSchema.properties.createdAt.format, "date-time");
+  assert.equal(route.contentTypes["200"][0], "application/json");
+
+  const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
+  t.after(() => app.close());
+  for (const schema of schemas) app.addSchema(schema);
+  app.route({
+    method: route.method,
+    url: route.url,
+    schema: route.schema,
+    handler: async () => ({ revisionId: "revision-2", createdAt: "2026-11-23T12:00:00Z" }),
+  });
+
+  const valid = await app.inject({
+    method: "PATCH",
+    url: "/documents/document-1",
+    payload: { kind: "replace", body: "updated", title: null },
+  });
+  assert.equal(valid.statusCode, 200, valid.payload);
+  assert.equal(valid.json().revisionId, "revision-2");
+
+  const extraProperty = await app.inject({
+    method: "PATCH",
+    url: "/documents/document-1",
+    payload: { kind: "replace", body: "updated", title: null, unexpected: true },
+  });
+  assert.equal(extraProperty.statusCode, 400);
+});
+
+test("contract validation rejects omitted routes and Fastify path collisions", () => {
+  const contract = {
+    openapi: "3.1.0",
+    info: { title: "Inventory fixture", version: "1.0.0" },
+    paths: {
+      "/resources/{resourceId}": { get: { operationId: "get_resource", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+      "/resources/{id}": { get: { operationId: "get_resource_alias", "x-codexia-contract-status": "incomplete", responses: { "200": { description: "ok" } } } },
+    },
+  };
+
+  assert.throws(() => assertOpenApiContract(contract, { requiredOperations: ["GET /resources/{resourceId}", "DELETE /resources/{resourceId}"] }), /missing required operation DELETE \/resources/u);
+  assert.throws(() => toFastifyRoutes(contract), /Fastify route collision.*GET \/resources\/\{resourceId\}.*GET \/resources\/\{id\}/u);
+});
+
+test("Fastify conversion fails when a schema keyword cannot preserve OpenAPI 3.1 semantics", () => {
+  const contract = {
+    openapi: "3.1.0",
+    info: { title: "Unsupported schema fixture", version: "1.0.0" },
+    paths: {
+      "/example": {
+        post: {
+          operationId: "create_example",
+          "x-codexia-contract-status": "complete",
+          requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/Unsupported" } } } },
+          responses: { "204": { description: "created" } },
+        },
+      },
+    },
+    components: { schemas: { Unsupported: { allOf: [{ type: "object", properties: { known: { type: "string" } } }], unevaluatedProperties: false } } },
+  };
+
+  assert.throws(() => toFastifyRoutes(contract), /unevaluatedProperties.*cannot be translated without changing schema semantics/u);
+});
