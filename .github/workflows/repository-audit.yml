@@ -102,8 +102,8 @@ jobs:
           else
             node scripts/ci/dashboard/collect.mjs "$RUNNER_TEMP/site"
           fi
-      - name: Record source identity
-        run: printf '%s\n' "$(git rev-parse HEAD)" > "$RUNNER_TEMP/site/.source-audit"
+      - name: Stamp audit source and content digest
+        run: node scripts/audit/assemble-parts.mjs stamp "$RUNNER_TEMP/site" audit "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: pages-audit
@@ -154,8 +154,8 @@ jobs:
           node scripts/architecture-diagrams/pack.mjs \
             "$RUNNER_TEMP/site" "$(git rev-parse HEAD)" \
             "$RUNNER_TEMP/architecture-renderer/node_modules/.bin/mmdc"
-      - name: Record source identity
-        run: printf '%s\n' "$(git rev-parse HEAD)" > "$RUNNER_TEMP/site/.source-architecture"
+      - name: Stamp architecture source and content digest
+        run: node scripts/audit/assemble-parts.mjs stamp "$RUNNER_TEMP/site" architecture "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: pages-architecture
@@ -232,8 +232,8 @@ jobs:
           node scripts/graphify-pages/pack.mjs \
             "$RUNNER_TEMP/graphify-out/graphify-out" "$RUNNER_TEMP/site" "$(git rev-parse HEAD)" \
             "$RUNNER_TEMP/graphify-out/graphify-out/candidates.json"
-      - name: Record source identity
-        run: printf '%s\n' "$(git rev-parse HEAD)" > "$RUNNER_TEMP/site/.source-specification"
+      - name: Stamp specification source and content digest
+        run: node scripts/audit/assemble-parts.mjs stamp "$RUNNER_TEMP/site" specification "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: pages-specification
@@ -263,6 +263,11 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
+      - name: Install frozen workspace dependencies
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
       - name: Install the isolated audit tool
         run: |
           npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
@@ -287,7 +292,7 @@ jobs:
       - name: Verify source identity and assemble disjoint outputs
         env:
           CODEXIA_EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/audit/assemble-parts.mjs "$RUNNER_TEMP/pages-parts" "$RUNNER_TEMP/audit-site"
+        run: node scripts/audit/assemble-parts.mjs assemble "$RUNNER_TEMP/pages-parts" "$RUNNER_TEMP/audit-site"
       - name: Require current PR's review materials
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
