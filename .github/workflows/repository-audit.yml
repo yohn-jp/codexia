@@ -25,6 +25,7 @@ on:
       - 'docs/verification/ARCHITECTURE-ATLAS.md'
       - 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md'
       - 'docs/deployment/UPDATE-FLOW.md'
+      - 'docs/deployment/DEPLOYMENT-LIFECYCLE.md'
       - 'docs/verification/GRAPHIFY-PAGES.md'
       - 'scripts/ci/dashboard/timing.mjs'
       - 'scripts/ci/impact/contract.mjs'

@@ -8,7 +8,7 @@ PostgreSQL is the sole manuscript authority. Git persistence, synchronization, h
 
 Read only the contracts relevant to the task:
 - Design authority and system boundaries: [Documentation authority](docs/architecture/DOCUMENTATION-AUTHORITY.md), [System design](docs/architecture/SYSTEM-DESIGN.md), [Data model](docs/architecture/DATA-MODEL.md).
-- Mandatory flows: [User screens](docs/design/USER-SCREEN-FLOW.md), [Owner security](docs/design/ADMIN-SCREEN-FLOW.md), [Initial deployment](docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [Compatible updates](docs/deployment/UPDATE-FLOW.md).
+- Mandatory flows: [Production deployment lifecycle](docs/deployment/DEPLOYMENT-LIFECYCLE.md), [User screens](docs/design/USER-SCREEN-FLOW.md), [Owner security](docs/design/ADMIN-SCREEN-FLOW.md), [Initial deployment](docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [Compatible updates](docs/deployment/UPDATE-FLOW.md).
 - Shared ownership and refactoring: [Internal boundaries](docs/architecture/INTERNAL-BOUNDARIES.md).
 - AI integration and frozen internal LLM calls: [MCP-first architecture](docs/architecture/MCP-FIRST.md).
 - Application boundaries: [Core](docs/architecture/CORE.md), [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md), and [Modules](docs/architecture/MODULES.md).
