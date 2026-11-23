@@ -142,13 +142,20 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal((await plan([changedPath])).full_model_oci, !excluded, changedPath);
   }
   assert.equal((await plan(['.github/workflows/verify.yml'])).full_model_oci, true, 'Verify caller changes require its model proof');
+  assert.equal((await plan(['docs/deployment/IAC.md'])).full_model_oci, false,
+    'Reviewed deployment documentation is not a real-model input');
+  // Valid but unclassified inputs have no complete exclusion proof: PR admission fails closed.
+  // The standalone main push path selector remains explicitly owned and independently tested.
   for (const changedPath of [
     '.github/workflows/other.yml',
     'profiles-old/full/config.json',
     'tests/integration/unrelated.acceptance.mjs',
-    'docs/deployment/IAC.md',
   ]) {
-    assert.equal((await plan([changedPath])).full_model_oci, false, `Unexpected plan impact for ${changedPath}`);
+    assert.equal(matchesWorkflowPaths(pushPaths, [changedPath]), false,
+      `Unclassified input is not in the standalone main push closure: ${changedPath}`);
+    const selected = await plan([changedPath]);
+    assert.equal(selected.mode, 'full', `Unclassified path requires full verification: ${changedPath}`);
+    assert.equal(selected.full_model_oci, true, `Unclassified path requires conservative PR real-model proof: ${changedPath}`);
   }
   for (const [label, files, expected] of [
     ['DB contract-only test', ['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
