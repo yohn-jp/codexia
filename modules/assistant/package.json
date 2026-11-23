@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "codexiaDisplay": {
     "name": "Writing assistant",
-    "description": "Prepare provider-backed context and prompts, stream suggestions, and create reviewable proposals."
+    "description": "Local manuscript analysis, source-bound prompts for external MCP clients, and reviewable author proposals."
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -35,14 +35,8 @@
     "@codexia/module-diagnostics": "workspace:*",
     "@codexia/module-semantic": "workspace:*",
     "@codexia/module-speaker": "workspace:*",
-    "@ai-sdk/anthropic": "4.0.106",
-    "@ai-sdk/openai-compatible": "2.0.93",
-    "ai": "7.0.176",
-    "jsonrepair": "3.15.0",
     "zod": "4.6.7",
-    "yaml": "^2.9.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "yaml": "^2.9.1"
   },
   "codexiaModule": {
     "id": "assistant",
@@ -59,13 +53,8 @@
     "requires": [],
     "serverEntry": "./dist/index.js",
     "browserEntry": "./dist/browser.js",
-    "statePaths": [
-      "meta/scriptorium/modules/assistant"
-    ],
-    "locality": "optional-external",
-    "optionalRequires": [
-      "host.model-usage",
-      "nlp.token-counter"
-    ]
+    "statePaths": [],
+    "locality": "local",
+    "optionalRequires": []
   }
 }

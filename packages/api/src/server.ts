@@ -15,14 +15,13 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostgresAdditiveSchema, packagedMigrationFingerprint, runPostgresAdditiveMigrations, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
-import { HistoricalModelUsageStore } from "./historical-store.js";
 import { assertCurrentJobHistory, JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
@@ -532,14 +531,8 @@ export function createServer(options: ApiServerOptions): Server {
     const project = await options.persistence.read(reader => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
     return project?.id === projectId ? project : undefined;
   };
-  const capabilityProviders = {
-    ...(options.runtimeOptions?.capabilityProviders ?? {}),
-    [MODEL_USAGE_CAPABILITY]: { create: (): ModelUsageStore => new HistoricalModelUsageStore(usageDirectory) },
-  };
-  const hostCapabilities = [...new Set([
-    ...(options.runtimeOptions?.hostCapabilities ?? Object.keys(capabilityProviders)),
-    MODEL_USAGE_CAPABILITY,
-  ])];
+  const capabilityProviders = options.runtimeOptions?.capabilityProviders ?? {};
+  const hostCapabilities = options.runtimeOptions?.hostCapabilities ?? Object.keys(capabilityProviders);
   const runtime: RuntimeHttpHost = options.runtime ?? new ModuleRuntime({
     manifests: options.runtimeOptions?.manifests ?? [],
     enabled: options.runtimeOptions?.enabled ?? [],
