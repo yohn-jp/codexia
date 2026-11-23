@@ -223,7 +223,7 @@ owner APIはCodexia発行OAuth bearerを署名・audience・scope・ownerとし�
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
 **Design owner**: [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)
-**Implementation identifiers**: packages/api/src/server.ts; persistence-routes.ts; packages/api/src/better-auth.ts (API-OWNER-SESSION-001 read-only OWNER-SESSION confirmation)
+**Implementation identifiers**: packages/api/src/server.ts; persistence-routes.ts
 **Verification identifiers**: packages/api/src/server.test.ts; packages/api/src/oauth-mcp.test.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
@@ -235,8 +235,6 @@ HTTP methodとpathだけでなくprincipal・project・object・revision・effec
 
 - **Type**: File
   **Path**: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md
-- **Type**: File
-  **Path**: docs/architecture/API-CONTRACT.md
 - **Type**: File
   **Path**: packages/api/src/server.ts
 - **Type**: File
