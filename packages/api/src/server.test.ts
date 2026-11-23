@@ -507,11 +507,15 @@ it("confirms only a cookie-backed owner session on the exact same origin", async
   assert.equal(checks.length, beforeBearer, "bearer/cookie ambiguity is rejected before Better Auth session lookup");
   assert.equal((await post({ Cookie: "codexia_session=owner" }, JSON.stringify({ role: "owner" }))).status, 400);
 
+  const beforeMissingOrigin = checks.length;
   const missingOrigin = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Cookie: "codexia_session=owner" }, body: "{}" });
   assert.equal(missingOrigin.status, 403, "Origin is required on the cookie-backed confirmation request");
+  assert.equal(checks.length, beforeMissingOrigin, "a missing Origin must not reach Better Auth session lookup");
+
+  const beforeCrossOrigin = checks.length;
   const crossOrigin = await post({ Origin: "https://attacker.example", Cookie: "codexia_session=owner" });
   assert.equal(crossOrigin.status, 403);
-  assert.equal(checks.includes("codexia_session=owner"), true, "the mismatched-origin request did not add a session check");
+  assert.equal(checks.length, beforeCrossOrigin, "a mismatched Origin must not reach Better Auth session lookup");
 });
 
 async function startApi(staticDir: string, trustProxy = false) {
