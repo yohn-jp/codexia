@@ -19,6 +19,10 @@ bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file"
   --candidate-full-image "$certified_full_image"
 ```
 
-After the restored PostgreSQL and history fingerprints match the backup, the candidate runs its packaged maintenance `--check`, `--apply`, and `--check` against the scratch database. It uses a dedicated read-only role for checks and a separate writer for apply. The image uses only the scratch database's loopback network namespace. Preserve the successful drill output with the exact digest and checksum-manifest SHA-256. The regular backup receipt still records the restored ciphertext identity. Paired activation and production recovery require their own approved procedure.
+After the restored PostgreSQL and history fingerprints match the backup, the candidate runs its packaged PostgreSQL maintenance `--check`, `--apply`, and `--check` against the scratch database. It uses a dedicated read-only role for checks and a separate writer for apply. The image uses only the scratch database's loopback network namespace.
+
+The same image then runs the packaged `maintain-job-history.js` command in the same three modes against the restored scratch history volume. It runs as UID/GID 1000 without network access and mounts the scratch volume read-only for checks. Apply promotes job-history formats 1 and 2 to format 3. A missing or current history is already ready. The drill requires both final checks to report readiness and preserves the encrypted backup bytes.
+
+Preserve the successful drill output with the exact digest and checksum-manifest SHA-256. The regular backup receipt still records the restored ciphertext identity. Paired activation and production recovery require their own approved procedure.
 
 [Push deployment procedure](PUSH-DEPLOYMENT.md)

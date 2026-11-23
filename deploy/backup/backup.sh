@@ -175,7 +175,7 @@ assert_restore_resource_absent(){
   [[ "$status" == 1 ]] || die 'Isolated restore resource name is already in use or cannot be inspected'
 }
 rehearse_restore_maintenance(){
-  local candidate="$1" database="$2" status=0
+  local candidate="$1" database="$2" history_volume="$3" status=0
   local -a run=(podman run --rm --pull=never --read-only --cap-drop all --security-opt no-new-privileges --entrypoint node)
   [[ "$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$database")" == none ]] || die 'Restored database must be isolated from all networks'
   "${run[@]}" --network none "$candidate" --input-type=module -e '
@@ -199,11 +199,19 @@ SQL
   local writer=postgres://codexia@127.0.0.1:5432/codexia
   # The database has only loopback. The candidate joins that disposable network
   # namespace without mounts, port publication, or a caller-supplied endpoint.
-  run+=(--network "container:$database")
-  "${run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || status=$?
+  local -a database_run=("${run[@]}" --network "container:$database")
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || status=$?
   [[ "$status" == 0 || "$status" == 2 ]] || die 'Isolated maintenance pre-check failed'
-  "${run[@]}" --env "CODEXIA_DATABASE_URL=$writer" "$candidate" "$maintenance" --apply >/dev/null || die 'Isolated maintenance apply failed'
-  "${run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || die 'Isolated maintenance still required after apply'
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$writer" "$candidate" "$maintenance" --apply >/dev/null || die 'Isolated maintenance apply failed'
+  "${database_run[@]}" --env "CODEXIA_DATABASE_URL=$reader" "$candidate" "$maintenance" --check >/dev/null || die 'Isolated maintenance still required after apply'
+
+  local history_maintenance=/app/node_modules/@codexia/api/dist/maintain-job-history.js
+  local -a history_run=("${run[@]}" --network none --user 1000:1000 --env CODEXIA_USAGE_DIR=/history)
+  status=0
+  "${history_run[@]}" --volume "$history_volume:/history:ro,nocopy" "$candidate" "$history_maintenance" --check >/dev/null || status=$?
+  [[ "$status" == 0 || "$status" == 2 ]] || die 'Isolated job-history pre-check failed'
+  "${history_run[@]}" --volume "$history_volume:/history:rw,nocopy" "$candidate" "$history_maintenance" --apply >/dev/null || die 'Isolated job-history apply failed'
+  "${history_run[@]}" --volume "$history_volume:/history:ro,nocopy" "$candidate" "$history_maintenance" --check >/dev/null || die 'Isolated job-history maintenance still required after apply'
 }
 case "${1:-}" in
   backup-locked)
@@ -316,7 +324,7 @@ case "${1:-}" in
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
     [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
-    if [[ -n "$candidate" ]]; then rehearse_restore_maintenance "$candidate" "$db"; fi
+    if [[ -n "$candidate" ]]; then rehearse_restore_maintenance "$candidate" "$db" "$history"; fi
     cleanup_restore_resources
     trap - EXIT
     [[ "$(validate_artifact "$dir")" == "$artifact_hash" ]] || die 'Backup artifact changed during the restore drill'
