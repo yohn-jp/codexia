@@ -54,7 +54,7 @@ The fixture runs `site.yml` through `host`, `secrets`, `base` and a separate `de
 
 With a synthetic OIDC provider, the fixture registers the owner and clients, activates Better Auth, and verifies that the owner session, signing keys and auth schema survive same-digest reapplication, a compatible update and rollback of a failed candidate.
 
-The backup fixture mounts an SSHFS export served by a separate container on the same temporary runner. The real backup helper still checks for a remote filesystem, creates the encrypted archive under its normal lock, and validates the published checksum manifest. The runner and SSHFS server share a host. Production recovery requires a restore on an independent host.
+The backup fixture mounts an SSHFS export served by a separate container on the same temporary runner. The real backup helper still checks for a remote filesystem, creates the encrypted archive under its normal lock, and validates the published checksum manifest. The runner and SSHFS server share a host. Production recovery requires a restore on an independent host. The disposable rootless container has a distinct network-namespace address: CI resolves its mount-source alias to that address solely so the unchanged backup destination guard can verify a non-local peer. SSH transport remains pinned to the same container through its localhost-mapped port, and the temporary host mapping is removed during cleanup. Neither container isolation nor this CI proof establishes physical backup independence.
 
 ## First application activation
 

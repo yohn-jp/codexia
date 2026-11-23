@@ -17,6 +17,7 @@ environment_generator_dir=/run/systemd/user-environment-generators
 environment_generator="$environment_generator_dir/99-codexia-lifecycle-xdg-$fixture_uid"
 environment_generator_dir_created=false
 environment_generator_installed=false
+fixture_ip=''
 backup_mounted=false
 build_context=''
 fixture_image=''
@@ -274,6 +275,12 @@ cleanup() {
       rootless rm -r "$build_context" || cleanup_failed "$LINENO"
       rootless test ! -e "$build_context" || cleanup_failed "$LINENO"
     fi
+  fi
+  # The alias is a disposable network-namespace address used by the canonical
+  # backup destination guard, not the SSH transport endpoint.
+  if [[ -n "$fixture_ip" ]]; then
+    sudo sed -i "\\|^${fixture_ip//./\\.} codexia-backup-fixture$|d" /etc/hosts || cleanup_failed "$LINENO" 'SSHFS fixture host mapping removal'
+    grep -Fxq "$fixture_ip codexia-backup-fixture" /etc/hosts && cleanup_failed "$LINENO" 'SSHFS fixture host mapping remains'
   fi
   if [[ "$registry_configured" == true ]]; then
     rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_failed "$LINENO"
@@ -540,6 +547,17 @@ if ! rootless ssh -F "$fixture_home/.ssh/config" -o BatchMode=yes codexia-backup
   echo 'The isolated SSHFS endpoint failed its pinned-key SSH capability check' >&2
   exit 1
 fi
+# The production backup guard resolves the SSHFS mount *source* and must find
+# a non-local peer. Name the actual isolated container address, while SSH
+# continues to reach that same container over its mapped 127.0.0.1:2222 port.
+fixture_ip=$(rootless_podman inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codexia-backup-sshfs)
+[[ "$fixture_ip" =~ ^([0-9]{1,3}\\.){3}[0-9]{1,3}$ ]] || { echo 'SSHFS container has no verifiable network address' >&2; exit 1; }
+printf '%s codexia-backup-fixture\\n' "$fixture_ip" | sudo tee -a /etc/hosts >/dev/null
+getent ahosts codexia-backup-fixture | awk '{print $1}' | grep -Fxq "$fixture_ip" || {
+  echo 'SSHFS fixture hostname did not resolve to its isolated container address' >&2
+  exit 1
+}
+
 if ! rootless sshfs codexia-backup@codexia-backup-fixture:/backups "$fixture_home/.local/state/codexia-backup-mount" -o reconnect -o ServerAliveInterval=15 -o ServerAliveCountMax=3 2>"$tmp/sshfs.log"; then
   redact_log "$tmp/sshfs.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/sshfs-bounded.log"
   if grep -Eqi 'fuse|operation not permitted|permission denied' "$tmp/sshfs.log"; then
