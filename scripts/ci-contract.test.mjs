@@ -43,11 +43,21 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.ok(VERIFICATION_GROUPS['types-tests'].includes('requirements-trace'));
   assert.equal(VERIFICATION_TASKS.filter(task => task === 'requirements-trace').length, 1);
   const strictdocSetup = workflow.jobs.types.steps.find(step => step.name === 'Install pinned StrictDoc and Chromium');
-  assert.equal(strictdocSetup.if, "matrix.group == 'tests'");
+  const traceSelected = "matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')";
+  assert.equal(strictdocSetup.if, traceSelected);
+  for (const [files, expected] of [
+    [['docs/verification/CI-CD.md'], false],
+    [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
+    [['docs/requirements/STRICTDOC-TRACEABILITY.md'], true],
+    [['scripts/strictdoc/verify.mjs'], true],
+  ]) {
+    assert.equal(createVerificationPlan({ files, event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) }).tasks.includes('requirements-trace'),
+      expected, `StrictDoc admission for ${files.join(', ')}`);
+  }
   assert.match(strictdocSetup.run, /requirements\.lock\.txt/u);
   assert.match(strictdocSetup.run, /playwright install --with-deps chromium/u);
   const python = workflow.jobs.types.steps.find(step => step.uses === 'actions/setup-python@v6.1.0');
-  assert.equal(python.if, "matrix.group == 'tests'");
+  assert.equal(python.if, traceSelected);
   assert.equal(python.with['python-version'], '3.12');
   const typesCheckout = workflow.jobs.types.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
   assert.equal(typesCheckout.with['fetch-depth'], "${{ matrix.group == 'tests' && '0' || '1' }}");

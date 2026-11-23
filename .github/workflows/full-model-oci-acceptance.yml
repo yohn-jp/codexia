@@ -19,9 +19,29 @@ on:
       - modules/**
       - package.json
       - packages/**
+      # Unit/contract fixtures are not packaged into either runtime profile.
+      - '!app/**/test/**'
+      - '!app/**/tests/**'
+      - '!app/**/*.test.*'
+      - '!modules/**/test/**'
+      - '!modules/**/tests/**'
+      - '!modules/**/*.test.*'
+      - '!packages/**/test/**'
+      - '!packages/**/tests/**'
+      - '!packages/**/*.test.*'
+      - 'app/src/**/test/**'
+      - 'app/src/**/tests/**'
+      - 'modules/**/src/**/test/**'
+      - 'modules/**/src/**/tests/**'
+      - 'packages/**/src/**/test/**'
+      - 'packages/**/src/**/tests/**'
+      # Build-emitted source and test files remain runtime package inputs.
+      - 'packages/api/src/**'
+      - 'packages/persistence-contracts/src/**'
       - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - scripts/ci-impact.mjs
       - scripts/ci-workspace.mjs
       - scripts/ci-parallel.mjs
       - scripts/build/packaging/profile-build.mjs

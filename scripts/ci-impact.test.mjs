@@ -54,6 +54,8 @@ test('PR paths and completed-Verify release impact retain component build inputs
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
     ['Backend API', ['packages/api/src/server.ts'], [false, true]],
+    ['Backend API source helper', ['packages/api/src/auth/tests/helper.ts'], [false, true]],
+    ['Desktop public asset', ['app/public/test/theme.test.css'], [true, false]],
     ['Base compiler settings', ['tsconfig.base.json'], [true, true]],
     ['Docker context', ['.dockerignore'], [false, true]],
     ['Dockerfile context override', ['Dockerfile.backend.dockerignore'], [false, true]],
@@ -72,6 +74,28 @@ test('PR paths and completed-Verify release impact retain component build inputs
       assert.deepEqual(triggered, expected, `${event}: ${label}`);
     }
   }
+});
+
+test('disposable app lifecycle is not admitted by isolated workspace tests', () => {
+  const workflow = parse(readFileSync(new URL('../.github/workflows/push-app-lifecycle.yml', import.meta.url), 'utf8'));
+  const paths = workflow.on.pull_request.paths;
+  for (const path of [
+    'packages/persistence-postgres/tests/db-contract/runner.test.mjs',
+    'packages/http-contract/test/fastify-persistence-registration.test.ts',
+    'packages/core/src/snapshot-reuse.test.ts',
+    // Other compiled test sources in this contract still contribute to the final dist, not host state.
+    'modules/mcp/src/tool-catalog.test.ts',
+  ]) assert.equal(matchesWorkflowPaths(paths, [path]), false, path);
+  for (const path of [
+    'packages/api/src/server.ts',
+    'modules/mcp/src/tools.ts',
+    'deploy/quadlet/codexia-api.container',
+    'deploy/ansible/deploy.yml',
+    '.github/workflows/push-app-lifecycle.yml',
+  ]) assert.equal(matchesWorkflowPaths(paths, [path]), true, path);
+  assert.equal(matchesWorkflowPaths(paths, [
+    'packages/core/src/snapshot-reuse.test.ts', 'deploy/quadlet/codexia-db.container',
+  ]), true, 'runtime input must not be suppressed by an unrelated test file');
 });
 
 const plan = async (files, event = 'pull_request') => {
@@ -103,7 +127,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
 });
 
 test('Full-model OCI selection follows the standalone workflow and the Verify caller', async () => {
-  const { FULL_MODEL_OCI_PATHS } = await import('./ci-impact.mjs');
+  const { FULL_MODEL_OCI_PATHS, matchesFullModelOciPath } = await import('./ci-impact.mjs');
   const standalone = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
   const pushPaths = standalone.on.push.paths;
   assert.equal(Object.hasOwn(standalone.on, 'workflow_call'), true);
@@ -112,21 +136,66 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
   assert.equal(Object.hasOwn(standalone.on, 'pull_request'), false);
   assert.deepEqual(pushPaths, FULL_MODEL_OCI_PATHS.filter(file => file !== '.github/workflows/verify.yml'));
 
-  // GitHub's standalone path declarations define which inputs require the real model suite.
+  // Verify the standalone GitHub glob selector against the independent PR selector.
+  // A synthetic path containing glob metacharacters can be unclassified and thus
+  // conservatively select the model even when a standalone exclusion matches.
   for (const expression of pushPaths) {
-    const excluded = expression.startsWith('!');
-    const pattern = excluded ? expression.slice(1) : expression;
+    const pattern = expression.startsWith('!') ? expression.slice(1) : expression;
     const changedPath = pattern.endsWith('/**') ? `${pattern.slice(0, -3)}/ci-impact-sentinel.mjs` : pattern;
-    assert.equal((await plan([changedPath])).full_model_oci, !excluded, changedPath);
+    const standaloneSelected = matchesWorkflowPaths(pushPaths, [changedPath]);
+    assert.equal(matchesFullModelOciPath(changedPath), standaloneSelected,
+      `Main push and PR glob policy disagree: ${changedPath}`);
+    if (standaloneSelected) assert.equal((await plan([changedPath])).full_model_oci, true,
+      `An admitted standalone model input cannot be dropped by the PR plan: ${changedPath}`);
   }
   assert.equal((await plan(['.github/workflows/verify.yml'])).full_model_oci, true, 'Verify caller changes require its model proof');
+  assert.equal((await plan(['docs/deployment/IAC.md'])).full_model_oci, false,
+    'Reviewed deployment documentation is not a real-model input');
+  // Valid but unclassified inputs have no complete exclusion proof: PR admission fails closed.
+  // The standalone main push path selector remains explicitly owned and independently tested.
   for (const changedPath of [
     '.github/workflows/other.yml',
     'profiles-old/full/config.json',
     'tests/integration/unrelated.acceptance.mjs',
-    'docs/deployment/IAC.md',
   ]) {
-    assert.equal((await plan([changedPath])).full_model_oci, false, `Unexpected plan impact for ${changedPath}`);
+    assert.equal(matchesWorkflowPaths(pushPaths, [changedPath]), false,
+      `Unclassified input is not in the standalone main push closure: ${changedPath}`);
+    const selected = await plan([changedPath]);
+    assert.equal(selected.mode, 'full', `Unclassified path requires full verification: ${changedPath}`);
+    assert.equal(selected.full_model_oci, true, `Unclassified path requires conservative PR real-model proof: ${changedPath}`);
+  }
+  for (const [label, files, expected] of [
+    ['DB contract-only test', ['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
+    ['HTTP contract-only test', ['packages/http-contract/test/fastify-persistence-registration.test.ts'], false],
+    ['MCP unit test in src', ['modules/mcp/src/tool-catalog.test.ts'], false],
+    ['Declared module test fixture outside src', ['modules/assistant/tests/browser-workflow.acceptance.mjs'], false],
+    ['Declared package fixture outside src', ['packages/api/test/fixtures/better-auth-server.ts'], false],
+    ['Core unit test in src', ['packages/core/src/snapshot-reuse.test.ts'], false],
+    ['Desktop unit test', ['app/src/api-generated.test.ts'], false],
+    ['Native Swift source', ['ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift'], false],
+    ['Backend source', ['packages/api/src/server.ts'], true],
+    ['Desktop source', ['app/src/api.ts'], true],
+    ['Real-model fixture', ['tests/integration/model-oci-lifecycle-arguments.test.mjs'], true],
+    ['Profile packager', ['scripts/build/packaging/profile-package.mjs'], true],
+    ['Model admission policy', ['scripts/ci-impact.mjs'], true],
+    ['API emitted test', ['packages/api/src/server.test.ts'], true],
+    ['API emitted spec', ['packages/api/src/server.spec.ts'], true],
+    ['API emitted test helper', ['packages/api/src/test/fixtures.ts'], true],
+    ['Core compiled spec input', ['packages/core/src/new.spec.ts'], true],
+    ['Module compiled spec input', ['modules/mcp/src/worker.spec.ts'], true],
+    ['Module emitted test helper', ['modules/mcp/src/test/fixture.ts'], true],
+    ['Database emitted test helper', ['packages/persistence-postgres/src/tests/fixture.ts'], true],
+    ['Nested module emitted helper', ['modules/mcp/src/domain/test/fixture.ts'], true],
+    ['Nested database emitted helper', ['packages/persistence-postgres/src/domain/tests/fixture.ts'], true],
+    ['Nested desktop typechecked helper', ['app/src/editor/test/fixture.ts'], true],
+    ['Desktop typechecked spec input', ['app/src/editor.spec.ts'], true],
+    ['Persistence contract emitted test', ['packages/persistence-contracts/src/index.test.ts'], true],
+    ['Persistence contract emitted spec', ['packages/persistence-contracts/src/index.spec.ts'], true],
+    ['Persistence contract emitted test helper', ['packages/persistence-contracts/src/tests/helpers.ts'], true],
+    ['Mixed source and test', ['modules/mcp/src/tool-catalog.test.ts', 'packages/api/src/server.ts'], true],
+  ]) {
+    assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);
+    assert.equal((await plan(files)).full_model_oci, expected, `PR model selection: ${label}`);
   }
   const nativeConfig = 'app/native/capacitor.config.ts';
   const bridgeDeclaration = 'app/native/plugins/codexia-auth/src/index.d.mts';
@@ -141,7 +210,31 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `main push: ${files.join(', ')}`);
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
-  assert.equal((await plan(null)).full_model_oci, false);
+  assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
+  const unreviewedNativeCode = ['ios/CodexiaTransport/Sources/CodexiaAPI/unreviewed.mjs'];
+  assert.equal(matchesWorkflowPaths(pushPaths, unreviewedNativeCode), false);
+  assert.equal((await plan(unreviewedNativeCode)).full_model_oci, true,
+    'Only the explicitly native Swift source extension can bypass supplemental model admission');
+  // An undeclared nested fixture is not a standalone main-push model input,
+  // but an unclassified PR path cannot prove the real-model test is irrelevant.
+  const unknownNestedFixture = ['app/unknown/test/new-fixture.mjs'];
+  assert.equal(matchesWorkflowPaths(pushPaths, unknownNestedFixture), false);
+  const unknownNestedPlan = await plan(unknownNestedFixture);
+  assert.equal(unknownNestedPlan.mode, 'full');
+  assert.equal(unknownNestedPlan.full_model_oci, true);
+
+  // A valid but unclassified path selects full verification; Full-model OCI cannot
+  // silently disappear merely because it was absent from the older allowlist.
+  for (const unknown of ['scripts/new-unclassified-ci-helper.mjs', 'tests/new-domain/acceptance.mjs', 'docs/new-executable-policy.json']) {
+    const selected = await plan([unknown]);
+    assert.equal(selected.mode, 'full', `Unclassified path needs full verification: ${unknown}`);
+    assert.equal(selected.full_model_oci, true, `Unclassified path needs conservative model admission: ${unknown}`);
+  }
+  for (const invalid of ['', '/packages/api/src/server.ts', '../packages/api/src/server.ts', 'packages\\api\\src\\server.ts']) {
+    const selected = await plan([invalid]);
+    assert.equal(selected.mode, 'full', 'Invalid changed paths must select full verification');
+    assert.equal(selected.full_model_oci, true, 'Invalid changed paths must not suppress real-model proof');
+  }
   assert.equal((await plan(['profiles/full/config.json'], 'push')).full_model_oci, false);
 
   const verify = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
@@ -489,14 +582,14 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
   const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage'];
-  for (const file of [
-    'packages/api/test/passkey-bootstrap.acceptance.test.ts',
-    'packages/api/scripts/run-passkey-acceptance.mjs',
+  for (const [file, expectedModelOci] of [
+    ['packages/api/test/passkey-bootstrap.acceptance.test.ts', false],
+    ['packages/api/scripts/run-passkey-acceptance.mjs', true],
   ]) {
     const result = await plan([file]);
     assert.deepEqual(result.tasks, expected, file);
     assert.equal(result.mode, 'affected', file);
-    assert.equal(result.full_model_oci, true, 'package paths remain in the separate Full-model OCI impact closure');
+    assert.equal(result.full_model_oci, expectedModelOci, `Full-model OCI admission: ${file}`);
   }
   const browserSpec = await plan(['tests/e2e/passkey-bootstrap.acceptance.spec.ts']);
   assert.ok(browserSpec.tasks.includes('browser-core-passkey-bootstrap'));

@@ -25,6 +25,131 @@ This is the normative execution and release architecture. [Test architecture](TE
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
 
+## CI admission, execution and resource policy
+
+This section is the **normative scheduling and resource contract**. The canonical task
+inventory, impact selection, input-closure proof and certifier above remain authoritative.
+Workflow `paths`, local shell guards and special-purpose release filters are implementation
+of those decisions, never independent permission to waive a required verification task.
+The design below is the accepted target; an item is operational only after its workflow,
+impact rules, tests and CI acceptance are committed and observed.
+
+### Admission and ownership
+
+**Three distinct stages must not be conflated:**
+
+1. **Event admission** prevents a workflow run from being created when none of its
+   required obligations can be affected. Use `on.pull_request.paths` / `on.push.paths`
+   only for domains with a complete and independently tested input-closure mapping;
+   include the workflow and its relevant policy/configuration files. A change outside
+   that closure must not activate unrelated release or integration lanes.
+2. **Job admission** happens in one cheap exact-source plan. Use the existing
+   `ci-impact.mjs` task selection and `ci-contract.mjs` job inventory; expose selected
+   prerequisites explicitly. Do not launch a costly job merely because another task
+   shares its job family. Unknown paths, unavailable diffs, invalid identities and
+   unreviewed dependency edges fail closed to wider verification.
+3. **Step admission / reuse** installs or executes expensive tools only for actually
+   selected tasks. Chromium, StrictDoc, model files, image builds and temporary hosts
+   must not be prepared for a `NOT_SELECTED` task. Reuse only through existing
+   content-addressed, toolchain-bound and source/attempt-verified receipts.
+
+```mermaid
+flowchart TD
+  E[PR or main event] --> C{Owning domain impacted?}
+  C -->|No, complete closure proved| X[No independent heavy workflow]
+  C -->|Yes or unknown| P[Exact-source canonical plan]
+  P --> S{Task or component selected?}
+  S -->|No| N[NOT_SELECTED with certifier evidence]
+  S -->|Yes| T[Prepare only required tools]
+  T --> V[Run tests and retain proof]
+  N --> G[Canonical certification]
+  V --> G
+  G -->|Certified main source only| R[Release eligibility]
+```
+
+| Change/input owner | Required proof | Avoid when unrelated |
+| --- | --- | --- |
+| Native iOS SwiftUI/transport and Xcode projects | Native Swift build, API contract, simulator/physical acceptance as specified by iOS design | Desktop browser E2E, backend OCI, real-model OCI |
+| Database contract-only tests / isolated proof fixtures | DB contract, affected type/unit and coverage | Backend/frontend image release builds, app host lifecycle, real-model OCI |
+| Runtime Backend/Core/Full sources and packaging inputs | Applicable unit/type, actual Core/Full OCI, API/integration and exact-image identity | Unrelated Pages and iOS workflows |
+| Desktop React, static assets, or frontend build inputs | Desktop type/build, affected browser shards, UI asset packaging/delivery | Backend publication and VM lifecycle unless shared runtime inputs change |
+| Auth, PostgreSQL runtime schema or deployment state machine | Owning DB/API contract, auth E2E, relevant host and rollback acceptance | Unrelated model, native or Pages integration |
+| StrictDoc/specification inputs | Requirements trace with its pinned StrictDoc/Chromium toolchain and affected Pages acceptance | Full model or backend image solely because a trace test changed |
+| Pages generators, diagram/graph/audit inputs | Generator tests, source-bound report, faithful browser rendering | OCI builds and host lifecycle |
+| JavaScript/TypeScript or analyzer rule inputs | CodeQL and quality checks per analyzed source closure | A CodeQL run for unrelated native/docs-only input |
+| Dependency, container, IaC and secret-handling inputs | Trivy and appropriate config/security checks, plus affected runtime proofs | Full Git-history scan for every unchanged history |
+| New, renamed, deleted, unknown or missing-diff inputs | Conservative safe superset / full verification until closure is proven | Unverified skipping or unconditional success |
+
+**Independent-workflow owners.** `verify.yml` is the only owner of task inventory
+and canonical certification. `backend-release.yml` and `frontend-release.yml` own
+component build, package, promotion and publication; `push-app-lifecycle.yml`,
+deployment-config/host/backup flows own real operational proof; `repository-audit.yml`
+owns development Pages; `ios-*.yml` own native acceptance;
+`codeql.yml` and `security-scans.yml` own static security scanning.
+Do not run a backend image or disposable VM lifecycle merely because a
+`packages/**` test file or unrelated deployment documentation changed. Conversely,
+include packaging scripts, profile manifests, dependency locks, workflows and actual
+runtime inputs in the relevant closure. A package filename suffix is not by itself
+proof that a file is irrelevant: generated/test assets consumed by a build remain inputs.
+
+**Security admission.** CodeQL PR analysis must cover changed analyzable JS/TS
+or analyzer configuration, with main/default-branch and scheduled scanning retained.
+Trivy must cover dependency locks, Dockerfiles, containers, IaC, action/dependency
+security configuration and other verified scanner inputs. Gitleaks must inspect new
+PR commits (including file renames) without rescanning unrelated full history on
+each PR, and retain complete-history review on main/schedule. If the commit base,
+history span, or scan coverage cannot be verified, run the broader scan or fail.
+Preserve SARIF upload/category behavior and non-bypassed security controls.
+Security alerts, static policy gates and CI certification are separate obligations.
+
+**Main and delivery.** Every main source requires full exact-source verification or
+the already defined strictly validated same-tree merged-PR reuse. Direct pushes,
+manual runs and invalid reuse use full execution. Publication/deployment starts
+only after successful exact-main certification; the completed event is not an
+excuse to create redundant backend/frontend jobs for unaffected components.
+Never cancel source certification, image publication, rollback or protected
+deployment merely because a later PR arrives. Cancel only superseded PR heads
+in the *same* workflow and PR; no cross-PR or cross-source cancellation.
+Reuse verified artifacts, not stale success statuses or unverified skip contexts.
+
+**Required checks.** Before enabling a GitHub event-level path exclusion, verify
+the active branch ruleset and every effective required check context for the repo.
+An excluded workflow may leave a required check pending; a skipped job may appear
+successful while proving nothing. Keep a cheap, stable admission/certification
+status, emit `NOT_SELECTED` with an explicit owning input closure and reason,
+and independently verify that no selected task or security gate disappeared.
+Branch protection/merge queue and status check migration must be updated atomically;
+if effective rules cannot be read, do not deploy a potentially deadlocking filter.
+
+### Measurement and change acceptance
+
+Measure **run count**, cancellation before and after runner acquisition,
+per-PR workflow multiplicity, executed versus queued job count, p50/p95 queue time, runner seconds,
+critical path, wall clock, cold/warm cache state, failure/retry rate, and the
+specific phases (tool downloads, fixture setup, build, browser, artifacts).
+`cancelled` run count is *not* equal to wasted runner minutes; check actual job
+start/logs before making a savings claim. Actions queued/waiting jobs may expose
+placeholder start timestamps; they consume no observed runner seconds and must
+not be counted as executed jobs. Cancelled jobs may also expose placeholder
+timestamps even after becoming `completed`; require a positive assigned
+`runner_id` before claiming runner consumption, and report pre/post-runner
+cancellations separately. Prefer comparable exact-source and
+toolchain runs; record counterfactual estimates separately from observed results.
+Compare a full run, native-only changes, test-only DB changes, documentation-only
+changes, frontend/backend runtime changes, unknown/new paths and changed workflow
+definitions before and after an admission change. For rapid consecutive main merges,
+record each source SHA and its actual PR plan mode, base SHA, merge parent,
+reusable proof decision, queued jobs, executed jobs and runner seconds. A green
+`affected` PR check is not a complete main certificate; a stale base or
+unverified proof must trigger exact-source execution, not an implicit pass.
+
+A rollout passes only when (a) the canonical plan and actual workflow trigger
+agree; (b) every selected task is proven or blocked/fails, never silently skipped;
+(c) selected security and release gates remain enforced; (d) source/attempt/lock/
+profile identities are preserved; (e) test-only and unrelated changes no longer
+start expensive lanes; and (f) comparable actual CI demonstrates improved queue,
+runner and wall-clock behavior. A budget alone never authorizes dropping proof.
+
 ## Static quality and Code Scanning contract
 
 The accepted JS/TS quality-toolchain design uses [Biome](../architecture/DEPENDENCY-POLICY.md) as the single Lint, formatter and import-organizing authority. Run non-mutating `biome ci` as a required PR quality gate and upload **Lint-only** SARIF to GitHub Code Scanning under its own category, separate from CodeQL. Formatting findings fail the CI check, but must not be uploaded as security alerts. TypeScript type checks, CodeQL's security and data-flow analysis, tests and architecture boundaries remain independent obligations; a passing Biome job never satisfies a skipped or failed security check.
