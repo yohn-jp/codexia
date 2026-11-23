@@ -35,15 +35,15 @@ op exportPersistenceArchive(@path projectId: string): JsonResponse | { @statusCo
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
-op listPersistenceDocuments(@path projectId: string, @query parentId?: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 400; @body body: ApiError; };
+op listPersistenceDocuments(@path projectId: string, @query parentId?: string, @query projectVersion?: int32): PersistenceDocumentListResponse | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @post @operationId("persistence_documents_post")
-op createPersistenceDocument(@path projectId: string, @body body: JsonObject, @header("Idempotency-Key") idempotencyKey: string): { @statusCode _: 201; @body body: JsonObject; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op createPersistenceDocument(@path projectId: string, @body body: JsonObject, @header("Idempotency-Key") idempotencyKey: string): { @statusCode _: 201; @body body: SaveDocumentResponse; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}") @get @operationId("persistence_document_get")
-op getPersistenceDocument(@path projectId: string, @path documentId: string, @query revision?: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPersistenceDocument(@path projectId: string, @path documentId: string, @query revision?: string, @query projectVersion?: int32): PersistenceDocumentGetResponse | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}") @patch @operationId("persistence_document_patch")
@@ -57,19 +57,19 @@ op savePersistenceDocument(
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}") @delete @operationId("persistence_document_delete")
-op deletePersistenceDocument(@path projectId: string, @path documentId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op deletePersistenceDocument(@path projectId: string, @path documentId: string, @body body: JsonObject): PersistenceDocumentEnvelope | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata") @patch @operationId("persistence_document_metadata_patch")
-op updatePersistenceDocumentMetadata(@path projectId: string, @path documentId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op updatePersistenceDocumentMetadata(@path projectId: string, @path documentId: string, @body body: JsonObject): PersistenceDocumentEnvelope | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/revisions") @get @operationId("persistence_document_revisions_get")
-op listPersistenceDocumentRevisions(@path projectId: string, @path documentId: string, @query limit?: int32, @query before?: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op listPersistenceDocumentRevisions(@path projectId: string, @path documentId: string, @query limit?: int32, @query before?: string): DocumentRevisionPageResponse | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/restore") @post @operationId("persistence_document_restore_post")
-op restorePersistenceDocumentRevision(@path projectId: string, @path documentId: string, @body body: JsonObject, @header("Idempotency-Key") idempotencyKey: string): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op restorePersistenceDocumentRevision(@path projectId: string, @path documentId: string, @body body: JsonObject, @header("Idempotency-Key") idempotencyKey: string): SaveDocumentResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors") @get @operationId("persistence_document_anchors_get")
