@@ -192,6 +192,11 @@ test('lifecycle readiness uses real conditions without time-based sleep loops', 
   const db = readFileSync(new URL('../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
   assert.match(api, /^Notify=healthy$/mu);
   assert.match(api, /^HealthStartupInterval=2s$/mu);
+  const healthCommand = api.match(/^HealthCmd=(.+)$/mu)?.[1];
+  const startupCommand = api.match(/^HealthStartupCmd=(.+)$/mu)?.[1];
+  assert.ok(healthCommand && startupCommand, 'startup requires an explicit healthcheck command');
+  assert.equal(startupCommand, healthCommand,
+    'the faster startup readiness probe must be identical to the regular API readiness probe');
   assert.match(api, /^StartLimitBurst=3$/mu);
   assert.match(db, /^Tmpfs=\/run\/postgresql:rw,nosuid,nodev,noexec,size=16m$/mu);
   assert.doesNotMatch(db, /^Tmpfs=\/var\/run\/postgresql:/mu);
