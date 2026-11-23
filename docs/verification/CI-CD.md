@@ -70,6 +70,7 @@ flowchart TD
 | Change/input owner | Required proof | Avoid when unrelated |
 | --- | --- | --- |
 | Native iOS SwiftUI/transport and Xcode projects | Native Swift build, API contract, simulator/physical acceptance as specified by iOS design | Desktop browser E2E, backend OCI, real-model OCI |
+
 | Database contract-only tests / isolated proof fixtures | DB contract, affected type/unit and coverage | Backend/frontend image release builds, app host lifecycle, real-model OCI |
 | Runtime Backend/Core/Full sources and packaging inputs | Applicable unit/type, actual Core/Full OCI, API/integration and exact-image identity | Unrelated Pages and iOS workflows |
 | Desktop React, static assets, or frontend build inputs | Desktop type/build, affected browser shards, UI asset packaging/delivery | Backend publication and VM lifecycle unless shared runtime inputs change |
@@ -79,6 +80,15 @@ flowchart TD
 | JavaScript/TypeScript or analyzer rule inputs | CodeQL and quality checks per analyzed source closure | A CodeQL run for unrelated native/docs-only input |
 | Dependency, container, IaC and secret-handling inputs | Trivy and appropriate config/security checks, plus affected runtime proofs | Full Git-history scan for every unchanged history |
 | New, renamed, deleted, unknown or missing-diff inputs | Conservative safe superset / full verification until closure is proven | Unverified skipping or unconditional success |
+
+Native-only PR admission is bounded to reviewed `ios/CodexiaTransport/`,
+`ios/CodexiaApp/` and `ios/CodexiaEditor/` Swift/Xcode/configuration inputs
+and dedicated `ios-api.yml` / `ios-editor.yml` workflows. The exact PR diff
+receives `unit-root` and canonical `coverage` proof; native build and
+simulator acceptance remain owned by native workflows. Shared OpenAPI inputs
+retain their affected contract tasks; lockfiles or unknown inputs retain the
+applicable conservative verification scope.
+
 
 **Independent-workflow owners.** `verify.yml` is the only owner of task inventory
 and canonical certification. `backend-release.yml` and `frontend-release.yml` own
@@ -91,6 +101,21 @@ Do not run a backend image or disposable VM lifecycle merely because a
 include packaging scripts, profile manifests, dependency locks, workflows and actual
 runtime inputs in the relevant closure. A package filename suffix is not by itself
 proof that a file is irrelevant: generated/test assets consumed by a build remain inputs.
+
+**Security scope implementation.** `scripts/ci/impact/security-admission.mjs`
+uses the exact PR merge result and its two verified parents to determine a
+CodeQL/Trivy net-change closure. The stable check jobs remain present, but
+scanner steps are omitted for proven unrelated inputs. Missing history,
+checkout identity disagreement, unexpected extensions or unresolved scope
+runs both scans. Main/scheduled scans and Gitleaks are never filtered here.
+`scripts/ci/impact/design-admission.mjs` uses the same verified PR
+merge-result identity to keep the existing Impeccable check job while skipping
+the actual scan and SARIF upload for isolated `app` or `modules/*/src`
+test/spec changes. The existing workflow event `paths` are retained because
+effective legacy required-check policy could not be read through the connector.
+
+The admission decision is recorded in the job log and step summary; a skipped
+scanner must never be reported as having analyzed changed code.
 
 **Security admission.** CodeQL PR analysis must cover changed analyzable JS/TS
 or analyzer configuration, with main/default-branch and scheduled scanning retained.

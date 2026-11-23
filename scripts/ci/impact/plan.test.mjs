@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
@@ -595,4 +595,100 @@ test('the Passkey browser acceptance source is owned by the API unit, package ty
   assert.ok(browserSpec.tasks.includes('browser-core-passkey-bootstrap'));
   assert.ok(browserSpec.tasks.includes('browser-full-passkey-bootstrap'));
   assert.ok(browserSpec.tasks.includes('test-types-app-e2e'));
+});
+
+test('native Swift-only PR inputs select owner contract without unrelated Desktop or OCI jobs', async () => {
+  const owned = [
+    '.github/workflows/ios-api.yml',
+    '.github/workflows/ios-editor.yml',
+    'ios/CodexiaTransport/.gitignore',
+    'ios/CodexiaTransport/Package.swift',
+    'ios/CodexiaTransport/Package.resolved',
+    'ios/CodexiaTransport/generate.sh',
+    'ios/CodexiaTransport/normalize-openapi.py',
+    'ios/CodexiaTransport/openapi-generator-config.yaml',
+    'ios/CodexiaTransport/KeychainProbe/KeychainHost.entitlements',
+    'ios/CodexiaTransport/KeychainProbe/KeychainProbe.xcodeproj/project.pbxproj',
+    'ios/CodexiaTransport/KeychainProbe/KeychainProbe.xcodeproj/xcshareddata/xcschemes/KeychainProbe.xcscheme',
+    'ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift',
+    'ios/CodexiaTransport/Tests/CodexiaTransportTests/OAuthTests.swift',
+    'ios/CodexiaApp/CodexiaApp.xcodeproj/project.pbxproj',
+    'ios/CodexiaApp/UITests/AuthoringFlowUITests.swift',
+    'ios/CodexiaEditor/.gitignore',
+    'ios/CodexiaEditor/Package.swift',
+    'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift',
+  ];
+  for (const file of owned) {
+    const result = await plan([file]);
+    assert.equal(result.mode, 'affected', file);
+    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    assert.equal(result.full_model_oci, false, file);
+  }
+  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage']);
+  const nativeApi = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
+  for (const input of ['.github/workflows/ios-api.yml', 'ios/CodexiaTransport/**', 'packages/http-contract/openapi/codexia.openapi.yaml']) {
+    assert.ok(nativeApi.on.pull_request.paths.includes(input), input);
+  }
+  assert.equal(nativeApi.jobs.api['runs-on'], 'xcode-27');
+});
+
+test('native ownership fails closed for unsupported or mixed inputs and main', async () => {
+  const { VERIFICATION_TASKS } = await import('./contract.mjs');
+  const source = 'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift';
+  for (const file of [
+    'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',
+    'ios/Unreviewed/Sources/Unexpected.swift',
+    '.github/workflows/ios-other.yml',
+    'pnpm-lock.yaml',
+    'packages/api/src/server.ts',
+  ]) {
+    const mixed = await plan([source, file]);
+    assert.deepEqual(mixed.tasks, VERIFICATION_TASKS, file);
+  }
+  const contract = 'packages/http-contract/openapi/codexia.openapi.yaml';
+  const mixedContract = await plan([source, contract]);
+  const contractOnly = await plan([contract]);
+  for (const task of contractOnly.tasks) assert.ok(mixedContract.tasks.includes(task), task);
+  assert.ok(mixedContract.tasks.includes('unit-root'));
+  assert.deepEqual((await plan([source], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+});
+
+
+test('Impeccable retains its existing workflow triggers and guards only unneeded heavy steps', () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/impeccable.yml', import.meta.url), 'utf8'));
+  const paths = workflow.on.pull_request.paths;
+  for (const file of [
+    'app/src/workspace/persistence.test.ts',
+    'modules/publishing/src/publishing.test.ts',
+    'app/src/editor/ManuscriptEditor.tsx',
+    '.github/workflows/impeccable.yml',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  const steps = workflow.jobs.scan.steps;
+  const scopeIndex = steps.findIndex(step => step.name === 'Select exact-source design scope');
+  assert.ok(scopeIndex > 0);
+  assert.match(steps[scopeIndex].run, /design-admission\.mjs/u);
+  for (const name of ['Scan application and module source', 'Upload design findings']) {
+    assert.equal(steps.find(step => step.name === name).if, "steps.scope.outputs.design == 'true'");
+  }
+  assert.deepEqual(workflow.on.push.paths, paths);
+});
+
+test('native-owned input admission requires the Xcode workflow while its Swift source tree exists', () => {
+  const owners = [
+    { dir: 'ios/CodexiaTransport/', workflow: 'ios-api.yml', paths: ['ios/CodexiaTransport/**'], job: 'api' },
+    { dir: 'ios/CodexiaEditor/', workflow: 'ios-editor.yml',
+      paths: ['ios/CodexiaEditor/**', 'ios/CodexiaApp/**'], job: 'editor' },
+  ];
+  for (const owner of owners) {
+    const directory = new URL('../../../' + owner.dir, import.meta.url);
+    if (!existsSync(directory)) continue; // Native implementation may be in a separate unmerged workstream.
+    const workflowFile = new URL('../../../.github/workflows/' + owner.workflow, import.meta.url);
+    assert.ok(existsSync(workflowFile), owner.dir + ' requires its native workflow');
+    const workflow = parse(readFileSync(workflowFile, 'utf8'));
+    for (const input of owner.paths) assert.ok(workflow.on.pull_request.paths.includes(input), input);
+    assert.equal(workflow.jobs[owner.job]['runs-on'], 'xcode-27', owner.workflow);
+    assert.ok(workflow.jobs[owner.job].steps.some(step => String(step.run ?? '').includes('swift test') ||
+      String(step.run ?? '').includes('xcodebuild')), owner.workflow + ' must execute a native build/test');
+  }
 });
