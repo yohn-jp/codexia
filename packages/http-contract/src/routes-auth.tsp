@@ -31,12 +31,13 @@ model OAuthConsentContextRequest {
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
 @extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.")
 @route("/api/auth/oauth2/consent-context") @post @operationId("auth_consent_context_post")
-op getOAuthConsentContext(@body body: OAuthConsentContextRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+op getOAuthConsentContext(@body body: OAuthConsentContextRequest): OAuthConsentContextBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("auth-adapter")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
 @extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.")
+@extension("x-codexia-runtime-response-deviation", "Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
 @route("/api/auth/oauth2/get-consents") @get @operationId("auth_list_consents_get")
 op listOAuthConsents(): JsonResponse | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 

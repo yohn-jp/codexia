@@ -109,7 +109,9 @@ private extension Optional where Wrapped == HTTPBody {
     let apple = URLSessionTransport(configuration: .init(session: session, httpBodyProcessingMode: .buffered))
     let transport = try APITransport(origin: origin, accessToken: { "fixture.token" }, transport: apple)
     let response = try await transport.client.api_session_get()
-    #expect(try response.ok.body.json.additionalProperties["authenticated"]?.value as? Bool == true)
+    let sessionBody = try response.ok.body.json
+    #expect(sessionBody.authenticated == true)
+    #expect(sessionBody.authorScope == "owner")
 }
 
 private final class SessionFixture: URLProtocol {
