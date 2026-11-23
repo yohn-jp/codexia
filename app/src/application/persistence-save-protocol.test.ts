@@ -258,6 +258,7 @@ test("replay superseded by another writer acknowledges the original receipt with
     signal: new AbortController().signal,
   });
   assert.equal(result.replayWasSuperseded, true);
+  assert.equal(result.result.revision.id, "revision-2", "machine receipt identity must remain the exact saved operation response");
   assert.equal(result.acknowledgedRevision.id, laterRevision.id);
   assert.equal(result.acknowledgedRevision.markdown, laterRevision.markdown);
   assert.deepEqual(events, [

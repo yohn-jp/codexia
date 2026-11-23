@@ -112,6 +112,58 @@ test("a 412 precondition response remains a conflict instead of becoming an unkn
   actor.stop();
 });
 
+test("a stale conflict from the previous document does not block the newly selected draft", async () => {
+  const calls: string[] = [];
+  let releaseFirstSave!: (result: { kind: "conflict"; operationId: string; generation: number }) => void;
+  const actor = createActor(createPersistenceSaveMachine({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) {
+      calls.push(input.identity.documentId);
+      if (input.operationId === "save-a") return await new Promise((resolve) => { releaseFirstSave = resolve; });
+      return { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "receipt-b" };
+    },
+  }), { input: { identity } });
+  actor.start();
+  actor.send({ type: "RECOVERY.READY", identity, recovery: "clean", generation: 0 });
+  actor.send({ type: "DRAFT.CHANGED", identity, generation: 1, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "save-a", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "saving" } }), { timeout: 1_000 });
+
+  const nextIdentity = { projectId: "project-1", documentId: "document-2" };
+  actor.send({ type: "RECOVERY.READY", identity: nextIdentity, recovery: "draft", generation: 7, draftProtected: true });
+  releaseFirstSave({ kind: "conflict", operationId: "save-a", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "idle" } }), { timeout: 1_000 });
+  assert.equal(actor.getSnapshot().context.identity.documentId, "document-2");
+  assert.equal(actor.getSnapshot().context.remoteConflict, false);
+  assert.equal(actor.getSnapshot().context.protectedGeneration, 7);
+
+  actor.send({ type: "SAVE.MANUAL", identity: nextIdentity, operationId: "save-b", generation: 7 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, ["document-1", "document-2"]);
+  actor.stop();
+});
+
+test("an explicit retry can start a new operation after an unreadable conflict head", async () => {
+  const calls: string[] = [];
+  const { actor } = harness({
+    async saveOperation(input) {
+      calls.push(input.operationId);
+      return input.operationId === "save-op-1"
+        ? { kind: "unknown", operationId: input.operationId, generation: input.generation }
+        : { kind: "confirmed", operationId: input.operationId, generation: input.generation, receiptId: "revision-3" };
+    },
+  });
+  actor.send({ type: "DRAFT.CHANGED", identity, generation: 1, dirty: true });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { journal: "protected" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "save-op-1", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "unknown" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "save-op-2", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(calls, ["save-op-1", "save-op-2"]);
+  actor.stop();
+});
+
 test("IndexedDB protection failure blocks server writes", async () => {
   const calls: string[] = [];
   const { actor } = harness({

@@ -20,6 +20,11 @@ export interface PersistenceSaveMachineServices {
 
 type RecoveryKind = "clean" | "draft" | "pending-save";
 
+type SaveOperationOutcome =
+  | { kind: "confirmed"; identity: PersistenceSaveIdentity; operationId: string; generation: number; receiptId: string }
+  | { kind: "conflict"; identity: PersistenceSaveIdentity; operationId: string; generation: number }
+  | { kind: "unknown"; identity: PersistenceSaveIdentity; operationId: string; generation: number };
+
 interface PersistenceSaveMachineContext {
   identity: PersistenceSaveIdentity;
   generation: number;
@@ -64,6 +69,15 @@ function generatedOperationId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `save-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function matchesOperation(context: PersistenceSaveMachineContext, outcome: SaveOperationOutcome): boolean {
+  return sameIdentity(context.operationIdentity, outcome.identity) && context.operationId === outcome.operationId &&
+    context.operationGeneration === outcome.generation;
+}
+
+function outcomeIsCurrent(context: PersistenceSaveMachineContext, outcome: SaveOperationOutcome): boolean {
+  return sameIdentity(context.identity, outcome.identity) && matchesOperation(context, outcome);
+}
+
 /**
  * Executable WRT-01 / REC-01 coordination. IndexedDB and PostgreSQL remain the
  * authorities; this actor holds only the current identity, generations,
@@ -84,7 +98,19 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
       saveOperation: fromPromise(async ({ input, signal }: {
         input: { identity: PersistenceSaveIdentity; operationId: string; generation: number; reconcileReplay: boolean };
         signal: AbortSignal;
-      }) => services.saveOperation(input, signal)),
+      }): Promise<SaveOperationOutcome> => {
+        try {
+          const result = await services.saveOperation(input, signal);
+          return { ...result, identity: input.identity, operationId: input.operationId, generation: input.generation };
+        } catch (error) {
+          return {
+            kind: conflictStatus(error) ? "conflict" : "unknown",
+            identity: input.identity,
+            operationId: input.operationId,
+            generation: input.generation,
+          };
+        }
+      }),
     },
     guards: {
       readyDraftProtected: ({ event }) => event.type === "RECOVERY.READY" && (event.recovery === "clean" || event.draftProtected === true),
@@ -271,10 +297,10 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                   }),
                   onDone: [
                     {
-                      guard: ({ event }) => event.output.kind === "confirmed",
+                      guard: ({ context, event }) => outcomeIsCurrent(context, event.output) && event.output.kind === "confirmed",
                       target: "confirmed",
                       actions: assign(({ context, event }) => event.output.kind === "confirmed" ? {
-                        operationIdentity: context.operationIdentity,
+                        operationIdentity: event.output.identity,
                         operationId: event.output.operationId,
                         operationGeneration: event.output.generation,
                         receiptId: event.output.receiptId,
@@ -282,12 +308,16 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
                         error: "",
                       } : {}),
                     },
-                    { guard: ({ event }) => event.output.kind === "conflict", target: "conflict", actions: assign(() => ({ error: "PostgreSQL reported a revision conflict" })) },
-                    { target: "unknown", actions: assign(() => ({ error: "Save result is unknown; retry the same operation identity" })) },
-                  ],
-                  onError: [
-                    { guard: ({ event }) => conflictStatus(event.error), target: "conflict", actions: assign(() => ({ error: "PostgreSQL reported a revision conflict" })) },
-                    { target: "unknown", actions: assign(() => ({ error: "Save result is unknown; retry the same operation identity" })) },
+                    { guard: ({ context, event }) => outcomeIsCurrent(context, event.output) && event.output.kind === "conflict", target: "conflict", actions: assign(() => ({ error: "PostgreSQL reported a revision conflict" })) },
+                    { guard: ({ context, event }) => outcomeIsCurrent(context, event.output) && event.output.kind === "unknown", target: "unknown", actions: assign(() => ({ error: "Save result is unknown; retry the same operation identity" })) },
+                    {
+                      guard: ({ context, event }) => Boolean(context.operationIdentity && context.operationId && context.operationGeneration !== null &&
+                        sameIdentity(context.identity, context.operationIdentity) && !matchesOperation(context, event.output)),
+                      target: "saving",
+                      reenter: true,
+                    },
+                    { target: "idle", actions: assign(({ context, event }) => matchesOperation(context, event.output)
+                      ? { operationIdentity: null, operationId: null, operationGeneration: null, reconcileReplay: false } : {}) },
                   ],
                 },
                 on: {
@@ -309,6 +339,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
               unknown: {
                 on: {
                   "SAVE.RETRY": { guard: "hasPendingOperation", target: "saving" },
+                  "SAVE.MANUAL": { guard: "canSaveCurrentGeneration", target: "saving", actions: "setManualOperation" },
                   "DRAFT.CHANGED": { actions: "acceptDraftChange" },
                   "RECOVERY.READY": [
                     { guard: ({ event }) => event.type === "RECOVERY.READY" && event.recovery === "pending-save" && Boolean(event.operationId), target: "saving", actions: "acceptReady" },

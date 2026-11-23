@@ -1289,7 +1289,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
       }
       return acknowledgement.acknowledged
-        ? { kind: "confirmed" as const, operationId: pending.idempotencyKey, generation: pending.generation, receiptId: acknowledgedRevision.id }
+        ? { kind: "confirmed" as const, operationId: pending.idempotencyKey, generation: pending.generation, receiptId: protocol.result.revision.id }
         : { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
     } catch (error) {
       if (controller.signal.aborted) return { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
@@ -1302,14 +1302,19 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         try {
           const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
           const latest = activeRef.current;
+          const currentHeadConfirmed = Boolean(currentRead.revision &&
+            currentRead.document.projectId === pending.projectId && currentRead.document.id === pending.documentId &&
+            currentRead.document.headRevisionId === currentRead.revision.id &&
+            currentRead.revision.projectId === pending.projectId && currentRead.revision.documentId === pending.documentId);
           if (latest && inScope(latest)) {
-            publishEditor(resolvePersistenceSaveConflict(latest, currentRead.revision ?? null));
+            publishEditor(resolvePersistenceSaveConflict(latest, currentHeadConfirmed ? currentRead.revision : null));
           }
+          if (currentHeadConfirmed) return { kind: "conflict" as const, operationId: pending.idempotencyKey, generation: pending.generation };
         } catch (readError) {
           const latest = activeRef.current;
           if (latest && inScope(latest)) publishEditor(resolvePersistenceConflictReadFailure(latest, readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした."));
         }
-        return { kind: "conflict" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+        return { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
       } else {
         const latest = activeRef.current;
         if (latest && inScope(latest)) {
