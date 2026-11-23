@@ -13,7 +13,9 @@ docker pull "$base"
 pinned_base="$(docker image inspect "$base" --format '{{json .RepoDigests}}' | node -e '
 let raw="";process.stdin.on("data",c=>raw+=c).on("end",()=>{
   const refs=JSON.parse(raw);
-  const hit=refs.find(x=>/^(?:docker\\.io\\/library\\/)?debian@sha256:[a-f0-9]{64}$/.test(x));
+  const normalized=refs.map(x=>x.startsWith("debian@")?"docker.io/library/"+x:x);
+  const hit=normalized.find(x=>x.startsWith("docker.io/library/debian@sha256:")&&
+    /^[a-f0-9]{64}$/.test(x.split("@sha256:")[1]||""));
   if(!hit)process.exit(1);
   console.log(hit.startsWith("docker.io/")?hit:"docker.io/library/"+hit);
 })')"
