@@ -9,8 +9,8 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Overall architecture and trust boundaries | [System design](architecture/SYSTEM-DESIGN.md) — canonical system design |
 | PostgreSQL domain and schema invariants | [Data model](architecture/DATA-MODEL.md) — canonical domain design |
 | User screen navigation and recovery | [User screen flows](design/USER-SCREEN-FLOW.md) — canonical state transitions |
-| Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — canonical state transitions; future IdP controls identified |
-| Pristine VM and first owner enrollment | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — canonical state transitions |
+| Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — canonical `/console`, `/console/setup`, `/console/security`, `/console/identity` routing and state transitions (target, not implemented) |
+| Pristine VM, one-time setup key, first owner and recovery | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — SSH-ready VM, Ansible, Workers setup-only/API, protected activation and existing-owner restore contract |
 | Compatible backend updates and rollback | [Update flows](deployment/UPDATE-FLOW.md) — canonical state transitions |
 | Visual design system | [App design system](../app/DESIGN.md) — canonical visual direction and owner-confirmed decisions |
 | Design, information architecture and UX acceptance | [Design and UX contract](design/UX-CONTRACT.md) — normative target, not a runtime certification |
