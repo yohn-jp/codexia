@@ -5,7 +5,7 @@ import {
   assertFrontendOAuthConfigIdentity,
   frontendOAuthConfigIdentity,
   readFrontendOAuthConfig,
-} from './frontend-oauth-config.mjs';
+} from './oauth-config.mjs';
 
 const settings = {
   VITE_CODEXIA_OAUTH_ISSUER: 'https://codexia.example.test/api/auth',
@@ -46,8 +46,8 @@ test('an empty optional scope variable uses the documented default scopes', () =
 });
 
 test('the release build stops before Vite when OAuth settings are partial', () => {
-  const result = spawnSync(process.execPath, ['scripts/build-frontend.mjs'], {
-    cwd: new URL('..', import.meta.url),
+  const result = spawnSync(process.execPath, ['scripts/build/frontend/build.mjs'], {
+    cwd: new URL('../../../', import.meta.url),
     env: {
       ...process.env,
       VITE_CODEXIA_OAUTH_ISSUER: settings.VITE_CODEXIA_OAUTH_ISSUER,

@@ -4,15 +4,15 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/pro
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readRegularFile } from './read-regular-file.mjs';
+import { readRegularFile } from '../../shared/read-regular-file.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const modulePackagePrefix = '@codexia/module-';
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
 const sourceSpecifier = /\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["'](@codexia\/module-[^"']+)["']/g;
 
 function usage() {
-  console.error('Usage: node scripts/profile-build.mjs --profile <core|full> [--out <dir>] [--verify-deploy <dir>]');
+  console.error('Usage: node scripts/build/packaging/profile-build.mjs --profile <core|full> [--out <dir>] [--verify-deploy <dir>]');
   process.exit(2);
 }
 

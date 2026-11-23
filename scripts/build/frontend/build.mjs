@@ -5,11 +5,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readComponentVersion } from './component-release-version.mjs';
-import { frontendOAuthConfigIdentity, readFrontendOAuthConfig } from './frontend-oauth-config.mjs';
-import { createBuildCommands } from './profile-package.mjs';
+import { readComponentVersion } from '../../component-release-version.mjs';
+import { frontendOAuthConfigIdentity, readFrontendOAuthConfig } from './oauth-config.mjs';
+import { createBuildCommands } from '../packaging/profile-package.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function run(command, args, env = process.env) {
   const result = spawnSync(command, args, { cwd: root, env: { ...process.env, ...env }, stdio: 'inherit' });

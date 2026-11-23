@@ -19,8 +19,8 @@ on:
       - pnpm-workspace.yaml
       - tsconfig.base.json
       - deploy/postgres/**
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
+      - scripts/build/packaging/profile-build.mjs
+      - scripts/build/packaging/profile-package.mjs
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/backend-update-identity*.mjs

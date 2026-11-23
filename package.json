@@ -8,10 +8,10 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "node scripts/root-build.mjs",
-    "ui:preview": "node scripts/ui-preview.mjs",
-    "ui:scan": "node scripts/ui-scan.mjs",
-    "build:workspace": "node scripts/ci-workspace.mjs build-workspace && node scripts/profile-build.mjs --profile \"${CODEXIA_PROFILE:-core}\" && pnpm --filter @codexia/app build && pnpm --filter @codexia/api build",
+    "build": "node scripts/build/root.mjs",
+    "ui:preview": "node scripts/build/frontend/preview.mjs",
+    "ui:scan": "node scripts/build/frontend/scan.mjs",
+    "build:workspace": "node scripts/ci-workspace.mjs build-workspace && node scripts/build/packaging/profile-build.mjs --profile \"${CODEXIA_PROFILE:-core}\" && pnpm --filter @codexia/app build && pnpm --filter @codexia/api build",
     "typecheck": "node scripts/ci-workspace.mjs typecheck",
     "typecheck:tests": "pnpm --filter @codexia/api... build && node scripts/typecheck-tests.mjs",
     "typecheck:safety": "tsc -p tsconfig.safety.json",
@@ -23,7 +23,7 @@
     "verify:public-oauth-edge": "node scripts/verify-public-oauth-edge.mjs",
     "verify": "node scripts/verify.mjs",
     "test:scripts": "node --test 'scripts/**/*.test.mjs' && pnpm run verify:deployment && pnpm run typecheck:deployment && pnpm run test:deployment",
-    "build:frontend": "node scripts/build-frontend.mjs",
+    "build:frontend": "node scripts/build/frontend/build.mjs",
     "typecheck:deployment": "tsc -p edge/frontend/tsconfig.json --noEmit",
     "test:deployment": "node --import tsx --test 'edge/frontend/test/*.test.ts'",
     "verify:deployment": "node scripts/verify-deployment-config.mjs"

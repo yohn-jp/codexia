@@ -1,12 +1,14 @@
 .git
 .github
 .codegraph
+build
+**/build
+!scripts/build/
+scripts/build/**/build
 node_modules
 **/node_modules
 dist
 **/dist
-build
-**/build
 coverage
 **/coverage
 .turbo

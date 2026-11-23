@@ -13,9 +13,9 @@ on:
       - modules/**
       - '!modules/story/src/browser.tsx'
       - profiles/**
-      - scripts/profile-build.mjs
-      - scripts/read-regular-file.mjs
-      - scripts/profile-package.mjs
+      - scripts/build/packaging/profile-build.mjs
+      - scripts/shared/read-regular-file.mjs
+      - scripts/build/packaging/profile-package.mjs
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/backend-update-identity*.mjs
