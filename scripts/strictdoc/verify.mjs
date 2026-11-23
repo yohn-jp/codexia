@@ -392,7 +392,7 @@ async function runStrictDoc(command, root, sourceAbs, outputDir) {
     '--formats', 'html,json',
     '--output-dir', outputDir,
     '--no-parallelization',
-  ], { cwd: root });
+  ], { cwd: root, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   if (result.status !== 0) throw new Error(`StrictDoc export failed (${result.status ?? 'signal'}):\n${String(result.stdout)}\n${String(result.stderr)}`);
   return `${String(result.stdout)}\n${String(result.stderr)}`;
 }
