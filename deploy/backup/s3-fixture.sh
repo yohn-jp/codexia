@@ -73,8 +73,11 @@ basicConstraints=CA:FALSE
 EOF
 openssl x509 -req -in "$work/server.csr" -CA "$certs/ca.crt" -CAkey "$certs/ca.key" \
   -CAcreateserial -out "$certs/public.crt" -days 2 -extfile "$work/server.ext" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$certs/untrusted-ca.key" \
+  -out "$certs/untrusted-ca.crt" -days 2 -subj "/CN=Untrusted S3 fixture $token" >/dev/null 2>&1
 cp -- "$certs/ca.crt" "$certs/CAs/ca.crt"
-chmod 0600 "$certs/ca.key" "$certs/ca.crt" "$certs/CAs/ca.crt" "$certs/private.key" "$certs/public.crt"
+chmod 0600 "$certs/ca.key" "$certs/ca.crt" "$certs/CAs/ca.crt" "$certs/private.key" \
+  "$certs/public.crt" "$certs/untrusted-ca.key" "$certs/untrusted-ca.crt"
 
 root_user="codexia657root$token"
 root_secret="$(openssl rand -hex 32)"
@@ -362,16 +365,28 @@ artifact_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
 receipt_path="$work/receipts/$backup_id.json"
 
 AWS_ACCESS_KEY_ID="$writer_user" AWS_SECRET_ACCESS_KEY="$writer_secret" \
-  "$python_bin" - "$script_dir" "$profile_path" "$artifact" "$backup_id" \
-  "$source_identity" "$receipt_path" <<'PY'
+"$python_bin" - "$script_dir" "$profile_path" "$artifact" "$backup_id" \
+  "$source_identity" "$receipt_path" "$certs/untrusted-ca.crt" <<'PY'
 import json, pathlib, sys
-script_dir, profile_path, artifact, backup_id, source_identity, receipt_path = sys.argv[1:]
+script_dir, profile_path, artifact, backup_id, source_identity, receipt_path, untrusted_ca = sys.argv[1:]
 sys.path.insert(0, script_dir)
 import s3_transfer
+from botocore.exceptions import SSLError
 
 try:
     profile = s3_transfer.load_profile(pathlib.Path(profile_path))
     transfer = s3_transfer.S3BackupTransfer(profile, _allow_private_test_addresses=True)
+    untrusted_profile = {**profile, 'caBundle': untrusted_ca}
+    untrusted_client = s3_transfer.S3BackupTransfer(
+        untrusted_profile, _allow_private_test_addresses=True,
+    ).client
+    try:
+        untrusted_client.get_bucket_location(Bucket=profile['bucket'])
+    except SSLError as error:
+        if 'CERTIFICATE_VERIFY_FAILED' not in str(error) and 'certificate verify failed' not in str(error).lower():
+            raise s3_transfer.TransferError('Fixture S3 TLS request failed for a reason other than certificate verification') from error
+    else:
+        raise s3_transfer.TransferError('Fixture S3 endpoint accepted an untrusted TLS authority')
     receipt = transfer.upload_artifact(
         pathlib.Path(artifact), backup_id=backup_id,
         source_identity=source_identity, receipt_path=pathlib.Path(receipt_path),
