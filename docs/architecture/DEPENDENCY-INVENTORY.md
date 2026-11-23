@@ -30,6 +30,11 @@
 | `typescript` | `~5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
+| `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
+| `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
+| `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
+| `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
+| `@typespec/openapi3` | `1.18.0` | `packages/http-contract`・OpenAPI 3.1.0 emitter | **連動**: compiler/http/openapi librariesと同一releaseで更新 |
 
 ### 認証・API・永続化
 
@@ -40,7 +45,7 @@
 | `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
-| `fastify` | `^5.12.8` | API・単一認可境界 | **既存採用**: Fastify 5。最新版・major互換性の証拠は別途評価 |
+| `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
 | `jose` | `6.2.17` | API・JWT検証 | **更新対象**: 6.2.18へのDependabot PRあり。ローカルのJWTプロファイル・失効判定の契約を維持 |
 | `pg` | API `8.16.3` / persistence `^8.23.1` | API/Auth・PostgreSQL | **更新対象**: API側が遅れている。8.23.1への更新と、二つのDB接続主体の動作を確認 |
 | `@types/pg` | API `8.15.6` / persistence `^8.23.1` | PostgreSQL型 | **更新対象**: 型定義もAPI側を8.23.1系列へ合わせる。ランタイムとの型整合を検証 |
@@ -76,7 +81,7 @@
 | `@ai-sdk/openai-compatible` | `2.0.93` | Assistant・生成provider | **整理対象**: 3.0.93へのPRあり。provider v3→v4変更。内部生成の凍結契約に照らし、更新以前に削除・隔離を評価 |
 | `ai` | `7.0.176` | Assistant・AI SDK | **整理対象＋更新対象**: 7.0.177へのPRあり。生成providerの要否判定が先 |
 | `jsonrepair` | `3.15.0` | Assistant・生成JSON回復 | **整理対象**: 内部生成の凍結範囲で利用継続が妥当か確認 |
-| `yaml` | `^2.9.1` | Core・Contracts・modules等 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
+| `yaml` | `^2.9.1` / HTTP contract `2.9.1` | Core・Contracts・modules等、HTTP contract OpenAPI parser | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
 | `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |
 | `@huggingface/transformers` | `4.3.2` | NLP/Semantic・推論 | **要検証**: Optional Full profile専用。Core-onlyを汚染しないこと。`sharp`の修正版overrideは別の採用制約 |
@@ -103,6 +108,7 @@
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v6.1.0` | **更新対象**: v7.1.0 PRあり。配布元・ランナー互換性と該当ジョブの実行を検証 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
+| oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
 
 ## アップデートの審査・記録
 

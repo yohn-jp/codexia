@@ -24,6 +24,7 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'modules/**',
   'package.json',
   'packages/**',
+  '!packages/http-contract/**',
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
@@ -162,6 +163,18 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
+      continue;
+    }
+    if (
+      file.startsWith('packages/http-contract/src/') ||
+      file.startsWith('packages/http-contract/test/') ||
+      file.startsWith('packages/http-contract/scripts/') ||
+      file.startsWith('packages/http-contract/openapi/') ||
+      file.startsWith('packages/http-contract/baselines/') ||
+      file === 'packages/http-contract/tspconfig.yaml' ||
+      file === 'packages/http-contract/redocly.yaml'
+    ) {
+      add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
       continue;
     }
     // API client source is read by the canonical deployment route assertion.

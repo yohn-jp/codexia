@@ -1,6 +1,6 @@
 // Canonical verification inventory: workflow matrices, coverage and release eligibility share these names.
 export const WORKSPACES = [
-  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].map(id => ({ id, path: `packages/${id}` })),
+  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract'].map(id => ({ id, path: `packages/${id}` })),
   { id: 'app', path: 'app' },
   ...['story', 'nlp', 'diagnostics', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'].map(id => ({ id, path: `modules/${id}` })),
 ];
@@ -8,6 +8,7 @@ export const UNIT_TARGETS = [...WORKSPACES, { id: 'root', path: '.' }];
 export const TYPECHECK_TARGETS = [
   { id: 'foundations', workspaces: ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime'] },
   { id: 'core-api', workspaces: ['core', 'api'] },
+  { id: 'http-contract', workspaces: ['http-contract'] },
   { id: 'app', workspaces: ['app'] },
   { id: 'modules-a', workspaces: ['story', 'nlp', 'diagnostics', 'semantic', 'speaker'] },
   { id: 'modules-b', workspaces: ['assistant', 'publishing', 'mcp', 'search'] },
@@ -34,7 +35,7 @@ export const VERIFICATION_TASKS = [
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
-  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'root'].map(id => `unit-${id}`),
+  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
   'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
