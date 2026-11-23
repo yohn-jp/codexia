@@ -9,7 +9,7 @@ import { validateVerificationPlan } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
-import { assertReusedCoverageProof, assertReusedOmittedTaskProofs } from './ci-task-proof-reuse.mjs';
+import { assertReusedCoverageProof } from './ci-task-proof-reuse.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -35,8 +35,15 @@ const run = await request(`actions/runs/${GITHUB_RUN_ID}`);
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
 if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all validations');
-if (run.event === 'pull_request' && plan.mode === 'affected') {
-  assert.equal(plan.taskInputReuse?.format, 'codexia-ci-task-input-reuse/v2', 'Affected PR plan requires complete omitted-task input equivalence');
+if (run.event === 'pull_request') {
+  const expectedBase = process.env.CODEXIA_EXPECTED_BASE;
+  assert.match(expectedBase ?? '', /^[a-f0-9]{40}$/u, 'Missing exact PR base identity');
+  assert.equal(plan.base, expectedBase, 'Impact plan PR base does not match the event');
+  if (plan.mode === 'affected') {
+    const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', `${expectedBase}...${plan.sha}`, '--'],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\\0').filter(Boolean);
+    assert.deepEqual(plan.files, changed, 'Impact plan does not match the exact PR diff');
+  }
 }
 const jobs = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`), 'jobs');
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
@@ -60,10 +67,6 @@ assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption r
 if (reusedCoverageReports.length === 1) {
   await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
     repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
-}
-if (plan.mode === 'affected') {
-  await assertReusedOmittedTaskProofs({ plan, current: run, repository: GITHUB_REPOSITORY, token: GH_TOKEN,
-    request: async (url, options) => fetch(url, options) });
 }
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full']);
