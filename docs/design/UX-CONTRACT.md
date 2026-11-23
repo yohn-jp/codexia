@@ -131,6 +131,8 @@ panelを閉じても原稿は破棄されない。未導入／無効moduleのpan
 
 ### 認証・セキュリティ設定
 
+**採用済みの管理UX目標:** 管理者の入口はWorkersで提供する`/console`、初回セットアップは`/console/setup`、Passkey・セッションは`/console/security`、OIDC・OAuth管理は`/console/identity`。初回キーは256-bitの一回限りの導入資格情報であり、Ansibleはownerを作成しない。初回の本人登録はBetter AuthのPasskey ceremonyを伴い、SSHで一時登録サーバーを手動起動しない。登録中断・期限切れ・API応答不明・既存owner復旧の画面を区別し、既存ownerを再作成しない。実装前の設計目標は[管理画面遷移](ADMIN-SCREEN-FLOW.md)と[初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)に従い、現行UIとは区別する。
+
 認証の仕様正本は [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md#accepted-target-passkey-first-authentication-and-identity-management) に従う。Desktop／Mobile共通の操作語彙として、Passkeyの登録・確認・名称変更・削除、連携OIDC、セッション・OAuth同意、管理者のOIDC設定を明確に分ける。Passkeyログインを基本とし、外部OIDC未設定でも利用できる。追加認証のために原稿のローカル下書きを消してはならない。
 
 認証状態は「未登録」「利用可能」「検証中」「失敗」「再認証が必要」「回復が必要」を区別する。未検証のOIDC設定を利用可能と表示しない。Client Secretと回復用grantは再表示・永続ブラウザー保存せず、最後の利用可能な本人認証手段を削除させない。セキュリティ操作はサーバーでowner確認、fresh reauthentication、CSRF対策を強制し、非ownerはUIを迂回しても変更できない。
