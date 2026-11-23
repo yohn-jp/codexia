@@ -67,6 +67,12 @@ function authStatusTrue(data: unknown): boolean {
   return Boolean(data && typeof data === "object" && "status" in data && data.status === true);
 }
 
+async function confirmOwnerSessionToken(): Promise<string | null> {
+  if (await checkOwnerSession() !== "owner") return null;
+  const current = authData<BetterAuthSessionPayload>(await authClient.getSession(), "Better Auth session is unavailable");
+  return current?.session?.token ?? null;
+}
+
 function errorText(error: unknown): string {
   if (error instanceof Error) return `${error.name} ${error.message}`;
   if (!error || typeof error !== "object") return String(error ?? "");
@@ -157,6 +163,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
   const [capabilityLoading, setCapabilityLoading] = useState(true);
   const [newPasskeyName, setNewPasskeyName] = useState("");
   const [addingPasskey, setAddingPasskey] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
   const [busyPasskeyId, setBusyPasskeyId] = useState<string | null>(null);
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [revokingOtherSessions, setRevokingOtherSessions] = useState(false);
@@ -189,10 +196,6 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
         }
       }
       try {
-        if (await checkOwnerSession() !== "owner") {
-          if (active) setAccess({ status: "unavailable", reason: "session" });
-          return;
-        }
         const clientReady = Boolean(
           passkeyClient &&
           typeof passkeyClient.listUserPasskeys === "function" &&
@@ -208,8 +211,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
           if (active) setAccess({ status: "unavailable", reason: "client" });
           return;
         }
-        const current = authData<BetterAuthSessionPayload>(await authClient.getSession(), "Better Auth session is unavailable");
-        const token = current?.session?.token;
+        const token = await confirmOwnerSessionToken();
         if (!token) {
           if (active) setAccess({ status: "unavailable", reason: "session" });
           return;
@@ -357,6 +359,36 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
     }
   };
 
+  const reauthenticateWithPasskey = async () => {
+    if (access.status !== "ready" || reauthenticating) return;
+    setReauthenticating(true);
+    setPasskeyError("");
+    setPasskeyMessage("");
+    try {
+      const result = authData<BetterAuthSessionPayload>(await authClient.signIn.passkey(), "Better Auth response is unavailable");
+      const token = await confirmOwnerSessionToken();
+      if (!token || token === access.currentSessionToken || token !== result?.session?.token) {
+        throw new TypeError("Better Auth did not confirm the new owner session");
+      }
+      setAccess({ ...access, currentSessionToken: token });
+      await loadSessions();
+      setPasskeyMessage("パスキーで再認証しました。");
+    } catch (error) {
+      if (outcomeWasUnconfirmed(error)) {
+        const token = await confirmOwnerSessionToken().catch(() => null);
+        if (token) {
+          setAccess({ ...access, currentSessionToken: token });
+          await loadSessions();
+        } else {
+          setAccess({ status: "unavailable", reason: "session" });
+        }
+      }
+      setPasskeyError(securityErrorMessage(error, "パスキーでの再認証を確認できませんでした。"));
+    } finally {
+      setReauthenticating(false);
+    }
+  };
+
   const openDialog = () => {
     const dialog = dialogRef.current;
     if (!dialog || dialog.open) return;
@@ -378,14 +410,22 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
         </section>;
   }
 
+  const SectionHeading = placement === "console" ? "h2" : "h3";
   const currentSessionListed = sessions.some((session) => session.token === access.currentSessionToken);
   const otherSessions = sessions.filter((session) => session.token !== access.currentSessionToken);
 
   const content = (
     <div className="identity-management__content">
       <section className="identity-management__section" aria-labelledby={`${panelId}-passkeys`}>
-        <h3 id={`${panelId}-passkeys`}>パスキー</h3>
+        <SectionHeading id={`${panelId}-passkeys`}>パスキー</SectionHeading>
         <p className="identity-management__intro">登録した認証器を管理します。追加・改名・削除には最近のサインインが必要です。</p>
+        {placement === "console" && passkeySupported && passkeys.length > 0 && (
+          <button className="identity-management__secondary" type="button"
+            disabled={reauthenticating || addingPasskey || busyPasskeyId !== null || busySessionId !== null || revokingOtherSessions}
+            onClick={() => void reauthenticateWithPasskey()}>
+            {reauthenticating ? "再認証しています…" : "パスキーで再認証"}
+          </button>
+        )}
         <div className="identity-management__add-form">
           <h4 id={`${panelId}-add-passkey-title`}>パスキーを追加</h4>
           {passkeySupported ? (
@@ -398,12 +438,12 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
                   type="text"
                   autoComplete="off"
                   maxLength={80}
-                  disabled={addingPasskey || busyPasskeyId !== null}
+                  disabled={reauthenticating || addingPasskey || busyPasskeyId !== null}
                   value={newPasskeyName}
                   onChange={(event) => setNewPasskeyName(event.target.value)}
                   aria-describedby={`${panelId}-passkey-name-help`}
                 />
-                <button className="identity-management__primary" type="submit" disabled={addingPasskey || busyPasskeyId !== null || capabilityLoading}>
+                <button className="identity-management__primary" type="submit" disabled={reauthenticating || addingPasskey || busyPasskeyId !== null || capabilityLoading}>
                   {addingPasskey ? "認証器を確認中…" : "パスキーを追加"}
                 </button>
               </div>
@@ -429,7 +469,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
                 key={passkey.id}
                 passkey={passkey}
                 canDelete={passkeys.length > 1}
-                disabled={busyPasskeyId !== null || addingPasskey}
+                disabled={reauthenticating || busyPasskeyId !== null || addingPasskey}
                 onRename={renamePasskey}
                 onDelete={deletePasskey}
               />
@@ -439,7 +479,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
       </section>
 
       <section className="identity-management__section" aria-labelledby={`${panelId}-sessions`}>
-        <h3 id={`${panelId}-sessions`}>セッション</h3>
+        <SectionHeading id={`${panelId}-sessions`}>セッション</SectionHeading>
         <p className="identity-management__intro">サインイン中のブラウザーや端末を確認して、不要なセッションを終了できます。</p>
         {sessionError ? <p className="identity-management__error" role="alert">{sessionError}</p> : null}
         {sessionMessage ? <p className="identity-management__message" role="status">{sessionMessage}</p> : null}
@@ -458,13 +498,13 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
                 <p id={`${panelId}-revoke-other`}>現在のセッションを残して、ほかのセッションを終了しますか？</p>
                 <div className="identity-management__actions">
                   <button className="identity-management__secondary" type="button" disabled={revokingOtherSessions} onClick={() => setConfirmingOtherSessions(false)}>キャンセル</button>
-                  <button className="identity-management__danger" type="button" disabled={revokingOtherSessions || busySessionId !== null} onClick={() => void revokeOtherSessions()}>
+                  <button className="identity-management__danger" type="button" disabled={reauthenticating || revokingOtherSessions || busySessionId !== null} onClick={() => void revokeOtherSessions()}>
                     {revokingOtherSessions ? "終了しています…" : "他のセッションを終了する"}
                   </button>
                 </div>
               </div>
             ) : (
-              <button className="identity-management__secondary" type="button" disabled={busySessionId !== null} onClick={() => setConfirmingOtherSessions(true)}>
+              <button className="identity-management__secondary" type="button" disabled={reauthenticating || busySessionId !== null} onClick={() => setConfirmingOtherSessions(true)}>
                 他のすべてのセッションを終了
               </button>
             ))}
@@ -475,7 +515,7 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
                   session={session}
                   current={session.token === access.currentSessionToken}
                   currentSessionKnown={currentSessionListed}
-                  disabled={busySessionId !== null || revokingOtherSessions}
+                  disabled={reauthenticating || busySessionId !== null || revokingOtherSessions}
                   busy={busySessionId === session.id}
                   onRevoke={revokeSession}
                 />

@@ -360,6 +360,9 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     ownerClientIds.splice(0, ownerClientIds.length, registered.webClientId, registered.iosClientId);
     runtimeConfig.oauthIntrospectionClientId = registered.introspectionClientId;
 
+    // Construct the serving runtime with its final owner subject, as production does.
+    await runtime.pool.end();
+    runtime = createBetterAuthRuntime(runtimeConfig);
     const productionSignIn = await runtime.auth.api.signInSocial({
       body: { provider: "workspace-oidc", callbackURL: "/oauth/login", requestSignUp: true }, asResponse: true,
     });

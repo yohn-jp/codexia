@@ -1,5 +1,8 @@
 .codexia-console {
-  min-height: 100vh;
+  /* The Ionic styles bundled with Desktop fix the body in place. */
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
   padding: clamp(1rem, 3vw, 2.25rem);
   color: var(--ink);
   background: var(--page-bg);
