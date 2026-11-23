@@ -34,8 +34,10 @@ function show(diagram, updateHash = true) {
   title.textContent = diagram.title;
   groupTitle.textContent = diagram.groupLabel;
   kind.textContent = diagram.kind;
+  const sourceShaText = document.getElementById('source-sha').textContent.trim();
+  const sourceSha = /^[0-9a-fA-F]{7,40}$/.test(sourceShaText) ? sourceShaText : 'HEAD';
   sourceLink.href = 'https://github.com/yohn-jp/codexia/blob/' +
-    document.getElementById('source-sha').textContent + '/' +
+    sourceSha + '/' +
     diagram.markdown.split('/').map(encodeURIComponent).join('/') + '#L' + diagram.line;
   svgLink.href = diagram.image;
   image.hidden = true;
