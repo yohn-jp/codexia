@@ -216,6 +216,8 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
+    // Fail closed on changed JS/TS sources; native Swift-only PRs retain their Xcode owner.
+    if (file === 'biome.json' || /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file)) add('biome-ci');
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
@@ -386,6 +388,7 @@ export function verificationPlanOutputs(plan) {
   validateVerificationPlan(plan);
   return {
     plan: JSON.stringify(plan),
+    biome: String(plan.groups.includes('biome')),
     unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
     types: JSON.stringify(['sources', 'tests', 'trace'].filter(id => plan.groups.includes(`types-${id}`))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),

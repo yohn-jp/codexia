@@ -43,6 +43,7 @@ export function taskGroup(task) {
 
 export function taskWorkflowJob(task) {
   const group = taskGroup(task);
+  if (group === 'biome') return 'biome';
   if (group.startsWith('unit-')) return 'unit';
   if (group.startsWith('types-')) return 'types';
   if (group.startsWith('browser-')) return 'browser';
@@ -71,6 +72,7 @@ export function taskInvocation(task, executable = process.execPath) {
   assert.ok(typeof task === 'string' && task.length > 0, 'Task name is required');
   const overrides = taskOverrides(task);
   const environmentKeys = Object.keys(overrides).sort();
+  if (task === 'biome-ci') return { executable, arguments: ['scripts/ci/biome/check.mjs'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (task === 'requirements-trace') return {
     executable,
@@ -111,6 +113,7 @@ function taskEnvironment(task, group, runtime) {
     CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
   });
+  if (task === 'biome-ci') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
   if (task === 'db-contract') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
   if (task.startsWith('browser-')) {
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
@@ -136,6 +139,7 @@ function taskProducerRecipe(task) {
   }
   const external = [];
   if (task.startsWith('unit-') || task.startsWith('browser-')) external.push(POSTGRES_CI_IMAGE);
+  if (task === 'biome-ci') external.push('@biomejs/biome@2.6.8');
   if (task === 'db-contract') {
     const toolchain = DB_CONTRACT_TOOLCHAIN;
     const archive = entry => `${entry.url}#sha256=${entry.sha256}`;

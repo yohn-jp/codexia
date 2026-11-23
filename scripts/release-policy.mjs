@@ -72,7 +72,7 @@ export function assertVerificationLeafJobs(jobs) {
 // GitHub emits these literal matrix-name placeholders when entire families are skipped.
 // The compact path requires positive certification-step evidence, never skipped status alone.
 export const REUSED_MAIN_SKIPPED_JOBS = Object.freeze([
-  'full-model-oci', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
+  'full-model-oci', 'biome', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
   'build-${{ matrix.profile }}', 'oci-${{ matrix.profile }}', 'browser-${{ matrix.group }}',
 ]);
 export const REUSED_MAIN_CERT_STEP = 'Certify reused merged PR proof';

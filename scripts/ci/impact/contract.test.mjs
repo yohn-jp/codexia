@@ -15,7 +15,7 @@ const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.y
 const fullModelWorkflow = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
 test('the certified graph covers every declared obligation within the twenty-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
-  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -133,7 +133,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
-  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci'].includes(id))) {
+  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'biome'].includes(id))) {
     assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
@@ -141,9 +141,13 @@ test('browser groups depend on profile producers; independent groups cannot canc
     assert.ok(job.steps.some(step => step.run?.includes('group.mjs')));
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.if === 'always()'));
   }
+  const biome = workflow.jobs.biome;
+  assert.deepEqual(biome.needs, ['plan']);
+  assert.equal(biome.permissions['security-events'], 'write');
+  assert.equal(biome.steps.find(step => step.name === 'Publish Biome Lint results to Code Scanning').with.category, 'biome-lint');
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, '${{ always() && !cancelled() }}');
-  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser'].toSorted());
+  assert.deepEqual(gate.needs.toSorted(), ['plan', 'biome', 'unit', 'types', 'build', 'oci', 'browser'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.name === 'Download selected plan by exact artifact ID');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
@@ -348,7 +352,7 @@ test('compact main proof is resolved only on main push, skips all heavy families
   assert.equal(reuse.run, 'node scripts/ci/certification/reuse-merged-pr.mjs plan');
   assert.equal(plan.permissions.actions, 'read');
   assert.equal(plan.permissions['pull-requests'], 'read');
-  const families = ['unit', 'types', 'build', 'oci', 'browser'];
+  const families = ['biome', 'unit', 'types', 'build', 'oci', 'browser'];
   for (const name of families) assert.match(workflow.jobs[name].if, /needs\.plan\.outputs\.reuse != 'true'/);
   assert.deepEqual(REUSED_MAIN_SKIPPED_JOBS, ['full_model_oci', ...families].map(name => workflow.jobs[name].name));
   const gate = workflow.jobs.certification;

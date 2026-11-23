@@ -29,13 +29,14 @@ export const VERIFICATION_TASKS = [
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
-  'coverage', 'architecture-g5', 'requirements-trace',
+  'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace',
 ];
 // Execution groups batch work without removing any validation obligation.
 // Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
+  biome: ['biome-ci'],
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`).concat('db-contract'),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5'],
@@ -62,7 +63,7 @@ export function requiredBuildProfile(group) {
 }
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
-export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'unit', 'types', 'build', 'oci', 'browser']);
+export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'biome', 'unit', 'types', 'build', 'oci', 'browser']);
 
 /** @param {string[]} tasks */
 export function requiresWorkspacePreparation(tasks) {
