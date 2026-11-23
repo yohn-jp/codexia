@@ -151,6 +151,8 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
   assert.match(await page.locator('#expansion-list').innerText(), /beta/);
   await page.setViewportSize({ width: 320, height: 800 });
+  assert.equal(await page.evaluate(() => window.innerWidth), 320, 'the mobile disclosure assertion uses a real 320px viewport');
+  await page.waitForSelector('#file-explorer:not([open])');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'long source evidence should wrap within 320px shell');
   assert.equal(await page.locator('#file-explorer').evaluate(element => element.open), false, 'mobile file explorer starts collapsed so the selected graph remains primary');
   await page.locator('.file-explorer-summary').click();
