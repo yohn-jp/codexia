@@ -47,11 +47,14 @@
 | REQ-UI-003 | [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md) | app/src/App.tsx、app/src/components/、app/src/shells/ | ui-v1.acceptance.spec.ts。全CTRL ID未照合 | PARTIAL |
 | REQ-UI-004 | [UX](../design/UX-CONTRACT.md) | app/src/editor/、app/src/shells/ | core.acceptance.spec.ts。IME実機は別証拠 | MAPPED_UNVERIFIED |
 | REQ-UI-005 | [UX](../design/UX-CONTRACT.md) | app/src/components/、app/src/shells/ | redesign-visual.acceptance.spec.ts。支援技術は別証拠 | PARTIAL |
+| REQ-UI-006 | [XState machine](../design/XSTATE-STATE-MACHINE-CONTRACT.md)・[Screen Atlas](../design/SCREEN-STATE-ATLAS.md) | machine未導入。原稿保存/復旧は既存app controllerが観測開始点 | XST-001〜006。v5 actor/machineと独立のブラウザー受入が未実施 | UNMAPPED |
 | REQ-EXT-001 | [External IF](../architecture/EXTERNAL-INTERFACES.md) | deploy/cloudflare/ui-routes.json、public-protocol-paths.json、terraform/ | scripts/verify-deployment-config.mjs | MAPPED_UNVERIFIED |
 | REQ-EXT-002 | [External IF](../architecture/EXTERNAL-INTERFACES.md) | packages/contracts/src/oauth-metadata.ts、packages/api/src/better-auth.ts、modules/mcp/src/http.ts | oauth-metadata.test.ts | MAPPED_UNVERIFIED |
 | REQ-OPS-001 | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | deploy/ansible/site.yml、auth-runtime.yml | test-auth-runtime-integration.sh。setup-onlyが未実装 | PARTIAL |
 | REQ-OPS-002 | [Update flow](../deployment/UPDATE-FLOW.md) | deploy/update-compatibility.json、frontend-compatibility.json、.github/workflows/backend-release.yml | deploy/ansible/test-push-app-lifecycle.sh | MAPPED_UNVERIFIED |
 | REQ-OPS-003 | [Backup](../deployment/BACKUP.md) | deploy/backup/、deploy/ansible/restore-drill.yml | 隔離復元の実行証拠未取得 | MAPPED_UNVERIFIED |
+| REQ-OPS-004 | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Admin flow](../design/ADMIN-SCREEN-FLOW.md) | /console/backups、config/secret store、Fastify BKC-001〜007は全て目標・未実装 | BKC-T01〜04/09/10、CON-30〜32とCTRL | UNMAPPED |
+| REQ-OPS-005 | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md) | rootless executor、BKC-008〜010、protected host lock/durable runは追加未実装 | BKC-T05〜10、CON-33/34、隔離host receipt | UNMAPPED |
 | REQ-QUAL-001 | [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) | tests/e2e/、tests/integration/、packages/配下test | 義務別の証明力は未監査 | PARTIAL |
 | REQ-QUAL-002 | [CI/CD](CI-CD.md) | .github/workflows/verify.yml、scripts/ci-impact.mjs | exact-sourceのrun/artifact未結合 | MAPPED_UNVERIFIED |
 | REQ-QUAL-003 | [UX](../design/UX-CONTRACT.md) | scripts/performance/ | 条件固定の計測証拠未取得 | UNMAPPED |
