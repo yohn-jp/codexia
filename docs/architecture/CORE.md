@@ -8,7 +8,7 @@ PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodi
 
 The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines standalone Better Auth OAuth admission and object-level authorization. [Push deployment](../deployment/PUSH-DEPLOYMENT.md) describes owner enrollment and approved activation.
 
-Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Cloudflare Access can restrict entry to the static UI. Better Auth provides author identity and issues OAuth access tokens to registered MCP clients. The API enforces each MCP client's project assignments and operation scopes. Core coordinates module snapshots and approved mutations through Persistence, and the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
+Desktop React Web and native SwiftUI iOS are separate UI implementations using the same authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Cloudflare Access can restrict entry to the static UI. Better Auth provides author identity and issues OAuth access tokens to registered MCP clients. The API enforces each MCP client's project assignments and operation scopes. Core coordinates module snapshots and approved mutations through Persistence, and the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |
 | --- | --- |

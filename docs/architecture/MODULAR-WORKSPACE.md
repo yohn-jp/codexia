@@ -2,7 +2,7 @@
 
 ## 1. Product decision
 
-The interface is assembled from movable, replaceable components over PostgreSQL projects, documents, revisions, Knowledge and Evidence. Desktop and Mobile retain separate shells and share authoring and recovery. Search, terminology, NLP and Semantic remain optional modules on top of Core.
+The interface is assembled from movable, replaceable components over PostgreSQL projects, documents, revisions, Knowledge and Evidence. The adopted product target is Desktop React Web and independent native SwiftUI iOS. They **share Core/API/Revision contracts but not frontend shells, UI components or local authoring/recovery implementations**. The existing React Mobile shell is legacy until cutover. Search, terminology, NLP and Semantic remain optional modules on top of Core.
 
 The three product goals are:
 
@@ -83,9 +83,9 @@ Minimum layout semantics:
 
 - Arbitrary user reordering and placement across allowed containers; horizontal/vertical splits, tab groups, resizing and hiding.
 - Presets for **Writing**, **Research** and **Review** as initial compositions (exact default panel selections are UX configuration, not Core semantics).
-- Save and restore a custom workspace, distinguish desktop/mobile arrangements, and persist schema version.
+- Save and restore the Desktop Web custom workspace and schema version. Native SwiftUI has independent navigation/layout state, not synchronized browser layout preferences.
 - Unknown/disabled/uninstalled contributions are omitted from rendering with a recoverable placeholder or reversible layout fallback; other panels remain usable.
-- Mobile offers accessible alternative panel navigation without assuming desktop drag gestures; keyboard controls and focus restoration remain supported.
+- Native iOS supplies its own accessible SwiftUI navigation and sheet/focus behavior; no Ionic/React Mobile panel implementation or viewport-sized React validation is required.
 - Loading/closing/switching panels cancels pending requests, disposes module mounts and releases optional resources; unsaved manuscript drafts are not discarded.
 
 The layout schema must be validated before use, including depth, size, IDs, duplicate panel instances and permission to mount each contribution. Malformed persisted state falls back to an accessible Core preset without deleting the prior state until the user explicitly saves a replacement.

@@ -2,20 +2,20 @@
 
 **詳細画面設計:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[画面状態遷移図](SCREEN-STATE-ATLAS.md)、[URL/API認可設計](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) が初回SETUP、owner-session管理、OIDC/OAuth、運用プレーンの権限を区別する。
 
-**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile 内の認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
+**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile React 内の認証・セキュリティ UI は**旧実装**であり、Desktop WebとSwiftUI Native iOSが採用製品である。Nativeの本人認証・設定UIは[iOS SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)で独立して実装する。現行Webの認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）
 
 [既存の本人セキュリティ画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#admin-1)
 
 - **Desktop:** 原稿 Shell の「認証・セキュリティ」から dialog を開く。閉じると元の原稿に戻る。
-- **Mobile:** ヘッダー「設定」→ `view=settings` →「認証とセキュリティ」を表示し、元の執筆面に戻る。
+- **iOS Native目標:** SwiftUI設定・OS認証から許可された本人操作へ移動する。旧Mobile Reactの`view=settings`は廃止対象でありNative UIの正本ではない。
 - **前提:** API session が認証済み、作者 scope が `owner`、Passkey runtime と Better Auth session が利用可能。いずれかが欠けた場合は UI を非表示または利用不能として示す。UI を非表示にすることはサーバー側認可の代替ではない。
 - **本人認証:** Better Auth session と必要な fresh reauthentication をサーバーで検証する。Passkey ceremony は安全な origin と利用者による明示操作を必要とする。
 
 ```mermaid
 flowchart TD
-    ENTRY["Desktopの認証・セキュリティ / Mobile設定"] --> GATE{"owner + 有効session + Passkey runtime?"}
+    ENTRY["Desktop Webの認証・セキュリティ / iOS Native設定（目標）"] --> GATE{"owner + 有効session + Passkey runtime?"}
     GATE -->|認証不可・owner以外| DENY["非表示 / 権限エラー<br/>原稿へ戻る"]
     GATE -->|client/session未整備| UNAVAILABLE["利用不可<br/>再認証や再読込を案内"]
     GATE -->|はい| HOME["認証とセキュリティ"]
@@ -101,7 +101,7 @@ flowchart LR
 | 管理操作中に原稿の未保存変更 | 元の journal と editor を保護してから遷移 | 入力・作者 scope |
 | 公開経路・VM 操作で障害 | Web UI に迂回権限を与えず、管理プレーンの停止/復旧手順へ | 既存サービスとバックアップ |
 
-**受入条件:** 実ブラウザーで Desktop dialog、Mobile settings、owner/non-owner、Passkey 登録/名称変更/最後の1個削除拒否、別セッション revoke、認証失効・ネットワーク障害、元の原稿への安全な復帰を確認する。外部 IdP / OAuth 管理は実装後に別途 E2E と本人同一性・CSRF・権限拒否を検証する。Web に運用コンソールがないことは欠落ではなく信頼境界の決定である。
+**受入条件:** Desktop Webの実ブラウザーとiOS Nativeの実機で、各設定・本人操作、owner/non-owner、Passkey 登録/名称変更/最後の1個削除拒否、別セッション revoke、認証失効・ネットワーク障害、元の原稿への安全な復帰を確認する。外部 IdP / OAuth 管理は実装後に別途 E2E と本人同一性・CSRF・権限拒否を検証する。Web に運用コンソールがないことは欠落ではなく信頼境界の決定である。
 
 ## 管理コンソールのルート・認可と情報設計（合意済み目標）
 
@@ -195,17 +195,17 @@ flowchart TD
 | 本番公開待ち | 構築担当に必要な承認を案内、状態を更新 | UIからSSH/Ansible/デプロイ権限を行使しない。公開が失敗しても認証DBを初期化しない |
 | 完了・サインイン | /consoleへ進む、認証設定を確認 | sessionがない場合は通常のPasskeyログインへ誘導し、登録処理を再開しない |
 
-**UX品質:** Desktop/Mobile Webで同じ深いURLを開けること。幅320px、キーボード操作、可視フォーカス、スクリーンリーダーの状態通知、非同期処理中の重複送信防止と再開可能性を満たす。初期登録キーは通常のサインインパスワードではなく一回限りの導入資格情報として扱う。管理コンソールへ遷移するときも執筆中の下書きを破棄しない。OAuthのclient secretや初期キーをフロントエンドの配信物へ同梱しない。
+**UX品質:** Desktop Webの`/console`で深いURL・再読込・キーボード操作・可視フォーカス・スクリーンリーダーの状態通知を確認する。iOS NativeではSwiftUI画面遷移とOS認証、VoiceOver、IME、再開を物理iPhoneで独立検証する。Mobile React viewport E2Eを要求しない。非同期処理中の重複送信防止と再開可能性を満たす。初期登録キーは通常のサインインパスワードではなく一回限りの導入資格情報として扱う。管理コンソールへ遷移するときも執筆中の下書きを破棄しない。OAuthのclient secretや初期キーをフロントエンドの配信物へ同梱しない。
 
 ### 管理トップと日常的な設定変更のUX
 
-`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）、**バックアップ**（S3保管先・検証・保全履歴）の四つの操作群を区別する。現在のDesktop dialogとMobile設定の実装を再利用・移行し、同じAPI状態を異なる画面で独立して書き換える実装を新設しない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
+`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）、**バックアップ**（S3保管先・検証・保全履歴）の四つの操作群を区別する。Webは現在のDesktop dialogを`/console`へ移行する。旧Mobile React設定の再利用は要求しない。iOS NativeはSwiftUI独立UIと同じAPI契約を使用し、別の認証DB・権限正本を作らない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
 
-既存のDesktop/Mobileの「認証・セキュリティ」入口は、実装移行後は`/console/security`への案内を正規導線とし、ログイン/戻り先は同一origin内の安全な既知ルートのみ許す。現在はdialog/settingsとして実装されており、`/console`へ切り替えたと主張しない。
+既存のDesktop Webの「認証・セキュリティ」入口は、実装移行後は`/console/security`への案内を正規導線とし、ログイン/戻り先は同一origin内の安全な既知ルートのみ許す。現在Desktopはdialog、旧Mobileはsettingsとして実装されており、`/console`へ切り替えたと主張しない。
 
 ## 新設コンソールの受入条件（実装後に検証）
 
-- Workersの`/console`、`/console/setup`、`/console/security`、`/console/identity`がDesktop/Mobile Webで直接訪問・再読込でき、SPAの404にならない。
+- Workersの`/console`、`/console/setup`、`/console/security`、`/console/identity`はDesktop Webで直接訪問・再読込でき、SPAの404にならない。iOS Nativeは別の画面/認証導線で実機受入を行い、Mobile React WebとのURL互換を要求しない。
 - 新規DBではキー検証からPasskey確定、登録後の同一キー拒否、API応答不明からの状態照合、本人の通常ログインまで実ブラウザーで確認する。
 - 既存owner、復旧中、キー失効・期限切れ・競合、非owner、API/DB障害、WebAuthn不正origin/UV不備をすべて拒否し、公開経路が作業APIへの抜け道にならない。
 - セキュリティ設定はログイン維持・再認証・最後のPasskey削除拒否・セッション失効・原稿へ戻る際の下書き保護を通す。
@@ -249,4 +249,4 @@ flowchart TD
 | DRILL_PASSED | 独立した復旧hostで実データ契約を満たす復号・復元を観測した別の証拠。REMOTE_VERIFIEDと混同しない |
 | DISABLED / DEGRADED | 既存のオフVM保全を削除しない。required保管先の停止は保護条件を検証し拒否する |
 
-本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Mobile/Web 320px・キーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。**現時点では画面・API・executorは未実装**。
+本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Desktop Webのキーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。iOS Nativeは実機/Simulatorで独立検証し、Mobile React 320px専用E2Eは要求しない。**現時点では画面・API・executorは未実装**。
