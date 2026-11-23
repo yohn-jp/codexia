@@ -172,6 +172,6 @@ test('review finalization rejects symlinked files before updating integrity meta
       renameSync(original, path);
     }
     assert.deepEqual(finalize(site, origin), { finalizedReviews: 1 });
-    assert.equal(verify(site, origin).routes, 8);
+    assert.equal(verify(site, origin).routes, 9);
   } finally { cleanup(site); }
 });
