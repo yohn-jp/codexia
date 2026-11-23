@@ -182,6 +182,7 @@ jobs:
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core"
           node scripts/pages-smoke.mjs "$RUNNER_TEMP/audit-site" \
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM" "$PAGES_SCREENSHOTS"
+          CODEXIA_PAGES_SITE="$RUNNER_TEMP/audit-site" node --test scripts/audit/specifications.browser.mjs
       - name: Verify manifests, links and public artifact scope
         run: node scripts/audit/portal.mjs verify "$RUNNER_TEMP/audit-site" "$PAGES_ORIGIN"
       - name: Upload Chromium screenshots for PR review

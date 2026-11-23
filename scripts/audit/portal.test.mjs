@@ -175,3 +175,23 @@ test('review finalization rejects symlinked files before updating integrity meta
     assert.equal(verify(site, origin).routes, 10);
   } finally { cleanup(site); }
 });
+
+test('records and validates LikeC4 source, lock and published SVG provenance',()=>{
+  const site=fixture();
+  try {
+    const atlasPath=join(site,'architecture','manifest.json');
+    const atlas=JSON.parse(readFileSync(atlasPath,'utf8'));
+    const model=readFileSync('docs/architecture/likec4/model.likec4');
+    atlas.diagrams.push({id:'system-1', image:'svg/system-1.svg', sourceModel:'docs/architecture/likec4/model.likec4', sourceModelSha256:digest(model)});
+    put(atlasPath,JSON.stringify(atlas));
+    put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    const registry=generate(site,sha,origin);
+    assert.equal(registry.likec4.sourceSha,sha);
+    assert.equal(registry.likec4.model.sha256,digest(model));
+    assert.equal(registry.likec4.generator.version,'1.61.0');
+    assert.equal(registry.likec4.generator.lockSha256,digest(readFileSync('scripts/architecture/package-lock.json')));
+    verify(site,origin);
+    put(join(site,'architecture','svg','system-1.svg'),'<svg>changed</svg>');
+    assert.throws(()=>verify(site,origin),/LikeC4.*digest/u);
+  } finally {cleanup(site);}
+});

@@ -8,6 +8,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
 import { verifySpecifications } from './specifications.mjs';
+import { parseGeneratedMermaid } from '../architecture/contract.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const CANONICAL_ORIGIN = 'https://yohn-jp.github.io/codexia';
@@ -43,6 +44,29 @@ function page(site, route) {
   return join(site, path);
 }
 
+function likec4Provenance(site, sourceSha) {
+  const atlasPath = join(site, 'architecture', 'manifest.json');
+  if (!existsSync(atlasPath)) return undefined;
+  const atlas = JSON.parse(readPageFile(atlasPath, 'utf8'));
+  const diagram = atlas.diagrams?.find(item => item.id === 'system-1');
+  if (!diagram) return undefined;
+  assert.equal(atlas.sourceSha, sourceSha, 'LikeC4 Atlas source mismatch');
+  const paths = { model:'docs/architecture/likec4/model.likec4', derivative:'docs/architecture/likec4/generated/system-overview.mmd', lock:'scripts/architecture/package-lock.json' };
+  const atSource = path => execFileSync('git', ['show', `${sourceSha}:${path}`]);
+  const model = atSource(paths.model), derivative = atSource(paths.derivative), lock = atSource(paths.lock);
+  const parsed = parseGeneratedMermaid(derivative.toString('utf8'));
+  assert.equal(parsed.sourceSha256, sha256(model), 'LikeC4 derivative source digest mismatch');
+  assert.equal(diagram.sourceModel, paths.model, 'LikeC4 model path mismatch');
+  assert.equal(diagram.sourceModelSha256, sha256(model), 'LikeC4 model digest mismatch');
+  assert.equal(diagram.image, 'svg/system-1.svg', 'LikeC4 SVG path mismatch');
+  const packageLock = JSON.parse(lock.toString('utf8'));
+  const version = packageLock.packages?.['']?.dependencies?.likec4;
+  assert.equal(version, '1.61.0', 'Unexpected LikeC4 generator version');
+  assert.equal(packageLock.packages?.['node_modules/likec4']?.version, version, 'LikeC4 lock version mismatch');
+  const svg = readPageFile(join(site,'architecture','svg','system-1.svg'));
+  return { sourceSha, generatedAt: new Date().toISOString(), publication:'public', model:{path:paths.model,sha256:sha256(model)}, derivative:{path:paths.derivative,sha256:sha256(derivative)}, generator:{name:'likec4',version,lockPath:paths.lock,lockSha256:sha256(lock)}, output:{path:'architecture/svg/system-1.svg',sha256:sha256(svg)} };
+}
+
 function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
@@ -66,7 +90,8 @@ function makeRoutes(site, sourceSha, origin, audit) {
     const review=audit.reviews[sha], outputs=JSON.parse(readFileSync(join(site,'reviews',sha,'manifest.json'),'utf8')).outputs;
     routes.push({ route:`/reviews/${sha}/`,label:`Review Materials ${sha.slice(0,12)}`,description:'OCR-selected review input materials. These are not AI review findings.',category:'Audit',sourceSha:sha,generationStatus:'ready',coverageStatus:review.status,dataKind:'branch-head-snapshot',observedAt:audit.observedAt,externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sha}`,internalLinks:[`../../audit/#sha-${sha}`,'manifest.json',...outputs.map(item=>item.name)] });
   }
-  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), routes };
+  const likec4=likec4Provenance(site,sourceSha);
+  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), ...(likec4 ? {likec4} : {}), routes };
 }
 
 function renderPortal(manifest,audit) {
@@ -345,6 +370,14 @@ function validateRegistry(site,manifest,audit,origin) {
   if (architecture.generationStatus==='ready') {
     const atlas=JSON.parse(readFileSync(join(site,'architecture','manifest.json'),'utf8'));
     assert.ok(atlas.sourceSha===sourceSha,'Architecture source SHA differs from Pages build');
+    const expectedLikec4=likec4Provenance(site,sourceSha);
+    if (expectedLikec4) {
+      assert.ok(manifest.likec4, 'LikeC4 publication provenance missing');
+      const {generatedAt:ignored, ...expected}=expectedLikec4;
+      const {generatedAt, ...recorded}=manifest.likec4;
+      assert.ok(!Number.isNaN(Date.parse(generatedAt)), 'LikeC4 generation time invalid');
+      assert.deepEqual(recorded,expected,'LikeC4 publication digest or provenance mismatch');
+    } else assert.equal(manifest.likec4,undefined,'LikeC4 provenance has no published view');
     assert.ok(Array.isArray(atlas.diagrams) && atlas.diagrams.length>0,'Architecture diagram manifest is empty');
     const images=[];
     const diagramIds=[];

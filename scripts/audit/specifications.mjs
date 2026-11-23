@@ -29,6 +29,14 @@ export function packSpecifications(site, output, sourceSha) {
   assert.equal(report.traceability?.TRC02?.status, 'LOCAL_PASS');
   assert.equal(report.traceability?.TRC07?.staticStaging, 'PASSED');
   assert.equal(report.traceability?.TRC07?.browserAcceptance, 'PASSED');
+  const rawNames = ['html', 'json'].flatMap(folder => files(join(output, folder)).map(name => `${folder}/${name}`)).sort();
+  assert.ok(Array.isArray(report.exports?.rawFiles), 'StrictDoc raw inventory missing');
+  assert.deepEqual(report.exports.rawFiles.map(item => item.name), rawNames, 'StrictDoc raw inventory mismatch');
+  for (const item of report.exports.rawFiles) {
+    const bytes = readFileSync(join(output, item.name));
+    assert.equal(bytes.length, item.bytes, 'StrictDoc raw size mismatch');
+    assert.equal(hash(bytes), item.sha256, 'StrictDoc raw digest mismatch');
+  }
   const dest = join(site, 'requirements');
   assert.ok(!existsSync(dest), 'Requirements destination must not exist');
   for (const folder of ['html', 'json']) { files(join(output, folder)); mkdirSync(dest, { recursive: true }); cpSync(join(output, folder), join(dest, folder), { recursive: true, errorOnExist: true }); }
