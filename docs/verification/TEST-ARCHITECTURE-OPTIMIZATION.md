@@ -6,7 +6,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 
 - [Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[MCP-first](../architecture/MCP-FIRST.md)、[UX contract](../design/UX-CONTRACT.md) を製品契約の正本とする。テストは現行実装の追認ではなく、それらの契約を証明する。
 - 実行グラフと認証の正本は [CI/CD architecture](CI-CD.md) とする。
-- PostgreSQL単一正本、明示的作者承認、外部エージェントの権限、固定Snapshot、Core/FullおよびHostedの構成境界を維持する。内部LLM開発凍結、Git永続化の廃止、閉鎖済み移行証拠の保全を変更しない。
+- PostgreSQL単一正本、明示的作者承認、外部エージェントの権限、固定Snapshot、Core/Fullの構成境界を維持する。内部LLM開発凍結、Git永続化の廃止、閉鎖済み移行証拠の保全を変更しない。
 - 既存の全検証義務を維持する。実行単位の再編と検証義務の削減を混同しない。必須テストの移管には旧・新の契約対応表と同等以上の検出能力の証拠が必要である。
 - 検証には隔離した合成データを使用し、実作者データ・秘密値の持ち出しを禁止する。
 
@@ -21,7 +21,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 | コンポーネント | 描画状態・表示条件、イベント、shared controller、エラー表示の結線 | appの既存テスト基盤。必要なら既存ブラウザ環境で局所テスト |
 | 実DB結合・API E2E | 永続化、Revision、トランザクション、認可、冪等、契約間の整合 | persistence-postgres、core、api、MCP integration |
 | ブラウザE2E | UIから正本までの結合、実操作、IndexedDB、再起動、IME、Desktop/Mobile、実ブラウザ差 | tests/e2e、Core/Full、Chromium/WebKit |
-| 実行環境・パッケージング | OCI startup/drain、migration identity、構成分離、native producer、catalog、compose | verify-oci、verify-hosted-native、profile-package |
+| 実行環境・パッケージング | OCI startup/drain、migration identity、Core/Fullの構成分離 | verify-oci、profile-package |
 | 特殊資源・運用受入 | 実モデル推論、native workerの解放、物理端末、バックアップ復元、実配備 | [Integration](INTEGRATION.md)、[OCI](OCI.md)、運用契約 |
 
 単体・コンポーネント層では依存を制御できるが、PostgreSQL、Core/APIやMCPの境界、実ブラウザの永続化を証明するテストで対象そのものをモックへ置換してはならない。外部provider、外部ID基盤などの組織制御外の依存をテストダブルで置き換える場合、代替範囲を明示する。実モデル検証の未実行を、provider non-executionや型検査の成功で代替しない。
@@ -36,7 +36,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 | MCP | named/generic schema、scope決定、結果型 | stdioとStreamable HTTPの実接続、PostgreSQL、認可・provider非実行 |
 | エディタ | Draft状態、revision acknowledgement、ナビゲーション世代、純粋なreducer | 実IMEイベント、保存中入力、遅延応答、reload/別タブ、実IndexedDB quotaと復旧 |
 | ワークスペース | 表示状態、アクション利用可否、画面内操作 | Desktop/Mobileの執筆・参照・復帰、モジュール有無、WebKitの契約 |
-| 配備 | 解析・構成選択・artifact identity | Core/Full実イメージ、native catalogとcore/selected/full compose、起動・停止 |
+| 配備 | 解析・構成選択・artifact identity | Core/Full実イメージ、起動・停止 |
 | モデル | capability leaseや設定の論理分岐 | 実モデルの推論、キャンセル、release、派生索引再構築と置換後の正本照合 |
 
 下位層へ移管するのは、その層で同じ故障を検出できると証明したケースだけとする。例えば遅延保存の世代判定は単体で網羅できても、実エディタのnavigationとIndexedDBの結合に固有の故障はブラウザに残す。
@@ -49,7 +49,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 - Desktop/Mobileで場面を切り替え、参照・修正して原稿へ復帰する。IMEの合成中の遷移、保存保護、明示的navigationの優先を確認する。
 - 外部MCPによる作品参照・提案、作者UIによるレビュー・承認、PostgreSQL適用とreceipt、拒否された操作が正本を変更しないこと。
 - Knowledgeの根拠、Story Contextの視点、Scenarioの仮説と承認後の確定状態。実装の横断的な結合を証明する。
-- Core/Fullとブラウザ固有の差、Hosted catalog・composition、実OCIライフサイクルの証明。
+- Core/Fullとブラウザ固有の差、実OCIライフサイクルの証明。
 
 テスト移管時は、契約ID、旧テスト識別子、検出対象の反例、移管先、実装前の失敗または故障注入、保持するE2E、適用profileを対応付ける。移管先がまだ実行されていない段階で旧テストを削除しない。
 
@@ -102,7 +102,7 @@ Codexiaでは次のモデルを既存契約から定義する。実装の関数�
 - Define required and forbidden transitions, inputs, pre/postconditions and cross-component refinement before implementation. Keep expected outcomes independent from the implementation. Test logical combinations at their cheapest faithful layer; keep representative end-to-end scenarios that expose real integration failures.
 - For a migrated test, map the original contract and counterexample to the new proof and retained E2E scenario. Demonstrate equivalent or stronger detection before removing the original. Never substitute a mocked DB or screenshot for persistence/authorization evidence.
 - Keep deterministic failure seeds, trace and fixture identity. A blocked or skipped case is not a success. For performance and usability, use measured workload and representative author goals, not merely functional assertions; browser emulation is not physical IME/device acceptance.
-- Preserve Core/Full, real PostgreSQL, MCP transport, browser, OCI and Hosted obligations. Measure CI optimization and verify release eligibility according to [CI/CD architecture](CI-CD.md). Do not introduce a new generic framework or formal verifier without a separately justified need.
+- Preserve Core/Full, real PostgreSQL, MCP transport, browser and OCI obligations. Measure CI optimization and verify release eligibility according to [CI/CD architecture](CI-CD.md). Do not introduce a new generic framework or formal verifier without a separately justified need.
 
 ## 6. 設計参考
 
