@@ -231,6 +231,17 @@ NODE
     'Require explicit disposable approvals for pristine database initialization'
   [[ "$(observe_auth_database)" == "$database_before" ]]
   require_inactive_api
+  local orphan_record="$fixture_home/.local/state/codexia-deploy/deployed-release.json"
+  rootless sh -c 'printf "%s\n" "previous release" > "$1"' sh "$orphan_record"
+  if run_deploy head true '' auth-first-install-orphan-record; then
+    echo 'First-activation approvals replaced an orphaned deployment record' >&2
+    return 1
+  fi
+  grep -Fq 'first activation requires a clean API target' "$tmp/auth-first-install-orphan-record.log"
+  [[ "$(rootless cat "$orphan_record")" == 'previous release' ]]
+  [[ "$(observe_auth_database)" == "$database_before" ]]
+  rootless rm -- "$orphan_record"
+  require_inactive_api
   run_application_lifecycle
 
   run_deploy auth-primary false '' auth-verified-activation
@@ -243,6 +254,26 @@ NODE
   set_state better_auth_activation PASS 'isolated HTTPS registration, discovery and protected owner session verified'
 
   prior=$(release_checksums)
+  # Base normally owns the canonical Tunnel unit. Stage the fixture's reviewed
+  # definition again without connecting to the external provider.
+  sudo install -o codexia -g codexia -m 0600 "$repo_root/deploy/quadlet/codexia-tunnel.container" \
+    "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
+  rootless_systemctl daemon-reload
+  local running_before secrets_before
+  running_before=$(rootless_podman inspect --format '{{.Id}} {{.State.StartedAt}}' codexia-db codexia-api)
+  secrets_before=$(rootless_podman secret ls --format '{{.Name}} {{.ID}}' | sort)
+  database_before=$(observe_auth_database)
+  sed 's/codexia_database_initialization_approved: true/codexia_database_initialization_approved: false/' \
+    "$tmp/auth-stage.yml" > "$tmp/bootstrap-online.yml"
+  run_playbook "$tmp/bootstrap-online.yml" bootstrap-online "$tmp/bootstrap.yml"
+  grep -Eq 'localhost[[:space:]]*:.*changed=0([[:space:]]|$)' "$tmp/bootstrap-online.log"
+  [[ "$(rootless_podman inspect --format '{{.Id}} {{.State.StartedAt}}' codexia-db codexia-api)" == "$running_before" ]]
+  [[ "$(rootless_podman secret ls --format '{{.Name}} {{.ID}}' | sort)" == "$secrets_before" ]]
+  [[ "$(observe_auth_database)" == "$database_before" ]]
+  [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
+  [[ "$(rootless_systemctl show --property=ActiveState --value codexia-tunnel.service)" == inactive ]]
+  disable_fixture_tunnel
+
   run_deploy auth-primary false '' auth-same-digest
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary

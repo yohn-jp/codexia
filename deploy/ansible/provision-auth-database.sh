@@ -166,16 +166,7 @@ SQL
     ;;
   initialize-application)
     image="$3"
-    state_dir="$(dirname -- "$lock_file")"
-    pending="$state_dir/deploy-transaction.json"
-    unit="$HOME/.config/containers/systemd/codexia-api.container"
-    [[ ! -e "$pending" && ! -L "$pending" && ! -e "$unit" && ! -L "$unit" ]] ||
-      die 'Application initialization requires a fresh host without an API unit or pending deployment'
-    if podman container exists codexia-api; then
-      die 'Application initialization requires a fresh host without an API container'
-    elif [[ $? != 1 ]]; then
-      die 'Could not verify that no API container exists'
-    fi
+    "$HOME/.local/bin/codexia-require-clean-api-target"
     podman run --rm --pull=missing --network codexia-data \
       --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
       --entrypoint=node "$image" --input-type=module -e '

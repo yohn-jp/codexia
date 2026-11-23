@@ -342,9 +342,9 @@
     scope: user
     state: started
   when: base_runtime_containers.results[0].rc == 1
-- name: Wait for the canonical PostgreSQL service to accept connections
+- name: Wait for the permanent PostgreSQL server to accept TCP connections
   ansible.builtin.command:
-    argv: [podman, exec, codexia-db, pg_isready, -U, codexia_admin, -d, codexia]
+    argv: [podman, exec, codexia-db, pg_isready, -h, 127.0.0.1, -U, codexia_admin, -d, codexia]
   register: base_runtime_pg_ready
   changed_when: false
   retries: 60

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { verifyAuthSchema } from "./auth-schema.js";
 
 export async function verifyBetterAuthClientRegistrations(): Promise<void> {
-  const runtime = createBetterAuthRuntime(readBetterAuthMigrationConfig());
+  const runtime = createBetterAuthRuntime({ ...readBetterAuthMigrationConfig(), readOnlyDatabase: true });
   try {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await verifyAuthSchema(runtime.pool);

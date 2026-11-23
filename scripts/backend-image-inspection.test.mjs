@@ -63,7 +63,7 @@ switch (command) {
     fs.writeFileSync(args[1], process.env.IDENTITY);
     break;
   case 'rm':
-    if (!args.includes('fixture-container')) process.exit(2);
+    if (!args.includes('fixture-container') || !args.includes('--volumes')) process.exit(2);
     fs.unlinkSync(process.env.CONTAINER);
     break;
   default:

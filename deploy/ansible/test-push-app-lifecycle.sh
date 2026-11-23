@@ -159,6 +159,12 @@ observe_runtime() {
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
+  local history_permissions
+  history_permissions=$(rootless_podman exec codexia-api stat -c '%u:%g:%a' /history)
+  [[ "$history_permissions" == '1000:1000:700' ]] || {
+    echo "The mounted API history directory has unexpected owner, group or mode: $history_permissions" >&2
+    return 1
+  }
   api_unit=$(rootless_systemctl show --property=ActiveState --value codexia-api.service)
   quadlet_sha=$(rootless sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
   release_sha=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
@@ -602,28 +608,21 @@ disable_fixture_tunnel() {
 }
 
 run_application_lifecycle() {
-  local failed_image compatible_image compatible_key historical_image historical_status=0
-  compatible_key=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).compatibleCandidateKey')
-  [[ "$compatible_key" == compatible || "$compatible_key" == auth-update ]]
-  compatible_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates[process.argv[1]].image' "$compatible_key")
-  historical_image=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,"utf8")).candidates["historical-token"]?.image ?? ""')
-  if [[ -n "$historical_image" ]]; then
-    [[ "$compatible_key" == auth-update ]]
-    set_state historical_token_release IN_PROGRESS
-    # Isolate the known retired image from the database and all credentials.
-    # It is never passed to the Ansible lifecycle candidate allowlist.
-    rootless_podman run --rm --pull=never --network=none --env CODEXIA_AUTH_MODE=better-auth "$historical_image" \
-      >"$tmp/historical-token-boot.log" 2>&1 || historical_status=$?
-    redact_log "$tmp/historical-token-boot.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/historical-token-boot-bounded.log"
-    [[ "$historical_status" == 1 ]]
-    grep -Fxq 'CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters' "$tmp/historical-token-boot.log"
-    set_state historical_token_release PASS 'publication-verified pre-cutover image rejected OAuth-only startup in a network-isolated container without credentials'
-  fi
+  local initial_key update_key update_image failed_image
+  read -r initial_key update_key update_image < <(node - "$evidence" <<'TRANSITION'
+const fs = require('node:fs');
+const { transition, candidates } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { from, to } = transition;
+if (candidates[from].image === candidates[to].image) throw new Error('The update requires two distinct OCI digests');
+console.log(from, to, candidates[to].image);
+TRANSITION
+  )
+  [[ "$initial_key:$update_key" == prior:head || "$initial_key:$update_key" == head:auth-update ]]
 # Exercise only the canonical production transaction code, with its separate
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
-run_deploy head true
-observe_runtime first-activation head
+run_deploy "$initial_key" true
+observe_runtime first-activation "$initial_key"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
@@ -633,17 +632,17 @@ const fs=require('node:fs');const [path,artifact,validation,checksum]=process.ar
 BACKUP_EVIDENCE
 set_state first_activation PASS 'fresh schema and API readiness verified on real rootless Podman and PostgreSQL'
 
-run_deploy head false
-observe_runtime same-digest-reapply head
+run_deploy "$initial_key" false
+observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
 CREATE TABLE codexia_lifecycle_sentinel(id integer PRIMARY KEY, value text NOT NULL);
 INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
 SENTINEL_SQL
-run_deploy "$compatible_key" false
-observe_runtime compatible-update "$compatible_key"
-set_state compatible_update PASS "run-bound $compatible_key Full image became the sole healthy API writer"
+run_deploy "$update_key" false
+observe_runtime compatible-update "$update_key"
+set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
 failed_context="$build_context/failed"
@@ -654,7 +653,7 @@ FROM ${BASE_IMAGE}
 ENTRYPOINT ["/bin/false"]
 DOCKERFILE
 sudo install -o codexia -g codexia -m 0644 "$tmp/failed.Dockerfile" "$failed_context/Dockerfile"
-rootless_podman build --build-arg "BASE_IMAGE=$compatible_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
+rootless_podman build --build-arg "BASE_IMAGE=$update_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
 failed_tag="localhost:5000/yohn-jp/codexia-backend:lifecycle-failed-$source_sha"
 rootless_podman tag codexia-backend-lifecycle-fail "$failed_tag"
 failed_digest_file="$fixture_home/.local/state/codexia-lifecycle-build/failed.digest"
@@ -673,7 +672,7 @@ if ! grep -Eq 'Deployment transaction failed during candidate API (startup|readi
   exit 1
 fi
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-observe_runtime failed-candidate-rollback "$compatible_key"
+observe_runtime failed-candidate-rollback "$update_key"
 [[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)" == "$before_failure" ]]
 set_state failed_candidate_rollback PASS 'candidate start failure restored the previous digest and release record'
 
@@ -691,10 +690,10 @@ fi
 exit "$status"
 FAULT_SYSTEMCTL
 sudo install -o codexia -g codexia -m 0755 "$tmp/fault-systemctl" "$fault_dir/systemctl"
-if run_deploy head false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
+if run_deploy auth-primary false "$fault_dir"; then echo 'Injected controller interruption unexpectedly returned success' >&2; exit 1; fi
 rootless grep -q '"phase":"pending"' "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
-run_deploy "$compatible_key" false
-observe_runtime interrupted-recovery "$compatible_key"
+run_deploy "$update_key" false
+observe_runtime interrupted-recovery "$update_key"
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'

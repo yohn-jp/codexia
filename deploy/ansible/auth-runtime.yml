@@ -193,6 +193,20 @@
     - {path: "{{ home }}/.local/state/codexia-deploy"}
     - {path: "{{ home }}/.config/codexia-auth"}
 
+- name: Install the shared clean API target check
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/require-clean-api-target.sh"
+    dest: "{{ home }}/.local/bin/codexia-require-clean-api-target"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+
+- name: Verify a clean target before staging initial owner registration
+  ansible.builtin.command:
+    argv: [flock, --exclusive, --nonblock, "{{ home }}/.local/state/codexia-deploy/host.lock", "{{ home }}/.local/bin/codexia-require-clean-api-target"]
+  changed_when: false
+  when: codexia_auth_registration_pending | default(false)
+
 - name: Install the locked auth database bootstrap helper
   ansible.builtin.copy:
     src: "{{ repo_root }}/deploy/ansible/provision-auth-database.sh"
@@ -356,6 +370,15 @@
   when:
     - codexia_auth_registration_pending | default(false)
     - codexia_auth_passkey_bootstrap_owner_id is defined
+
+- name: Remove superseded first-owner launchers
+  ansible.builtin.file:
+    path: "{{ home }}/.local/bin/{{ item.name }}"
+    state: absent
+  loop:
+    - { name: codexia-register-auth, needed: "{{ codexia_auth_registration_pending | default(false) }}" }
+    - { name: codexia-grant-passkey-owner, needed: "{{ (codexia_auth_registration_pending | default(false)) and codexia_auth_passkey_bootstrap_owner_id is defined }}" }
+  when: not item.needed
 
 - name: Install the operator-mediated Passkey recovery grant launcher
   ansible.builtin.copy:

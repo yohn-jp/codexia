@@ -25,6 +25,8 @@ export const OIDC_PROVIDER_ID = "workspace-oidc";
 
 export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
+  /** Prevent plugin initialization from writing during deployment verification. */
+  readonly readOnlyDatabase?: boolean;
   readonly publicOrigin: string;
   /** Explicit Passkey RP ID for an isolated setup listener on a production-host subdomain. */
   readonly passkeyRpId?: string;
@@ -301,7 +303,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
 
   const pool = new Pool({
     connectionString: config.databaseUrl,
-    options: `-c search_path=${CODEXIA_AUTH_SCHEMA}`,
+    options: `-c search_path=${CODEXIA_AUTH_SCHEMA}${config.readOnlyDatabase ? " -c default_transaction_read_only=on" : ""}`,
   });
   const approvedBootstrapOidcSubject = bootstrap?.ownerOidcSubject;
   const auth = betterAuth({

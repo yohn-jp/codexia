@@ -52,7 +52,7 @@
 
 - name: Create a stopped metadata container without executing the candidate image
   ansible.builtin.command:
-    argv: [podman, create, --entrypoint, /bin/false, "{{ codexia_image }}"]
+    argv: [podman, create, --image-volume=ignore, --entrypoint, /bin/false, "{{ codexia_image }}"]
   register: codexia_candidate_container
   changed_when: false
 
@@ -455,8 +455,9 @@
           stale_admission 'the admitted API is no longer healthy'
         fi
         had_unit=true
-      elif [[ -e "$active_unit" || -L "$active_unit" ]]; then
-        stale_admission 'an API Quadlet appeared after first-activation admission'
+      else
+        bash -c {{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/require-clean-api-target.sh') | quote }} ||
+          stale_admission 'first activation requires a clean API target'
       fi
       release_present=false
       if [[ -e "$release_state" || -L "$release_state" ]]; then
@@ -526,20 +527,24 @@
       mkdir -p "$wants_dir"
       api_link_created=false
       tunnel_link_created=false
-      ensure_wants_link(){
+      plan_wants_link(){
         local link="$1" target="$2" created_name="$3"
         if [[ -e "$link" || -L "$link" ]]; then
           [[ -L "$link" && "$(readlink -- "$link")" == "$target" ]] || { echo "Unexpected systemd activation link: $link" >&2; return 1; }
         else
-          ln -s -- "$target" "$link"
           printf -v "$created_name" '%s' true
         fi
       }
-      ensure_wants_link "$api_wants_link" ../codexia-api.service api_link_created
+      plan_wants_link "$api_wants_link" ../codexia-api.service api_link_created
       if [[ "$tunnel_present" == true ]]; then
-        ensure_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
+        plan_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
       fi
+      install_wants_links(){
+        if [[ "$api_link_created" == true ]]; then ln -s -- ../codexia-api.service "$api_wants_link" || return 1; fi
+        if [[ "$tunnel_link_created" == true ]]; then ln -s -- ../codexia-tunnel.service "$tunnel_wants_link" || return 1; fi
+      }
       if [[ "$unchanged" == true ]]; then
+        install_wants_links
         systemctl --user daemon-reload
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
@@ -572,6 +577,8 @@
         echo 'Could not record the deployment transaction intent' >&2
         exit 1
       fi
+      # Record which links recovery owns before creating either one.
+      install_wants_links
       restore_previous(){
         local restore_status=0
         if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
@@ -607,7 +614,7 @@
           fi
         fi
         if [[ "$restore_status" == 0 ]]; then
-          rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
+          rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
         fi
         return "$restore_status"
       }
@@ -705,7 +712,7 @@
         echo 'Could not commit the deployment transaction intent; previous Quadlet was restored' >&2
         exit 1
       fi
-      rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || echo 'Committed deployment cleanup was incomplete; next deployment will finish it' >&2
+      rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || echo 'Committed deployment cleanup was incomplete; next deployment will finish it' >&2
       echo "UPDATED $candidate_image"
   args:
     executable: /bin/bash
@@ -719,6 +726,7 @@
     msg: >-
       Deployment transaction failed during
       {{ 'host lock admission' if 'Another Codexia deployment or backup holds the host lock' in (codexia_deploy_transaction.stderr | default('')) else
+         'first activation requires a clean API target' if 'first activation requires a clean API target' in (codexia_deploy_transaction.stderr | default('')) else
          'stale admission' if 'Stale deployment admission' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth settings snapshot' if 'Better Auth settings snapshot is invalid' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth migration' if 'Better Auth migrations failed' in (codexia_deploy_transaction.stderr | default('')) else
