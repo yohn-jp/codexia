@@ -5,6 +5,11 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Topic | Reference |
 | --- | --- |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
+| Product requirements and stable requirement IDs | [Requirements governance](requirements/README.md) · [Requirement register](requirements/REQUIREMENT-REGISTER.md) — initial adopted requirement baseline and explicit gaps; not a proof of complete coverage |
+| Requirement → design → code → test → evidence mapping | [Bidirectional traceability](verification/TRACEABILITY-REGISTER.md) — initial path/symbol/test index; statuses are not CI certification |
+| HTTP API request/response/error contracts | [API contract](architecture/API-CONTRACT.md) — operation inventory, partial verified source shape and remaining DTO coverage |
+| PostgreSQL physical objects and migrations | [DB detail contract](architecture/DATABASE-DETAIL-CONTRACT.md) — tables, constraints, indexes, schema identity |
+| External service and protocol interfaces | [External interfaces](architecture/EXTERNAL-INTERFACES.md) — trust, credential, failure/recovery and implementation mapping |
 | Principal/URL/HTTP authorization contract | [Route authorization](architecture/ROUTE-AUTHORIZATION-CONTRACT.md) — API privileges by URL, principal, method and setup/owner state |
 | Complete screen, control and user journey catalog | [Screen control catalog](design/SCREEN-CONTROL-CATALOG.md) — route/CTA/error/authorization traceability |
 | Individual screen state diagrams | [Screen State Atlas](design/SCREEN-STATE-ATLAS.md) — all logical screen transitions and recovery paths |
