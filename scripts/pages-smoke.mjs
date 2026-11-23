@@ -10,7 +10,7 @@ assert.ok(site && playwright && chromiumPath, 'Usage: pages-smoke.mjs SITE PLAYW
 
 const root = resolve(site);
 const prefix = '/codexia/';
-const destinations = ['architecture/', 'graph/', 'ci/', 'security/', 'audit/'];
+const destinations = ['architecture/', 'api/', 'graph/', 'ci/', 'security/', 'audit/'];
 const viewports = [
   { width: 1440, height: 900 },
   { width: 768, height: 1024 },
@@ -22,6 +22,7 @@ const contentTypes = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
+  '.yaml': 'text/yaml',
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
 };
@@ -48,6 +49,10 @@ const { chromium } = require(resolve(playwright));
 const source = JSON.parse(await readFile(resolve(root, 'graph/source.json'), 'utf8'));
 const atlas = JSON.parse(await readFile(resolve(root, 'architecture/manifest.json'), 'utf8'));
 const audit = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
+const pagesManifest = JSON.parse(await readFile(resolve(root, 'site-manifest.json'), 'utf8'));
+const apiManifest = pagesManifest.scalar;
+assert.ok(apiManifest, 'Pages site manifest must include Scalar provenance');
+assert.equal(apiManifest.sourceSha, pagesManifest.sourceSha, 'Scalar must match the Pages source SHA');
 const diagram = atlas.diagrams.find(item => item.id === 'admin-5');
 assert.ok(diagram, 'Established Atlas #admin-5 deep link must be in the manifest');
 assert.equal(source.sourceSha, atlas.sourceSha);
@@ -133,6 +138,20 @@ async function assertDownload(page, link, { name, sha256 }) {
   assert.equal(createHash('sha256').update(bytes).digest('hex'), sha256);
 }
 
+async function selectScalarOperation(page, path, method) {
+  if (!(await page.getByRole('button', { name: /Open Search/u }).count())) {
+    await page.getByRole('button', { name: /Open Menu/u }).press('Enter');
+    await page.getByRole('button', { name: /Open Search/u }).waitFor();
+  }
+  await page.getByRole('button', { name: /Open Search/u }).press('Enter');
+  const search = page.locator('input[aria-label="Enter search query"]');
+  await search.fill(path);
+  const operation = page.locator(`[role="option"][id$="/${method}${path}"]`);
+  await operation.waitFor();
+  await operation.click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+}
+
 let browser;
 try {
   if (screenshots) await mkdir(screenshots, { recursive: true });
@@ -151,7 +170,12 @@ try {
       await page.screenshot({ path: resolve(screenshots, `${name}-${viewport.width}x${viewport.height}.png`), fullPage: name === 'security-export' });
     };
     const errors = [];
+    const externalRequests = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('request', request => {
+      const url = request.url();
+      if (!url.startsWith(base) && !url.startsWith('data:') && !url.startsWith('blob:')) externalRequests.push(url);
+    });
     page.on('response', response => {
       if (response.url().startsWith(base) && response.status() >= 400) {
         errors.push(response.status() + ' ' + response.url().slice(base.length));
@@ -229,6 +253,39 @@ try {
         assert.ok(apiRequests > requestsBeforeRetry, 'CI retry must make another API request');
         assert.ok(await page.locator('#copy-diagnostics').isDisabled());
         apiStatus = 429;
+      } else if (destination === 'api/') {
+        let body = await page.locator('body').innerText();
+        assert.match(body, /Static target contract from TypeSpec/u);
+        assert.match(body, /Runtime implementation: partial/u);
+        assert.match(body, /Verification: contract generation and lint are separate CI results/u);
+        assert.match(body, /Authentication scheme definitions/u);
+        assert.match(body, /BearerAuth[\s\S]*HTTP Bearer/u);
+        assert.match(body, /ApiKeyAuth[\s\S]*__Secure-better-auth\.session_token/u);
+        assert.equal(await page.getByRole('button', { name: /Ask AI/u }).count(), 0,
+          'Scalar assistant controls must stay disabled for the public contract');
+        assert.equal(await page.locator('input[type="password"], input[autocomplete*="password"], input[placeholder*="token" i], input[aria-label*="token" i]').count(), 0,
+          'Scalar must not expose credential entry fields');
+        assert.equal(await page.getByRole('button', { name: /Authorize/u }).count(), 0,
+          'Scalar must not expose authorization controls');
+        await selectScalarOperation(page, '/api/auth/oauth2/consent-context', 'POST');
+        body = await page.locator('body').innerText();
+        assert.match(body, /Declared principal:[\s\S]*OWNER-SESSION; same-origin request/u);
+        assert.match(body, /Security deviation:[\s\S]*owner-session cookie/u);
+        assert.match(body, /401[\s\S]*unauthorized|unauthorized[\s\S]*401/iu);
+        assert.match(body, /403[\s\S]*forbidden|forbidden[\s\S]*403/iu);
+        await selectScalarOperation(page, '/api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}', 'GET');
+        body = await page.locator('body').innerText();
+        assert.match(body, /Runtime response deviation:[\s\S]*at 404/u);
+        assert.match(body, /404[\s\S]*cannot find/iu);
+        await selectScalarOperation(page, '/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors', 'POST');
+        body = await page.locator('body').innerText();
+        assert.match(body, /Runtime validation evidence:[\s\S]*incomplete and the published schema/u);
+        await assertReflow(page, 'API operation details');
+        assert.equal(await page.getByRole('link', { name: 'Third-party notices' }).getAttribute('href'), './THIRD_PARTY_NOTICES.txt');
+        assert.equal(await page.getByRole('button', { name: /Try it|Send API Request|Test Request/i }).count(), 0,
+          'Static API reference must not expose request execution controls');
+        assert.deepEqual(externalRequests, [], 'Static Scalar page must not request an external origin');
+        await capture('api-reference');
       } else if (destination === 'security/') {
         assert.equal(scanningRequests, 0, 'Security page must not request protected alerts before authorization');
         const token = page.locator('#access-token');

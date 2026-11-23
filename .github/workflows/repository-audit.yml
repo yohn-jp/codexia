@@ -10,6 +10,9 @@ on:
       - 'scripts/graphify-pages/**'
       - 'scripts/architecture-diagrams/**'
       - 'scripts/pages-ui/**'
+      - 'scripts/pages-api/**'
+      - 'packages/http-contract/**'
+      - 'pnpm-lock.yaml'
       - 'scripts/code-scanning-pages/**'
       - 'scripts/pages-smoke.mjs'
       - 'docs/architecture/SYSTEM-DESIGN.md'
@@ -268,6 +271,12 @@ jobs:
           corepack enable
           corepack pnpm@12.21.0 --version
           pnpm install --frozen-lockfile
+      - name: Install locked Scalar static reference builder
+        run: npm ci --prefix scripts/pages-api --ignore-scripts --no-audit --no-fund
+      - name: Test Scalar publication policy
+        run: node --test scripts/pages-api/*.test.mjs
+      - name: Verify committed OpenAPI matches the TypeSpec source
+        run: pnpm --filter @codexia/http-contract check-generated
       - name: Install the isolated audit tool
         run: |
           npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
@@ -304,6 +313,8 @@ jobs:
         run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
       - name: Bundle authenticated Code scanning export (no alert data)
         run: node scripts/code-scanning-pages/pack.mjs "$RUNNER_TEMP/audit-site"
+      - name: Generate static Scalar OpenAPI reference
+        run: node scripts/pages-api/pack.mjs "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)"
       - name: Assemble the integrated Pages artifact
         run: |
           SITE="$RUNNER_TEMP/audit-site"
