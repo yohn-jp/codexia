@@ -167,3 +167,5 @@ private struct APIDates: DateTranscoder {
         return try wholeSeconds.decode(text)
     }
 }
+
+// CI-only probe of native-owned verification admission; no runtime behavior change.
