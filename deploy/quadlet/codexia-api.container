@@ -38,7 +38,10 @@ NoNewPrivileges=true
 DropCapability=all
 HealthCmd=node -e 'fetch("http://127.0.0.1:3000/health/ready").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 HealthInterval=30s
-# Reuse the real health probe more frequently during startup only.
+# Startup checks are an independent probe: setting only the interval leaves
+# the regular 30s healthcheck as the readiness gate on Podman 5.7.
+# Use the identical endpoint so startup and steady-state readiness cannot drift.
+HealthStartupCmd=node -e 'fetch("http://127.0.0.1:3000/health/ready").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 HealthStartupInterval=2s
 HealthStartupSuccess=1
 HealthTimeout=5s
