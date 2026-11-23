@@ -2,7 +2,7 @@
 
 **種別: ビューアーの検証・運用手順。** 設計上の正本は [画面状態遷移図](../design/SCREEN-STATE-ATLAS.md)、[全画面操作台帳](../design/SCREEN-CONTROL-CATALOG.md)、[URL/API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[システム設計](../architecture/SYSTEM-DESIGN.md)、[利用画面](../design/USER-SCREEN-FLOW.md)、[管理画面](../design/ADMIN-SCREEN-FLOW.md)、[初期デプロイ](../deployment/INITIAL-DEPLOYMENT-FLOW.md)、[更新](../deployment/UPDATE-FLOW.md) の Mermaid コードブロックと、それらが参照する領域設計書にある。Atlas に別の図の正本は設けない。
 
-[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する読み取り専用の SVG ビューアーで、原本に登録されたシステム・状態・画面遷移図すべてを表示する。詳細画面23図を含む表示件数はビルド時のmanifestから取得し、文書更新に伴う追加にも対応する。左側のカテゴリから図を切替え、拡大・縮小・元の設計書への移動・SVG 単体表示ができる。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
+[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する読み取り専用の SVG ビューアーで、原本に登録されたシステム・状態・画面遷移図すべてを表示する。詳細画面の全図を含む表示件数はビルド時のmanifestから取得し、文書更新に伴う追加にも対応する。左側のカテゴリから図を切替え、拡大・縮小・元の設計書への移動・SVG 単体表示ができる。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
 
 ## 生成・権限
 

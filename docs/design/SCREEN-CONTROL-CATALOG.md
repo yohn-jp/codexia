@@ -16,6 +16,9 @@
 
 ## 全画面カタログとルーティング
 
+画面IDは [情報設計](INFORMATION-ARCHITECTURE.md) の従来カタログと整合させる。特に **WRT-02＝Revision履歴、REV-01＝提案一覧、REV-02＝提案詳細**。CFG-01は表示設定（DISPLAY-01）と本人セキュリティ設定（PREF-01）を束ねる概念的なカテゴリであり、別のデータ正本やURLを作らない。KNO-03の局所グラフは情報設計で検討された**未採用提案**として明示し、実装済みの関係一覧/詳細に見せかけない。
+
+
 **画面IDは安定した論理識別子。** 【実装】は現行mainの機能／【目標】は採用済み仕様だが専用画面やAPIの受入が未完了。shell内パネルに独立URLを強制しない。
 
 | 画面ID | 入口・表示形態 | principal | 主タスクと通常の戻り先 | 種別 |
@@ -27,12 +30,13 @@
 | OUT-01 | 同じshellの構成panel・Mobile参照sheet | OWNER-API | 巻/章/シーン選択・移動・検索 → 本文 | 実装 |
 | WRT-01 | `/<shell>/projects/:projectId/scenes/:documentId` | OWNER-API | 編集、保存、閲覧、根拠、Revision。元の本文へ | 実装 |
 | READ-01 | WRT-01の読書表示、Mobileページャー | OWNER-API | 文字組み/縦横/参照→同じRevisionの編集位置へ | 実装 |
-| REV-01 | WRT-01のRevision履歴・差分 | OWNER-API | 差分表示・履歴復元→元の本文 | 実装 |
+| WRT-02 | WRT-01のRevision履歴・差分 | OWNER-API | 差分表示・履歴復元→元の本文 | 実装 |
 | REC-01 | WRT-01の保存状態・競合/回復/失効 | OWNER-API＋browser local journal | 確定状態を照合・復旧→同じ文書 | 実装 |
 | KNO-01 | Desktop Knowledge panel / Mobile `view=inspection` | OWNER-API | 候補一覧、検索、確定→KNO-02／原稿へ | 実装 |
 | KNO-02 | Knowledge node詳細・Evidence inspector | OWNER-API | Relation/Assertion/Text Anchor/根拠への遷移→元の文書 | 実装 |
-| REVIEW-01 | Native ChangeSet・Module proposal一覧 / Mobile `view=tools` | OWNER-API | 内容・作者の判断対象を選択 → REVIEW-02 | 実装 |
-| REVIEW-02 | 提案の前後差分・承認/却下/適用 | OWNER-API | receiptを照合し反映された原稿/知識へ | 実装 |
+| KNO-03 | 選択nodeを中心にした局所関係グラフ/一覧 | OWNER-API（当該projectのreadのみ） | KNO-02から開き、同じnode/元原稿へ戻す | **情報設計の未採用提案**。専用UI/URLは未実装 |
+| REV-01 | Native ChangeSet・Module proposal一覧 / Mobile `view=tools` | OWNER-API | 内容・作者の判断対象を選択 → REV-02 | 実装 |
+| REV-02 | 提案の前後差分・承認/却下/適用 | OWNER-API | receiptを照合し反映された原稿/知識へ | 実装 |
 | TOOL-01 | Workspaceの`module:*`可変panel | OWNER-API、MCPは独立tool側 | Moduleのread/compute/proposeと非同期job→同じ作品 | 実装 |
 | JOB-01 | ヘッダーの受信箱/ジョブdialog | OWNER-API | 通知とjob確認/既読 → 元の作業 | 実装 |
 | DISPLAY-01 | Theme、組版、Workspace配置 | 本人のbrowser UI state | 見た目・レイアウト変更→元の作業。原稿は無変更 | 実装 |
@@ -85,8 +89,8 @@
 | WRT-01.B | 読む/編集へ戻る | LOCAL、IMEとdraft guard | READ-01⇄WRT-01、同じ原稿 | guard失敗なら切替えない |
 | WRT-01.C | 選択範囲をText Anchor化 | OWNER-API、確定Revision、選択UTF-16とquote hash | KNO-02の根拠へ | dirty/stale/位置不明は無効化 |
 | WRT-01.D | 書式記号・組版・文字サイズ | LOCAL、CodeMirrorと表示state | editor保持／表示のみ変更 | IME/カーソルを奪わない |
-| REV-01.A | Revision履歴と差分 | OWNER-API、`GET …/revisions` | 比較のみ、本文は無変更 | 取得不可なら再試行。Draftは消さない |
-| REV-01.B | このRevisionを復元 | OWNER-API、`POST …/restore`、base/冪等、明示確認 | 新immutable RevisionとしてWRT-01へ | 競合時に現在原稿を上書きしない |
+| WRT-02.A | Revision履歴と差分 | OWNER-API、`GET …/revisions` | 比較のみ、本文は無変更 | 取得不可なら再試行。Draftは消さない |
+| WRT-02.B | このRevisionを復元 | OWNER-API、`POST …/restore`、base/冪等、明示確認 | 新immutable RevisionとしてWRT-01へ | 競合時に現在原稿を上書きしない |
 | REC-01.A | 下書きを再保護 | LOCAL IndexedDB、原稿/author同一性 | journal再確認→WRT-01 | quota/write失敗を黙って消さない |
 | REC-01.B | 応答不明を再確認 | OWNER-API、同じoperation/receipt | 確定なら「保存済み」 | timeout時に別IDで重複保存しない |
 | REC-01.C | 競合を比較して解決 | OWNER-API、明示選択した版 | 差分を示した上で新save | 「回復Draftを破棄」は追加確認が必要 |
@@ -95,9 +99,10 @@
 | KNO-02.A | Evidence/Anchorを開く | OWNER-API、Revision一致と対象project | 原稿の該当引用へ。戻り先保持 | orphan/staleなら位置再確認へ |
 | KNO-02.B | Link・Relation・Assertionを変更 | OWNER-API、version/confirmed anchor | KNO-02を再取得 | confirmedを推測せず競合として扱う |
 | KNO-02.C | Knowledgeを統合 | OWNER-API、previewDigest+projectVersion+confirm | 影響/receipt表示 | preview古さ、競合、未確認は適用不可 |
-| REVIEW-01.A | 提案/ChangeSetを開く | OWNER-API、read-set対象の認可 | REVIEW-02、元のproject保持 | stale/欠損を成功として扱わない |
-| REVIEW-02.A | 承認・却下・適用 | OWNER-APIだけ。ChangeSet versionと状態 | receipt後に反映文書/知識へ | MCPに渡さず、staleや未承認を拒否 |
-| REVIEW-02.B | Module提案を一覧から隠す | LOCAL、ブラウザーjournal | 一覧表示だけ変更 | **サーバー上の却下ではない**と示す |
+| KNO-03.A | （提案）関係グラフ/一覧へ切替・対象nodeを選択 | OWNER-APIの同一project readのみ。新規mutationなし | KNO-02の選択node・原稿への復帰文脈を保持 | 現時点では未実装。存在しないグラフを表示済みとしない |
+| REV-01.A | 提案/ChangeSetを開く | OWNER-API、read-set対象の認可 | REV-02、元のproject保持 | stale/欠損を成功として扱わない |
+| REV-02.A | 承認・却下・適用 | OWNER-APIだけ。ChangeSet versionと状態 | receipt後に反映文書/知識へ | MCPに渡さず、staleや未承認を拒否 |
+| REV-02.B | Module提案を一覧から隠す | LOCAL、ブラウザーjournal | 一覧表示だけ変更 | **サーバー上の却下ではない**と示す |
 | TOOL-01.A | 分析/外部module actionを起動 | OWNER-API、宣言されたeffect+module availability | 局所結果またはJOB-01へ | 未導入/失敗はCore執筆へ波及させない |
 | JOB-01.A | job/通知を読む・再取得・既読 | OWNER-API、`/api/jobs*`/`/api/inbox*` | dialog内状態更新、元の作業維持 | stream失敗はpoll/retry、既読成功を偽装しない |
 | DISPLAY-01.A | Theme・layout・組版 | LOCAL、author/device classの表示設定 | 同じ原稿・位置 | 保存設定の失敗を通知、原稿無変更 |

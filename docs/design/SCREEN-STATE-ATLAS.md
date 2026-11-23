@@ -113,7 +113,7 @@ flowchart TD
     RESULT -->|応答不明/競合| RECOVER
     CONFIRMED -->|追加入力| EDIT
     CONFIRMED -->|読む| READING["READ-01"]
-    CONFIRMED -->|履歴| HIST["REV-01"]
+    CONFIRMED -->|履歴| HIST["WRT-02"]
     CONFIRMED -->|根拠作成| KNOW["KNO-02"]
 ```
 
@@ -132,7 +132,7 @@ flowchart TD
     PAGE -->|編集へ戻る| EDIT
 ```
 
-## REV-01 — Revisionの閲覧・復元【実装】
+## WRT-02 — Revisionの閲覧・復元【実装】
 
 ```mermaid
 flowchart TD
@@ -207,7 +207,7 @@ flowchart TD
     RESULT -->|競合| RECHECK
 ```
 
-## REVIEW-01 — 提案・ChangeSet一覧【実装】
+## REV-01 — 提案・ChangeSet一覧【実装】
 
 ```mermaid
 flowchart TD
@@ -216,12 +216,12 @@ flowchart TD
     RETRY --> FEED
     FEED -->|空| EMPTY["判断待ちなし"]
     FEED -->|取得成功| LIST["提案者・対象・状態・件数"]
-    LIST -->|提案を選択| DETAIL["REVIEW-02"]
+    LIST -->|提案を選択| DETAIL["REV-02"]
     DETAIL -->|一覧へ| LIST
     LIST -->|本文へ| WRITE["WRT-01 / 元の原稿"]
 ```
 
-## REVIEW-02 — 提案の比較・作者承認/適用【実装】
+## REV-02 — 提案の比較・作者承認/適用【実装】
 
 ```mermaid
 flowchart TD
@@ -254,7 +254,7 @@ flowchart TD
     EXEC --> RESULT{"結果"}
     RESULT -->|即時| VIEW["結果と出典/snapshotを表示"]
     RESULT -->|非同期| JOB["JOB-01"]
-    RESULT -->|提案| REVIEW["REVIEW-01"]
+    RESULT -->|提案| REVIEW["REV-01"]
     RESULT -->|失敗| ERROR
     VIEW --> ENTRY
 ```
@@ -411,6 +411,27 @@ flowchart TD
     NEXT -->|戻る| ACTION
     STAY --> ACTION
 ```
+
+## KNO-03 — 選択ノードの局所関係表示【未採用提案・未実装】
+
+```mermaid
+flowchart TD
+    ENTRY["KNO-02 node詳細から関係を確認"] --> STATE{"同じprojectの関係/根拠を取得できた?"}
+    STATE -->|DB/認可エラー| ERROR["元のnodeと原稿を維持し再試行"]
+    STATE -->|関係なし| EMPTY["関係は未登録 / 他projectは非表示"]
+    STATE -->|関係あり| GRAPH["局所グラフまたはアクセシブルな一覧"]
+    GRAPH -->|nodeを選択| VERIFY{"対象nodeも同じproject?"}
+    VERIFY -->|はい| DETAILS["KNO-02: 対象nodeの詳細"]
+    VERIFY -->|いいえ| ERROR
+    GRAPH -->|一覧表示| LIST["同じrelation集合をテキストで表示"]
+    LIST --> GRAPH
+    GRAPH -->|閉じる| RETURN["元のnode / 参照元原稿へ"]
+    DETAILS -->|戻る| GRAPH
+    EMPTY --> RETURN
+    ERROR --> RETURN
+```
+
+採用前に関係情報を可視化した画面・動的API・Graphify等の別ソースを追加しない。本図は[情報設計](INFORMATION-ARCHITECTURE.md)の検討を漏らさないための詳細仕様候補であり、既存のKnowledge/Evidenceのproject限定read・原稿保護を変更しない。
 
 ## Diagram/Control/APIの受入契約
 
