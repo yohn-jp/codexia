@@ -278,7 +278,7 @@ await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, sou
   await git(root, 'commit', '-qm', 'affected trace');
   const sha = await git(root, 'rev-parse', 'HEAD');
   const plan = createVerificationPlan({ files: ['scripts/strictdoc/verify.mjs'], event: 'pull_request', sha, base });
-  assert.ok(plan.groups.includes('types-tests'));
+  assert.deepEqual(plan.groups, ['types-tests', 'types-trace']);
   assert.ok(plan.tasks.includes('coverage') && plan.tasks.includes('requirements-trace'));
   const planPath = path.join(root, 'plan.json');
   const report = path.join(root, 'reports');
@@ -288,7 +288,7 @@ await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, sou
     !key.startsWith('GITHUB_') && !key.startsWith('CODEXIA_CI_') && !key.startsWith('NODE_TEST_') && key !== 'STRICTDOC_BIN'));
   Object.assign(env, { CODEXIA_CI_PLAN_PATH: planPath, CODEXIA_CI_REPORT_DIR: report,
     CODEXIA_CI_SOURCE_SHA: 'f'.repeat(40), CODEXIA_CI_TASK: 'wrong-task', STRICTDOC_BIN: tool });
-  execFileSync(process.execPath, ['scripts/ci/execution/group.mjs', 'types-tests'],
+  execFileSync(process.execPath, ['scripts/ci/execution/group.mjs', 'types-trace'],
     { cwd: root, env, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   const observed = JSON.parse(await readFile(path.join(report, 'requirements-trace/observed.json'), 'utf8'));
   assert.deepEqual(observed, { report: path.join(report, 'requirements-trace'), source: sha,
@@ -298,5 +298,5 @@ await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, sou
   assert.deepEqual(traceResult.invocations, [taskInvocation('requirements-trace', process.execPath)],
     'Observed execution must match the certified task recipe');
   assert.deepEqual(Object.fromEntries(result.results.map(({ task, status }) => [task, status])),
-    { coverage: 'passed', 'requirements-trace': 'passed' });
+    { 'requirements-trace': 'passed' });
 });

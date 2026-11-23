@@ -53,7 +53,7 @@ function ordinaryArtifacts() {
   return artifacts;
 }
 
-test('certification selector emits exact IDs for single and multiple selections', t => {
+test('certification selector emits exact IDs for selected requirements and full-plan groups', t => {
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-evidence-selection-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const planPath = path.join(directory, 'plan.json');
@@ -62,12 +62,12 @@ test('certification selector emits exact IDs for single and multiple selections'
   const affected = createVerificationPlan({
     files: ['scripts/strictdoc/surface-inventory.json'], event: 'pull_request', sha: sourceSha, base: 'b'.repeat(40),
   });
-  assert.deepEqual(affected.groups, ['types-tests']);
+  assert.deepEqual(affected.groups, ['types-tests', 'types-trace']);
   const artifacts = ordinaryArtifacts();
   writeFileSync(inventoryPath, JSON.stringify({ artifacts, jobs: successfulJobs, identity }));
-  const single = artifacts.find(item => item.name === 'ci-evidence-types-tests').id;
+  const affectedIds = ['types-tests', 'types-trace'].map(group => artifacts.find(item => item.name === `ci-evidence-${group}`).id).join(',');
   const multiple = artifacts.slice(1).map(item => item.id).join(',');
-  for (const [selectedPlan, expectedIds] of [[affected, single], [plan, multiple]]) {
+  for (const [selectedPlan, expectedIds] of [[affected, affectedIds], [plan, multiple]]) {
     writeFileSync(planPath, JSON.stringify(selectedPlan));
     writeFileSync(outputPath, '');
     execFileSync(process.execPath, [fileURLToPath(new URL('../certification/select-evidence.mjs', import.meta.url))], {
