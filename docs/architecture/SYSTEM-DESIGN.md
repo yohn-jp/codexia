@@ -1,5 +1,11 @@
 # Codexia システム基本設計
 
+## Desktop frontend toolchain — accepted target
+
+The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type checking) + Vite 8 + vanilla-extract**, including `@vanilla-extract/css`, `@vanilla-extract/vite-plugin`, and `@vanilla-extract/recipes` for typed design tokens, Light/Dark/Paper theme contracts and component variants. React 19, Radix, Headless Tree and CodeMirror retain their existing responsibilities. Vite remains the bundler; replacing it with Rsbuild or another bundler is not part of this decision. The iOS client remains native SwiftUI and does not share Web UI/CSS implementation.
+
+**Status: design accepted; implementation and CI acceptance pending.** The current dependency manifests still declare TypeScript 5.9.x and do not yet install vanilla-extract. Do not present the target as deployed. Resolve TypeScript 7's previously observed Node built-in/`NodeJS` type resolution failures without suppressing checks or retaining a parallel TypeScript 5 compiler. Verify workspace builds, emitted declarations, tests, desktop/OAuth entry boundaries, CSS output, themes, CodeMirror, browser E2E and CI before declaring cutover. Migrate component styles to vanilla-extract and remove superseded global CSS; retain external editor styles where required, not a permanent duplicate design system. See [dependency inventory](DEPENDENCY-INVENTORY.md) and [CI acceptance](../verification/CI-CD.md).
+
 [図をグラフィカルに閲覧する](https://yohn-jp.github.io/codexia/architecture/#system-1)
 
 **種別: 正本・規範的設計（normative）。** 本書はシステム全体の構成、責務分界、変更が守る不変条件を定義する。実装・CI・本番環境を検査して得られる事実は適合証拠であり、設計の代替正本ではない。運用手順・個別機能の詳細は本書から参照する所有文書が定める。
