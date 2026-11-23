@@ -41,6 +41,7 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
+  'scripts/ci-impact.mjs',
   'scripts/ci-workspace.mjs',
   'scripts/ci-parallel.mjs',
   'scripts/build/packaging/profile-build.mjs',
@@ -181,11 +182,11 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
   const fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
     files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
-      file.split('/').includes('..') || matchesFullModelOciPath(file)));
+      file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
-    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;

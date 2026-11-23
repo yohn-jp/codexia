@@ -160,6 +160,7 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     ['Desktop source', ['app/src/api.ts'], true],
     ['Real-model fixture', ['tests/integration/model-oci-lifecycle-arguments.test.mjs'], true],
     ['Profile packager', ['scripts/build/packaging/profile-package.mjs'], true],
+    ['Model admission policy', ['scripts/ci-impact.mjs'], true],
     ['Mixed source and test', ['modules/mcp/src/tool-catalog.test.ts', 'packages/api/src/server.ts'], true],
   ]) {
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);
@@ -179,6 +180,11 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
   assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
+  for (const invalid of ['', '/packages/api/src/server.ts', '../packages/api/src/server.ts', 'packages\\api\\src\\server.ts']) {
+    const selected = await plan([invalid]);
+    assert.equal(selected.mode, 'full', 'Invalid changed paths must select full verification');
+    assert.equal(selected.full_model_oci, true, 'Invalid changed paths must not suppress real-model proof');
+  }
   assert.equal((await plan(['profiles/full/config.json'], 'push')).full_model_oci, false);
 
   const verify = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));

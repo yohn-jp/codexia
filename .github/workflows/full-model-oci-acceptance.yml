@@ -35,6 +35,7 @@ on:
       - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - scripts/ci-impact.mjs
       - scripts/ci-workspace.mjs
       - scripts/ci-parallel.mjs
       - scripts/build/packaging/profile-build.mjs
