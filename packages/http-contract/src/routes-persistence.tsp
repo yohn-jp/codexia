@@ -31,7 +31,7 @@ op updatePersistenceProject(@path projectId: string, @body body: PersistenceProj
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/archive") @get @operationId("persistence_project_archive_get")
-op exportPersistenceArchive(@path projectId: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op exportPersistenceArchive(@path projectId: string): WorkArchive | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
@@ -78,7 +78,7 @@ op restorePersistenceDocumentRevision(@path projectId: string, @path documentId:
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors") @get @operationId("persistence_document_anchors_get")
-op listPersistenceDocumentAnchors(@path projectId: string, @path documentId: string, @query revision?: string, @query limit?: int32, @query projectVersion?: int32): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; };
+op listPersistenceDocumentAnchors(@path projectId: string, @path documentId: string, @query revision?: string, @query limit?: int32, @query projectVersion?: int32): DocumentEvidenceListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors") @post @operationId("persistence_document_anchors_post")
@@ -100,11 +100,11 @@ op createAnchorMention(@path projectId: string, @path documentId: string, @path 
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes") @get @operationId("persistence_nodes_get")
-op listPersistenceNodes(@path projectId: string, @query q?: string, @query type?: string, @query status?: string, @query limit?: int32, @query cursor?: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op listPersistenceNodes(@path projectId: string, @query q?: string, @query type?: string, @query status?: string, @query limit?: int32, @query cursor?: string, @query projectVersion?: int32): PersistenceNodeListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}") @get @operationId("persistence_node_get")
-op getPersistenceNode(@path projectId: string, @path nodeId: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPersistenceNode(@path projectId: string, @path nodeId: string, @query projectVersion?: int32): PersistenceNodeBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}") @put @operationId("persistence_node_put")
@@ -112,11 +112,11 @@ op updatePersistenceNode(@path projectId: string, @path nodeId: string, @body bo
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview") @post @operationId("persistence_node_merge_preview_post")
-op previewPersistenceNodeMerge(@path projectId: string, @path nodeId: string, @body body: KnowledgeMergePreviewRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op previewPersistenceNodeMerge(@path projectId: string, @path nodeId: string, @body body: KnowledgeMergePreviewRequest): KnowledgeMergePreviewBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge") @post @operationId("persistence_node_merge_post")
-op mergePersistenceNode(@path projectId: string, @path nodeId: string, @body body: KnowledgeMergeRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op mergePersistenceNode(@path projectId: string, @path nodeId: string, @body body: KnowledgeMergeRequest): KnowledgeMergeResultBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases") @post @operationId("persistence_node_aliases_post")
@@ -128,11 +128,11 @@ op createPersistenceNodeRelation(@path projectId: string, @path nodeId: string, 
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence") @get @operationId("persistence_node_evidence_get")
-op listPersistenceNodeEvidence(@path projectId: string, @path nodeId: string, @query limit?: int32, @query projectVersion?: int32): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op listPersistenceNodeEvidence(@path projectId: string, @path nodeId: string, @query limit?: int32, @query projectVersion?: int32): NodeEvidenceListBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/assertions/{assertionId}") @get @operationId("persistence_assertion_get")
-op getPersistenceAssertion(@path projectId: string, @path assertionId: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPersistenceAssertion(@path projectId: string, @path assertionId: string, @query projectVersion?: int32): AssertionResponseBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/assertions/{assertionId}") @put @operationId("persistence_assertion_put")
@@ -140,7 +140,7 @@ op updatePersistenceAssertion(@path projectId: string, @path assertionId: string
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence") @get @operationId("persistence_assertion_evidence_get")
-op listPersistenceAssertionEvidence(@path projectId: string, @path assertionId: string, @query projectVersion?: int32): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op listPersistenceAssertionEvidence(@path projectId: string, @path assertionId: string, @query projectVersion?: int32): AssertionEvidenceListBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence") @post @operationId("persistence_assertion_evidence_post")
@@ -148,28 +148,28 @@ op createPersistenceAssertionEvidence(@path projectId: string, @path assertionId
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets") @get @operationId("persistence_changesets_get")
-op listPersistenceChangeSets(@path projectId: string, @query limit?: int32): JsonResponse | { @statusCode _: 400; @body body: ApiError; };
+op listPersistenceChangeSets(@path projectId: string, @query limit?: int32): PersistenceChangeSetListBody | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets") @post @operationId("persistence_changesets_post")
-op proposePersistenceChangeSet(@path projectId: string, @body body: ProposeChangeSetRequest, @header("Idempotency-Key") idempotencyKey: string): { @statusCode _: 201; @body body: JsonObject; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op proposePersistenceChangeSet(@path projectId: string, @body body: ProposeChangeSetRequest, @header("Idempotency-Key") idempotencyKey: string): { @statusCode _: 201; @body body: PersistenceChangeSetResultBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}") @get @operationId("persistence_changeset_get")
-op getPersistenceChangeSet(@path projectId: string, @path changeSetId: string): JsonResponse | { @statusCode _: 404; @body body: ApiError; };
+op getPersistenceChangeSet(@path projectId: string, @path changeSetId: string): PersistenceChangeSetResponseBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve") @post @operationId("persistence_changeset_approve_post")
-op approvePersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op approvePersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApprovalBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject") @post @operationId("persistence_changeset_reject_post")
-op rejectPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op rejectPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApprovalBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply") @post @operationId("persistence_changeset_apply_post")
-op applyPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): JsonResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
+op applyPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApplicationBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/review-feed") @get @operationId("persistence_review_feed_get")
-op getPersistenceReviewFeed(@path projectId: string, @query limit?: int32): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
+op getPersistenceReviewFeed(@path projectId: string, @query limit?: int32): PersistenceReviewFeedBody | { @statusCode _: 403; @body body: ApiError; };

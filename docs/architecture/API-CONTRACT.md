@@ -5,6 +5,14 @@
 Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、エラー、securityの正本は [TypeSpec](../../packages/http-contract/src/main.tsp) とする。
 [生成したOpenAPI](../../packages/http-contract/openapi/codexia.openapi.yaml) から各操作のHTTP表現を参照できる。
 
+契約は90パスの115操作を収録する。
+[ルート照合用の一覧](../../packages/http-contract/test/fixtures/admitted-routes.json) は、現行の公開・登録範囲104操作と、未実装のバックアップ管理11操作を区別する。
+`x-codexia-security-deviation` と `x-codexia-runtime-response-deviation` は、承認済みの互換基準と設計または実装の差を示す。
+現行のジョブ一覧とOAuth同意一覧は配列を返し、互換基準ではオブジェクトとして定義されている。
+MCPの6操作のJSON-RPCペイロードはMCPのプロトコル契約で管理する。
+`x-codexia-validation-status` を付けた入力モデルは、互換基準の範囲で記述できる形状を収録している。
+実行時の必須項目や未知のキーの拒否は、各モデルの注記と対応する実装・試験で確認する。
+
 ## 契約境界
 
 - **Web/iOS/Core API:** packages/api/src/server.ts がFastifyの共通admissionとCore API routeを所有。認証済みowner bearerはAPIからproject/objectまで検証する。
