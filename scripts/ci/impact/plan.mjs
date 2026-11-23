@@ -185,8 +185,8 @@ const NATIVE_IOS_GENERATOR_INPUTS = new Set([
 export function isNativeIosOwnedInput(file) {
   if (NATIVE_IOS_WORKFLOW_INPUTS.includes(file)) return true;
   if (!NATIVE_IOS_ROOTS.some(root => file.startsWith(root))) return false;
-  return /\\.(?:swift|entitlements|pbxproj|xcscheme|plist|xcconfig)$/u.test(file) ||
-    /\\/(?:Package\\.swift|Package\\.resolved|\\.gitignore)$/u.test(file) ||
+  return /\.(?:swift|entitlements|pbxproj|xcscheme|plist|xcconfig)$/u.test(file) ||
+    /\/(?:Package\.swift|Package\.resolved|\.gitignore)$/u.test(file) ||
     NATIVE_IOS_GENERATOR_INPUTS.has(file);
 }
 

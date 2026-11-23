@@ -6,6 +6,15 @@ on:
     paths: &design-inputs
       - 'app/**'
       - 'modules/*/src/**'
+      # Unit/spec fixtures do not change the authored UI surface.
+      - '!app/**/test/**'
+      - '!app/**/tests/**'
+      - '!app/**/*.test.*'
+      - '!app/**/*.spec.*'
+      - '!modules/*/src/**/test/**'
+      - '!modules/*/src/**/tests/**'
+      - '!modules/*/src/**/*.test.*'
+      - '!modules/*/src/**/*.spec.*'
       - '.agents/skills/impeccable/**'
       - '.github/workflows/impeccable.yml'
       - '.impeccable/**'

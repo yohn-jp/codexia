@@ -639,13 +639,17 @@ test('native ownership fails closed for unsupported or mixed inputs and main', a
     'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',
     'ios/Unreviewed/Sources/Unexpected.swift',
     '.github/workflows/ios-other.yml',
-    'packages/http-contract/openapi/codexia.openapi.yaml',
     'pnpm-lock.yaml',
     'packages/api/src/server.ts',
   ]) {
     const mixed = await plan([source, file]);
     assert.deepEqual(mixed.tasks, VERIFICATION_TASKS, file);
   }
+  const contract = 'packages/http-contract/openapi/codexia.openapi.yaml';
+  const mixedContract = await plan([source, contract]);
+  const contractOnly = await plan([contract]);
+  for (const task of contractOnly.tasks) assert.ok(mixedContract.tasks.includes(task), task);
+  assert.ok(mixedContract.tasks.includes('unit-root'));
   assert.deepEqual((await plan([source], 'push')).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
 });

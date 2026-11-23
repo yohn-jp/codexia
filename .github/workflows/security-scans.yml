@@ -25,7 +25,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+      - name: Select exact-source security scope
+        id: scope
+        env:
+          CODEXIA_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          CODEXIA_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+        run: node scripts/ci/impact/security-admission.mjs
       - name: Scan repository
+        if: steps.scope.outputs.trivy == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -38,7 +46,7 @@ jobs:
           exit-code: '0'
           hide-progress: true
       - name: Upload Trivy SARIF
-        if: ${{ !cancelled() && hashFiles('trivy.sarif') != '' }}
+        if: ${{ !cancelled() && steps.scope.outputs.trivy == 'true' && hashFiles('trivy.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
         with:
           sarif_file: trivy.sarif
