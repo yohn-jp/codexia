@@ -74,6 +74,27 @@ test('PR paths and completed-Verify release impact retain component build inputs
   }
 });
 
+test('disposable app lifecycle is not admitted by isolated workspace tests', () => {
+  const workflow = parse(readFileSync(new URL('../.github/workflows/push-app-lifecycle.yml', import.meta.url), 'utf8'));
+  const paths = workflow.on.pull_request.paths;
+  for (const path of [
+    'packages/persistence-postgres/tests/db-contract/runner.test.mjs',
+    'packages/http-contract/test/fastify-persistence-registration.test.ts',
+    'packages/core/src/snapshot-reuse.test.ts',
+    'modules/mcp/src/tool-catalog.test.ts',
+  ]) assert.equal(matchesWorkflowPaths(paths, [path]), false, path);
+  for (const path of [
+    'packages/api/src/server.ts',
+    'modules/mcp/src/tools.ts',
+    'deploy/quadlet/codexia-api.container',
+    'deploy/ansible/deploy.yml',
+    '.github/workflows/push-app-lifecycle.yml',
+  ]) assert.equal(matchesWorkflowPaths(paths, [path]), true, path);
+  assert.equal(matchesWorkflowPaths(paths, [
+    'packages/core/src/snapshot-reuse.test.ts', 'deploy/quadlet/codexia-db.container',
+  ]), true, 'runtime input must not be suppressed by an unrelated test file');
+});
+
 const plan = async (files, event = 'pull_request') => {
   const { createVerificationPlan } = await import('./ci-impact.mjs');
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
