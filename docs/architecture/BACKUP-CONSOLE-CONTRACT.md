@@ -51,7 +51,7 @@ S3互換endpointへのprobeと転送は固定のegress policyを持つserver-sid
 | BKC-006 | `POST /api/console/backups/config/activate` | 202＋`operationId`。draft revisionとPASSED probeの一致、fresh再認証、再承認後にactiveへの適用を要求。**202は有効化成功ではない** | 409 stale/unverified、403、失効したprobe、実policyと矛盾 |
 | BKC-007 | `POST /api/console/backups/config/disable` | 202＋operationId。影響（オフVM保護喪失）を明示確認し、別の保護経路がなくrequiredなら拒否 | requiredのDR保全を無検証に空にする操作、遠隔object削除要求 |
 | BKC-008 | `POST /api/console/backups/runs` | 202＋runId。手動保全をdurable queueへ要求。maintenance window・writer停止の確認が必要。**バックアップ成功ではない** | 重複request identity、lock競合、未承認live writer停止、executor不在 |
-| BKC-009 | `GET /api/console/backups/runs` / `GET .../runs/:id` | 200。実行履歴、source/version、active revision、phase、manifest digest、off-VM confirmation、詳細エラー区分をredactedで返す | 未存在/他identity、receiptなきsuccess、秘密露出 |
+| BKC-009 | `GET /api/console/backups/runs` / `GET /api/console/backups/runs/:id` | 200。実行履歴、source/version、active revision、phase、manifest digest、off-VM confirmation、詳細エラー区分をredactedで返す | 未存在/他identity、receiptなきsuccess、秘密露出 |
 | BKC-010 | `GET /api/console/backups/recovery` | 200。restore drillの最終成功・対象と不足条件。実復旧のOPERATOR手順への導線のみ | Webからの本番復元、age private keyダウンロード、VM操作不可 |
 
 **共通DTO・エラー:** `requestId`/Idempotency-Key、`revision`/If-Match、明示的な`status`と`phase`、`reasonCode`、`observedAt`。資格・endpoint/バケット詳細のログ/応答は安全なマスキングを適用。401未認証、403権限不足、404存在隠蔽、409稼働状態不整合、412 revision、422妥当性、429頻度、503 executor/DB/S3停止を区分。タイムアウト/応答不明時は`requestId`による再取得を必須とし、二重実行しない。API operationの詳細wire Schemaは [API contract](API-CONTRACT.md) と将来のTypeSpecが所有する。BKC-IDは安定した要求識別子であり、任意のHTTP handler名に依存しない。
