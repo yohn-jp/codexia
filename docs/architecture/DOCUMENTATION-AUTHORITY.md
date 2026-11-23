@@ -19,6 +19,7 @@
 | 対象 | 設計上の所有先 |
 | --- | --- |
 | 採用済み仕様ツールチェーンと移行の比較・合格条件 | [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)（設計正本は本書と各領域に従う） |
+| 外部ライブラリの選定・最新版方針・依存境界 | [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)・[既存依存と固定根拠の台帳](DEPENDENCY-INVENTORY.md) |
 | 要求管理/StrictDoc移行 | [StrictDoc traceability](../requirements/STRICTDOC-TRACEABILITY.md)（REQ-ID内容の正本は要求登録簿） |
 | HTTP実行基盤/生成器の移行目標 | [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)（認可の意味は Route authorization） |
 | DB契約検証ツールと対象 | [PostgreSQL contract verification](POSTGRES-CONTRACT-VERIFICATION.md)（Data modelとDB detailが正本） |

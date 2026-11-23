@@ -5,6 +5,8 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Topic | Reference |
 | --- | --- |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
+| External dependencies, current-version policy and selected libraries | [Library selection policy](architecture/DEPENDENCY-POLICY.md) — normative library-first choices, compatibility boundaries and adoption criteria |
+| Existing dependencies, declared versions and update constraints | [Dependency inventory](architecture/DEPENDENCY-INVENTORY.md) — direct dependencies, version constraints, update lag and coordinated upgrades |
 | Approved specification toolchain and alternative decisions | [Toolchain architecture](architecture/SPECIFICATION-TOOLCHAIN.md) — selected targets, implementation not yet certified |
 | Requirements tool migration | [StrictDoc traceability](requirements/STRICTDOC-TRACEABILITY.md) — Markdown-to-requirements conversion and code/test/evidence gates |
 | HTTP/API schema-first target | [TypeSpec → Fastify/Orval](architecture/HTTP-PLATFORM-MIGRATION.md) — schema-first Fastify routes, generated client and acceptance gates |

@@ -1,6 +1,8 @@
 # Verification
 
-[Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は現在の単一publisher、Audit/Graphify/CI/Architectureの出力・限界・不足を観測としてまとめる。[Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は未実装の提案であり、公開済みページの振る舞いを保証しない。Pagesの設計と本番Workersの画面（`/console`）を混同しない。
+[Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は単一の公開ワークフローと各画面のデータ出典、観測の限界をまとめる。
+[Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は画面の設計正本を定義する。
+統合ポータルの受入証拠は、対象SHAのRepository Audit Pagesの結果と生成物を参照する。
 
 [Architecture Atlas](ARCHITECTURE-ATLAS.md) specifies static SVG generation and actual browser acceptance for the canonical architecture and UI/deployment transitions.
 

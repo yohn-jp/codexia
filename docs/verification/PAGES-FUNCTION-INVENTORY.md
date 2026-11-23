@@ -1,8 +1,31 @@
 # GitHub Pages 機能・公開物の棚卸し
 
-**文書種別: 観測台帳（非規範）。担当: Repository Audit Pages / 可視化の生成コード。対象読者: 設計者・実装者・レビュー担当。** 現行の設計案は [Pages統合ポータルのUX設計](../design/DEVELOPMENT-PAGES-UX.md) が所有する。本台帳は実際の公開サイトを保証するものではなく、PR #646ブランチのソースと生成処理を確認した結果である。GitHub Pages公開URLの直接取得は今回の確認環境ではできていないため、**公開先での動作・到達性は未検証**。動的に生成されるブランチ数・ソースファイル数・Graphifyノード数・CI実行件数を推測して記載しない。
+**観測台帳（非規範）**。対象は Repository Audit Pages の生成物。
+画面の設計は [Pages 統合ポータルの UX 設計](../design/DEVELOPMENT-PAGES-UX.md) が所有する。
 
-## 1. 公開制御と信頼境界
+## 統合ポータルの生成物
+
+単一の [Repository Audit Pages ワークフロー](../../.github/workflows/repository-audit.yml) が次のルートを同一の静的サイトに収録する。
+公開先は GitHub Pages のプロジェクトパス `/codexia/`。
+
+| サイト相対ルート | 機能 | データの範囲 |
+| --- | --- | --- |
+| `/` | Development Portal | サイトマップとデータ出典。サイト全体の台帳は `site-manifest.json` |
+| `/architecture/` | Architecture Atlas | ビルド対象 SHA の正本 Markdown。図の URL ハッシュと原文行を保持 |
+| `/graph/` | Code Map | 同じビルド対象 SHA から Graphify が抽出した静的参照。既存の `?file=` と集約概観の URL を保持 |
+| `/ci/` | CI Observatory | 閲覧時に公開 API から取得した run、job、step の標本。個別タスクの時間は未計測 |
+| `/audit/` | Source Audit | 公開リポジトリで観測したブランチ HEAD。root の `manifest.json` と SHA 別の snapshot、review の URL を保持 |
+
+PR ではパッケージを `repository-audit-preview` に保存する。
+アップロード前に生成済みサイトの台帳、内部リンク、監査公開物を検査し、Chromium で幅 1440px と 320px の画面遷移を確認する。
+本番公開は main の Pages デプロイジョブが担当し、配信先での受入は対象デプロイに対して確認する。
+
+## PR #646 時点の観測記録
+
+以下は統合ポータルの実装前に確認した出力と不足の記録。
+GitHub Pages の配信先は当時の確認環境から未確認。
+
+### 1. 公開制御と信頼境界
 
 - **唯一のPages公開者:** [Repository Audit Pages](../../.github/workflows/repository-audit.yml)。`main`の`push`または`workflow_dispatch`で監査サイト一式を生成・Pagesに公開する。PRでは同じパッケージング処理を実行し、`repository-audit-preview` artifactへ保存するが公開しない。別のGraphify/CI/Atlas専用publisherはない。
 - **同じ静的サイト内のデータ取得方法は異なる。** Auditはビルド時のremote branch HEADをパッケージし、Architecture/Graphはビルド時にcheckoutされたソースSHAを参照する。CIはページ閲覧時にブラウザーからGitHub Actionsの公開REST APIを取得する。日時・SHA・対象範囲を一律の「最新」と表示できない。
@@ -10,7 +33,7 @@
 - **公開データ:** 全ブランチの監査対象ソースを`repomix.json`と分割JSONで配布する。ルールによる秘匿ファイル・履歴・vendored skillの除外があるが、**それだけで非公開ブランチの機密性を証明しない**。公開対象の認可、漏えい検査とPages可視性の検討が必要。
 - **非目標:** GitHub PagesはCodexia本番アプリのCloudflare Workers UI（`/console`を含む）ではない。PagesからVM、Ansible、Better Auth、原稿を操作しない。診断表示をCI合格、マージ可否、未使用コードの証拠と混同しない。
 
-## 2. 現在のルートと生成元
+### 2. 現在のルートと生成元
 
 | URL / 出力 | ユーザーができること・生成物 | 実装根拠 | 状況 |
 | --- | --- | --- | --- |
@@ -33,36 +56,36 @@
 
 `/docs/`、`/audit/`、`/pages/` は**現行生成経路で公開済みと確認できない**。仮のサイトマップから存在するURLとして案内しない。
 
-## 3. 機能詳細と観測上の限界
+### 3. 機能詳細と観測上の限界
 
-### A. ソース監査 / OCRレビュー入力
+#### A. ソース監査 / OCRレビュー入力
 
 - Remoteの`refs/heads/*`を観測したHEADごとにRepomixを実行し、前回の整合済みSHAはcache再利用する。branchはパッケージング中・公開後に進む可能性がある。
 - 収録対象はGit blobの正規ファイルに限定し、`evidence/`、vendored agent skills、`.env`/`.pem`等の一部、非UTF-8/binary、サイズ上限等を除外する。Repomix固有の除外で`partial`になり得る。`blocked`はダウンロード不可。
 - 責務ごとに最大9分類の分割JSONが作成される。OCRの`gemini-review.md`は**AIレビューを実行した結果ではなく、選定された差分・ソースを含む入力資料**。レビュー対象漏れ・欠落理由の表示が必要。
 - 根本の制約: HTMLのトップはbranch一覧とダウンロードが主役。サイト内の機能探索やGraphへの直接入口がない。
 
-### B. CI Observatory
+#### B. CI Observatory
 
 - [collector](../../scripts/ci-dashboard/collection.mjs)は公開GitHub APIから最大2ページ、直近200件程度のPR実行を取得し、実行されたSHAへの関連付けが一意な履歴に絞る。PRとSHAに基づく`Verify Codexia`を中心に20件程度の選定結果を出す。
 - [analysis](../../scripts/ci-dashboard/analysis.mjs)はVerifyの公開`needs` DAG、step時刻、実行待ち、最長完了ジョブ、certification tailを分析。`diagnostics.mjs`はソースに結びついた比較・観測上の欠落を機械可読JSONへまとめる。
 - 失敗/中断/skip、step時刻欠落、APIアクセス制限、切詰められた履歴を成功またはゼロとして扱わない。
 - 限界: **task単位の時間・CPU/メモリ/IO・playwright specの真のコスト、全required check/branch protectionは可観測ではない。** 既存UIの「診断JSONコピー」はこの欠落を補完しない。
 
-### C. Graphify Code Map
+#### C. Graphify Code Map
 
 - `graphify extract . --code-only`のAST由来`graph.json`を使用。`tests/**`、`docs/**`、`evidence/**`、`.agents/**`、`*.test.*`、`*.spec.*`を解析から除く。Graphifyの`source_file`を同じcheckoutの`git ls-files`と突き合わせ、追跡ファイルに限り索引化する。
 - 現行explorerにはパス/シンボル検索、ディレクトリフィルタ、参照元なしフィルタ、1ファイルの参照先/参照元、グラフ上のクリック・キーボード選択、SHA固定GitHubソースへのリンクがある。画面中央の隣接グラフは**各方向最大8件**、下のリストは直接隣接の全件を扱う。検索結果一覧は**先頭200件**。
 - ファイル間エッジは`imports`、`imports_from`、`re_exports`、`calls`、`references`、`depends_on`、`instantiates`、`inherits`、`implements`、`extends`、`uses`の限定された静的観測を集約する。複数エッジは件数と関係種別を保持するが、表示はファイル単位が中心。現在のGraphify HTMLは別のコミュニティ概観として保存する。
 - 限界: 解析対象外ファイル、動的import、MCP登録、ルート登録、DBアクセス、CIの実行、リフレクション等の実行時到達を証明できない。**参照元0件 ≠ 未使用/削除可能**。多段探索、エッジの位置・根拠へのjump、変更前後比較、入口からの到達性と解析カバレッジの説明は現行UI/packingにない。
 
-### D. Architecture Atlas
+#### D. Architecture Atlas
 
 - 正本Markdownの`mermaid`フェンスを抽出してSVG化し、SHA・文書パス・原文行・図ID付きのmanifestへ収録。選択、hash、zoom、SVG単体を提供し、Mermaid/CDNのブラウザー実行には依存しない。
 - Atlasが表示するのは**設計上の状態遷移**であり、動く画面・認証された本番API・実装済みの機能とは一致しない場合がある。画面単位のUIプレビュー、コードの該当箇所、E2Eの証拠への関連付けは未定義。
 - 既存viewerは独立CSS/ナビゲーションを持ち、サイト全体で共通のナビゲーション/情報設計は生成されていない。
 
-## 4. ナビゲーションと公開の観測
+### 4. ナビゲーションと公開の観測
 
 | 入口 | 現行ナビゲーション | 不足 |
 | --- | --- | --- |
@@ -73,7 +96,7 @@
 | `/reviews/<SHA>/` | 同じSHAのレビュー入力と選定情報 | 共通ヘッダー/パンくず・監査の戻り先 |
 | `/snapshots/<SHA>/` | JSON/manifestの直接取得 | ユーザー向け目次/説明、所有者と公開範囲の明示 |
 
-### 版の正本
+#### 版の正本
 
 - Audit: **リモート各ブランチの観測HEAD**。個別ブランチごとにSHAが異なる。
 - Graph: **ページ生成時のcheckout SHA**。コードのみのGraphify観測。
@@ -81,7 +104,7 @@
 - CI: **閲覧した時点の公開APIの一部**。結果の観測時刻はサイト生成時刻と同じではない。
 - 文書リンク: GitHub上の`main`またはAtlasのSHA固定行。`main`リンクが現在のAtlasの図と異なる版を指す可能性がある。
 
-## 5. 不足機能台帳（設計候補）
+### 5. 不足機能台帳（設計候補）
 
 **P0 = 先に信頼・ナビゲーションを成立させる。P1 = 目的の分析を完結させる。P2 = 拡張。** これは現行動作の観測に基づく設計候補であり、すべての実装が承認済みという意味ではない。
 
@@ -104,7 +127,7 @@
 | PG-15 | P2 | `/reviews/<SHA>/`はレビュー資料配布のみ | Review資料の意味・coverage・SHAの戻り先を一貫した画面で示す |
 | PG-16 | P2 | docsはGitHub文書リンクが正本 | Pages内`/docs/`ミラーの要否を検討。現段階はGitHub正本への直接リンクで十分 |
 
-## 6. 調査の証拠と未確認事項
+### 6. 調査の証拠と未確認事項
 
 確認した生成元: [publisher](../../.github/workflows/repository-audit.yml)、[audit exporter](../../scripts/audit/export.mjs)、[delegate](../../scripts/audit/delegate.mjs)、[CI packer](../../scripts/ci-dashboard/collect.mjs)、[CI client](../../scripts/ci-dashboard/site/dashboard.js)、[Graph packer](../../scripts/graphify-pages/pack.mjs)、[Graph UI](../../scripts/graphify-pages/explorer.html)、[Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[Atlas UI](../../scripts/architecture-diagrams/atlas.js)、および各[既存のCI説明](CI-DASHBOARD.md)・[Graph説明](GRAPHIFY-PAGES.md)・[Atlas説明](ARCHITECTURE-ATLAS.md)。
 
