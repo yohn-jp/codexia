@@ -495,10 +495,12 @@ rootless mkdir -p "$build_context"
 sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/authorized_keys"
 sudo install -o codexia -g codexia -m 0644 "$CODEXIA_LIFECYCLE_FIXTURE_DIR/sshfs-fixture.tar" "$build_context/sshfs-fixture.tar"
 rootless_podman load --input "$build_context/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1
-[[ "$(rootless_podman image inspect "$fixture_image" --format '{{.Id}}')" == "$fixture_image_id" ]] || {
-  echo 'Imported SSHFS fixture image ID differs from exact-run producer' >&2
+imported_fixture_image_id=$(rootless_podman image inspect "$fixture_image" --format '{{.Id}}')
+if [[ ! "$imported_fixture_image_id" =~ ^(sha256:)?[a-f0-9]{64}$ ]] ||
+   [[ "${imported_fixture_image_id#sha256:}" != "${fixture_image_id#sha256:}" ]]; then
+  printf 'Imported SSHFS image ID differs: producer=%s consumer=%s\n' "$fixture_image_id" "$imported_fixture_image_id" >&2
   exit 1
-}
+fi
 rootless_podman run -d --name codexia-backup-sshfs --network codexia-lifecycle-backup \
   -p 127.0.0.1:2222:22 \
   --volume "$build_context/authorized_keys:/home/codexia-backup/.ssh/authorized_keys:ro" \
