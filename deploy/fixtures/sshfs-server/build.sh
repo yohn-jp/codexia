@@ -28,7 +28,12 @@ test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = l
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
 cp "$work/key.pub" "$work/authorized_keys"
 chmod 0600 "$work/authorized_keys" "$work/key"
+# Rootful Docker bind mounts preserve host ownership; sshd StrictModes requires
+# authorized_keys to be owned by the fixture user or root, not the runner UID.
+backup_uid="$(docker run --rm --entrypoint id "$image" -u codexia-backup)"
+sudo chown "$backup_uid:$backup_uid" "$work/authorized_keys"
 cleanup() {
+  if [[ ${SSHFS_SMOKE_PASSED:-false} != true ]]; then docker logs --tail 80 codexia-sshfs-smoke >&2 || true; fi
   docker rm -f codexia-sshfs-smoke >/dev/null 2>&1 || true
   rm -f "$work/key" "$work/key.pub" "$work/authorized_keys" "$work/known_hosts"
 }
@@ -45,6 +50,7 @@ printf '[127.0.0.1]:2223 %s\n' "$server_key" >"$work/known_hosts"
 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
   -o UserKnownHostsFile="$work/known_hosts" -o ConnectTimeout=10 \
   -i "$work/key" -p 2223 codexia-backup@127.0.0.1 true
+SSHFS_SMOKE_PASSED=true
 docker save -o "$work/sshfs-fixture.tar" "$image"
 PINNED_BASE="$pinned_base" IMAGE="$image" python3 - <<'PY'
 import hashlib, json, os, pathlib, subprocess
