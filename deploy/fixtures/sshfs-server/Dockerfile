@@ -6,7 +6,8 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no
     && useradd --create-home --shell /bin/bash codexia-backup \
     && mkdir -p /home/codexia-backup/.ssh /backups \
     && chown -R codexia-backup:codexia-backup /home/codexia-backup/.ssh /backups \
-    && chmod 0700 /home/codexia-backup/.ssh
+    && chmod 0700 /home/codexia-backup/.ssh \
+    && rm -f /etc/ssh/ssh_host_*_key*
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]
