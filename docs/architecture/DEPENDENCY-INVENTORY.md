@@ -27,7 +27,7 @@
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
-| `typescript` | `~5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
+| `typescript` | 現行 `~5.9.3` → **採用目標 TypeScript 7 最新安定版** | root・型検査 | **移行必須・未実装**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。型設定・依存型を修正し、全workspaceでnative型検査を受入。5系への恒久フォールバックは禁止 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 
@@ -68,7 +68,17 @@
 | `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
 | `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
-| `vite` | `^8.3.8` | app・フロントビルド | **要検証**: ビルド・Workers配信成果物の一致を検証 |
+| `vite` | 現行 `^8.3.8` → **Vite 8継続採用** | app・フロントビルド | **採用確定**: 最新8系への追従、Reactプラグイン・CSS生成・Workers配信・OAuth分離を検証。バンドラー変更は本契約の対象外 |
+
+### Desktop CSS基盤（採用目標・未導入）
+
+| パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
+| --- | --- | --- | --- |
+| `@vanilla-extract/css` | 未導入 → 最新安定版 | Desktop Web・型付きテーマ／静的CSS | **採用確定・未実装**: Light/Dark/Paperのtheme contractとsemantic tokensを正本化 |
+| `@vanilla-extract/vite-plugin` | 未導入 → 最新安定版 | Vite 8・CSSビルド統合 | **採用確定・未実装**: Vite 8との互換性、CSS出力とOAuthビルド分離を実証 |
+| `@vanilla-extract/recipes` | 未導入 → 最新安定版 | Desktop UI・型付きvariants | **採用確定・未実装**: 再利用可能なvariantsのみ採用し、重複スタイルを撤去 |
+
+既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
 ### Optional modules・ファイル形式
 
