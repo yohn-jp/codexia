@@ -6,9 +6,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { dirname, join, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { containsCredentialPattern } from './publication-policy.mjs';
 
 export const REPOMIX_VERSION = '1.19.0';
 const config = fileURLToPath(new URL('./repomix.config.json', import.meta.url));
+const publicationPolicy = new URL('./publication-policy.mjs', import.meta.url);
 const self = fileURLToPath(import.meta.url);
 const shaPattern = /^[a-f0-9]{40}$/u;
 const maxBlob = 8 * 1024 * 1024;
@@ -20,7 +22,7 @@ const json = data => JSON.stringify(data, null, 2) + '\n';
 const git = (root, args, options = {}) => execFileSync('git', args, { cwd: root, maxBuffer: maxInput + 4 * 1024 * 1024, ...options });
 const decode = bytes => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 const order = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-const policy = () => hash(Buffer.concat([Buffer.from(REPOMIX_VERSION), readFileSync(self), readFileSync(config)]));
+const policy = () => hash(Buffer.concat([Buffer.from(REPOMIX_VERSION), readFileSync(self), readFileSync(config), readFileSync(publicationPolicy)]));
 
 export function parseHeads(value) {
   const seen = new Set();
@@ -69,6 +71,7 @@ function inventory(root, sha, stage) {
     let content;
     try { content = decode(bytes); } catch { excluded.push({ path, reason: 'non-utf8' }); continue; }
     if (content.includes('\0')) { excluded.push({ path, reason: 'binary' }); continue; }
+    if (containsCredentialPattern(content)) { excluded.push({ path, reason: 'credential-pattern' }); continue; }
     total += size;
     assert.ok(total <= maxInput, 'Snapshot exceeds input budget');
     const target = join(stage, path);
@@ -120,7 +123,7 @@ export function validatePack(pack, inventory) {
   // omitted content from Git or silently describe the export as complete.
   const excluded = [...inventory.excluded, ...[...expected.keys()].map(path => ({ path, reason: 'repomix-omitted (security or packer filtering)' }))].sort((a,b) => order(a.path,b.path));
   assert.ok(included.length, 'Repomix returned no source files');
-  return { included, excluded, partial: expected.size > 0 };
+  return { included, excluded, partial: expected.size > 0 || excluded.some(file => file.reason === 'credential-pattern') };
 }
 
 function snapshot(root, sha, dest, executable, policyHash) {
@@ -190,36 +193,39 @@ function sizeLabel(bytes) {
 function downloadLink(base, name, filename, label, className = '') {
   return '<a class="' + escapeHtml(className) + '" href="' + escapeHtml(base + name) + '" download="' + escapeHtml(filename) + '">' + escapeHtml(label) + '</a>';
 }
-export function renderIndex(manifest) {
+export function renderIndex(manifest, { base = '' } = {}) {
+  const anchored = new Set();
   const rows = manifest.branches.map(branch => {
     const snap = manifest.snapshots[branch.sha];
-    const base = 'snapshots/' + branch.sha + '/';
+    const snapshotBase = base + 'snapshots/' + branch.sha + '/';
     const prefix = 'codexia-' + branch.sha + '-';
+    const rowId = anchored.has(branch.sha) ? '' : ' id="sha-' + escapeHtml(branch.sha) + '"';
+    anchored.add(branch.sha);
     let links = 'Not published';
     if (snap.status !== 'blocked') {
       const full = snap.outputs.find(x => x.name === 'repomix.json');
       assert.ok(full, 'Missing full export');
       const parts = snap.outputs.filter(x => x.name.startsWith('part-'));
-      links = '<div class="actions">' +
-        downloadLink(base, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
-        downloadLink(base, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
-        '<a href="' + base + 'repomix.json">View JSON</a></div>' +
+      links = '<div class="actions"><a href="' + snapshotBase + '">Snapshot details</a>' +
+        downloadLink(snapshotBase, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
+        downloadLink(snapshotBase, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
+        '<a href="' + snapshotBase + 'repomix.json">View JSON</a></div>' +
         '<div class="actions review-parts">' +
-        parts.map((item, i) => downloadLink(base, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
+        parts.map((item, i) => downloadLink(snapshotBase, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
         '</div>';
     }
     const review = manifest.reviews?.[branch.sha];
     if (review && (review.status === 'ready' || review.status === 'partial')) {
       links += '<div class="actions review-parts">' +
-        downloadLink('reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
+      downloadLink(base + 'reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
           'Gemini review · 1 Markdown (' + review.published + ' source files)' + (review.status === 'partial' ? ' · partial' : ''), 'primary') +
-        '<a href="reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
+        '<a href="' + base + 'reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
     } else if (review?.status === 'blocked') {
       links += '<div>OCR review inputs unavailable</div>';
     }
-    return '<tr><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
+    return '<tr' + rowId + '><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
   }).join('\n');
-  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink('', 'manifest.json', 'codexia-branches.json', 'Download branch index') + ' · <a href="ci/">CI Observatory</a> · <a href="architecture/">Architecture Atlas</a> · <a href="https://github.com/yohn-jp/codexia">Repository</a></p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></html>';
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style></head><body><main><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence and vendored agent skills are excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink(base, 'manifest.json', 'codexia-branches.json', 'Download branch index') + '</p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></main></body></html>';
 }
 
 export function buildPortal({ root, site, cache, executable, heads, observedAt = new Date().toISOString() }) {
@@ -254,7 +260,8 @@ export function buildPortal({ root, site, cache, executable, heads, observedAt =
   // Cache is an optimization only; deleted HEADs are never copied into the site.
   for (const name of readdirSync(cache)) if (shaPattern.test(name) && !manifest.snapshots[name]) rmSync(join(cache, name), { recursive: true, force: true });
   writeFileSync(join(site, 'manifest.json'), json(manifest));
-  writeFileSync(join(site, 'index.html'), renderIndex(manifest));
+  mkdirSync(join(site, 'audit'), { recursive: true });
+  writeFileSync(join(site, 'audit', 'index.html'), renderIndex(manifest, { base: '../' }));
   writeFileSync(join(site, '.nojekyll'), '');
   return manifest;
 }

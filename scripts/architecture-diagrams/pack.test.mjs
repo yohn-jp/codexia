@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createManifest, DIAGRAM_DOCUMENTS, parseMermaidDiagrams } from './pack.mjs';
+import { createManifest, DIAGRAM_DOCUMENTS, parseMermaidDiagrams, SCREEN_IMPLEMENTATION_PATHS } from './pack.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = 'a'.repeat(40);
@@ -13,7 +13,8 @@ test('all canonical system, UI, administration and delivery diagrams have stable
     section,
     markdown: readFileSync(join(root, section.path), 'utf8'),
   }));
-  const manifest = createManifest(sha, sources);
+  const catalog = readFileSync(join(root, 'docs/design/SCREEN-CONTROL-CATALOG.md'), 'utf8');
+  const manifest = createManifest(sha, sources, catalog);
   assert.equal(manifest.format, 'codexia-architecture-atlas/v1');
   assert.equal(manifest.sourceSha, sha);
   const sourceCount = sources.reduce((total, item) =>
@@ -32,6 +33,11 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
     /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));
+  const entry = manifest.diagrams.find(d => d.screenIds.includes('ENTRY-01'));
+  assert.deepEqual(entry.implementationPaths, SCREEN_IMPLEMENTATION_PATHS['ENTRY-01']);
+  assert.deepEqual(entry.screenContracts, [{ id: 'ENTRY-01', line: 26, status: '実装' }]);
+  assert.ok(manifest.diagrams.filter(d => d.screenIds.includes('CON-01'))
+    .every(d => d.implementationPaths.length === 0), 'goal screens without a direct implementation stay unmapped');
 });
 
 test('every cataloged product screen has an owned, rendered transition diagram', () => {
