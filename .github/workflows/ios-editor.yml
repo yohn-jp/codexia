@@ -28,6 +28,7 @@ jobs:
       - name: Build fixture app for Simulator
         run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaApp -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
       - name: Boot Simulator and launch fixture app
+        timeout-minutes: 5
         run: |
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
           DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
