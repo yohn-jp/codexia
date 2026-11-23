@@ -363,7 +363,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [knowledgeStatusFilter, setKnowledgeStatusFilter] = useState("");
   const [knowledgeNextCursor, setKnowledgeNextCursor] = useState<string | null>(null);
   const [knowledgeComplete, setKnowledgeComplete] = useState(false);
-  const [knowledgeLegacyMode, setKnowledgeLegacyMode] = useState(false);
   const [knowledgePageLoading, setKnowledgePageLoading] = useState(false);
   const knowledgeBrowseSequenceRef = useRef(0);
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch((current) => current + 1), []);
@@ -558,10 +557,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
   const selectedNodeError = knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId
     ? knowledgeSelectionError.message : "";
-  const visibleKnowledgeNodes = knowledgeLegacyMode ? nodes.filter((node) =>
-    node.name.toLocaleLowerCase().includes(knowledgeQuery.trim().toLocaleLowerCase()) &&
-    (!knowledgeTypeFilter || node.type === knowledgeTypeFilter) &&
-    (!knowledgeStatusFilter || node.status === knowledgeStatusFilter)) : nodes;
   const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
   const publishEditor = useCallback((next: ActiveDocument | null) => {
@@ -751,28 +746,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setKnowledgePageLoading(false);
     setKnowledgeNextCursor(null);
     setKnowledgeComplete(false);
-    setKnowledgeLegacyMode(false);
     setNodes([]);
     const delay = window.setTimeout(() => void api.persistenceKnowledgePage(projectId, {
       q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter,
-    }, controller.signal).then(async (result) => {
+    }, controller.signal).then((result) => {
       if (controller.signal.aborted || sequence !== knowledgeBrowseSequenceRef.current || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setNodes(result.nodes);
-      if ("nextCursor" in result) {
-        setKnowledgeLegacyMode(false);
-        setKnowledgeNextCursor(result.nextCursor);
-        setKnowledgeComplete(result.nextCursor === null);
-      } else {
-        setKnowledgeLegacyMode(true);
-        setKnowledgeNextCursor(null);
-        setKnowledgeComplete(true);
-        // Older API builds ignore the new filter parameters. Recover the
-        // previous bounded inventory (up to 500) so local fallback filtering
-        // retains the old browse reach, while keeping coverage explicitly unknown.
-        const legacy = await api.persistenceNodes(projectId, 500, controller.signal);
-        if (controller.signal.aborted || sequence !== knowledgeBrowseSequenceRef.current || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
-        setNodes(legacy.nodes);
-      }
+      setKnowledgeNextCursor(result.nextCursor);
+      setKnowledgeComplete(result.nextCursor === null);
       setKnowledgeListError("");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === projectId) {
@@ -795,15 +776,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter, cursor,
       });
       if (sequence !== knowledgeBrowseSequenceRef.current || projectIdRef.current !== selectedProjectId || sessionBlockedRef.current) return;
-      if (!("nextCursor" in result)) {
-        const legacy = await api.persistenceNodes(selectedProjectId, 500);
-        if (sequence !== knowledgeBrowseSequenceRef.current || projectIdRef.current !== selectedProjectId || sessionBlockedRef.current) return;
-        setNodes(legacy.nodes);
-        setKnowledgeLegacyMode(true);
-        setKnowledgeNextCursor(null);
-        setKnowledgeComplete(true);
-        return;
-      }
       setNodes(current => [...current, ...result.nodes]);
       setKnowledgeNextCursor(result.nextCursor);
       setKnowledgeComplete(result.nextCursor === null);
@@ -2763,8 +2735,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           <p role="status" aria-live="polite">
             {knowledgeListLoading ? "Knowledgeを検索しています。" : knowledgeListError
               ? `${nodes.length}件取得済み。Knowledgeの取得に失敗しました。`
-              : knowledgeLegacyMode
-              ? `旧サーバーから取得した${nodes.length}件の名前・種類・状態だけを表示しています。別名検索と続きの取得は利用できず、全体の網羅状況は不明です。${visibleKnowledgeNodes.length}件が現在の条件に一致。`
               : nodes.length === 0 && knowledgeComplete
               ? "該当するKnowledgeはありません。"
               : knowledgeComplete ? `すべての絞り込み結果を取得済み（${nodes.length}件）。`
@@ -2772,7 +2742,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </p>
           <ul className="pg-knowledge-list">
             {knowledgeListLoading && nodes.length === 0 && <li role="status">Knowledge一覧を読み込んでいます。</li>}
-            {visibleKnowledgeNodes.map((node) => <li key={node.id}>
+            {nodes.map((node) => <li key={node.id}>
               <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => { setNodeId(node.id); setSelectedKnowledgeNode(node); }}>
                 <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
               </button>

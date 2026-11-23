@@ -152,8 +152,6 @@ export const responseContracts = {
     /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(v.changeSet.id),
   nativeChangeSetApplication: changeSetApplication,
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
-  persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } | PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) &&
-    (v.nextCursor === undefined && v.projectVersion === undefined || nullableText(v.nextCursor) && integer(v.projectVersion)),
   persistenceKnowledgePage: (v: unknown): v is PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) && nullableText(v.nextCursor) && integer(v.projectVersion),
   persistenceDocumentEnvelope: (v: unknown): v is { document: PersistenceDocument } => record(v) && persistenceDocument(v.document),
   apply: application,

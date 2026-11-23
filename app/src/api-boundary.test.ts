@@ -61,6 +61,39 @@ test("audit browser API rejects jobs missing their required opaque result", asyn
   assert.equal((await api.jobs())[0]?.result, null);
 });
 
+test("Knowledge browse carries server-selected filters into the opaque cursor continuation", async () => {
+  const filters = { q: "literal%_! alias", type: "person", status: "confirmed" };
+  const cursor = "opaque+next/page=";
+  const nodes = ["Aoi", "Mio"].map((name, index) => ({
+    id: `node-${index}`, projectId: "project-1", name, type: "person", status: "confirmed",
+    attributes: {}, version: 1, deletedAt: null, createdAt: "", updatedAt: "",
+  }));
+  const received: Array<Record<string, string>> = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input), "https://codexia.test");
+    assert.equal(url.pathname, "/api/v1/persistence/projects/project-1/nodes");
+    received.push(Object.fromEntries(url.searchParams));
+    return url.searchParams.has("cursor")
+      ? Response.json({ nodes: [nodes[1]], nextCursor: null, projectVersion: 18 })
+      : Response.json({ nodes: [nodes[0]], nextCursor: cursor, projectVersion: 18 });
+  };
+
+  const first = await api.persistenceKnowledgePage("project-1", filters);
+  assert.deepEqual(first, { nodes: [nodes[0]], nextCursor: cursor, projectVersion: 18 });
+  assert.equal(first.nextCursor, cursor);
+  const last = await api.persistenceKnowledgePage("project-1", { ...filters, cursor: first.nextCursor });
+  assert.deepEqual(last, { nodes: [nodes[1]], nextCursor: null, projectVersion: 18 });
+  assert.deepEqual(received, [{ limit: "50", ...filters }, { limit: "50", ...filters, cursor }]);
+});
+
+test("Knowledge browse rejects responses without an explicit cursor and project version", async () => {
+  const filters = { q: "", type: "", status: "" };
+  for (const payload of [{ nodes: [] }, { nodes: [], nextCursor: null }, { nodes: [], projectVersion: 18 }]) {
+    globalThis.fetch = async () => Response.json(payload);
+    await assert.rejects(api.persistenceKnowledgePage("project-1", filters), invalid);
+  }
+});
+
 test("complete workspace document reads cover 999 records and reject an ambiguous full page", async () => {
   const documents = Array.from({length:1000},(_,index)=>({
     id:`doc-${index}`,projectId:"project-1",parentId:null,kind:"scene",title:`Scene ${index}`,
