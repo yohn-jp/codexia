@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { GenericEndpointContext } from "@better-auth/core";
 import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
@@ -34,6 +35,9 @@ interface OAuthConsent {
   readonly clientId: string;
   readonly scopes: string[];
   readonly updatedAt: Date;
+  readonly referenceId?: string | null;
+  readonly resources?: string[] | null;
+  readonly requestedUserInfoClaims?: string[] | null;
 }
 
 function reject(status: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT", code: string): never {
@@ -43,6 +47,14 @@ function reject(status: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT",
 function isFresh(createdAt: Date): boolean {
   const age = Date.now() - new Date(createdAt).getTime();
   return age >= 0 && age < OWNER_FRESH_AGE_MS;
+}
+
+// The OAuth Provider may write the same timestamp to multiple distinct consent revisions.
+function consentRevision(consent: OAuthConsent): string {
+  return createHash("sha256").update(JSON.stringify([
+    consent.id, consent.clientId, consent.scopes, consent.updatedAt.toISOString(),
+    consent.referenceId ?? null, consent.resources ?? null, consent.requestedUserInfoClaims ?? null,
+  ])).digest("base64url");
 }
 
 /** Attach only to the normal author runtime. Setup and operator recovery own their separate ceremony admission. */
@@ -105,17 +117,22 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
           provider: { status: options.legacyOidcConfigured ? "operator-configured-unverified" : "not-configured" },
           clients: clients.map(({ clientId, name, scopes, redirectUris, disabled }) =>
             ({ clientId, name: name ?? clientId, scopes: scopes ?? [], redirectUris, disabled: disabled === true })),
-          consents: consents.filter(({ clientId }) => registered.has(clientId)).map(({ id, clientId, scopes, updatedAt }) =>
-            ({ id, clientId, scopes, updatedAt })),
+          consents: consents.filter(({ clientId }) => registered.has(clientId)).map((consent) => ({
+            id: consent.id, clientId: consent.clientId, scopes: consent.scopes, updatedAt: consent.updatedAt,
+            revision: consentRevision(consent),
+          })),
         });
       }),
       ownerSecurityRevokeConsent: createAuthEndpoint("/codexia/owner-security/revoke-consent", {
         method: "POST",
         requireHeaders: true,
-        body: z.strictObject({ id: z.string().min(1), clientId: z.string().min(1), scopes: z.array(z.string().min(1)).min(1), updatedAt: z.iso.datetime() }),
+        body: z.strictObject({
+          id: z.string().min(1), clientId: z.string().min(1), scopes: z.array(z.string().min(1)).min(1),
+          revision: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+        }),
       }, async (ctx) => {
         const { user } = await requireOwner(ctx, { write: true, fresh: true });
-        const { id, clientId, scopes, updatedAt } = ctx.body;
+        const { id, clientId, scopes, revision } = ctx.body;
         if (!clientIds.has(clientId)) reject("NOT_FOUND", "OWNER_SECURITY_CONSENT_NOT_FOUND");
         const adapter = ctx.context.adapter;
         const where = [{ field: "id", value: id }, { field: "clientId", value: clientId }, { field: "userId", value: user.id }];
@@ -123,11 +140,23 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
         if (!consent) reject("NOT_FOUND", "OWNER_SECURITY_CONSENT_NOT_FOUND");
         const selectedScopes = new Set(scopes);
         if (selectedScopes.size !== scopes.length || consent.scopes.length !== scopes.length ||
-            !consent.scopes.every((scope) => selectedScopes.has(scope)) || consent.updatedAt.toISOString() !== updatedAt) {
+            !consent.scopes.every((scope) => selectedScopes.has(scope)) || consentRevision(consent) !== revision) {
           reject("CONFLICT", "OWNER_SECURITY_CONSENT_CHANGED");
         }
+        // Better Auth's PostgreSQL/Kysely schema stores string arrays in JSONB.
+        // Its where-clause transformer does not serialize string[] values as its writer does.
+        const storedArray = (value: string[] | null | undefined) => value == null ? null
+          : adapter.id === "kysely" ? JSON.stringify(value) : value;
         const deleted = await adapter.deleteMany({
-          model: "oauthConsent", where: [...where, { field: "updatedAt", value: consent.updatedAt }],
+          model: "oauthConsent",
+          where: [
+            ...where,
+            { field: "updatedAt", value: consent.updatedAt },
+            { field: "scopes", value: storedArray(consent.scopes) },
+            { field: "referenceId", value: consent.referenceId ?? null },
+            { field: "resources", value: storedArray(consent.resources) },
+            { field: "requestedUserInfoClaims", value: storedArray(consent.requestedUserInfoClaims) },
+          ],
         });
         if (deleted !== 1) reject("CONFLICT", "OWNER_SECURITY_CONSENT_CHANGED");
         // This withdraws the persisted approval. The OAuth protocol owns already issued tokens.

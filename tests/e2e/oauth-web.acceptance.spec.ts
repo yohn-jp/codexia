@@ -281,7 +281,7 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
       const response = await loaded;
       expect(response.request().headers().authorization).toBeUndefined();
       const consent = settings.getByRole("list", { name: "保存したアプリ同意" }).getByRole("listitem")
-        .filter({ has: settings.getByRole("heading", { name: fixture.webClientId, exact: true }) });
+        .filter({ has: page.getByRole("heading", { name: fixture.webClientId, exact: true }) });
       await expect(consent).toContainText("codexia:api");
       await page.keyboard.press("Escape");
       await expect(settings).not.toBeVisible();

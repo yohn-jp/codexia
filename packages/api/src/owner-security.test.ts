@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { jwt, testUtils } from "better-auth/plugins";
+import { Pool } from "pg";
 import { ownerSecurity } from "./owner-security.js";
 
 const origin = "https://codexia.example.test";
@@ -11,8 +13,9 @@ const ownerId = "established-owner";
 const webClientId = "codexia-web";
 const iosClientId = "codexia-ios";
 
-async function fixture() {
+async function fixture(database?: Pool) {
   const auth = betterAuth({
+    ...(database ? { database } : {}),
     baseURL: `${origin}/api/auth`,
     secret: "disposable-owner-security-fixture-secret",
     logger: { disabled: true },
@@ -29,6 +32,7 @@ async function fixture() {
     ],
   });
   const context = await auth.$context;
+  if (database) await context.runMigrations();
   const { createUser, saveUser, login } = context.test;
   const owner = await saveUser(createUser({ id: ownerId }));
   const nonOwner = await saveUser(createUser({ id: "not-the-owner" }));
@@ -49,7 +53,15 @@ async function fixture() {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }));
   }
-  return { context, current, other, foreign, request };
+  async function consentSelection(id: string) {
+    const response = await request("/codexia/owner-security/identity");
+    assert.equal(response.status, 200);
+    const result = await response.json() as { consents: { id: string; clientId: string; scopes: string[]; revision: string }[] };
+    const row = result.consents.find((consent) => consent.id === id);
+    assert.ok(row);
+    return { id: row.id, clientId: row.clientId, scopes: row.scopes, revision: row.revision };
+  }
+  return { context, current, other, foreign, request, consentSelection };
 }
 
 test("owner management rejects cross-origin, missing-origin writes, bearer and foreign sessions", async () => {
@@ -125,7 +137,8 @@ test("identity reads only allowlisted clients and owner grants, with an unverifi
 });
 
 test("withdrawing stored consent compares the owner, client, scopes and exact version", async () => {
-  const { request, current, foreign, context } = await fixture();
+  const { request, current, foreign, context, consentSelection } = await fixture();
+  await context.adapter.create({ model: "oauthClient", data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
   const updatedAt = new Date();
   const create = (userId: string, clientId: string) => context.adapter.create({
     model: "oauthConsent", data: { userId, clientId, scopes: ["openid", "offline_access"], createdAt: updatedAt, updatedAt },
@@ -134,18 +147,75 @@ test("withdrawing stored consent compares the owner, client, scopes and exact ve
   const foreignConsent = await create(foreign.user.id, webClientId);
   const otherConsent = await create(ownerId, iosClientId);
   const path = "/codexia/owner-security/revoke-consent";
-  const body = { id: consent.id, clientId: webClientId, scopes: ["openid", "offline_access"], updatedAt: updatedAt.toISOString() };
+  const body = await consentSelection(consent.id);
   assert.equal((await request(path, { body: { ...body, id: foreignConsent.id } })).status, 404);
   assert.equal((await request(path, { body: { ...body, clientId: iosClientId } })).status, 404);
   assert.equal((await request(path, { body: { ...body, scopes: ["openid"] } })).status, 409);
-  assert.equal((await request(path, { body: { ...body, updatedAt: new Date(0).toISOString() } })).status, 409);
+  await context.adapter.update({ model: "oauthConsent", where: [{ field: "id", value: consent.id }], update: { requestedUserInfoClaims: ["name"], updatedAt } });
+  assert.equal((await request(path, { body })).status, 409);
+  const currentSelection = await consentSelection(consent.id);
   await context.internalAdapter.updateSession(current.token, { createdAt: new Date(Date.now() - 6 * 60_000) });
-  assert.equal((await request(path, { body })).status, 403);
+  assert.equal((await request(path, { body: currentSelection })).status, 403);
   await context.internalAdapter.updateSession(current.token, { createdAt: new Date() });
-  const receipt = await request(path, { body });
+  const receipt = await request(path, { body: currentSelection });
   assert.equal(receipt.status, 200);
   assert.deepEqual(await receipt.json(), { consentRemoved: true });
   assert.equal((await request(path, { body })).status, 404);
   const left = await context.adapter.findMany<{ id: string }>({ model: "oauthConsent" });
   assert.deepEqual(left.map(({ id }) => id).sort(), [foreignConsent.id, otherConsent.id].sort());
+});
+
+const authTestDatabase = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+
+test("PostgreSQL preserves a concurrently updated consent with the same timestamp", {
+  skip: authTestDatabase && process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" ? false : "requires a disposable auth database",
+}, async (t) => {
+  assert.ok(authTestDatabase);
+  const url = new URL(authTestDatabase);
+  assert.match(url.protocol, /^postgres(?:ql)?:$/u);
+  assert.equal(url.search + url.hash, "");
+  const localDisposable = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && url.pathname === "/codexia_auth_test";
+  const ciDisposable = process.env.CI === "true" && url.hostname === "postgres" && /^\/codexia_ci_[a-f0-9]{32}$/u.test(url.pathname);
+  assert.ok(localDisposable || ciDisposable, "owner security test requires an isolated disposable auth database");
+  const schema = `owner_security_test_${randomUUID().replaceAll("-", "")}`;
+  const admin = new Pool({ connectionString: authTestDatabase });
+  const scoped = new Pool({ connectionString: authTestDatabase, options: `-c search_path=${schema}` });
+  t.after(async () => {
+    try {
+      await scoped.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally { await admin.end(); }
+  });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  const { request, context, consentSelection } = await fixture(scoped);
+  await context.adapter.create({ model: "oauthClient", data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
+  const updatedAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+  const consent = await context.adapter.create({ model: "oauthConsent", data: {
+    userId: ownerId, clientId: webClientId, scopes: ["openid"], resources: [`${origin}/api`],
+    createdAt: updatedAt, updatedAt,
+  } });
+  const where = [{ field: "id", value: consent.id }];
+  const originalDelete = context.adapter.deleteMany;
+  const path = "/codexia/owner-security/revoke-consent";
+  for (const update of [
+    { scopes: ["openid", "offline_access"] },
+    { resources: [`${origin}/different-resource`] },
+    { requestedUserInfoClaims: ["name"] },
+  ]) {
+    context.adapter.deleteMany = async (input) => {
+      if (input.model === "oauthConsent") await context.adapter.update({ model: "oauthConsent", where, update: { ...update, updatedAt } });
+      return originalDelete(input);
+    };
+    assert.equal((await request(path, { body: await consentSelection(consent.id) })).status, 409);
+    const persisted = await context.adapter.findOne<{ scopes: string[]; resources?: string[]; requestedUserInfoClaims?: string[] }>({
+      model: "oauthConsent", where,
+    });
+    assert.ok(persisted);
+    for (const key of ["scopes", "resources", "requestedUserInfoClaims"] as const) {
+      if (update[key]) assert.deepEqual(persisted[key], update[key]);
+    }
+  }
+  context.adapter.deleteMany = originalDelete;
+  assert.equal((await request(path, { body: await consentSelection(consent.id) })).status, 200);
+  assert.equal(await context.adapter.findOne({ model: "oauthConsent", where }), null);
 });
