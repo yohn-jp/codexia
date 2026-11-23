@@ -72,7 +72,7 @@ For local generation from the repository root, use a separate installation of Re
 node scripts/audit/export.mjs /tmp/codexia-audit-site /tmp/codexia-audit-cache /absolute/path/to/repomix
 ```
 
-The exporter reads Git blobs, never executes branch code or uses branch-specific packer configuration, excludes binary/non-UTF-8 content, private-data paths, credential filenames and the entire historical `evidence/` directory (including generated Markdown manuscripts), and enables Repomix secret scanning. Filtered or blocked snapshots are explicitly marked. This is review material, not release verification or a substitute for a security review; do not commit private material even to an audit-target branch.
+The exporter reads Git blobs, never executes branch code or uses branch-specific packer configuration, excludes binary/non-UTF-8 content, private-data paths, credential filenames and the entire historical `evidence/` directory (including generated Markdown manuscripts), and enables Repomix secret scanning. The publication policy excludes matching source files before packaging and records the affected snapshots as partial. The assembled-site check runs the same credential-pattern checks before upload.
 
 ## Development and verification
 

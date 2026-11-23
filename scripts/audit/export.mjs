@@ -6,9 +6,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { dirname, join, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { containsCredentialPattern } from './publication-policy.mjs';
 
 export const REPOMIX_VERSION = '1.19.0';
 const config = fileURLToPath(new URL('./repomix.config.json', import.meta.url));
+const publicationPolicy = new URL('./publication-policy.mjs', import.meta.url);
 const self = fileURLToPath(import.meta.url);
 const shaPattern = /^[a-f0-9]{40}$/u;
 const maxBlob = 8 * 1024 * 1024;
@@ -20,7 +22,7 @@ const json = data => JSON.stringify(data, null, 2) + '\n';
 const git = (root, args, options = {}) => execFileSync('git', args, { cwd: root, maxBuffer: maxInput + 4 * 1024 * 1024, ...options });
 const decode = bytes => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 const order = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-const policy = () => hash(Buffer.concat([Buffer.from(REPOMIX_VERSION), readFileSync(self), readFileSync(config)]));
+const policy = () => hash(Buffer.concat([Buffer.from(REPOMIX_VERSION), readFileSync(self), readFileSync(config), readFileSync(publicationPolicy)]));
 
 export function parseHeads(value) {
   const seen = new Set();
@@ -69,6 +71,7 @@ function inventory(root, sha, stage) {
     let content;
     try { content = decode(bytes); } catch { excluded.push({ path, reason: 'non-utf8' }); continue; }
     if (content.includes('\0')) { excluded.push({ path, reason: 'binary' }); continue; }
+    if (containsCredentialPattern(content)) { excluded.push({ path, reason: 'credential-pattern' }); continue; }
     total += size;
     assert.ok(total <= maxInput, 'Snapshot exceeds input budget');
     const target = join(stage, path);
@@ -120,7 +123,7 @@ export function validatePack(pack, inventory) {
   // omitted content from Git or silently describe the export as complete.
   const excluded = [...inventory.excluded, ...[...expected.keys()].map(path => ({ path, reason: 'repomix-omitted (security or packer filtering)' }))].sort((a,b) => order(a.path,b.path));
   assert.ok(included.length, 'Repomix returned no source files');
-  return { included, excluded, partial: expected.size > 0 };
+  return { included, excluded, partial: expected.size > 0 || excluded.some(file => file.reason === 'credential-pattern') };
 }
 
 function snapshot(root, sha, dest, executable, policyHash) {

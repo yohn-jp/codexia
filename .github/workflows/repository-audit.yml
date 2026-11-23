@@ -87,9 +87,9 @@ jobs:
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ runner.temp }}/audit-cache
-          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json', 'scripts/audit/publication-policy.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-
+            audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json', 'scripts/audit/publication-policy.mjs') }}-
       - name: Pack every remote branch HEAD with the same policy
         run: |
           node scripts/audit/export.mjs "$RUNNER_TEMP/audit-site" "$RUNNER_TEMP/audit-cache" "$CODEXIA_AUDIT_REPOMIX_BIN"
@@ -161,7 +161,7 @@ jobs:
         uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/audit-cache
-          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json', 'scripts/audit/publication-policy.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload Pages site
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5.0.0

@@ -89,7 +89,9 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     git('add', '-A'); git('commit', '-qm', 'fixture');
     const first = git('rev-parse', 'HEAD');
     writeFileSync(join(repo, 'source.ts'), 'export const value = 2;\n');
-    git('add', 'source.ts'); git('commit', '-qm', 'second');
+    const fixtureBearer = ['Bearer', ['local', 'fixture', 'not', 'a', 'credential', '0123456789'].join('-')].join(' ');
+    writeFileSync(join(repo, 'bearer-fixture.ts'), 'export const auth = ' + JSON.stringify(fixtureBearer) + ';\n');
+    git('add', 'source.ts', 'bearer-fixture.ts'); git('commit', '-qm', 'second');
     const second = git('rev-parse', 'HEAD');
     writeFileSync(join(repo, 'source.ts'), 'uncommitted text');
     const cache = join(root, 'cache');
@@ -99,11 +101,13 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     assert.ok(existsSync(join(root,'site1','audit','index.html')));
     assert.ok(existsSync(join(root,'site1','manifest.json')));
     assert.equal(a.snapshots[first].status, 'ready');
-    assert.equal(a.snapshots[second].status, 'ready');
+    assert.equal(a.snapshots[second].status, 'partial');
     const read = (site, id, file) => JSON.parse(readFileSync(join(root, site, 'snapshots', id, file), 'utf8'));
+    assert.ok(read('site1',second,'manifest.json').excluded.some(x => x.path === 'bearer-fixture.ts' && x.reason === 'credential-pattern'));
     assert.match(read('site1',first,'repomix.json').files['source.ts'], /value = 1/);
     assert.match(read('site1',second,'repomix.json').files['source.ts'], /value = 2/);
     const files = read('site1',second,'repomix.json').files;
+    assert.equal(Object.hasOwn(files, 'bearer-fixture.ts'), false);
     assert.equal(Object.hasOwn(files, '.env'), false);
     assert.equal(Object.hasOwn(files, 'link'), false);
     assert.equal(Object.hasOwn(files, 'repomix.config.ts'), false);
@@ -121,7 +125,7 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     }
     assert.equal(manifest.outputs.filter(x => x.name.startsWith('part-')).length, 3);
     const c = run('site2', [{branch:'main',sha:second}], '/does-not-exist');
-    assert.equal(c.snapshots[second].status, 'ready');
+    assert.equal(c.snapshots[second].status, 'partial');
     assert.equal(existsSync(join(root, 'site2', 'snapshots', first)), false);
     assert.equal(existsSync(join(cache, first)), false);
     writeFileSync(join(cache, second, 'repomix.json'), 'tampered');

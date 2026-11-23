@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { containsCredentialPattern } from './publication-policy.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const CANONICAL_ORIGIN = 'https://yohn-jp.github.io/codexia';
@@ -115,19 +116,12 @@ function inventory(site) {
   return files;
 }
 
-const secretPatterns = [
-  /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/u,
-  /\b(?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{30,})\b/u,
-  /\bAKIA[0-9A-Z]{16}\b/u,
-  /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/u,
-  /\bBearer\s+[A-Za-z0-9._~+/-]{32,}/iu,
-];
 function inspectSecrets(files) {
   for (const file of files) {
     const bytes = readFileSync(file.absolute);
     if (bytes.includes(0)) continue;
     const content = bytes.toString('utf8');
-    for (const pattern of secretPatterns) assert.ok(!pattern.test(content), `Credential-like value in public artifact: ${file.rel}`);
+    assert.ok(!containsCredentialPattern(content), `Credential-like value in public artifact: ${file.rel}`);
   }
 }
 
