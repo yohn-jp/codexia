@@ -2202,6 +2202,14 @@ describe("Codexia HTTP boundary", () => {
       }],
     };
 
+    const legacyId = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
+      method: "POST", headers: ownerHeaders(),
+      body: JSON.stringify({ proposalId: proposal.id, snapshot, operations: [selected] }),
+    });
+    assert.equal(legacyId.status, 400);
+    assert.equal((await legacyId.json() as { code: string }).code, "INVALID_PROPOSAL");
+    assert.equal(await store.getProposal(project.id, proposal.id), null);
+
     const initial = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
       method: "POST", headers: { Authorization: signedRequests.mcpHeaders().Authorization, "Content-Type": "application/json" },
       body: JSON.stringify({ ...proposal, source: "author" }),

@@ -1694,8 +1694,8 @@ export function createServer(options: ApiServerOptions): Server {
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
         if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
-        const suppliedId = typeof body.id === "string" ? body.id : typeof body.proposalId === "string" ? body.proposalId : undefined;
-        const requestedId = suppliedId || undefined;
+        if ("proposalId" in body) throw httpFailure(400, "INVALID_PROPOSAL", "Use id for the proposal identity");
+        const requestedId = typeof body.id === "string" && body.id ? body.id : undefined;
         let source: ChangeProposal["source"] = isBearer ? "mcp" : "author";
         if (requestedId !== undefined) {
           if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_IDENTITY_UNAVAILABLE", "Core cannot verify an existing proposal identity for this retry");
