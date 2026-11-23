@@ -93,22 +93,28 @@ test("the maintained session endpoints preserve the current session and enforce 
 
 test("passkey management requires the fresh owner and rejects deletion of their last passkey", async () => {
   const { request, current, foreign, context } = await fixture();
-  const passkey = await context.adapter.create({ model: "passkey", data: {
+  const createPasskey = (name: string, credentialID: string) => context.adapter.create({ model: "passkey", data: {
     userId: ownerId,
-    name: "Current key",
-    credentialID: "Y3JlZGVudGlhbA",
+    name,
+    credentialID,
     publicKey: "Zml4dHVyZQ==",
     counter: 0,
     deviceType: "singleDevice",
     backedUp: false,
     createdAt: new Date(),
   } });
+  const passkey = await createPasskey("Current key", "Y3JlZGVudGlhbA");
   assert.equal((await request("/passkey/list-user-passkeys", { headers: foreign.headers, suppliedOrigin: null })).status, 403);
   assert.equal((await request("/passkey/generate-register-options", { headers: foreign.headers, suppliedOrigin: null })).status, 403);
   assert.equal((await request("/passkey/delete-passkey", { body: { id: passkey.id } })).status, 403);
   assert.equal((await request("/passkey/update-passkey", { body: { id: passkey.id, name: "Renamed" } })).status, 200);
+  const spare = await createPasskey("Spare key", "c3BhcmUtY3JlZGVudGlhbA");
+  assert.equal((await request("/passkey/delete-passkey", { body: { id: spare.id } })).status, 200);
+  assert.equal(await context.adapter.findOne({ model: "passkey", where: [{ field: "id", value: spare.id }] }), null);
+  assert.equal((await request("/passkey/delete-passkey", { body: { id: passkey.id } })).status, 403);
   await context.internalAdapter.updateSession(current.token, { createdAt: new Date(Date.now() - 6 * 60_000) });
   assert.equal((await request("/passkey/update-passkey", { body: { id: passkey.id, name: "Old session" } })).status, 403);
+  assert.equal((await request("/passkey/generate-register-options", { suppliedOrigin: null })).status, 403);
   assert.ok(await context.adapter.findOne({ model: "passkey", where: [{ field: "id", value: passkey.id }] }));
 });
 

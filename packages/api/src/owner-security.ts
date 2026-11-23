@@ -15,9 +15,12 @@ const freshPaths = new Set([
   "/passkey/update-passkey", "/passkey/delete-passkey",
 ]);
 
-interface OwnerSecurityOptions {
+interface OwnerSecurityPolicyOptions {
   readonly origin: string;
   readonly ownerId: string;
+}
+
+interface OwnerSecurityOptions extends OwnerSecurityPolicyOptions {
   readonly oauthClientIds: readonly string[];
   readonly legacyOidcConfigured: boolean;
 }
@@ -57,27 +60,25 @@ function consentRevision(consent: OAuthConsent): string {
   ])).digest("base64url");
 }
 
-/** Attach only to the normal author runtime. Setup and operator recovery own their separate ceremony admission. */
-export function ownerSecurity(options: OwnerSecurityOptions) {
-  const clientIds = new Set(options.oauthClientIds);
-
-  async function requireOwner(ctx: GenericEndpointContext, { write = false, fresh = false } = {}) {
-    ctx.setHeader("cache-control", "no-store");
-    const origin = ctx.headers?.get("origin");
-    const fetchSite = ctx.headers?.get("sec-fetch-site");
-    if ((write && origin !== options.origin) || (origin && origin !== options.origin) ||
-        (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none")) {
-      reject("FORBIDDEN", "OWNER_SECURITY_ORIGIN_DENIED");
-    }
-    if (ctx.headers?.has("authorization")) reject("FORBIDDEN", "OWNER_SECURITY_COOKIE_REQUIRED");
-    if (!ctx.headers?.has("cookie")) reject("UNAUTHORIZED", "OWNER_SECURITY_SESSION_REQUIRED");
-    const result = await getAuthoritativeSessionFromCtx(ctx);
-    if (!result) reject("UNAUTHORIZED", "OWNER_SECURITY_SESSION_REQUIRED");
-    if (result.user.id !== options.ownerId) reject("FORBIDDEN", "OWNER_SECURITY_OWNER_REQUIRED");
-    if (fresh && !isFresh(result.session.createdAt)) reject("FORBIDDEN", "OWNER_SECURITY_REAUTH_REQUIRED");
-    return result;
+async function requireOwner(ctx: GenericEndpointContext, options: OwnerSecurityPolicyOptions, { write = false, fresh = false } = {}) {
+  ctx.setHeader("cache-control", "no-store");
+  const origin = ctx.headers?.get("origin");
+  const fetchSite = ctx.headers?.get("sec-fetch-site");
+  if ((write && origin !== options.origin) || (origin && origin !== options.origin) ||
+      (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none")) {
+    reject("FORBIDDEN", "OWNER_SECURITY_ORIGIN_DENIED");
   }
+  if (ctx.headers?.has("authorization")) reject("FORBIDDEN", "OWNER_SECURITY_COOKIE_REQUIRED");
+  if (!ctx.headers?.has("cookie")) reject("UNAUTHORIZED", "OWNER_SECURITY_SESSION_REQUIRED");
+  const result = await getAuthoritativeSessionFromCtx(ctx);
+  if (!result) reject("UNAUTHORIZED", "OWNER_SECURITY_SESSION_REQUIRED");
+  if (result.user.id !== options.ownerId) reject("FORBIDDEN", "OWNER_SECURITY_OWNER_REQUIRED");
+  if (fresh && !isFresh(result.session.createdAt)) reject("FORBIDDEN", "OWNER_SECURITY_REAUTH_REQUIRED");
+  return result;
+}
 
+/** Attach these maintained-path guards only to the normal owner runtime. */
+export function ownerSecurityPolicy(options: OwnerSecurityPolicyOptions) {
   return {
     id: "codexia-owner-security",
     hooks: {
@@ -85,7 +86,7 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
         matcher: (ctx: { path?: string }) => Boolean(ctx.path && protectedPaths.has(ctx.path)),
         handler: createAuthMiddleware(async (ctx) => {
           const path = ctx.path;
-          const { user, session } = await requireOwner(ctx, {
+          const { user, session } = await requireOwner(ctx, options, {
             write: ctx.method === "POST", fresh: Boolean(path && freshPaths.has(path)),
           });
           if (path === "/revoke-sessions") reject("FORBIDDEN", "OWNER_SECURITY_CURRENT_SESSION");
@@ -102,9 +103,17 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
         }),
       }],
     },
+  };
+}
+
+/** In-process evidence for scoped consent withdrawal pending admission to the HTTP contract. */
+export function ownerSecurity(options: OwnerSecurityOptions) {
+  const clientIds = new Set(options.oauthClientIds);
+  return {
+    ...ownerSecurityPolicy(options),
     endpoints: {
       ownerSecurityIdentity: createAuthEndpoint("/codexia/owner-security/identity", { method: "GET", requireHeaders: true }, async (ctx) => {
-        const { user } = await requireOwner(ctx);
+        const { user } = await requireOwner(ctx, options);
         const adapter = ctx.context.adapter;
         const clients = clientIds.size === 0 ? [] : await adapter.findMany<OAuthClient>({
           model: "oauthClient", where: [{ field: "clientId", operator: "in", value: [...clientIds] }],
@@ -131,7 +140,7 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
           revision: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
         }),
       }, async (ctx) => {
-        const { user } = await requireOwner(ctx, { write: true, fresh: true });
+        const { user } = await requireOwner(ctx, options, { write: true, fresh: true });
         const { id, clientId, scopes, revision } = ctx.body;
         if (!clientIds.has(clientId)) reject("NOT_FOUND", "OWNER_SECURITY_CONSENT_NOT_FOUND");
         const adapter = ctx.context.adapter;
