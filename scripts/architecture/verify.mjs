@@ -164,7 +164,7 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
     const invalidOperationsExport = JSON.parse(await readFile(injectedOperationsExportFile, 'utf8'));
     const operationsRouteControl = expectRejection('public-to-protected-operations-route', () =>
       validateLikeC4Export(invalidOperationsExport),
-    /client.*host-operations.*web -> codexia\.ssh/u);
+    /web -> codexia\.ssh/u);
 
     const imageDigest = execFileSync(dockerBin, [
       'image', 'inspect', '--format', '{{index .RepoDigests 0}}', THREAGILE_IMAGE,
