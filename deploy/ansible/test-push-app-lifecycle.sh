@@ -526,6 +526,21 @@ Host codexia-backup-fixture
   StrictHostKeyChecking yes
 SSH_CONFIG
 sudo install -o codexia -g codexia -m 0600 "$tmp/ssh-config" "$fixture_home/.ssh/config"
+# The container generates its host key on startup. Its detached run can finish
+# before ssh-keygen -A, so wait for the real key instead of racing sshd startup.
+ssh_host_key_ready=false
+for attempt in $(seq 1 30); do
+  if rootless_podman exec codexia-backup-sshfs test -s /etc/ssh/ssh_host_ed25519_key.pub >/dev/null 2>&1; then
+    ssh_host_key_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$ssh_host_key_ready" != true ]]; then
+  echo 'Prebuilt SSHFS fixture did not generate its SSH host key' >&2
+  rootless_podman logs --tail 50 codexia-backup-sshfs >&2 || true
+  exit 1
+fi
 server_key=$(rootless_podman exec codexia-backup-sshfs cat /etc/ssh/ssh_host_ed25519_key.pub)
 printf 'codexia-backup-fixture %s\n' "$server_key" > "$tmp/known_hosts"
 sudo install -o codexia -g codexia -m 0600 "$tmp/known_hosts" "$fixture_home/.ssh/known_hosts"
