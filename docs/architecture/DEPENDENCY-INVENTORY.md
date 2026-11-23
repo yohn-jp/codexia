@@ -67,6 +67,8 @@
 | `@ionic/react` | `9.0.12` | app・モバイルUI | **連動**: Ionic Coreと一緒に検証 |
 | `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
 | `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
+| `@xstate/react` | `6.1.0` | app・WRT-01/REC-01 machineとReact 19のactor接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。machine統合と保存／復旧受入で併せて検証 |
+| `xstate` | `5.33.4` | app・保存／復旧の状態機械とasync actor | **連動**: 実装時点のv5 latest stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
 | `vite` | `^8.3.8` | app・フロントビルド | **要検証**: ビルド・Workers配信成果物の一致を検証 |
 
