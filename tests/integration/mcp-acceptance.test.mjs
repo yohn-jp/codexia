@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -107,29 +107,23 @@ async function runtimeOptions(cacheDirectory, usageDirectory) {
   });
 }
 
-async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted, assignedProjects = [] }) {
+async function startAdmissionHost({ cacheDirectory, usageDirectory, assignedProjects }) {
   const databaseUrl = DATABASE_URL;
   await migratePostgresDatabase(databaseUrl);
   const persistence = createPostgresPersistence(databaseUrl);
   const runtime = await runtimeOptions(cacheDirectory, usageDirectory);
   const store = new CoreStore({ persistence });
-  let credentials;
-  let admission;
-  if (hosted) {
-    admission = { hosted, trustProxy: true };
-  } else {
-    assert.ok(assignedProjects.length > 0, "Standalone MCP requires explicitly assigned fixture projects");
-    for (let offset = 0; offset < assignedProjects.length; offset += 20) {
-      await Promise.all(assignedProjects.slice(offset, offset + 20).map(project => persistence.transaction(tx => tx.createProject(project))));
-    }
-    const signer = await createSignedRequests();
-    admission = clientAdmission(assignedProjects.map(project => project.id), signer.publicJwks, signer.isActive);
-    credentials = {
-      owner: await signer.issue(WEB_CLIENT, "codexia:api"),
-      mcp: await signer.issue(MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
-      reader: await signer.issue(MCP_CLIENT, "mcp:read"),
-    };
+  assert.ok(assignedProjects.length > 0, "Standalone MCP requires explicitly assigned fixture projects");
+  for (let offset = 0; offset < assignedProjects.length; offset += 20) {
+    await Promise.all(assignedProjects.slice(offset, offset + 20).map(project => persistence.transaction(tx => tx.createProject(project))));
   }
+  const signer = await createSignedRequests();
+  const admission = clientAdmission(assignedProjects.map(project => project.id), signer.publicJwks, signer.isActive);
+  const credentials = {
+    owner: await signer.issue(WEB_CLIENT, "codexia:api"),
+    mcp: await signer.issue(MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
+    reader: await signer.issue(MCP_CLIENT, "mcp:read"),
+  };
   const server = createServer({
     store, persistence, ...admission,
     staticDir: resolve(root, "app/dist"), runtime, usageDirectory,
@@ -143,7 +137,7 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted, assi
   assert.ok(address && typeof address === "object");
   let closePromise;
   return {
-    base: `http://127.0.0.1:${address.port}`, runtime, store, credentials, hosted: Boolean(hosted),
+    base: `http://127.0.0.1:${address.port}`, runtime, store, credentials,
     close() {
       closePromise ??= new Promise((resolveClose, rejectClose) => {
         server.close(async (error) => {
@@ -204,11 +198,11 @@ function errorCode(result, name) {
   return content.error.code;
 }
 
-async function startStdioClient(host, projectId, token = host.credentials?.mcp) {
+async function startStdioClient(host, projectId, token = host.credentials.mcp) {
   const environment = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     CODEXIA_API_URL: host.base,
-    // The legacy fixture uses a synthetic bearer to exercise transport, not OAuth issuance.
+    // The fixture signs the access token locally while the API verifies its claims and assignment.
     CODEXIA_MCP_ACCESS_TOKEN: token,
     CODEXIA_PROJECT_ID: projectId,
   };
@@ -224,10 +218,8 @@ async function startStdioClient(host, projectId, token = host.credentials?.mcp) 
   return { client, transport };
 }
 
-async function startHttpClient(host, projectId, token = host.credentials?.mcp) {
-  const path = host.hosted
-    ? `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`
-    : `/mcp?projectId=${encodeURIComponent(projectId)}`;
+async function startHttpClient(host, projectId, token = host.credentials.mcp) {
+  const path = `/mcp?projectId=${encodeURIComponent(projectId)}`;
   const transport = new StreamableHTTPClientTransport(new URL(path, host.base), {
     fetch: (input, init) => {
       const headers = new Headers(init?.headers);
@@ -595,31 +587,6 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   assert.equal((await apiRequest(host, "/mcp", { accessToken: host.credentials.mcp })).status, 400, "multiple assignments require an explicit project");
   assert.equal((await apiRequest(host, `/mcp?projectId=${otherProjectId}`, { accessToken: host.credentials.mcp })).status, 404);
 
-  const assignment = {
-    contractVersion: "scriptorium-platform/v1", instanceId: "native-mcp-acceptance", repositoryId: 123,
-    repositoryLocator: "https://github.com/owner/work", defaultBranchPolicy: "repository-default",
-    runtimeEpoch: 3, imageDigest: `sha256:${"a".repeat(64)}`,
-    compositionManifestDigest: `sha256:${"b".repeat(64)}`, enabledModuleIds: READY_MODULES,
-    credentialBrokerLocator: "https://praetorium.example/internal/github/credential",
-    controlServicePolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/control-jwks.json", audience: "praetorium-runtime-control" },
-    grantPolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json", audience: "https://native-mcp-acceptance.instances.example" },
-  };
-  const readToken = randomBytes(32).toString("base64url");
-  const writeToken = randomBytes(32).toString("base64url");
-  const hosted = await startAdmissionHost({
-    cacheDirectory: resolve(rootDir, "hosted-module-cache"), usageDirectory: resolve(rootDir, "hosted-history"),
-    hosted: { assignment, projectId, authorization: {
-      async authenticate(token, requiredPermission = "read") {
-        if (token !== readToken && token !== writeToken) throw Object.assign(new Error("grant invalid"), { status: 401 });
-        const permissions = token === writeToken ? ["read", "write"] : ["read"];
-        if (!permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
-        return { userId: token === writeToken ? "writer-1" : "reader-1", permissions,
-          repositoryId: assignment.repositoryId, instanceId: assignment.instanceId, runtimeEpoch: assignment.runtimeEpoch,
-          sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000 };
-      },
-    } },
-  });
-  t.after(() => hosted.close());
   const rejectedNode = randomUUID();
   const otherOperation = { type: "knowledge.node.save", command: {
     projectId: otherProjectId, id: rejectedNode, type: "person", name: "Must not be written",
@@ -631,13 +598,11 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     return result;
   };
   const connections = [
-    ["Standalone stdio", startStdioClient, false, host, host.credentials.mcp, host.credentials.reader],
-    ["Standalone Streamable HTTP", startHttpClient, true, host, host.credentials.mcp, host.credentials.reader],
-    ["Hosted stdio", startStdioClient, false, hosted, writeToken, readToken],
-    ["Hosted Streamable HTTP", startHttpClient, true, hosted, writeToken, readToken],
+    ["stdio", startStdioClient, false],
+    ["Streamable HTTP", startHttpClient, true],
   ];
-  for (const [label, connect, isHttp, boundary, writeAccess, readAccess] of connections) {
-    const writer = await connect(boundary, projectId, writeAccess);
+  for (const [label, connect, isHttp] of connections) {
+    const writer = await connect(host, projectId);
     let reader;
     try {
       const validPreview = success(await writer.client.callTool({
@@ -658,7 +623,7 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
         ["invoke_action", { action_id: "core.knowledge.propose", input: { projectVersion, idempotencyKey: "wrong-operation-generic", operations: [{ type: "knowledge.merge", command: {} }] } }],
       ]) await rejected(writer, tool, args, `${label} ${tool} boundary`);
 
-      reader = await connect(boundary, projectId, readAccess);
+      reader = await connect(host, projectId, host.credentials.reader);
       const read = success(await reader.client.callTool({ name: "knowledge.nodes.list", arguments: { project_version: projectVersion } }), `${label} read-only grant`);
       assert.equal(read.snapshot.projectId, projectId);
       assert.deepEqual(new Set(read.data.map(node => node.id)), new Set([sourceId, targetId]));

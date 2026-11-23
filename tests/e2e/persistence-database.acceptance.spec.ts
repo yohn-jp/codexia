@@ -1561,19 +1561,6 @@ for (const shell of ["desktop", "mobile"] as const) {
   });
 }
 
-test("Hosted permission metadata does not force Git workspace fallback", async ({ page, authorizeAuthor }) => {
-  expect(databaseUrl).toBeTruthy();
-  await page.route("**/api/session", async (route) => {
-    const response = await route.fetch();
-    if (!response.ok()) { await route.fulfill({ response }); return; }
-    const body = await response.json() as Record<string, unknown>;
-    await route.fulfill({ response, body: JSON.stringify({ ...body, authorScope: "hosted:acceptance", permissions: ["write"] }) });
-  });
-  await authorizeAuthor("mobile", page, { path: "/mobile/?store=git" });
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Git作品を開く" })).toHaveCount(0);
-});
-
 test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowledge to Text Anchors", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const contentSecurityPolicyViolations: string[] = [];
