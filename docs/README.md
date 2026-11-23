@@ -45,6 +45,8 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Installation and local startup | [Repository README](../README.md) |
 | Editing, recovery, history and layouts | [Authoring](authoring.md) |
 | Portable work JSON, new-project import and one-time source conversion | [Portable works](authoring-portable.md) |
+| First-party file names and ownership directories | [Source layout and naming](architecture/SOURCE-LAYOUT-CONVENTIONS.md) — approved naming and placement target; code movement not yet implemented |
+| Scripts migration waves and full mapping | [Migration plan](architecture/SCRIPTS-MIGRATION-PLAN.md) · [196-file map](architecture/SCRIPTS-MIGRATION-MAP.md) — implementation plan, not moved source |
 | Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
 | Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
 | Passkey-first login, optional OIDC administration, API OAuth and BOLA prevention | [API authentication and authorization](architecture/API-AUTHN-AUTHZ.md) — current behavior and accepted target; not deployment evidence |
