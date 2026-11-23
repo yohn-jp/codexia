@@ -30,6 +30,11 @@
 | `typescript` | 現行 `~5.9.3` → **採用目標 TypeScript 7 最新安定版** | root・型検査 | **移行必須・未実装**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。型設定・依存型を修正し、全workspaceでnative型検査を受入。5系への恒久フォールバックは禁止 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
+| `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
+| `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
+| `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
+| `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
+| `@typespec/openapi3` | `1.18.0` | `packages/http-contract`・OpenAPI 3.1.0 emitter | **連動**: compiler/http/openapi librariesと同一releaseで更新 |
 
 ### 認証・API・永続化
 
@@ -40,7 +45,7 @@
 | `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
-| `fastify` | `^5.12.8` | API・単一認可境界 | **既存採用**: Fastify 5。最新版・major互換性の証拠は別途評価 |
+| `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
 | `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
 | `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
 | `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
@@ -88,7 +93,7 @@
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `yaml` | `^2.9.1` | Core・Contracts・modules等 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
+| `yaml` | `^2.9.1` / HTTP contract `2.9.1` | Core・Contracts・modules等、HTTP contract OpenAPI parser | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
 | `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |
 | `@huggingface/transformers` | `4.3.2` | NLP/Semantic・推論 | **要検証**: Optional Full profile専用。Core-onlyを汚染しないこと。`sharp`の修正版overrideは別の採用制約 |
@@ -123,6 +128,7 @@
 | StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
+| oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
 | AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
 | S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 

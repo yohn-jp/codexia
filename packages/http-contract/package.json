@@ -1,0 +1,24 @@
+{
+  "name": "@codexia/http-contract",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm run typecheck && pnpm run check-generated && pnpm run lint",
+    "check-breaking": "node scripts/check-breaking.mjs",
+    "check-generated": "node scripts/check-generated.mjs",
+    "lint": "redocly lint openapi/codexia.openapi.yaml --config redocly.yaml",
+    "typecheck": "tsp compile src/main.tsp --no-emit && tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs test/*.test.ts && pnpm run lint && pnpm run check-generated && pnpm run check-breaking",
+    "generate": "tsp compile src/main.tsp"
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.82.0",
+    "@typespec/compiler": "1.18.0",
+    "@typespec/http": "1.18.0",
+    "@typespec/openapi": "1.18.0",
+    "@typespec/openapi3": "1.18.0",
+    "fastify": "5.12.8",
+    "yaml": "2.9.1"
+  }
+}
