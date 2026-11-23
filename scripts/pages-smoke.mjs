@@ -219,11 +219,13 @@ try {
     await assertReflow(page, 'Source Snapshot');
     await capture('snapshot');
 
+    const detailRoutes = [snapshotUrl.href];
     const review = Object.entries(audit.reviews ?? {}).find(([, item]) => ['ready', 'partial'].includes(item.status));
     if (review) {
       const [sha] = review;
       assert.match(sha, /^[a-f\d]{40}$/u);
       const reviewUrl = new URL('reviews/' + sha + '/', base);
+      detailRoutes.push(reviewUrl.href);
       assert.equal((await page.goto(reviewUrl.href)).status(), 200);
       const manifest = JSON.parse(await readFile(resolve(root, 'reviews', sha, 'manifest.json'), 'utf8'));
       const packet = manifest.outputs.find(output => output.name === 'gemini-review.md');
@@ -239,13 +241,13 @@ try {
     }
 
     if (viewport.width <= 768) {
-      for (const destination of ['', ...destinations]) {
-        await page.goto(base + destination);
+      for (const url of [base, ...destinations.map(destination => base + destination), ...detailRoutes]) {
+        await page.goto(url);
         await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-        await assertReflow(page, `${destination || 'Portal'} with 200% text`);
+        await assertReflow(page, `${url.slice(base.length) || 'Portal'} with 200% text`);
         assert.ok(await page.getByRole('heading', { level: 1 }).first().isVisible());
         const menu = page.locator('.cx-pages-menu-button');
-        if (!destination && await menu.isVisible()) {
+        if (url === base && await menu.isVisible()) {
           await menu.press('Enter');
           await assertReflow(page, 'Expanded navigation with 200% text');
         }
