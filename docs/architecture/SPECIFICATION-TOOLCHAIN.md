@@ -29,7 +29,7 @@
 | PostgreSQL schema | **SQL migration + pgTAP/pg_catalog** | Drizzle Schema + Drizzle Kit | 複合FK、trigger、CHECK、厳格なfingerprintを直接管理・検証。ORM Schemaを導入するとSQL固有の正本分割になり得る |
 | PostgreSQL query | **現行pgを維持** | Kysely | Query Builder追加だけでは本件の要求証明・物理schema適合の問題を解かない。型付きSQLの別要件が生じたら再評価 |
 | DB可視化 | **tbls（実DB由来）** | 手書きDBML | 実DBのオブジェクトから文書/ERDを派生でき、ドキュメントと実DBの差を発見できる |
-| MCP transport/sdk | **公式TypeScript SDK v2** | v1継続 | 2026-07-28 spec対応の現行安定ライン、Node/Hono adapterとZod v4。v1でのsessionfulモデルとの違いを別gateにする |
+| MCP transport/sdk | **公式TypeScript SDK v2** | v1継続 | 2026-07-28 spec対応の現行安定ライン、Node/Web標準handler adapterとZod v4。v1でのsessionfulモデルとの違いを別gateにする |
 | MCP protocol検証 | **公式Inspector / conformance** | 独自プロトコル検証器 | SDK公式の仕様適合と相互運用を利用。Codexia固有scope/author-onlyは統合テストで検証 |
 | Auth仕様の抽出 | **Better Auth公式OpenAPI生成** | 手書きのライブラリAPI一覧 | ライブラリ管理endpointのinventory重複を避ける。公式pluginはearly stageであり、productionのreference endpointを新規公開しない |
 | Architecture | **LikeC4** | Structurizr DSL | 静的出力/Node CLI/Web統合を重視。システム構成の意味はSYSTEM-DESIGNが決定し、既存Atlas/Mermaidの状態図と二重正本を作らない |
@@ -71,4 +71,4 @@
 - [MCP v2と認証境界](MCP-V2-MIGRATION.md)
 - [CI・脅威・性能・Portalの受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)
 
-公式参照（2026-11-23照合）: [TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval config](https://orval.dev/docs/reference/configuration/output/)、[StrictDoc supported formats](https://strictdoc-project.github.io/formats/)、[MCP v2 SDK](https://ts.sdk.modelcontextprotocol.io/v2/)、[MCP v2 protocol era migration](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[Better Auth OpenAPI](https://better-auth.com/docs/plugins/open-api)、[Hono security fixes/releases](https://github.com/honojs/hono/releases)。最新releaseのpinは**導入時に個別検証**し、独立互換制約を説明できない古い固定を放置しない。
+公式参照（2026-11-23照合）: [TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval config](https://orval.dev/docs/reference/configuration/output/)、[StrictDoc supported formats](https://strictdoc-project.github.io/formats/)、[MCP v2 SDK](https://ts.sdk.modelcontextprotocol.io/v2/)、[MCP v2 protocol era migration](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[Better Auth OpenAPI](https://better-auth.com/docs/plugins/open-api)、[Fastify validation and serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/)。最新releaseのpinは**導入時に個別検証**し、独立互換制約を説明できない古い固定を放置しない。
