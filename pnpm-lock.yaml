@@ -186,9 +186,6 @@ catalogs:
     '@better-auth/passkey':
       specifier: 1.7.26
       version: 1.7.26
-    '@huggingface/transformers':
-      specifier: 4.3.2
-      version: 4.3.2
     better-auth:
       specifier: 1.7.26
       version: 1.7.26
@@ -421,7 +418,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/module-runtime
       '@huggingface/transformers':
-        specifier: 'catalog:production'
+        specifier: 4.3.2
         version: 4.3.2(@types/node@24.19.2)
       lindera-wasm-nodejs-ipadic:
         specifier: 2.0.0
@@ -478,7 +475,7 @@ importers:
         specifier: workspace:*
         version: link:../story
       '@huggingface/transformers':
-        specifier: 'catalog:production'
+        specifier: 4.3.2
         version: 4.3.2(@types/node@24.19.2)
       react:
         specifier: 'catalog:production'

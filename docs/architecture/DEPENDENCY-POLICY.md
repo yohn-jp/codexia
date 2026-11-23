@@ -28,6 +28,7 @@
 
 - pnpmワークスペースで複数利用される外部ライブラリの**共通バージョン指定**は `pnpm-workspace.yaml` の `catalogs.production`・`catalogs.development` に集約する。ワークスペース内の `package.json` は `catalog:production`／`catalog:development` を参照する。Catalogは版を管理するための仕組みであり、インストール／配布への採否を決める機構ではない。
 - **実行時・本番依存は各ワークスペースの `dependencies`、型・ビルド・テスト専用依存は `devDependencies` が正本**とする。Catalog名とフィールドを必ず対応させる。実行時利用のあるライブラリをキャッシュやバンドルサイズだけを理由にdevへ移動しない。型定義は原則devに保ち、Core/Full OCIの実配布閉包を別途検査する。
+- **実行時にマニフェストの依存宣言文字列をバージョン識別として利用する実装は、正規のパッケージメタデータ参照へ移行するまでCatalog化しない。** Catalog参照文字列が製品のAPI出力やモデルIDに混入してはならない。
 - 互換範囲が異なるpeer依存は、Catalogへの一律統合で契約を広げたり狭めたりしない。共通の候補がなく単一ワークスペースでしか利用されない依存や、`workspace:`・`file:`等のローカル参照は、必要性が認められる限り宣言元に保持する。
 - Catalog・manifest・lockfileは同時更新し、`pnpm install --frozen-lockfile`、workspace型検査、Core/Full実ビルド、API認証とDesktop E2E、OCIの本番依存閉包で整合性を検証する。DependabotのCatalog更新検知を維持し、Catalog導入により検証義務やリリース証拠を省略しない。独立したnpm lockfile（Edge／移行完了までの既存Native）はこのpnpm Catalogの対象外とする。
 

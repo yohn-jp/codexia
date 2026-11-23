@@ -12,7 +12,6 @@ catalogs:
   production:
     '@better-auth/oauth-provider': 1.7.26
     '@better-auth/passkey': 1.7.26
-    '@huggingface/transformers': 4.3.2
     better-auth: 1.7.26
     react: ^19.3.1
     react-dom: ^19.3.1

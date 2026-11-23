@@ -35,7 +35,7 @@
     "react": "catalog:production",
     "react-dom": "catalog:production",
     "@codexia/module-runtime": "workspace:*",
-    "@huggingface/transformers": "catalog:production"
+    "@huggingface/transformers": "4.3.2"
   },
   "codexiaModule": {
     "id": "nlp",

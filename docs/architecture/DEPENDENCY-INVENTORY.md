@@ -91,7 +91,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `yaml` | `^2.9.1` | Core・Contracts・modules等 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
 | `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |
-| `@huggingface/transformers` | `4.3.2` | NLP/Semantic・推論 | **要検証**: Optional Full profile専用。Core-onlyを汚染しないこと。`sharp`の修正版overrideは別の採用制約 |
+| `@huggingface/transformers` | `4.3.2`（直接指定、Catalog対象外） | NLP/Semantic・推論 | **制約**: NLPエンジンの実行時バージョン識別がmanifestの直接依存文字列を使用するため、`catalog:`への変更で実際のバージョン識別が壊れる。実行時メタデータを正本にする修正が受入されるまで直接指定を保持。Optional Full profile専用でCore-onlyを汚染せず、`sharp`の修正版overrideを維持 |
 | `@huggingface/transformers>sharp` | `0.35.5`（workspace override） | pnpm transitive override | **連動**: native依存の修正済みリリースを強制する既存の安全対策。安全性を再検証せず解除しない |
 
 ### ネイティブ・エッジ
