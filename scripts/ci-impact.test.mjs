@@ -526,14 +526,14 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
   const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage'];
-  for (const file of [
-    'packages/api/test/passkey-bootstrap.acceptance.test.ts',
-    'packages/api/scripts/run-passkey-acceptance.mjs',
+  for (const [file, expectedModelOci] of [
+    ['packages/api/test/passkey-bootstrap.acceptance.test.ts', false],
+    ['packages/api/scripts/run-passkey-acceptance.mjs', true],
   ]) {
     const result = await plan([file]);
     assert.deepEqual(result.tasks, expected, file);
     assert.equal(result.mode, 'affected', file);
-    assert.equal(result.full_model_oci, true, 'package paths remain in the separate Full-model OCI impact closure');
+    assert.equal(result.full_model_oci, expectedModelOci, `Full-model OCI admission: ${file}`);
   }
   const browserSpec = await plan(['tests/e2e/passkey-bootstrap.acceptance.spec.ts']);
   assert.ok(browserSpec.tasks.includes('browser-core-passkey-bootstrap'));
