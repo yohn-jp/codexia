@@ -76,7 +76,7 @@ function main() {
     });
     console.log('Backend update identity verified');
   } else {
-    throw new Error('Usage: backend-update-identity.mjs build <runtime> <profile> <sha> | verify <identity> <api> <platform> <label> <fingerprint> <sha> <profile>');
+    throw new Error('Usage: update-identity.mjs build <runtime> <profile> <sha> | verify <identity> <api> <platform> <label> <fingerprint> <sha> <profile>');
   }
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

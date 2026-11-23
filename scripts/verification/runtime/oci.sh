@@ -82,7 +82,7 @@ for attempt in $(seq 1 40); do
   sleep 0.5
 done
 "$engine" exec "$database_container" pg_isready -h 127.0.0.1 -U codexia -d codexia_verify >/dev/null
-source "$(dirname "$0")/oci-better-auth-fixture.sh"
+source "$(dirname "$0")/better-auth-fixture.sh"
 setup_oci_better_auth "$engine" "$image" "$verification_network" "$database_container" "$secret_directory" "$bootstrap_container" "$oidc_container"
 
 "$engine" run --detach \

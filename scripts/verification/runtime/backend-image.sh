@@ -47,7 +47,7 @@ if [[ "$database_ready" != 1 ]]; then
   exit 1
 fi
 
-source "$(dirname "$0")/oci-better-auth-fixture.sh"
+source "$(dirname "$0")/better-auth-fixture.sh"
 setup_oci_better_auth "$engine" "$image" "$verification_network" "$database_container" "$secret_directory" "$bootstrap_container" "$oidc_container"
 
 "$engine" run --detach --name "$container_name" --network "$verification_network" --network-alias codexia-api \

@@ -15,7 +15,7 @@ This is the normative execution and release architecture. [Test architecture](TE
 | Responsibility | Canonical implementation |
 | --- | --- |
 | Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci/impact/contract.mjs) |
-| Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci/impact/plan.mjs) |
+| Impact selection, plan validation and digest | [plan.mjs](../../scripts/ci/impact/plan.mjs) |
 | Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs) |
 | Task producer invocation, input-proof generation, and coverage input inventory | [group.mjs](../../scripts/ci/execution/group.mjs), [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci/evidence/coverage-inputs.mjs) |
 | Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci/execution/workspace.mjs), [group.mjs](../../scripts/ci/execution/group.mjs) |
