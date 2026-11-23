@@ -41,7 +41,7 @@
     "@codexia/module-semantic": "workspace:*",
     "@codexia/module-speaker": "workspace:*",
     "@ai-sdk/anthropic": "4.0.106",
-    "@ai-sdk/openai-compatible": "2.0.93",
+    "@ai-sdk/openai-compatible": "3.0.93",
     "ai": "7.0.176",
     "jsonrepair": "3.15.0",
     "zod": "4.6.7",
