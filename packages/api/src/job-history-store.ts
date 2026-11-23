@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ActionResult, ModuleId } from "@codexia/contracts";
 import type { WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 
@@ -110,22 +111,30 @@ export class JobHistoryError extends Error {
   }
 }
 
+interface JobHistoryPaths {
+  root: string;
+  directory: string;
+  filePath: string;
+}
+
+function jobHistoryPaths(usageDirectory: string): JobHistoryPaths {
+  if (typeof usageDirectory !== "string" || !usageDirectory.trim()) {
+    throw new JobHistoryError("job_history_path_invalid", "A host history directory is required");
+  }
+  const root = resolve(usageDirectory);
+  const directory = join(root, "jobs");
+  return { root, directory, filePath: join(directory, "jobs-state.json") };
+}
+
 /** Durable owner-host history for real module-runtime jobs. Construction performs no I/O. */
 export class JobHistoryStore {
-  private readonly root: string;
-  private readonly directory: string;
-  private readonly filePath: string;
+  private readonly paths: JobHistoryPaths;
   private loaded = false;
   private state: PersistedState = { version: 3, jobs: [], inbox: [], legacySources: [] };
   private serial = Promise.resolve();
 
   constructor(usageDirectory: string) {
-    if (typeof usageDirectory !== "string" || !usageDirectory.trim()) {
-      throw new JobHistoryError("job_history_path_invalid", "A host history directory is required");
-    }
-    this.root = resolve(usageDirectory);
-    this.directory = join(this.root, "jobs");
-    this.filePath = join(this.directory, "jobs-state.json");
+    this.paths = jobHistoryPaths(usageDirectory);
   }
 
   async record(lifecycle: WorkerJobLifecycle): Promise<JobEvent> {
@@ -336,7 +345,7 @@ export class JobHistoryStore {
     return this.exclusive(async () => {
       await this.load();
       if (!/^[a-f0-9]{64}$/u.test(sourceHash)) throw new JobHistoryError("legacy_jobs_source_invalid", "Legacy job archive identity is invalid");
-      const archivePath = join(this.directory, "legacy", `${sourceHash}.json`);
+      const archivePath = join(this.paths.directory, "legacy", `${sourceHash}.json`);
       const raw = await readPrivateFile(archivePath, MAX_LEGACY_ARCHIVE_BYTES);
       if (hashBytes(raw) !== sourceHash) throw new JobHistoryError("legacy_jobs_archive_corrupt", "Legacy job archive integrity check failed");
       const report: LegacyJobHistoryImportReport = {
@@ -453,60 +462,111 @@ export class JobHistoryStore {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    let rootExists = false;
-    try { await assertPrivateDirectory(this.root); rootExists = true; }
-    catch (error) { if (!isCode(error, "ENOENT")) throw error; }
-    if (!rootExists) { this.loaded = true; return; }
-    try { await assertPrivateDirectory(this.directory); }
-    catch (error) { if (isCode(error, "ENOENT")) { this.loaded = true; return; } throw error; }
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      handle = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const info = await handle.stat();
-      if (!info.isFile() || info.size > MAX_STATE_BYTES || (info.mode & 0o077) !== 0) historyCorrupt();
-      const decoded: unknown = JSON.parse(await handle.readFile("utf8"));
+    const decoded = await readInstalledState(this.paths);
+    if (decoded !== undefined) {
       const recovered = normalizeState(decoded);
       if (orphanRunningJobs(recovered)) await this.persist(recovered);
       this.state = recovered;
-      this.loaded = true;
-    } catch (error) {
-      if (isCode(error, "ENOENT")) { this.loaded = true; return; }
-      if (error instanceof JobHistoryError) throw error;
-      throw new JobHistoryError("job_history_corrupt", "Host job history cannot be read safely");
-    } finally {
-      await handle?.close().catch(() => undefined);
     }
+    this.loaded = true;
   }
 
   private async persist(next: PersistedState): Promise<void> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    await assertPrivateDirectory(this.root);
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await assertPrivateDirectory(this.directory);
-    await syncDirectory(this.root);
-    const serialized = `${JSON.stringify(next)}\n`;
-    if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) {
-      throw new JobHistoryError("job_history_full", "Host job history exceeds its storage limit");
-    }
-    const temporary = join(this.directory, `.tmp-${randomBytes(16).toString("hex")}`);
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    await writeInstalledState(this.paths, serializeState(next));
+  }
+}
+
+/** Readiness check for the installed format. Runtime recovery is deferred to the live store. */
+export async function assertCurrentJobHistory(usageDirectory: string): Promise<void> {
+  const state = await readInstalledState(jobHistoryPaths(usageDirectory));
+  if (state !== undefined) normalizeState(state);
+}
+
+export type JobHistoryMaintenanceReport =
+  | { status: "ready"; version: 3 | null; migrated: boolean }
+  | { status: "maintenance_required"; version: 1 | 2; migrated: false };
+
+/** Convert installed job history while the API is stopped. This never resumes or marks jobs. */
+export async function maintainJobHistory(usageDirectory: string, mode: "check" | "apply"): Promise<JobHistoryMaintenanceReport> {
+  const paths = jobHistoryPaths(usageDirectory);
+  const state = await readInstalledState(paths);
+  if (state === undefined) return { status: "ready", version: null, migrated: false };
+  if (!isRecord(state)) historyCorrupt();
+  const { version } = state;
+  if (version !== 1 && version !== 2) {
+    normalizeState(state);
+    return { status: "ready", version: 3, migrated: false };
+  }
+  if (!hasOnlyKeys(state, new Set(["version", "jobs", "inbox", "legacySources"])) || !Array.isArray(state.jobs) ||
+      state.jobs.length > MAX_RETAINED_JOBS) historyCorrupt();
+  const jobs = state.jobs.map((entry: unknown) => {
+    if (!isRecord(entry) || !hasOnlyKeys(entry, new Set(["ownerKey", "projectKey", "job"]))) historyCorrupt();
+    return { kind: "worker", ...entry };
+  });
+  const migrated = {
+    version: 3, jobs, inbox: state.inbox,
+    legacySources: version === 1 && !Object.hasOwn(state, "legacySources") ? [] : state.legacySources,
+  };
+  normalizeState(migrated);
+  const serialized = serializeState(migrated);
+  if (mode === "check") return { status: "maintenance_required", version, migrated: false };
+  await writeInstalledState(paths, serialized);
+  return { status: "ready", version: 3, migrated: true };
+}
+
+async function readInstalledState({ root, directory, filePath }: JobHistoryPaths): Promise<unknown> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    await assertPrivateDirectory(root);
+    await assertPrivateDirectory(directory);
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_STATE_BYTES || (info.mode & 0o077) !== 0) historyCorrupt();
+    const bytes = await handle.readFile();
+    if (bytes.length > MAX_STATE_BYTES) historyCorrupt();
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)) as unknown;
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return undefined;
+    if (error instanceof JobHistoryError) throw error;
+    throw new JobHistoryError("job_history_corrupt", "Host job history cannot be read safely");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+function serializeState(state: unknown): string {
+  const serialized = `${JSON.stringify(state)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) {
+    throw new JobHistoryError("job_history_full", "Host job history exceeds its storage limit");
+  }
+  return serialized;
+}
+
+async function writeInstalledState({ root, directory, filePath }: JobHistoryPaths, serialized: string): Promise<void> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(root);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(directory);
+  await syncDirectory(root);
+  const temporary = join(directory, `.tmp-${randomBytes(16).toString("hex")}`);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    await handle.chmod(0o600);
+    await handle.writeFile(serialized, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
     try {
-      handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      await handle.writeFile(serialized, "utf8");
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      try {
-        await rename(temporary, this.filePath);
-      } catch (error) {
-        if (!isCode(error, "EEXIST")) throw error;
-        throw new JobHistoryError("job_history_write_failed", "Host job history could not be atomically replaced");
-      }
-      await syncDirectory(this.directory);
-    } finally {
-      await handle?.close().catch(() => undefined);
-      await unlink(temporary).catch(() => undefined);
+      await rename(temporary, filePath);
+    } catch (error) {
+      if (!isCode(error, "EEXIST")) throw error;
+      throw new JobHistoryError("job_history_write_failed", "Host job history could not be atomically replaced");
     }
+    await syncDirectory(directory);
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
   }
 }
 
@@ -677,17 +737,22 @@ function pruneJobs(jobs: StoredJob[]): void {
 }
 
 function normalizeState(value: unknown): PersistedState {
+  if (isRecord(value) && (value.version === 1 || value.version === 2)) {
+    const tool = fileURLToPath(new URL("./maintain-job-history.js", import.meta.url));
+    throw new JobHistoryError("job_history_maintenance_required",
+      `Host job history requires offline maintenance. Stop the API and run node ${tool} --check with CODEXIA_USAGE_DIR set.`);
+  }
   if (!isRecord(value) || !hasOnlyKeys(value, new Set(["version", "jobs", "inbox", "legacySources"])) ||
-      (value.version !== 1 && value.version !== 2 && value.version !== 3) || !Array.isArray(value.jobs) || !Array.isArray(value.inbox) ||
+      value.version !== 3 || !Array.isArray(value.jobs) || !Array.isArray(value.inbox) ||
       value.jobs.length > MAX_RETAINED_JOBS || value.inbox.length > MAX_RETAINED_INBOX ||
-      (value.version !== 1 && !Array.isArray(value.legacySources))) historyCorrupt();
+      !Array.isArray(value.legacySources)) historyCorrupt();
   const jobs: StoredJob[] = value.jobs.map((entry) => {
-    const fields = value.version === 3 ? new Set(["kind", "ownerKey", "projectKey", "job"]) : new Set(["ownerKey", "projectKey", "job"]);
+    const fields = new Set(["kind", "ownerKey", "projectKey", "job"]);
     if (!isRecord(entry) || !hasOnlyKeys(entry, fields) ||
         typeof entry.ownerKey !== "string" || !/^[a-f0-9]{64}$/u.test(entry.ownerKey) ||
         typeof entry.projectKey !== "string" || !/^[a-f0-9]{64}$/u.test(entry.projectKey) || !isRecord(entry.job) ||
         !hasOnlyKeys(entry.job, PUBLIC_JOB_FIELDS)) historyCorrupt();
-    const kind = value.version === 3 ? entry.kind : "worker";
+    const kind = entry.kind;
     if (kind !== "worker" && kind !== "domain" && kind !== "legacy") historyCorrupt();
     const job = normalizePublicJob(entry.job);
     return { kind, ownerKey: entry.ownerKey, projectKey: entry.projectKey, job };
@@ -699,11 +764,10 @@ function normalizeState(value: unknown): PersistedState {
   }
   const inbox = value.inbox.map((entry) => normalizeInboxItem(entry));
   if (new Set(inbox.map(({ id }) => id)).size !== inbox.length) historyCorrupt();
-  const legacySourcesRaw: unknown[] = value.version !== 1 && Array.isArray(value.legacySources) ? value.legacySources : [];
-  const legacySources = value.version !== 1 ? legacySourcesRaw.map((source) => {
+  const legacySources = value.legacySources.map((source: unknown) => {
     if (typeof source !== "string" || !/^[a-f0-9]{64}$/u.test(source)) historyCorrupt();
     return source;
-  }) : [];
+  });
   if (new Set(legacySources).size !== legacySources.length) historyCorrupt();
   return { version: 3, jobs, inbox, legacySources };
 }
