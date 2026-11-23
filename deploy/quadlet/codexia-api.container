@@ -1,5 +1,8 @@
 [Unit]
 Description=Codexia API backend
+# Limit repeated startup failures without weakening the runtime health gate.
+StartLimitIntervalSec=120
+StartLimitBurst=3
 Requires=codexia-db.service
 After=network-online.target codexia-db.service
 
@@ -35,9 +38,14 @@ NoNewPrivileges=true
 DropCapability=all
 HealthCmd=node -e 'fetch("http://127.0.0.1:3000/health/ready").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 HealthInterval=30s
+# Reuse the real health probe more frequently during startup only.
+HealthStartupInterval=2s
+HealthStartupSuccess=1
 HealthTimeout=5s
 HealthStartPeriod=60s
 HealthRetries=3
+# A successful systemctl start now proves the real API healthcheck passed.
+Notify=healthy
 
 [Service]
 Restart=on-failure
