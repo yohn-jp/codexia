@@ -65,10 +65,6 @@ test('the convergence step forwards the certified identity, private certificate 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const bin = path.join(directory, 'codexia-ansible', 'bin');
   const invocation = path.join(directory, 'ansible-invocation');
-  const certificate = path.join(directory, 'codexia-deployment-certificate.json');
-  const variables = path.join(directory, 'codexia-deploy-vars.json');
-  const inventory = path.join(directory, 'codexia-inventory.yml');
-
   mkdirSync(bin, { recursive: true });
   writeFileSync(path.join(bin, 'ansible-playbook'), '#!/bin/bash\nprintf "%s\\n" "$@" > "$RUNNER_TEMP/ansible-invocation"\n', { mode: 0o700 });
   symlinkSync(process.execPath, path.join(bin, 'node'));
@@ -115,30 +111,43 @@ test('the convergence step forwards the certified identity, private certificate 
     assert.ifError(result.error);
     assert.equal(result.status, 1, `invalid ${key} must be rejected`);
     assert.equal(existsSync(invocation), false, `invalid ${key} reached Ansible`);
-    assert.equal(existsSync(certificate), false, `invalid ${key} reached certificate staging`);
   }
 
-  const result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: admitted, encoding: 'utf8' });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(readFileSync(invocation, 'utf8').trimEnd().split('\n'), [
-    '-i', inventory, 'deploy/ansible/site.yml', '--extra-vars', `@${variables}`,
-  ]);
-  assert.deepEqual(readFileSync(certificate), certificateBytes);
-  assert.equal(statSync(certificate).mode & 0o777, 0o600);
-  assert.equal(parse(readFileSync(inventory, 'utf8')).all.hosts.codexia.codexia_stage, 'deploy');
-  assert.deepEqual(JSON.parse(readFileSync(variables, 'utf8')), {
-    codexia_image: digest,
-    codexia_source_sha: producer,
-    codexia_profile: 'full',
-    codexia_verified_main_sha: verified,
-    codexia_deployed_ui_epoch: 17,
-    codexia_deployment_certificate_file: certificate,
-    codexia_backup_destination: '/fixture/backups',
-    codexia_backup_recipient: 'age1fixture',
-    codexia_initial_install_approved: true,
-    codexia_database_initialization_approved: false,
-  });
+  for (const [installApproved, databaseApproved] of [[false, false], [true, false], [false, true], [true, true]]) {
+    rmSync(invocation, { force: true });
+    const env = {
+      ...admitted,
+      CODEXIA_INITIAL_INSTALL_APPROVED: String(installApproved),
+      CODEXIA_DATABASE_INITIALIZATION_APPROVED: String(databaseApproved),
+    };
+    const result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env, encoding: 'utf8' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    const args = readFileSync(invocation, 'utf8').trimEnd().split('\n');
+    assert.equal(args.length, 5);
+    assert.equal(args[0], '-i');
+    assert.equal(args[2], 'deploy/ansible/site.yml');
+    assert.equal(args[3], '--extra-vars');
+    assert.match(args[4], /^@/u);
+
+    const inventory = parse(readFileSync(args[1], 'utf8'));
+    assert.equal(inventory.all.hosts.codexia.codexia_stage, 'deploy');
+    const { codexia_deployment_certificate_file: certificate, ...variables } =
+      JSON.parse(readFileSync(args[4].slice(1), 'utf8'));
+    assert.deepEqual(readFileSync(certificate), certificateBytes);
+    assert.equal(statSync(certificate).mode & 0o777, 0o600);
+    assert.deepEqual(variables, {
+      codexia_image: digest,
+      codexia_source_sha: producer,
+      codexia_profile: 'full',
+      codexia_verified_main_sha: verified,
+      codexia_deployed_ui_epoch: 17,
+      codexia_backup_destination: '/fixture/backups',
+      codexia_backup_recipient: 'age1fixture',
+      codexia_initial_install_approved: installApproved,
+      codexia_database_initialization_approved: databaseApproved,
+    });
+  }
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
