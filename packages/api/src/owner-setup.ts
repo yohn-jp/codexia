@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import Fastify from "fastify";
 import { jwtVerify, SignJWT } from "jose";
 import { z } from "zod";
@@ -22,6 +23,7 @@ const profileBody = z.object({
 const transactionBody = z.object({
   grantId: z.uuid(), sub: z.uuid(), exp: z.number().int(), profile: profileBody.optional(),
 });
+const emptyBody = z.object({}).strict();
 const credentialBody = z.object({
   response: z.record(z.string(), z.unknown()), createSession: z.literal(true).optional(),
 }).strict();
@@ -35,7 +37,19 @@ function scopedKey(secret: string, purpose: string): Buffer {
   return createHmac("sha256", secret).update(purpose).digest();
 }
 
-export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirectUris: readonly string[]) {
+async function tunnelAddresses(): Promise<readonly string[]> {
+  try {
+    return (await lookup("codexia-tunnel", { all: true })).map(({ address }) => address);
+  } catch {
+    return [];
+  }
+}
+
+export function createOwnerSetupApp(
+  config: BetterAuthRuntimeConfig,
+  webRedirectUris: readonly string[],
+  trustedTunnelAddresses: () => Promise<readonly string[]> = tunnelAddresses,
+) {
   const origin = new URL(config.publicOrigin);
   const [web, ios] = config.ownerClientIds;
   const introspection = config.oauthIntrospectionClientId;
@@ -95,8 +109,8 @@ export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirect
 
   async function clientsReady(ownerId: string) {
     try {
-      await auth.assertRegisteredClients(ownerId);
-      await auth.verifyIntrospectionCredentials();
+      await provisionSetupOAuthClients(auth, clientId, new Headers(), ownerId,
+        { web: web!, ios: ios!, introspection }, webRedirectUris, httpFixture, true);
       return true;
     } catch {
       return false;
@@ -108,7 +122,8 @@ export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirect
     const lock = await auth.pool.connect();
     try {
       await lock.query("BEGIN");
-      await lock.query("SELECT pg_advisory_xact_lock(7149924356031231)");
+      const claim = await lock.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock(7149924356031231) AS acquired");
+      if (!claim.rows[0]?.acquired) throw new Error("Client provisioning is already in progress");
       if (await installedSetupOwner(auth.pool, undefined) !== ownerId) throw new Error("Setup owner changed");
       // Use Better Auth's server-only registration operation. The temporary session
       // stays on the server and is removed even if one of the three clients fails.
@@ -182,7 +197,10 @@ export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirect
       const browserOrigin = request.method === "GET"
         ? (request.headers.origin ?? (fetchSite === "same-origin" ? origin.origin : undefined))
         : request.headers.origin;
-      const transportSecure = httpFixture || request.protocol === "https" || request.headers["x-forwarded-proto"] === "https";
+      const peerAddress = request.raw.socket.remoteAddress?.replace(/^::ffff:/u, "");
+      const transportSecure = httpFixture || request.protocol === "https" ||
+        (request.headers["x-forwarded-proto"] === "https" && peerAddress !== undefined &&
+         (await trustedTunnelAddresses()).includes(peerAddress));
       if (!transportSecure || request.headers.host !== origin.host || browserOrigin !== origin.origin ||
           (fetchSite !== undefined && fetchSite !== "same-origin") ||
           request.headers.authorization !== undefined ||
@@ -245,7 +263,7 @@ export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirect
     setup.post("/api/auth/passkey/verify-registration", async (request, reply) => {
       const result = await ceremony("POST", request.headers[CONTEXT_HEADER], request.headers.cookie, request.body);
       if (!result.ok) {
-        const status = result.status === 409 ? 409 : 400;
+        const status = result.status === 409 || result.status === 403 ? result.status : 400;
         return reply.code(status).send({ code: "SETUP_PASSKEY_UNVERIFIED" });
       }
       // Never return Better Auth's credential or raw session token to the browser.
@@ -253,6 +271,7 @@ export function createOwnerSetupApp(config: BetterAuthRuntimeConfig, webRedirect
     });
 
     setup.post(OWNER_SETUP_PATH + "/complete", async (request, reply) => {
+      if (!emptyBody.safeParse(request.body).success) return reply.code(400).send({ code: "SETUP_REQUEST_INVALID" });
       const tx = await readTransaction(request.headers[CONTEXT_HEADER]);
       const state = await readOwnerSetup(auth.pool);
       if (!tx?.profile || state?.grant_id !== tx.grantId || state.owner_id !== tx.sub ||

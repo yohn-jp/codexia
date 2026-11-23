@@ -12,6 +12,7 @@
     "DELETE /api/projects/{projectId}/modules/mcp/streamable",
     "DELETE /api/v1/persistence/projects/{projectId}/documents/{documentId}",
     "DELETE /mcp",
+    "GET /api/auth/codexia/setup/status",
     "GET /api/auth/oauth2/get-consents",
     "GET /api/browser/version",
     "GET /api/health",
@@ -65,6 +66,7 @@
     "GET /health/live",
     "GET /health/ready",
     "GET /health/startup",
+    "GET /mcp",
     "HEAD /api/browser/version",
     "HEAD /api/health",
     "HEAD /api/ready",
@@ -72,11 +74,13 @@
     "HEAD /health/live",
     "HEAD /health/ready",
     "HEAD /health/startup",
-    "GET /mcp",
     "PATCH /api/v1/persistence/projects/{projectId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata",
+    "POST /api/auth/codexia/setup/authorize",
+    "POST /api/auth/codexia/setup/complete",
+    "POST /api/auth/codexia/setup/profile",
     "POST /api/auth/oauth2/consent-context",
     "POST /api/inbox/read-all",
     "POST /api/inbox/{inboxId}/read",
@@ -123,7 +127,11 @@
   ],
   "betterAuthAdapters": [
     "POST /api/auth/oauth2/consent-context",
-    "GET /api/auth/oauth2/get-consents"
+    "GET /api/auth/oauth2/get-consents",
+    "GET /api/auth/codexia/setup/status",
+    "POST /api/auth/codexia/setup/authorize",
+    "POST /api/auth/codexia/setup/profile",
+    "POST /api/auth/codexia/setup/complete"
   ],
   "betterAuthExternal": {
     "pathPrefix": "/api/auth/",

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
+import { chromium, expect, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { verifyAuthSchema } from "../src/auth-schema.js";
 import { assertDisposableAuthFixtureDatabaseUrl } from "./fixtures/better-auth-server.js";
@@ -840,6 +840,18 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
 
     await migrateBetterAuth({ ...config, installOwnerSetupSchema: true });
     app = createOwnerSetupApp(config, [config.publicOrigin + "/desktop/"]);
+    const dist = process.env.CODEXIA_PASSKEY_SETUP_UI_DIST;
+    if (dist) {
+      // Serve the reviewed built SPA route as Workers does. API requests still
+      // go directly to the actual setup-only Fastify routes and PostgreSQL.
+      const index = await readFile(join(dist, "index.html"), "utf8");
+      app.get("/console/setup", (_request, reply) => reply.type("text/html").send(index));
+      app.get<{ Params: { file: string } }>("/desktop/assets/:file", async (request, reply) => {
+        const file = request.params.file;
+        if (!/^[\w-]+[.](js|css)$/u.test(file)) return reply.code(404).send();
+        return reply.type(file.endsWith(".css") ? "text/css" : "text/javascript").send(await readFile(join(dist, "assets", file)));
+      });
+    }
     await app.verifySchema();
     await app.listen({ host: "localhost", port });
     authPool = new Pool({ connectionString: runtimeDatabase.href, options: "-c search_path=codexia_auth" });
@@ -890,7 +902,6 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
     }
     const first = await setupPage();
     const second = await setupPage();
-    const rejected = await setupPage();
     const authorize = async (page: Page, name: string) => page.evaluate(async ({ setupPath, key, name }) => {
       const headers = { "content-type": "application/json" };
       const grant = await fetch(setupPath + "/authorize", {
@@ -905,12 +916,58 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
       return (await profile.json()).transaction as string;
     }, { setupPath, key, name });
 
-    const badTransaction = await authorize(rejected!, "rejected");
     for (const tamper of ["origin", "challenge", "rp", "userVerification"] as const) {
-      const failed = await registerPasskey(rejected!, badTransaction, { setup: true, tamper });
+      const rejected = await setupPage();
+      const badTransaction = await authorize(rejected, "rejected");
+      const failed = await registerPasskey(rejected, badTransaction, { setup: true, tamper });
+      await rejected.context().close();
       assert.equal(failed.verifyStatus, 400, tamper);
       assert.equal((await authPool.query('SELECT 1 FROM "user"')).rowCount, 0);
       assert.equal((await authPool.query('SELECT 1 FROM "passkey"')).rowCount, 0);
+    }
+
+    if (dist) {
+      const wizard = await setupPage();
+      await wizard.goto(config.publicOrigin + "/console/setup");
+      const setupKey = wizard.getByLabel("初期登録キー");
+      await setupKey.fill(key);
+      await wizard.getByRole("button", { name: "キーを確認" }).click();
+      await expect(wizard.getByRole("heading", { name: "所有者プロフィール" })).toBeFocused();
+      await wizard.getByLabel("表示名").fill("Browser owner");
+      await wizard.getByLabel("連絡先メールアドレス").fill("browser-owner@example.test");
+      await wizard.getByRole("button", { name: "次へ" }).click();
+      await expect(wizard.getByRole("heading", { name: "Passkeyを作成" })).toBeFocused();
+      const noCredential = await wizard.evaluate(() => ({
+        url: window.location.href, local: JSON.stringify(localStorage), session: JSON.stringify(sessionStorage),
+      }));
+      assert.ok(Object.values(noCredential).every((value) => !value.includes(key)));
+      const prompt = wizard.getByRole("button", { name: "Passkeyを作成" });
+      const verificationPath = config.publicOrigin + "/api/auth/passkey/verify-registration";
+      // Hold the ceremony at the browser boundary so the independent race below
+      // can exercise two verified registrations with an unconsumed setup grant.
+      await wizard.route(verificationPath, (route) => route.fulfill({
+        status: 409, json: { code: "SETUP_PASSKEY_UNVERIFIED" },
+      }), { times: 1 });
+      const verification = wizard.waitForRequest(verificationPath);
+      await prompt.click();
+      const credential = await verification;
+      assert.equal(credential.method(), "POST");
+      assert.ok(credential.headers()["x-codexia-setup-transaction"]);
+      assert.equal((await authPool.query('SELECT 1 FROM "user"')).rowCount, 0);
+      await wizard.context().close();
+    }
+
+    const failedCommitPage = await setupPage();
+    const failedCommitToken = await authorize(failedCommitPage, "failed-commit");
+    await authPool.query('ALTER TABLE "passkey" ADD CONSTRAINT reject_fixture_passkey CHECK (false) NOT VALID');
+    try {
+      const failedCommit = await registerPasskey(failedCommitPage, failedCommitToken, { setup: true });
+      assert.equal(failedCommit.verifyStatus, 400);
+      assert.equal((await authPool.query('SELECT 1 FROM "user"')).rowCount, 0);
+      assert.deepEqual(await status(), { state: "setup-pending" });
+    } finally {
+      await authPool.query('ALTER TABLE "passkey" DROP CONSTRAINT reject_fixture_passkey');
+      await failedCommitPage.context().close();
     }
 
     const [firstToken, secondToken] = await Promise.all([authorize(first, "first"), authorize(second, "second")]);
@@ -945,6 +1002,11 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
       method: "POST", url: setupPath + "/complete",
       headers: { ...originHeaders, "x-codexia-setup-transaction": losingToken }, payload: {},
     })).statusCode, 403);
+    const resumed = await app.inject({
+      method: "POST", url: setupPath + "/complete",
+      headers: { ...originHeaders, "x-codexia-setup-transaction": winnerToken }, payload: {},
+    });
+    assert.deepEqual(resumed.json(), { state: "owner-enrolled", clientsReady: true, sessionConfirmed: false });
     const completed = await winningPage.evaluate(async ({ setupPath, winnerToken }) => {
       const response = await fetch(setupPath + "/complete", {
         method: "POST", headers: { "content-type": "application/json", "x-codexia-setup-transaction": winnerToken },
@@ -959,8 +1021,21 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1") test(
       method: "POST", url: setupPath + "/authorize", headers: originHeaders, payload: { key },
     })).statusCode, 403);
     assert.equal(await issueOwnerSetupGrant(authPool, { freshInstall: true }, async () => assert.fail("owner data reopened setup")), false);
+    const rejectedIssuance = runPackageCli("owner-setup-operator", ["--issue-new-approved"], {
+      ...process.env,
+      CODEXIA_AUTH_DATABASE_URL: runtimeDatabase.href,
+      CODEXIA_PUBLIC_ORIGIN: "https://codexia.example.test",
+      CODEXIA_AUTH_SECRET: config.authSecret,
+      CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID: config.oauthIntrospectionClientId,
+      CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET: config.oauthIntrospectionClientSecret,
+      CODEXIA_OAUTH_OWNER_CLIENT_IDS: config.ownerClientIds.join(","),
+      CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS: "https://codexia.example.test/desktop/",
+    });
+    assert.notEqual(rejectedIssuance.status, 0, "a protected first-issue request fails when no grant can be issued");
+    assert.equal(rejectedIssuance.stdout, "", "a failed issuance has no handoff document");
     await assert.rejects(installedSetupOwner(authPool, randomUUID()), /single approved owner/u);
     normalAuth = createBetterAuthRuntime({ ...config, ownerSubject: enrolledId });
+    assert.ok((await finish(winningPage, winnerToken, [firstAttempt, secondAttempt][winner]?.response)) >= 400);
     const browserCookies = await winningPage.context().cookies();
     const cookie = browserCookies.map(({ name, value }) => name + "=" + value).join("; ");
     assert.equal(await normalAuth.auth.api.getSession({ headers: new Headers({ cookie }) }), null);

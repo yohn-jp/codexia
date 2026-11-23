@@ -1287,7 +1287,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (options.betterAuth && routePath === "/api/auth/codexia/setup/status" && method === "GET") {
       response.setHeader("Cache-Control", "no-store");
       if (crossOrigin || request.headers.authorization !== undefined) {
-        fail(response, 403, "SETUP_SAME_ORIGIN_REQUIRED", "Setup status requires a same-origin request without API credentials");
+        sendJson(response, 403, { code: "SETUP_SAME_ORIGIN_REQUIRED" });
         return;
       }
       sendJson(response, 200, { state: "active" });

@@ -276,14 +276,14 @@ MCP clientは割当projectとread/compute/proposeまで。承認/applyやowner�
 **MID**: 98f28a41293b47032faa301b09ce740e
 **UID**: REQ-AUTH-004
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: MAPPED_UNVERIFIED
+**Applicability**: CURRENT
 **Design owner**: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: /console/setup、setup-only Fastify、codexia_auth.owner_setup、Ansible の protected owner-setup operation。公開経路と初回配備の運用受入は別途確認する
-**Verification identifiers**: tests/e2e/passkey-bootstrap.acceptance.spec.ts
+**Verification identifiers**: tests/e2e/passkey-bootstrap.acceptance.spec.ts, packages/api/test/passkey-bootstrap.acceptance.test.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／**目標・未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: 初回登録を実装。Cloudflare 経路、使い捨て VM の配備と運用受入の証跡待ち。
 
 Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認証ceremonyを満たす
 
@@ -295,6 +295,14 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
   **Path**: docs/deployment/INITIAL-DEPLOYMENT-FLOW.md
 - **Type**: File
   **Path**: tests/e2e/passkey-bootstrap.acceptance.spec.ts
+- **Type**: File
+  **Path**: app/src/console/ConsoleSetup.tsx
+- **Type**: File
+  **Path**: packages/api/src/owner-setup.ts
+- **Type**: File
+  **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
+- **Type**: File
+  **Path**: deploy/ansible/owner-setup.yml
 
 ## REQ-AUTH-005
 

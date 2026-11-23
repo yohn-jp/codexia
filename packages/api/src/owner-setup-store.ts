@@ -138,8 +138,8 @@ export async function issueOwnerSetupGrant(
     const previousGrantId = "replaceGrantId" in operation ? operation.replaceGrantId : null;
     const { rows } = await client.query<{ expires_at: Date }>(`
       UPDATE owner_setup
-      SET grant_id = $2, grant_digest = $3, issued_at = clock_timestamp(),
-          expires_at = clock_timestamp() + interval '24 hours',
+      SET grant_id = $2, grant_digest = $3, issued_at = statement_timestamp(),
+          expires_at = statement_timestamp() + interval '24 hours',
           revoked_at = CASE WHEN grant_id IS NOT NULL THEN clock_timestamp() ELSE revoked_at END
       WHERE id = $1 AND grant_id IS NOT DISTINCT FROM $4::text AND consumed_at IS NULL AND owner_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM "user") AND NOT EXISTS (SELECT 1 FROM "passkey")

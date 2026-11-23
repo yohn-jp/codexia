@@ -43,7 +43,7 @@ async function main(): Promise<void> {
         expiresAt: grant.expiresAt,
       }) + "\n");
     });
-    if (!issued && replacement) throw new Error("The selected grant cannot be replaced");
+    if (!issued) throw new Error("The approved operation could not issue a grant");
   } finally {
     await pool.end();
   }

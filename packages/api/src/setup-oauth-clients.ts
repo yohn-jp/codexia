@@ -29,6 +29,7 @@ export async function provisionSetupOAuthClients(
   clientIds: { readonly web: string; readonly ios: string; readonly introspection: string },
   webRedirectUris: readonly string[],
   disposableLoopback: boolean,
+  verifyOnly = false,
 ): Promise<void> {
   const { web: webClientId, ios: iosClientId, introspection: introspectionClientId } = clientIds;
   const context = await runtime.auth.$context;
@@ -51,6 +52,7 @@ export async function provisionSetupOAuthClients(
       }
       return;
     }
+    if (verifyOnly) throw new Error("A reviewed client has not been registered");
     await registrationId.run(id, () => runtime.auth.api.adminCreateOAuthClient({
       headers,
       body: {
