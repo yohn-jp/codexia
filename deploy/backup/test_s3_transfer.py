@@ -273,21 +273,23 @@ class S3TransferTests(unittest.TestCase):
         self.assertNotEqual(client_kwargs["verify"], False)
 
     def test_credential_denial_is_redacted_and_never_publishes_recovery_point(self) -> None:
-        self.write_artifact()
-        client = FakeS3Client()
-        client.fail_head_code = "AccessDenied"
+        for code in ("AccessDenied", "ExpiredToken"):
+            with self.subTest(code=code):
+                self.write_artifact()
+                client = FakeS3Client()
+                client.fail_head_code = code
 
-        with self.assertRaises(s3_transfer.TransferError) as caught:
-            self.make_transfer(client).upload_artifact(
-                self.artifact,
-                backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
-                source_identity="a" * 40,
-                receipt_path=self.receipts / "backup.json",
-            )
+                with self.assertRaises(s3_transfer.TransferError) as caught:
+                    self.make_transfer(client).upload_artifact(
+                        self.artifact,
+                        backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+                        source_identity="a" * 40,
+                        receipt_path=self.receipts / "backup.json",
+                    )
 
-        self.assertNotIn("secret", str(caught.exception).lower())
-        self.assertFalse(any(key.endswith("/COMMIT.json") for _, key in client.objects))
-        self.assertFalse((self.receipts / "backup.json").exists())
+                self.assertNotIn("secret", str(caught.exception).lower())
+                self.assertFalse(any(key.endswith("/COMMIT.json") for _, key in client.objects))
+                self.assertFalse((self.receipts / "backup.json").exists())
 
     def test_partial_single_object_write_never_publishes_commit_or_receipt(self) -> None:
         self.write_artifact()
@@ -344,9 +346,6 @@ class S3TransferTests(unittest.TestCase):
         with patch("s3_transfer.socket.getaddrinfo", return_value=private_answer):
             with self.assertRaises(s3_transfer.TransferError):
                 guard.before_send(type("Request", (), {"url": "https://objects.example.test/bucket/key"})())
-        response = (type("Response", (), {"status_code": 307})(), {})
-        with self.assertRaises(s3_transfer.TransferError):
-            guard.needs_retry(response=response)
         for status in (301, 302, 303, 307, 308):
             response = (type("Response", (), {"status_code": status})(), {})
             with self.subTest(status=status), self.assertRaises(s3_transfer.TransferError):
