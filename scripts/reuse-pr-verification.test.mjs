@@ -53,20 +53,12 @@ function fixture(files = ['package.json']) {
     .map(profile => [profile, add('ci-profile-build-' + profile, null)]));
   const reports = new Map(plan.groups.map(group => [group, { group, sha: head, planDigest: planDigest(plan),
     results: VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task)).map(task => ({ task, status: 'passed' })) }]));
-  const evidence = new Map([...reports].map(([group, report]) => [group, add('ci-evidence-' + group, report)]));
-  const native = evidence.get('hosted-native-catalog');
+  for (const [group, report] of reports) add('ci-evidence-' + group, report);
   for (const [group, report] of reports) {
     const profile = requiredBuildProfile(group);
     if (profile) {
       report.profileArtifact = { profile, sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id),
         producerJob: 'build-' + profile, producerAttempt: 1, artifactId: profileArtifacts[profile].id, artifactDigest: digest };
-    }
-    if (group === 'hosted-native-catalog') {
-      report.nativeProducer = { identity: { sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id), producerJob: group, producerAttempt: 1 },
-        reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
-    } else if (group.startsWith('hosted-native-')) {
-      report.nativeArtifact = { sourceSha: head, planDigest: planDigest(plan), runId: String(prRun.id), producerJob: 'hosted-native-catalog',
-        producerAttempt: 1, artifactId: native.id, artifactDigest: digest, reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
     }
   }
   const state = { pr, prRun, currentRun, jobs, artifacts, contents, reports, runs: [prRun], mergedPulls: [pr] };
@@ -246,7 +238,7 @@ test('selected producer and Full-model evidence must still be valid for full pro
 });
 
 test('compact certification cannot proceed on a failed plan or executed heavy family', () => {
-  const needs = Object.fromEntries(['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].map(name =>
+  const needs = Object.fromEntries(['plan', 'unit', 'types', 'build', 'oci', 'browser'].map(name =>
     [name, { result: name === 'plan' ? 'success' : 'skipped' }]));
   assert.doesNotThrow(() => assertCompactNeeds(needs));
   assert.throws(() => assertCompactNeeds({ ...needs, plan: { result: 'failure' } }));

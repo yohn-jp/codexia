@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { hasStandaloneOAuthIdentity } from './backend-update-identity.mjs';
 import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from './identity-probe-client.mjs';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
@@ -78,7 +79,7 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
 export function assertBackendIdentity(backend) {
   assert.ok(record(backend), 'Live backend identity is invalid');
   if (backend.name !== 'codexia') throw new Error('Live backend identity name is invalid');
-  if (backend.hosted !== false) throw new Error('Live backend must be standalone');
+  if (!hasStandaloneOAuthIdentity(backend)) throw new Error('Live backend must declare standalone OAuth identity');
   assert.ok(typeof backend.version === 'string' && semver.test(backend.version), 'Live backend version is invalid');
   assert.ok(['core', 'full'].includes(backend.profile), 'Live backend profile is invalid');
   assert.ok(Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0, 'Live backend API epoch is missing or invalid');

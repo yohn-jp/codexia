@@ -31,6 +31,7 @@ on:
       - scripts/component-release-record*.mjs
       - scripts/reuse-pr-verification*.mjs
       - scripts/verify-frontend-compatibility*.mjs
+      - scripts/backend-update-identity*.mjs
       - scripts/identity-probe-client.mjs
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs

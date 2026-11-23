@@ -74,7 +74,6 @@ export function assertVerificationLeafJobs(jobs) {
 export const REUSED_MAIN_SKIPPED_JOBS = Object.freeze([
   'full-model-oci', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
   'build-${{ matrix.profile }}', 'oci-${{ matrix.profile }}', 'browser-${{ matrix.group }}',
-  'hosted-native-catalog', 'hosted-native-${{ matrix.selection }}',
 ]);
 export const REUSED_MAIN_CERT_STEP = 'Certify reused merged PR proof';
 

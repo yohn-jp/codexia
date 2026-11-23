@@ -10,6 +10,11 @@ const readJson = filename => JSON.parse(readFileSync(filename, 'utf8'));
 const keys = ['apiEpoch', 'format', 'migrationFingerprint', 'persistenceFormat', 'platform', 'profile', 'sourceSha', 'version'];
 export const fingerprintProbe = 'import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 
+export function hasStandaloneOAuthIdentity(api) {
+  const auth = api?.auth;
+  return Array.isArray(auth) && auth.length === 2 && auth.includes('oauth-owner') && auth.includes('oauth-mcp');
+}
+
 export function validateBackendIdentity(identity) {
   if (!identity || typeof identity !== 'object' || Array.isArray(identity) ||
       Object.keys(identity).sort().join(',') !== keys.join(',') ||
@@ -35,7 +40,7 @@ export function assertBackendIdentity(identity, expected, observation) {
   if (observation.platform !== identity.platform || observation.sourceSha !== identity.sourceSha ||
       observation.migrationFingerprint !== identity.migrationFingerprint ||
       observation.api?.name !== 'codexia' || observation.api?.version !== identity.version ||
-      observation.api?.apiEpoch !== identity.apiEpoch || observation.api?.profile !== identity.profile || observation.api?.hosted !== false) {
+      observation.api?.apiEpoch !== identity.apiEpoch || observation.api?.profile !== identity.profile || !hasStandaloneOAuthIdentity(observation.api)) {
     throw new Error('Backend runtime does not match embedded identity');
   }
 }

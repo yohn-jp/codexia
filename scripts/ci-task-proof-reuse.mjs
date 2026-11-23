@@ -13,7 +13,6 @@ import { assertTrustedCertifiedSourceTaskInputProof } from './ci-task-input-proo
 import { captureTaskInputSource, taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { coverageRuntime } from './ci-coverage-inputs.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
-import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 
 const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const PROOF_API = 'https://api.github.com/repos/yohn-jp/codexia/';
@@ -231,10 +230,9 @@ export async function resolveExactMainTaskProofs({ plan: planValue, current, rep
   const selectedEvidence = selectedArtifacts({ identity, artifacts }, evidenceArtifacts.map(item => item.id), identity, 'evidence');
   const reports = await Promise.all(selectedEvidence.map(item => read(item, 'report.json')));
   assertPlanEvidence(mainPlan, jobs, reports);
-  if (tasks.some(task => requiredBuildProfile(taskGroup(task)) || task.startsWith('hosted-native-'))) {
-    const producerJobs = await resolveProducerJobAttempts(jobs, run, get, ['build-core', 'build-full', 'hosted-native-catalog']);
+  if (tasks.some(task => requiredBuildProfile(taskGroup(task)))) {
+    const producerJobs = await resolveProducerJobAttempts(jobs, run, get, ['build-core', 'build-full']);
     assertProfileArtifactEvidence(mainPlan, producerJobs, reports, artifacts, run.id);
-    if (tasks.some(task => task.startsWith('hosted-native-'))) assertNativeArtifactEvidence(mainPlan, producerJobs, reports, artifacts, run.id);
   }
   function receiptFor(task) {
     const group = task === 'coverage' ? COVERAGE_JOB : taskGroup(task);

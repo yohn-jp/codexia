@@ -139,7 +139,7 @@ test('Search browser changes do not run unrelated units or native image builds',
   assert.ok(selected.tasks.includes('browser-full-ui-v1'));
   assert.ok(!selected.tasks.includes('unit-core'));
   assert.ok(!selected.tasks.includes('unit-speaker'));
-  assert.ok(!selected.tasks.some(task => task.startsWith('hosted-native-') || task.startsWith('oci-')));
+  assert.ok(!selected.tasks.some(task => task.startsWith('oci-')));
 });
 
 test('shared app changes retain both profile browser coverage without backend units', async () => {
@@ -151,7 +151,6 @@ test('shared app changes retain both profile browser coverage without backend un
     assert.ok(selected.tasks.includes(`browser-${profile}-core`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
-  assert.ok(!selected.tasks.some(task => task.startsWith('hosted-native-')));
 });
 
 test('main, manual, shared contracts, lockfiles, manifests and unknown files fail closed to full verification', async () => {
@@ -214,7 +213,7 @@ test('every selected task has one execution group and every exclusion has a reas
   assert.ok(selected.excluded.every(item => item.reason && !selected.tasks.includes(item.task)));
 });
 
-test('known operational inputs retain root proof without unrelated browser, OCI or Hosted work', async () => {
+test('known operational inputs retain root proof without unrelated browser or OCI work', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {

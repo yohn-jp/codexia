@@ -82,19 +82,19 @@ test('certification rejects missing, failed, stale or wrong producer evidence',(
   assert.throws(()=>assertProfileArtifactEvidence(plan,[job],reports,[{...artifact,digest:'sha256:'+'b'.repeat(64)}],runId),/digest/);
 });
 
-test('full-profile evidence is mandatory for every native composition as well as browser groups',()=>{
+test('each browser group requires evidence from the matching verified Core or Full producer',()=>{
   const sourceSha='a'.repeat(40),runId='123';
   const plan=createVerificationPlan({files:null,event:'push',sha:sourceSha});
   const jobs=['core','full'].map(profile=>({name:'build-'+profile,head_sha:sourceSha,run_id:123,run_attempt:1,status:'completed',conclusion:'success',started_at:'2026-01-01T00:00:00Z',completed_at:'2026-01-01T00:02:00Z'}));
   const artifacts=['core','full'].map((profile,i)=>({id:10+i,name:'ci-profile-build-'+profile,created_at:'2026-01-01T00:01:00Z',expired:false,digest:'sha256:'+(i?'b':'a').repeat(64),workflow_run:{id:123,head_sha:sourceSha}}));
-  const reports=plan.groups.filter(g=>g.startsWith('browser-')||(g.startsWith('hosted-native-')&&!g.endsWith('-catalog'))).map(group=>{
-    const profile=group.startsWith('browser-')?group.split('-')[1]:'full';
+  const reports=plan.groups.filter(g=>g.startsWith('browser-')).map(group=>{
+    const profile=group.split('-')[1];
     const artifact=artifacts[profile==='core'?0:1];
     return {group,profileArtifact:{profile,sourceSha,planDigest:planDigest(plan),runId,producerJob:'build-'+profile,producerAttempt:1,artifactId:artifact.id,artifactDigest:artifact.digest}};
   });
-  assert.equal(reports.length,9);
+  assert.equal(reports.length,6);
   assert.doesNotThrow(()=>assertProfileArtifactEvidence(plan,jobs,reports,artifacts,runId));
-  for(const group of ['hosted-native-core','hosted-native-selected','hosted-native-full']){
+  for(const group of ['browser-full-writing','browser-full-reference','browser-full-webkit']){
     assert.throws(()=>assertProfileArtifactEvidence(plan,jobs,reports.filter(r=>r.group!==group),artifacts,runId));
     const bad=structuredClone(reports);
     bad.find(r=>r.group===group).profileArtifact={...bad.find(r=>r.group==='browser-core-writing').profileArtifact};

@@ -106,6 +106,7 @@ for command in bootstrap-auth grant-passkey-owner grant-passkey-owner-recovery m
   }
 done
 "$engine" exec "$container_name" node /app/node_modules/@codexia/api/dist/verify-auth-clients.js
+maintenance_command_path="$("$engine" exec "$container_name" node -p 'require("node:fs").realpathSync("/app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js")')"
 
 session_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$port/api/session")"
 root_response="$(curl --silent --write-out '\n%{http_code}' "http://127.0.0.1:$port/")"
@@ -224,6 +225,7 @@ done
 refusal="$("$engine" logs "$preflight_container" 2>&1)"
 [[ "$refusal" == *SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED* && "$refusal" == *"$legacy_project"* &&
    "$refusal" == *"$incompatible_project"* && "$refusal" == *"$publishing_project"* ]]
+[[ "$refusal" == *"Run node '$maintenance_command_path' --check"* ]]
 "$engine" rm --volumes "$preflight_container" >/dev/null
 check_status=0
 check_result="$(snapshot_maintenance codexia_preflight "$preflight_password" --check)" || check_status=$?

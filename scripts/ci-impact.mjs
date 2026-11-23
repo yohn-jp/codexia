@@ -204,8 +204,6 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   }
   // A selected browser suite always consumes the same-profile build result.
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
-  if ([...selected].some(task => task.startsWith('hosted-native-'))) add('hosted-native-catalog');
-  if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
     version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null, forceFull,
@@ -284,8 +282,6 @@ export function verificationPlanOutputs(plan) {
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
       .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
-    hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
-    hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
     full_model_oci: String(plan.full_model_oci),
   };
 }

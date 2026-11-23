@@ -12,7 +12,7 @@ import {
 } from './verify-frontend-compatibility.mjs';
 
 const frontend = { format: 'codexia-frontend-identity/v1', version: '0.1.2', sourceSha: 'a'.repeat(40), profile: 'full', apiEpoch: 1 };
-const backend = { name: 'codexia', hosted: false, version: '0.1.3', profile: 'full', apiEpoch: 1 };
+const backend = { name: 'codexia', auth: ['oauth-owner', 'oauth-mcp'], version: '0.1.3', profile: 'full', apiEpoch: 1 };
 const env = { CODEXIA_PUBLIC_ORIGIN: 'https://example.invalid', CODEXIA_ACCESS_CLIENT_ID: 'ci-id', CODEXIA_ACCESS_CLIENT_SECRET: 'test-secret', GITHUB_SHA: frontend.sourceSha };
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'cf-ray': 'abcdef-NRT' } });
 const allowedPaths = ['/api/version', '/desktop/update-identity.json'];

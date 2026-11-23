@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Read-only certification of a merged PR's source tree; never promote PR bytes here.
 import assert from 'node:assert/strict';
+import { CERTIFICATION_DEPENDENCIES } from './ci-contract.mjs';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
-import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-ci-artifacts.mjs';
 import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from './release-policy.mjs';
@@ -126,10 +126,9 @@ export function assertCandidatePlan(plan, candidate) {
 }
 
 export function assertCompactNeeds(needs) {
-  const families = ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'];
-  assert.deepEqual(Object.keys(needs).sort(), families.sort(), 'Incomplete compact DAG outcomes');
+  assert.deepEqual(Object.keys(needs).sort(), CERTIFICATION_DEPENDENCIES.toSorted(), 'Incomplete compact DAG outcomes');
   assert.equal(needs.plan.result, 'success');
-  assert.ok(families.filter(name => name !== 'plan').every(name => needs[name].result === 'skipped'),
+  assert.ok(CERTIFICATION_DEPENDENCIES.filter(name => name !== 'plan').every(name => needs[name].result === 'skipped'),
     'Compact certification requires every expensive group to be skipped');
 }
 
@@ -206,9 +205,8 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
   // Only digest-verified JSON is read. Never restore or execute code from a PR artifact.
   const reports = await Promise.all(selected.map(item => readArtifact(item, 'report.json')));
   assertPlanEvidence(plan, jobs, reports);
-  const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full', 'hosted-native-catalog']);
+  const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full']);
   assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
-  assertNativeArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }

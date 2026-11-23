@@ -66,7 +66,7 @@ test('selects plan and evidence by latest successful job window and artifact cre
 
 test('selection sees latest artifacts on later complete REST pages', async () => {
   const artifacts = ordinaryArtifacts().filter(item => item.name !== 'ci-evidence-oci-core');
-  artifacts.push(...Array.from({ length: 82 }, (_, index) => ({ name: `diagnostic-${index}` })));
+  artifacts.push(...Array.from({ length: 100 - artifacts.length }, (_, index) => ({ name: `diagnostic-${index}` })));
   artifacts.push(
     artifact(12_573_768_277, 'ci-evidence-oci-core', '2026-10-24T19:53:33Z'),
     artifact(12_572_824_349, 'ci-evidence-oci-core', '2026-10-24T20:00:04Z'),
@@ -178,14 +178,14 @@ test('partial rerun resolves a carried-over producer to its original execution a
   const old = {...job('build-core', '2026-11-16T12:53:24Z', '2026-11-16T12:54:14Z'), id: 100, run_attempt: 1};
   const carried = {...old, id: 200, run_attempt: 2};
   const fresh = {...job('build-full', '2026-11-17T03:37:00Z', '2026-11-17T03:38:00Z'), id: 201, run_attempt: 2};
-  const failed = {...fresh, name: 'hosted-native-catalog', conclusion: 'failure'};
+  const failed = {...fresh, name: 'oci-core', conclusion: 'failure'};
   const run = {id: Number(runId), run_attempt: 2};
   const request = async endpoint => {
     const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(endpoint)[1]);
     const rows = attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
     return {total_count: rows.length, jobs: rows};
   };
-  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, request, ['build-core','build-full','hosted-native-catalog']);
+  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, request, ['build-core','build-full','oci-core']);
   assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
   assert.equal(resolved[2].conclusion, 'failure');
   await assert.rejects(resolveProducerJobAttempts([carried], run, async () => ({total_count:0,jobs:[]}), ['build-core']), /history unavailable/u);
