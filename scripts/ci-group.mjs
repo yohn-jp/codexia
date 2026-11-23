@@ -112,7 +112,7 @@ async function executeTaskInContext(task, index, scope) {
           invocation: coverageInvocation(runtime.execPath), workflowJob });
         const proofArgs = { closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime };
         const candidateProof = coverageInputProof(proofArgs);
-        const reuse = plan.taskInputReuse?.coverage;
+        const reuse = plan.coverageReuse;
         let reusable = false;
         if (reuse && plan.base === reuse.sourceSha && process.env.GITHUB_RUN_ID && process.env.GITHUB_RUN_ATTEMPT) {
           const baselineProof = { ...reuse, sourceSha: reuse.proofSourceSha, format: 'codexia-ci-task-input-proof/v2', mode: 'static-coverage', status: 'passed' };

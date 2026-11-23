@@ -121,7 +121,7 @@ export function assertCandidatePlan(plan, candidate) {
   assert.equal(plan.sha, candidate.head, 'PR plan source mismatch');
   assert.equal(plan.base, candidate.base, 'PR was not verified against the merged base');
   assert.deepEqual(plan.files, candidate.files, 'PR impact does not cover actual merge diff');
-  // Affected selection is not yet a complete input-equivalence proof for excluded obligations.
+  // Affected PR checks certify only impacted tasks; compact main reuse requires the complete graph.
   assert.equal(plan.mode, 'full', 'Affected PR proof cannot yet replace complete main verification');
 }
 
