@@ -84,6 +84,7 @@ indexの存在、定義、重複、選択度、実クエリ計画は別々に検
 ## 変更・逸脱の扱いとツール検討の境界
 
 - 新テーブル/列の採否は論理設計、物理定義、migration計画、既存データ互換、rollback/restore、必要なAPI・MCP・UI・テストを一体でレビューする。
-- DBMLやERDはこの規範契約とSQLから生成・照合する可視化候補であって、新しい独立DB正本としない。
+- **採用済み検証目標:** [PostgreSQL contract verification](POSTGRES-CONTRACT-VERIFICATION.md) に従い、SQL-first、pgTAP、pg_catalog、tblsを使って使い捨てDBから物理schemaと可視化を検証する。ツールは未導入・未実行。
+- ERDとデータ辞書はこの規範契約とSQLを適用した実DBから生成・照合する派生物であり、新しい独立DB正本としない。
 - Atlas等の差分/宣言型schemaツールは、既存のmigration ledger・fingerprint・停止時適用と矛盾しない方式が確定するまで導入しない。
 - 実DBのpg_catalogとmigration後のDDLの全フィールド突合、認証schemaの全文物理項目の一覧・権限の実検証、CRUD→実DB traceの完全網羅は**未実施**。初期索引の整備だけで完了としない。
