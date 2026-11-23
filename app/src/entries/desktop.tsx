@@ -1,6 +1,7 @@
 import "../../styles.css";
 import { createRoot } from "react-dom/client";
 import { installNativeSelectCspCompatibility } from "../browser/nativeSelect";
+import { ConsoleEntry } from "../console/ConsoleEntry";
 import { PersistenceEntry } from "../persistence/PersistenceEntry";
 import { applyThemeMode, loadThemeMode } from "../theme";
 
@@ -9,4 +10,6 @@ if (!root) throw new Error("Missing React root");
 const theme = loadThemeMode();
 applyThemeMode(theme);
 installNativeSelectCspCompatibility(document);
-createRoot(root).render(<PersistenceEntry mode="desktop" />);
+createRoot(root).render(window.location.pathname === "/console" || window.location.pathname.startsWith("/console/")
+  ? <ConsoleEntry />
+  : <PersistenceEntry mode="desktop" />);

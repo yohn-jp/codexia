@@ -1,0 +1,2 @@
+# Runtime dependency for deploy/backup/s3_transfer.py. Selected 2026-11-23.
+boto3==1.44.9
