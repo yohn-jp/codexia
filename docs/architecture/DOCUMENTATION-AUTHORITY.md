@@ -28,6 +28,7 @@
 | 所有者の管理 UI | [管理画面遷移](../design/ADMIN-SCREEN-FLOW.md)・[API authentication](API-AUTHN-AUTHZ.md) |
 | 初期導入・VM の収束 | [初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)・[IaC](../deployment/IAC.md) |
 | 自動更新・復旧 | [更新遷移](../deployment/UPDATE-FLOW.md)・[Push deployment](../deployment/PUSH-DEPLOYMENT.md) |
+| GitHub Pagesの機能棚卸し・統合ポータル案 | [Pages機能台帳](../verification/PAGES-FUNCTION-INVENTORY.md)（現状観測）・[Pagesサイトマップ/UX](../design/DEVELOPMENT-PAGES-UX.md)（設計提案）・[CI/CD](../verification/CI-CD.md)（公開/証拠の現行契約） |
 | CI・証明・実測 | [CI/CD](../verification/CI-CD.md)・[Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) |
 
 ## 設計変更の順序
