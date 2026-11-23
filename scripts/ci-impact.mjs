@@ -223,6 +223,13 @@ export function validateVerificationPlan(plan) {
 
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 function assertCoverageReuse(plan, receipt) {
+  const fields = ['task', 'sourceSha', 'proofSourceSha', 'planDigest', 'workflowRunId',
+    'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'workflowJob', 'artifactId',
+    'artifactName', 'artifactDigest', 'inputClosure', 'runtime', 'certification'];
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+      JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(fields.sort())) {
+    throw new Error('Invalid coverage reuse receipt schema');
+  }
   if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Coverage proof reuse is only valid for a selected PR coverage task');
   const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
