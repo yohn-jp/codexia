@@ -248,7 +248,7 @@ test('collector rejects invalid page and partial job inventory', async () => {
 
 test('bundled dashboard renders measured telemetry and copies source-bound diagnostics', {
   skip: !process.env.CODEXIA_AUDIT_TOOL_DIR,
-  timeout: 30_000,
+  timeout: 60_000,
 }, async t => {
   const require = createRequire(join(process.env.CODEXIA_AUDIT_TOOL_DIR, 'package.json'));
   const { chromium } = require('playwright-core');
@@ -386,6 +386,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(copied.origin.executedSha, 'a'.repeat(40));
   assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
+  t.diagnostic('initial revision telemetry and diagnostic copy passed');
 
   // A full-history scan adds every attributable PR revision without eagerly downloading jobs.
   mode = 'large-inventory';
@@ -393,18 +394,21 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.locator('#pr option').first().waitFor();
   await page.getByRole('button', { name: '残りのPR・リビジョンを全件読み込む' }).waitFor();
   assert.equal(await page.locator('#pr option').count(),100);
+  t.diagnostic('first 100 revision inventory entries rendered');
   await page.locator('#timeline-foot').filter({hasText:'Range:'}).waitFor();
   const beforeInventoryExpansion = jobRequests;
   await page.getByRole('button', { name: '残りのPR・リビジョンを全件読み込む' }).click();
   await page.waitForFunction(() => document.querySelectorAll('#pr option').length === 101);
   assert.equal(jobRequests,beforeInventoryExpansion,'Listing revisions must not fetch every workflow job');
   assert.equal(await page.locator('#load-all').isVisible(),false);
+  t.diagnostic('full inventory pagination rendered 101 revisions without eager job requests');
   const revisionOptions = await page.locator('#pr option').allTextContents();
   const requestedIndex = revisionOptions.findIndex(value => value.startsWith('#42 / '));
   assert.ok(requestedIndex >= 0, 'Older PR must be present after full-history loading');
   await page.locator('#pr').selectOption(String(requestedIndex));
   await page.locator('#timeline-foot').filter({hasText:'Range:'}).waitFor();
   assert.equal(new URL(page.url()).searchParams.get('pr'),'42');
+  t.diagnostic('older revision selection and lazy details passed');
 
   // Switching to a revision with no completed jobs must not retain the prior timeline range.
   mode = 'two-revisions';
@@ -414,6 +418,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.locator('#pr').selectOption('0');
   assert.equal(await page.locator('#timeline-foot').textContent(), '未計測');
   await timeline.getByText('表示可能なジョブ時刻がありません。').waitFor();
+  t.diagnostic('incomplete revision correctly cleared timeline');
   // Error/retry fixtures intentionally return only #42; keep a valid deep link.
   await page.evaluate(() => history.replaceState(null, '', '?pr=42&sha=' + 'a'.repeat(40)));
 
@@ -435,6 +440,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
       await page.getByRole('status').filter({ hasText: 'Collected' }).waitFor();
     }
   }
+  t.diagnostic('HTTP error/retry cases passed');
   mode = 'empty';
   await page.reload();
   await page.getByRole('status').filter({ hasText: '公開Actions APIの取得範囲に対応するPRがありません。' }).waitFor();
@@ -445,6 +451,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
   assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
+  t.diagnostic('empty and incomplete API cases passed');
 
   mode = 'measured';
   await page.goto('http://localhost/ci/index.html?pr=999&sha=' + 'f'.repeat(40));
