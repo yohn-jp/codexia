@@ -6,7 +6,8 @@ import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fil
 
 const mockShellOrigin = "http://127.0.0.1:4173";
 const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
-test.use({ baseURL: mockShellOrigin });
+// WebAuthn accepts localhost, not an IPv4 address, as a relying-party domain.
+test.use({ baseURL: mockShellOrigin, authorHostname: "localhost" });
 
 async function registerCurrentSessionPasskey(page: Page): Promise<CDPSession> {
   const session = await page.context().newCDPSession(page);

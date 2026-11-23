@@ -8,12 +8,16 @@ export type AuthorizeAuthor = (shell: Shell, targetPage?: Page, navigation?: Aut
 
 export const test = base.extend<{
   authorizeAuthor: AuthorizeAuthor;
-}, { authorServer: BetterAuthFixture }>({
-  authorServer: [async ({}, use) => {
+}, { authorServer: BetterAuthFixture; authorHostname: "127.0.0.1" | "localhost" }>({
+  authorHostname: ["127.0.0.1", { scope: "worker", option: true }],
+  authorServer: [async ({ authorHostname }, use) => {
     const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
     if (!databaseUrl) throw new Error("The browser acceptance shard needs a disposable PostgreSQL database");
     const frontendSource = process.env.CODEXIA_E2E_COMPAT_FRONTEND_SOURCE;
-    const server = await startAuthorBrowserFixture({ databaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", frontendSource });
+    const server = await startAuthorBrowserFixture({
+      databaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", frontendSource,
+      apiHostname: authorHostname,
+    });
     try { await use(server); }
     finally { await server.close(); }
   }, { scope: "worker", timeout: 90_000 }],
