@@ -78,7 +78,7 @@ jobs:
                 codexia_service_home: /home/codexia
           EOF_INVENTORY
       - uses: docker/login-action@v4.8.0
-        if: inputs.operation == 'stage'
+        if: inputs.operation == 'preflight' || inputs.operation == 'stage'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

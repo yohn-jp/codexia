@@ -13,7 +13,7 @@ The [coordinated cutover contract](PUSH-DEPLOYMENT.md#coordinated-api-epoch-cuto
 
 ## Phase requests
 
-Dispatch `preflight` with `{}`. Its redacted evidence identifies the host, actual writer, database cluster and ledger, public backend and frontend identities, and the Cloudflare topology and current Worker deployment. Check `ready` and retain the run evidence under the approved maintenance record.
+Dispatch `preflight` with the installed backend's `priorBackendPublisherRunId`. Its redacted evidence identifies the host, actual writer and authenticated publication certificate, database cluster and ledger, public backend and frontend identities, and the Cloudflare topology and current Worker deployment. Check `ready` and retain the run evidence under the approved maintenance record.
 
 Dispatch `stage` with `priorBackendPublisherRunId`, `backendPublisherRunId`, `priorArchiveSha256`, `ingressReviewSha256` for the retained review of alternate ingress, `frontend` containing the main producer's `runId`, `verifyRunId`, `artifactId` and raw `artifactDigest`, and `window` containing `id`, `notBefore` and `notAfter` as UTC ISO timestamps with milliseconds. Select the completed main frontend run and its successful build job even if the independent production deployment failed. The workflow verifies both authenticated backend publication certificates, their immutable images and the exact main frontend archive, stages the candidate Quadlet under a private path, and uploads a Worker version with no traffic. Review both releases, topology, the window and the returned plan SHA-256.
 

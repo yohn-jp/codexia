@@ -90,20 +90,28 @@ async function execute(operation, input, scratch) {
       unitSha256: observed.host.writer.quadletSha256?.replace(/^sha256:/u, ''),
       settingsSha256: observed.host.writer.settingsSha256?.replace(/^sha256:/u, ''),
     };
+    const assertBaseline = () => {
+      assertPairedObservation({ ...observed, pinned: prior, environment });
+      requireCondition(prior.identity.apiEpoch === 1 && prior.identity.persistenceFormat === 1 && !observed.edge.fence.enabled,
+        'A verified, unfenced Full epoch 1 baseline is required');
+    };
+    const verifyPriorPublication = async () => {
+      step('verify the installed Full image publication certificate');
+      const publication = await verifyCutoverBackendPublication(input.priorBackendPublisherRunId);
+      requireCondition(publication.fullCertificate.image === prior.image &&
+        isDeepStrictEqual(publication.fullCertificate.identity, prior.identity),
+      'Installed Full release differs from its authenticated publication certificate');
+      return { backendPublisherRunId: publication.publisherRunId, backendCertificateSha256: digestEvidence(publication.fullCertificate) };
+    };
     if (operation === 'preflight') {
-      const ready = (() => {
-        try {
-          assertPairedObservation({ ...observed, pinned: prior, environment });
-          return prior.identity.apiEpoch === 1 && prior.identity.persistenceFormat === 1 && !observed.edge.fence.enabled;
-        } catch {
-          return false;
-        }
-      })();
-      return { operation, ready, ...observed, environment };
+      try {
+        assertBaseline();
+        return { operation, ready: true, ...observed, environment, priorPublication: await verifyPriorPublication() };
+      } catch {
+        return { operation, ready: false, ...observed, environment, rejectedDuring: [...diagnostic].at(-1) };
+      }
     }
-    assertPairedObservation({ ...observed, pinned: prior, environment });
-    requireCondition(prior.identity.apiEpoch === 1 && prior.identity.persistenceFormat === 1 && !observed.edge.fence.enabled,
-      'Staging requires a verified, unfenced Full epoch 1 baseline');
+    assertBaseline();
     requireCondition(rawHash.test(input.priorArchiveSha256 ?? ''), 'Retained prior frontend archive digest is required');
     prior.archiveSha256 = input.priorArchiveSha256;
     requireCondition(rawHash.test(input.ingressReviewSha256 ?? ''), 'Independent review of alternate ingress is required');
@@ -112,17 +120,11 @@ async function execute(operation, input, scratch) {
       ['notBefore', 'notAfter'].every(key => new Date(input.window[key]).toISOString() === input.window[key]) &&
       Date.parse(input.window.notAfter) > Math.max(Date.now(), Date.parse(input.window.notBefore)), 'Invalid approved window');
 
+    Object.assign(prior, await verifyPriorPublication());
     step('verify certified Full image and exact frontend archive');
-    const [priorPublication, backend, frontend] = await Promise.all([
-      verifyCutoverBackendPublication(input.priorBackendPublisherRunId),
-      verifyCutoverBackendPublication(input.backendPublisherRunId),
-      verifyCutoverFrontendArtifact(input.frontend),
+    const [backend, frontend] = await Promise.all([
+      verifyCutoverBackendPublication(input.backendPublisherRunId), verifyCutoverFrontendArtifact(input.frontend),
     ]);
-    requireCondition(priorPublication.fullCertificate.image === prior.image &&
-      isDeepStrictEqual(priorPublication.fullCertificate.identity, prior.identity),
-    'Installed Full release differs from its authenticated publication certificate');
-    prior.backendPublisherRunId = priorPublication.publisherRunId;
-    prior.backendCertificateSha256 = digestEvidence(priorPublication.fullCertificate);
     const { identity, image } = backend.fullCertificate;
     requireCondition(identity.profile === 'full' && identity.apiEpoch === 2 && identity.persistenceFormat === 2 &&
       identity.migrationFingerprint === prior.identity.migrationFingerprint,

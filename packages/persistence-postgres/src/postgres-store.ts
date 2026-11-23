@@ -2402,8 +2402,8 @@ export class PostgresPersistence implements Persistence {
     return result.rows.map(row => row.id);
   }
 
-  /** Read the actual DB session mode. Maintenance checks may also use a read-only app session. */
-  async snapshotStartupMode({ allowReadOnly = false } = {}): Promise<"transition" | "validate"> {
+  /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */
+  async snapshotStartupMode(): Promise<"transition" | "validate"> {
     const result = await this.pool.query("SELECT current_user AS role_name, current_setting('default_transaction_read_only') AS read_only");
     const row = result.rows[0];
     if (!row) throw new Error("PostgreSQL startup identity is unavailable");
@@ -2411,7 +2411,6 @@ export class PostgresPersistence implements Persistence {
       if (row.read_only !== "on") throw new Error("Updater preflight must use read-only PostgreSQL transactions");
       return "validate";
     }
-    if (allowReadOnly && row.read_only === "on") return "validate";
     if (row.read_only !== "off") throw new Error("Writer startup requires writable PostgreSQL transactions");
     return "transition";
   }
