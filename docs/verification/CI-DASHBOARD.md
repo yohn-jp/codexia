@@ -36,7 +36,7 @@ The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` wh
 ## Copyable diagnostic JSON
 
 **診断JSONをコピー** copies a source-bound, selected-revision
-\`codexia-ci-diagnostics/v1\` JSON document for the selected PR revision
+`codexia-ci-diagnostics/v1` JSON document for the selected PR revision
 using the browser's HTTPS clipboard API. It adds no alternate publisher, file export,
 GitHub token, new API fetch, CI task or certification gate. Copy failure is reported,
 not silently treated as success.
