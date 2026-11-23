@@ -46,10 +46,10 @@
 | CON-01 | `/console/setup`開始・登録キー入力 | SETUP | 状態確認、キー認可→CON-02 | 目標 |
 | CON-02 | `/console/setup` Passkey ceremony/確認 | SETUP | WebAuthn、owner一意確定→CON-03 | 目標 |
 | CON-03 | `/console/setup` client登録と公開待ち | SETUPのread-only状態（本人作成後は本人session） | 準備確認→通常owner login | 目標 |
-| CON-10 | `/console/security` Passkey管理 | OWNER-SESSION＋fresh確認 | 追加・改名・削除、現在の認証手段維持→CON-00 | 目標 |
-| CON-11 | `/console/security` session管理 | OWNER-SESSION＋fresh確認（操作による） | 他端末終了、全他セッション終了→CON-00 | 目標 |
-| CON-20 | `/console/identity` OIDC管理 | OWNER-SESSION＋fresh確認 | issuer/client登録・検証・リンク・有効化/無効化→CON-00 | 目標 |
-| CON-21 | `/console/identity` OAuth client/grants | OWNER-SESSION＋object/scope認可 | クライアント・同意の参照/許可された失効→CON-00 | 目標 |
+| CON-10 | `/console/security` Passkey管理 | OWNER-SESSION＋fresh確認 | 追加・改名・削除、現在の認証手段維持→CON-00 | Desktop Web 実装 |
+| CON-11 | `/console/security` session管理 | OWNER-SESSION＋fresh確認（操作による） | 他端末終了、全他セッション終了→CON-00 | Desktop Web 実装 |
+| CON-20 | `/console/identity` OIDC管理 | OWNER-SESSION＋fresh確認 | issuer/client登録・検証・リンク・有効化/無効化→CON-00 | 運用者設定状態の参照を実装。管理操作は目標 |
+| CON-21 | `/console/identity` OAuth client/grants | OWNER-SESSION＋object/scope認可 | クライアント・同意の参照/許可された失効→CON-00 | 保存済み同意の参照を実装。grant失効は目標 |
 | CON-30 | `/console/backups` | OWNER-SESSION | S3保存先/適用状態・off-VM保全・復旧検証の状態→各バックアップ画面 | 目標・未実装 |
 | CON-31 | `/console/backups/destination` | OWNER-SESSION＋fresh（secret/active変更時） | S3 provider/endpoint/bucket/prefix/credential（write-only）を編集→CON-32 | 目標・未実装 |
 | CON-32 | `/console/backups/verification` | OWNER-SESSION＋fresh（activate時） | probe→revision照合→activeの適用結果再取得→CON-30 | 目標・未実装 |
@@ -111,7 +111,7 @@
 | TOOL-01.A | 分析/外部module actionを起動 | OWNER-API、宣言されたeffect+module availability | 局所結果またはJOB-01へ | 未導入/失敗はCore執筆へ波及させない |
 | JOB-01.A | job/通知を読む・再取得・既読 | OWNER-API、`/api/jobs*`/`/api/inbox*` | dialog内状態更新、元の作業維持 | stream失敗はpoll/retry、既読成功を偽装しない |
 | DISPLAY-01.A | Theme・layout・組版 | LOCAL、author/device classの表示設定 | 同じ原稿・位置 | 保存設定の失敗を通知、原稿無変更 |
-| PREF-01.A | セキュリティ設定を開く | OWNER-SESSION、API owner確認 | 現行dialog/settings、目標はCON-10 | session変化で下書きを守る |
+| PREF-01.A | セキュリティ設定を開く | OWNER-SESSION、API owner確認 | dialog/settingsまたはCON-10 | session変化で下書きを守る |
 | PUB-01.A | 公開版を読む・テーマ変更 | SHARE-READER、GETのみ | 公開版のまま表示 | 失効/不明scopeでprivate APIへ遷移しない |
 | CON-00.A | セキュリティ・連携先を選択 | OWNER-SESSION | CON-10/CON-20 | 401なら再認証、403なら拒否 |
 | CON-01.A | 初期登録キーを検証 | SETUP、NEW_APPROVED＋短命transaction | CON-02 | expired/rate-limit/復旧中なら登録不可 |

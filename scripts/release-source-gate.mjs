@@ -8,9 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { componentReleaseAffected } from './release-impact.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
-import { selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
-import { downloadArtifact, extractJsonEntry } from './download-ci-artifacts.mjs';
-import { validateVerificationPlan } from './ci-impact.mjs';
+import { selectLatestPlanArtifact } from './ci/evidence/artifact-selection.mjs';
+import { downloadArtifact, extractJsonEntry } from './ci/evidence/download-artifacts.mjs';
+import { validateVerificationPlan } from './ci/impact/plan.mjs';
 
 export function verifiedReleaseEvent(payload, env, checkoutSha) {
   const run = payload?.workflow_run;

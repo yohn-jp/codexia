@@ -45,7 +45,7 @@ Desktop Reactは **TypeScript 7 + Vite 8 + vanilla-extract** を正本とする�
 | 用途 | 選定済みパッケージ／初期基準版 | 適用対象／責務 | バージョン・互換性制約 |
 | --- | --- | --- | --- |
 | ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop Webは対応ブラウザーで検証する |
-| 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/download-ci-artifacts.mjs`の独自ZIP構文解析を置換する対象 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
+| 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/ci/evidence/download-artifacts.mjs`の独自ZIP構文解析を置換する対象 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
 | API・MCP・外部データの実行時検証 | [`zod`](https://zod.dev/) `4.6.7` | API、MCP、Assistant等の境界検証の正本。手動検査の統一対象 | Zod 4はTypeScript 5.5以上で検証されている。`strict`設定・Core-only依存閉包を維持 |
 | Desktop WebのHTTP契約生成 | [`orval`](https://orval.dev/) `8.48.0` | TypeSpec由来のOpenAPI 3.1からfetch clientとZod DTOを生成するappの開発依存 | 生成器をlockfileで固定し、更新時にOpenAPI照合、決定的な再生成、アプリの型検査と応答検証を確認 |
 | GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
@@ -79,7 +79,7 @@ HTTP body、query、外部API応答、MCP DTO、インポート等の**不信頼
 
 ### Octokit：GitHub RESTの通信に限定採用
 
-`@octokit/rest`はエンドポイント呼出し、型、ページネーションの共通実装として使う。ただし、`scripts/ci-task-proof-reuse.mjs`等の**許可されたAPIパス、正確なrun／attempt／SHA、証明書、artifact digestの検証はCodexiaの責務**である。
+`@octokit/rest`はエンドポイント呼出し、型、ページネーションの共通実装として使う。ただし、`scripts/ci/evidence/proof-reuse.mjs`等の**許可されたAPIパス、正確なrun／attempt／SHA、証明書、artifact digestの検証はCodexiaの責務**である。
 
 GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転送しない。認証付きの制御プレーンRESTと、検証済みURLからの無認証バイナリ取得は明確に分離する。SDK導入で任意URLへの通信、緩いリトライ、証拠省略を追加しない。
 
@@ -117,7 +117,7 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 ## 参照元
 
 - OAuth protocol: [oauth4webapi](https://github.com/panva/oauth4webapi/blob/main/docs/README.md)、比較対象の[openid-client](https://github.com/panva/openid-client)、[API認証契約](API-AUTHN-AUTHZ.md)
-- ZIP: [zip.js untrusted ZIP guidance](https://gildas-lormeau.github.io/zip.js/)、[既存のCI証拠取得](../../scripts/download-ci-artifacts.mjs)
+- ZIP: [zip.js untrusted ZIP guidance](https://gildas-lormeau.github.io/zip.js/)、[既存のCI証拠取得](../../scripts/ci/evidence/download-artifacts.mjs)
 - Schema: [Zod requirements](https://zod.dev/)、[jsonc-parser visitor/parse options](https://github.com/microsoft/node-jsonc-parser)
 - GitHub: [Octokit REST](https://github.com/octokit/rest.js)、[SARIF upload](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
 - Quality: [Biome CI](https://biomejs.dev/recipes/continuous-integration/)、[Biome SARIF reporter](https://biomejs.dev/reference/reporters/)

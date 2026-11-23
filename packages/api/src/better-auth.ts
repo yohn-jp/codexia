@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
 import { getCurrentAdapter, runWithTransaction } from "@better-auth/core/context";
-import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -19,6 +19,7 @@ import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
 import { consumeOwnerSetupGrant, ownerSetupSchema, ownerSetupTableExists, type SetupRegistration } from "./owner-setup-store.js";
 import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
+import { ownerSecurityPolicy } from "./owner-security.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
 export { CODEXIA_OWNER_SCOPE };
 
@@ -334,6 +335,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     options: `-c search_path=${CODEXIA_AUTH_SCHEMA}${config.readOnlyDatabase ? " -c default_transaction_read_only=on" : ""}`,
   });
   const approvedBootstrapOidcSubject = bootstrap?.ownerOidcSubject;
+  const normalOwnerId = !bootstrap && !config.passkeyBootstrap && !config.readOnlyDatabase ? config.ownerSubject : undefined;
   const auth = betterAuth({
     database: pool,
     baseURL: issuer,
@@ -347,6 +349,8 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     } : {}),
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // The normal owner runtime uses the policy plugin for these maintained operations.
+        if (normalOwnerId) return;
         const path = ctx.path;
         if (path !== "/passkey/update-passkey" && path !== "/passkey/delete-passkey") return;
         if (config.passkeyBootstrap) return new Response("Passkey management is unavailable during first-owner enrollment", { status: 403 });
@@ -368,11 +372,22 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     plugins: [
       codexiaAuthMethodsPlugin(Boolean(oidcIssuer), Boolean(bootstrap?.ownerSetup || config.installOwnerSetupSchema)),
       setupProvisioningSessionPlugin(() => bootstrap?.setupProvisioningOwner?.()),
+      ...(normalOwnerId ? [ownerSecurityPolicy({ origin: publicOrigin.origin, ownerId: normalOwnerId })] : []),
       passkey({
         rpID: passkeyRpId,
         rpName: "Codexia",
         origin: publicOrigin.origin,
         authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
+        ...(normalOwnerId ? { authentication: {
+          async afterVerification({ ctx, clientData }) {
+            // The maintained ceremony verifies the assertion before this policy binds it to the established owner.
+            const credential = await ctx.context.adapter.findOne({
+              model: "passkey",
+              where: [{ field: "credentialID", value: clientData.id }, { field: "userId", value: normalOwnerId }],
+            });
+            if (!credential) throw new APIError("UNAUTHORIZED", { code: "OWNER_SECURITY_OWNER_REQUIRED" });
+          },
+        } } : {}),
         registration: {
           requireSession: !config.passkeyBootstrap && !bootstrap?.passkeyRecoveryOwnerId && !bootstrap?.ownerSetup,
           ...(bootstrap?.ownerSetup ? {

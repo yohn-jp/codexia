@@ -1,0 +1,94 @@
+name: Native iOS API
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ios-api.yml
+      - ios/CodexiaTransport/**
+      - packages/http-contract/openapi/codexia.openapi.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-api-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  api:
+    name: Generated API and native transport
+    runs-on: xcode-27
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Verify native SDK and generator inputs
+        run: |
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          swift --version
+          python3 -m pip install PyYAML==6.0.3
+      - name: Resolve locked Swift dependencies
+        env:
+          CODEXIA_GIT_READ_TOKEN: ${{ github.token }}
+        run: |
+          helper=$(mktemp "$RUNNER_TEMP/codexia-swift-credential.XXXXXX")
+          trap 'rm -f "$helper"' EXIT
+          cat > "$helper" <<'EOF'
+          #!/bin/sh
+          [ "$1" = get ] || exit 0
+          protocol=
+          host=
+          while IFS='=' read -r key value && [ -n "$key" ]; do
+            case "$key" in
+              protocol) protocol=$value ;;
+              host) host=$value ;;
+            esac
+          done
+          if [ "$protocol" = https ] && [ "$host" = github.com ]; then
+            printf 'username=x-access-token\npassword=%s\n' "$CODEXIA_GIT_READ_TOKEN"
+          fi
+          EOF
+          chmod 700 "$helper"
+          GIT_CONFIG_COUNT=2 \
+            GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='' \
+            GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1="!\"$helper\"" \
+            swift package --package-path ios/CodexiaTransport --force-resolved-versions resolve
+      - name: Compare regenerated client and operation IDs
+        run: ios/CodexiaTransport/generate.sh --check
+      - name: Run Swift contract tests
+        run: swift test --package-path ios/CodexiaTransport --force-resolved-versions --jobs 4
+      - name: Compile OAuth, Keychain and transport for iOS Simulator
+        working-directory: ios/CodexiaTransport
+        run: >-
+          xcodebuild -scheme CodexiaTransport -destination 'generic/platform=iOS Simulator'
+          -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
+      - name: Boot iOS Simulator
+        id: boot
+        timeout-minutes: 12
+        run: |
+          device_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for runtime,group in devices.items() if ".iOS-" in runtime for d in group if d["name"].startswith("iPhone")))')
+          echo "CODEXIA_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
+          xcrun simctl bootstatus "$device_id" -b
+      - name: Exercise OAuth and Keychain in a signed Simulator host
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' }}
+        timeout-minutes: 15
+        working-directory: ios/CodexiaTransport
+        run: |
+          workspace=KeychainProbe/KeychainProbe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          mkdir -p "$workspace"
+          cp Package.resolved "$workspace/Package.resolved"
+          xcodebuild -project KeychainProbe/KeychainProbe.xcodeproj -scheme KeychainProbe \
+            -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
+            -parallel-testing-enabled NO test
+      - name: Run Swift package tests on iOS Simulator
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' }}
+        timeout-minutes: 18
+        working-directory: ios/CodexiaTransport
+        run: >-
+          xcodebuild -scheme CodexiaTransport-Package -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID"
+          -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO test

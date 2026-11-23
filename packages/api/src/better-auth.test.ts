@@ -71,3 +71,25 @@ test("Better Auth validates Passkey owner bootstrap identity before opening Post
     passkeyBootstrap: { ownerId: "owner", ownerEmail: "not-an-email", ownerName: "Codexia Owner" },
   }), /email/u);
 });
+
+test("normal Better Auth registers the owner security policy without adding management endpoints", async () => {
+  const runtime = createBetterAuthRuntime({ ...baseConfig, ownerSubject: "established-owner" });
+  try {
+    const context = await runtime.auth.$context;
+    assert.equal(context.hasPlugin("codexia-owner-security"), true);
+    assert.equal("ownerSecurityIdentity" in runtime.auth.api, false);
+    assert.equal("ownerSecurityRevokeConsent" in runtime.auth.api, false);
+  } finally { await runtime.pool.end(); }
+});
+
+test("ordinary owner security policy stays outside operator setup and recovery runtimes", async () => {
+  const config = { ...baseConfig, ownerSubject: "established-owner" };
+  const configure = () => "unused-setup-client";
+  const runtimes = [
+    createBetterAuthRuntime(config, { nextClientId: configure, ownerSetup: () => undefined }),
+    createBetterAuthRuntime(config, { nextClientId: configure, passkeyRecoveryOwnerId: config.ownerSubject }),
+  ];
+  try {
+    for (const runtime of runtimes) assert.equal((await runtime.auth.$context).hasPlugin("codexia-owner-security"), false);
+  } finally { await Promise.all(runtimes.map((runtime) => runtime.pool.end())); }
+});

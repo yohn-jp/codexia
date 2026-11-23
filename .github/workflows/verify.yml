@@ -44,7 +44,7 @@ jobs:
         env:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-impact.mjs
+        run: node scripts/ci/impact/plan.mjs
       - name: Resolve exact-base task input proof
         id: taskproof
         if: github.event_name == 'pull_request'
@@ -53,13 +53,13 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/reuse-ci-task-input-proof.mjs plan
+        run: node scripts/ci/evidence/reuse-coverage-proof.mjs plan
       - name: Resolve reusable merged PR source proof
         id: reuse
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/reuse-pr-verification.mjs plan
+        run: node scripts/ci/certification/reuse-merged-pr.mjs plan
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-plan
@@ -163,7 +163,7 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-group.mjs "unit-${{ matrix.group }}"
+        run: node scripts/ci/execution/group.mjs "unit-${{ matrix.group }}"
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -192,7 +192,8 @@ jobs:
         with:
           node-version: 24.22.3
       - uses: actions/setup-python@v6.1.0
-        if: matrix.group == 'tests'
+        # Use the canonical per-task plan; coverage/test-type checks do not need StrictDoc or Chromium.
+        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
         with:
           python-version: '3.12'
       - name: Prepare exact pnpm toolchain
@@ -210,7 +211,7 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Install pinned StrictDoc and Chromium
-        if: matrix.group == 'tests'
+        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
         run: |
           python -m venv "$RUNNER_TEMP/strictdoc"
           "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
@@ -228,7 +229,7 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-group.mjs "types-${{ matrix.group }}"
+        run: node scripts/ci/execution/group.mjs "types-${{ matrix.group }}"
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -281,11 +282,11 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/build-${{ matrix.profile }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-group.mjs "build-${{ matrix.profile }}"
+        run: node scripts/ci/execution/group.mjs "build-${{ matrix.profile }}"
       - name: Pack immutable profile build
         env:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-profile-artifact.mjs pack "${{ matrix.profile }}" "${{ runner.temp }}/profile-build/profile-build.json"
+        run: node scripts/ci/evidence/profile-artifact.mjs pack "${{ matrix.profile }}" "${{ runner.temp }}/profile-build/profile-build.json"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-profile-build-${{ matrix.profile }}
@@ -326,7 +327,7 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-group.mjs "oci-${{ matrix.profile }}"
+        run: node scripts/ci/execution/group.mjs "oci-${{ matrix.profile }}"
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -400,7 +401,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
-        run: node scripts/ci-profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
+        run: node scripts/ci/evidence/profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
       - name: Run selected validations
         if: always() && !cancelled()
         env:
@@ -409,7 +410,7 @@ jobs:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
           CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
-        run: node scripts/ci-group.mjs "browser-${{ matrix.group }}"
+        run: node scripts/ci/execution/group.mjs "browser-${{ matrix.group }}"
       # Only one main-push browser job populates the scoped cache after passing
       # every selected validation. A cache failure must not replace CI evidence.
       - name: Save browser pnpm cache from main
@@ -492,7 +493,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           RUNNER_TEMP: ${{ runner.temp }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/select-ci-plan.mjs
+        run: node scripts/ci/certification/select-plan.mjs
       - name: Download selected plan by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
         env:
@@ -502,7 +503,7 @@ jobs:
           CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-plan.outputs.artifact-id }}
           CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-plan
           CODEXIA_CI_ARTIFACT_KIND: plan
-        run: node scripts/download-ci-artifacts.mjs
+        run: node scripts/ci/evidence/download-artifacts.mjs
       - name: Select latest exact-run execution evidence
         if: needs.plan.outputs.reuse != 'true'
         id: select-evidence
@@ -511,7 +512,7 @@ jobs:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/select-ci-evidence.mjs
+        run: node scripts/ci/certification/select-evidence.mjs
       - name: Download selected execution evidence by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
         env:
@@ -521,7 +522,7 @@ jobs:
           CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-evidence.outputs.artifact-ids }}
           CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-evidence
           CODEXIA_CI_ARTIFACT_KIND: evidence
-        run: node scripts/download-ci-artifacts.mjs
+        run: node scripts/ci/evidence/download-artifacts.mjs
       - name: Certify every required exact-source matrix element
         if: needs.plan.outputs.reuse != 'true'
         env:
@@ -531,15 +532,15 @@ jobs:
           CODEXIA_REQUIRED_RESULTS: ${{ toJSON(needs) }}
           CODEXIA_CI_EVIDENCE_DIR: ${{ runner.temp }}/ci-evidence
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/certify-ci.mjs
+        run: node scripts/ci/certification/certify.mjs
       - name: Certify reused merged PR proof
         if: needs.plan.outputs.reuse == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REQUIRED_RESULTS: ${{ toJSON(needs) }}
-        run: node scripts/reuse-pr-verification.mjs certify
+        run: node scripts/ci/certification/reuse-merged-pr.mjs certify
       - name: Record measured workflow timings in the job log
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/measure-ci.mjs
+        run: node scripts/ci/dashboard/measure.mjs

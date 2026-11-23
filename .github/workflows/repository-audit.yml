@@ -6,7 +6,7 @@ on:
       - 'scripts/strictdoc/**'
       - 'docs/requirements/**'
       - 'docs/architecture/likec4/**'
-      - 'scripts/ci-dashboard/**'
+      - 'scripts/ci/dashboard/**'
       - 'scripts/graphify-pages/**'
       - 'scripts/architecture-diagrams/**'
       - 'scripts/pages-ui/**'
@@ -23,8 +23,8 @@ on:
       - 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md'
       - 'docs/deployment/UPDATE-FLOW.md'
       - 'docs/verification/GRAPHIFY-PAGES.md'
-      - 'scripts/ci-timing.mjs'
-      - 'scripts/ci-contract.mjs'
+      - 'scripts/ci/dashboard/timing.mjs'
+      - 'scripts/ci/impact/contract.mjs'
       - '.github/workflows/repository-audit.yml'
       - 'docs/verification/CI-DASHBOARD.md'
       - 'docs/design/DEVELOPMENT-PAGES-UX.md'
@@ -97,7 +97,7 @@ jobs:
           fc-list :lang=ja family | grep -q 'Noto Sans CJK'
       - name: Test Pages generators, analysis and component interactions
         run: |
-          node --test scripts/audit/*.test.mjs scripts/ci-dashboard/*.test.mjs \
+          node --test scripts/audit/*.test.mjs scripts/ci/dashboard/*.test.mjs \
             scripts/graphify-pages/*.test.mjs scripts/architecture-diagrams/*.test.mjs scripts/pages-ui/*.test.mjs \
             scripts/code-scanning-pages/*.test.mjs
       - name: Restore previous verified HEAD exports
@@ -117,9 +117,9 @@ jobs:
       - name: Bundle CI dashboard in the existing Pages artifact
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site" --preview
+            node scripts/ci/dashboard/collect.mjs "$RUNNER_TEMP/audit-site" --preview
           else
-            node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
+            node scripts/ci/dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
           fi
       - name: Install pinned static Mermaid renderer
         env:

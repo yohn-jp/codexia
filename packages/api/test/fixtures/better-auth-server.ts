@@ -360,17 +360,34 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     ownerClientIds.splice(0, ownerClientIds.length, registered.webClientId, registered.iosClientId);
     runtimeConfig.oauthIntrospectionClientId = registered.introspectionClientId;
 
-    const productionSignIn = await runtime.auth.api.signInSocial({
-      body: { provider: "workspace-oidc", callbackURL: "/oauth/login", requestSignUp: true }, asResponse: true,
-    });
-    const productionCookie = cookieJar();
-    productionCookie.remember(productionSignIn);
-    const productionUrl = (await productionSignIn.json() as { url: string }).url;
-    const productionUpstream = await fetch(productionUrl, { redirect: "manual" });
-    const productionCallback = await runtime.handler(new Request(productionUpstream.headers.get("location")!, {
-      headers: { cookie: productionCookie.header() },
-    }));
-    productionCookie.remember(productionCallback);
+    // Construct the serving runtime with its final owner subject, as production does.
+    await runtime.pool.end();
+    runtime = createBetterAuthRuntime(runtimeConfig);
+    async function signInFixtureOwner() {
+      const activeRuntime = runtime!;
+      const signIn = await activeRuntime.auth.api.signInSocial({
+        body: { provider: "workspace-oidc", callbackURL: "/oauth/login", requestSignUp: true }, asResponse: true,
+      });
+      const cookie = cookieJar();
+      cookie.remember(signIn);
+      const productionUrl = (await signIn.json() as { url: string }).url;
+      const upstream = await fetch(productionUrl, { redirect: "manual" });
+      const callback = upstream.headers.get("location");
+      if (!callback) throw new Error("Fixture owner sign-in did not reach the registered callback");
+      cookie.remember(await activeRuntime.handler(new Request(callback, { headers: { cookie: cookie.header() } })));
+      const session = await fixtureOwnerSession(cookie);
+      if (session?.user.id !== ownerSubject) throw new Error("Fixture login did not confirm the established owner");
+      return cookie;
+    }
+
+    function fixtureOwnerSession(cookie: ReturnType<typeof cookieJar>) {
+      return runtime!.auth.api.getSession({
+        headers: new Headers({ cookie: cookie.header() }),
+        query: { disableCookieCache: true, disableRefresh: true },
+      });
+    }
+
+    let productionCookie = await signInFixtureOwner();
     const foreignClient = await runtime.auth.api.adminCreateOAuthClient({
       headers: new Headers({ cookie: productionCookie.header() }),
       body: {
@@ -401,6 +418,11 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     await listen(apiServer, apiPort);
 
     async function issueAccessToken(clientId: string, path: string): Promise<string> {
+      // Browser tests can revoke the fixture's previous owner session along with other devices.
+      if ((await fixtureOwnerSession(productionCookie))?.user.id !== ownerSubject) {
+        productionCookie = await signInFixtureOwner();
+      }
+      const cookie = productionCookie.header();
       const verifier = randomBytes(32).toString("base64url");
       const state = randomUUID();
       const redirectUri = new URL(path, apiOrigin).href;
@@ -408,7 +430,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         response_type: "code", client_id: clientId, redirect_uri: redirectUri,
         scope: `openid ${CODEXIA_OWNER_SCOPE}`, state, prompt: "consent", resource: audience,
         code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
-      })}`, { redirect: "manual", headers: { accept: "application/json", cookie: productionCookie.header() } });
+      })}`, { redirect: "manual", headers: { accept: "application/json", cookie } });
       if (!authorization.ok) throw new Error(`OAuth authorization failed (${authorization.status})`);
       const pending = await authorization.json() as { url?: string };
       const consentPage = new URL(pending.url ?? "", apiOrigin);
@@ -418,7 +440,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
 
       const consent = await fetch(`${issuer}/oauth2/consent`, {
         method: "POST", redirect: "manual",
-        headers: { "content-type": "application/json", cookie: productionCookie.header(), origin: apiOrigin },
+        headers: { "content-type": "application/json", cookie, origin: apiOrigin },
         body: JSON.stringify({ accept: true, oauth_query: consentPage.searchParams.toString() }),
       });
       if (!consent.ok) throw new Error(`OAuth consent failed (${consent.status})`);

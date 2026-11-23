@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 import { verifyFrontendMainPromotionProof } from './verify-frontend-artifact.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution as inspectDockerImage } from './backend-image-inspection.mjs';

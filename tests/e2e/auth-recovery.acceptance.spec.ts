@@ -9,7 +9,7 @@ const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
 test.use({ baseURL: mockShellOrigin });
 test.use({ authFixtureHost: "localhost" });
 
-async function registerCurrentSessionPasskey(page: Page): Promise<CDPSession> {
+async function attachVirtualPasskeyAuthenticator(page: Page): Promise<CDPSession> {
   const session = await page.context().newCDPSession(page);
   await session.send("WebAuthn.enable");
   await session.send("WebAuthn.addVirtualAuthenticator", {
@@ -22,24 +22,6 @@ async function registerCurrentSessionPasskey(page: Page): Promise<CDPSession> {
       automaticPresenceSimulation: true,
     },
   });
-  const result = await page.evaluate(async () => {
-    const optionsResponse = await fetch("/api/auth/passkey/generate-register-options", { credentials: "same-origin" });
-    if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status, verifyStatus: 0 };
-    const options: unknown = await optionsResponse.json();
-    const credential = await navigator.credentials.create({
-      publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options as never),
-    });
-    if (!(credential instanceof PublicKeyCredential)) return { optionsStatus: optionsResponse.status, verifyStatus: 0 };
-    const verifyResponse = await fetch("/api/auth/passkey/verify-registration", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ response: credential.toJSON(), name: "Console acceptance" }),
-    });
-    return { optionsStatus: optionsResponse.status, verifyStatus: verifyResponse.status };
-  });
-  expect(result.optionsStatus, "Better Auth must issue passkey registration options for the current owner session").toBe(200);
-  expect(result.verifyStatus, "Better Auth must persist the passkey registration for the current owner").toBe(200);
   return session;
 }
 
@@ -132,10 +114,54 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   await page.reload();
   expect((await reloadedOwnerCheck).status()).toBe(200);
   await expect(page.getByRole("heading", { name: "バックアップ", exact: true })).toBeVisible();
+  const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 320, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
-  const virtualAuthenticator = browserName === "chromium" ? await registerCurrentSessionPasskey(page) : undefined;
+  const virtualAuthenticator = browserName === "chromium" ? await attachVirtualPasskeyAuthenticator(page) : undefined;
+  const navigation = page.getByRole("navigation", { name: "管理コンソール" });
+  await navigation.getByRole("link", { name: "セキュリティ" }).click();
+  await expect(page.getByRole("heading", { name: "パスキー", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "この端末", exact: true })).toBeVisible();
+  expect(await page.getByRole("main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  if (virtualAuthenticator) {
+    await page.getByLabel("名前（任意）").fill("Console acceptance");
+    await page.getByRole("button", { name: "パスキーを追加", exact: true }).click({ timeout: 8_000 });
+    await expect(page.getByRole("heading", { name: "Console acceptance", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Console acceptanceの名前を変更" }).click();
+    await page.getByLabel("新しい名前").fill("Renamed console passkey");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Renamed console passkey", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Renamed console passkeyの名前を変更" }).click();
+    await page.getByLabel("新しい名前").fill("Reconciled console passkey");
+    await page.route(`${origin}/api/auth/passkey/update-passkey`, async (route) => {
+      // Commit the rename on the fixture server, then lose its response in the browser.
+      expect((await route.fetch()).status()).toBe(200);
+      await route.abort("failed");
+    }, { times: 1 });
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Reconciled console passkey", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("操作の応答を確認できませんでした。再取得した一覧で状態を確認してください。");
+    await expect(page.getByRole("button", { name: "Reconciled console passkeyを削除" })).toBeDisabled();
+    const deniedDeletion = await page.evaluate(async () => {
+      const rows = await (await fetch("/api/auth/passkey/list-user-passkeys")).json() as { id: string }[];
+      const response = await fetch("/api/auth/passkey/delete-passkey", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: rows[0]?.id }),
+      });
+      return { status: response.status, code: (await response.json() as { code?: string }).code };
+    });
+    expect(deniedDeletion).toEqual({ status: 403, code: "OWNER_SECURITY_LAST_PASSKEY" });
+  }
+  await navigation.getByRole("link", { name: "連携ID" }).click();
+  await expect(page.getByRole("heading", { name: "連携ID", exact: true })).toBeVisible();
+  await expect(page.getByText("運用者による設定があります。所有者との連携はこの画面では未確認です。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("list", { name: "保存したアプリ同意" })).toContainText("codexia:api");
+  await page.reload();
+  await expect(page.getByRole("list", { name: "保存したアプリ同意" })).toContainText("codexia:api");
+  expect(await page.getByRole("main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const ownerCookie = (await page.context().cookies(origin)).map(({ name, value }) => `${name}=${value}`).join("; ");
   expect(ownerCookie).not.toBe("");
   const csrf = await page.request.post(`${origin}/api/auth/codexia/owner-session`, {
@@ -144,6 +170,13 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   });
   expect(csrf.status()).toBe(403);
   expect(csrf.headers()["cache-control"]).toBe("no-store");
+  const bearerSessions = await page.request.get(`${origin}/api/auth/list-sessions`, {
+    headers: { Origin: origin, Authorization: "Bearer author-api-token" },
+  });
+  expect(bearerSessions.status()).toBe(403);
+  expect(await bearerSessions.json()).toMatchObject({ code: "OWNER_SECURITY_COOKIE_REQUIRED" });
+  const unadmittedIdentity = await page.request.get(`${origin}/api/auth/codexia/owner-security/identity`);
+  expect(unadmittedIdentity.status()).toBe(404);
 
   await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).first().click();
   await expect.poll(() => page.url()).toBe(authoringUrl);
@@ -173,15 +206,37 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   expect(reauthenticated.status()).toBe(200);
   expect(await reauthenticated.json()).toEqual({ authenticated: true });
   await expect(page.getByRole("heading", { name: "セキュリティ", exact: true })).toBeVisible();
+  if (virtualAuthenticator) {
+    await page.getByRole("button", { name: "パスキーで再認証" }).click();
+    await expect(page.getByText("パスキーで再認証しました。", { exact: true })).toBeVisible();
+    const deniedRevoke = await page.evaluate(async () => {
+      const current = await (await fetch("/api/auth/get-session")).json() as { session: { token: string } };
+      const response = await fetch("/api/auth/revoke-session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: current.session.token }),
+      });
+      return { status: response.status, code: (await response.json() as { code?: string }).code };
+    });
+    expect(deniedRevoke).toEqual({ status: 403, code: "OWNER_SECURITY_CURRENT_SESSION" });
+    await page.getByRole("button", { name: "他のすべてのセッションを終了" }).click();
+    await page.getByRole("button", { name: "他のセッションを終了する" }).click();
+    await expect(page.getByText("現在の端末以外のセッションを終了しました。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("list", { name: "有効なセッション" }).getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "この端末", exact: true })).toBeVisible();
+  }
 
   const ownerSessionWithBearer = `${origin}/api/auth/codexia/owner-session`;
-  const sendBearerToOwnerSession = (route: Route) => route.continue({
-    headers: { ...route.request().headers(), authorization: "Bearer not-an-owner-session" },
-  });
+  const sendBearerToOwnerSession = async (route: Route) => {
+    const response = await route.fetch({
+      headers: { ...route.request().headers(), authorization: "Bearer not-an-owner-session" },
+    });
+    expect(response.status()).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "OWNER_SESSION_COOKIE_REQUIRED" });
+    await route.fulfill({ response });
+  };
   await page.route(ownerSessionWithBearer, sendBearerToOwnerSession);
-  const forbiddenCheck = page.waitForResponse(response => response.url() === ownerSessionWithBearer);
   await page.reload();
-  expect((await forbiddenCheck).status()).toBe(403);
   await expect(page.getByRole("heading", { name: "管理権限がありません", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理コンソール" })).toHaveCount(0);
   await page.unroute(ownerSessionWithBearer, sendBearerToOwnerSession);

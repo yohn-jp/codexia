@@ -5,7 +5,7 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { assertVerificationJobs, collectGitHubPages } from './release-policy.mjs';
 import { selectReleaseSource } from './release-source-gate.mjs';
 import { successfulPublicationJobs, verifyExistingBackendRelease } from './verify-existing-backend-release.mjs';
