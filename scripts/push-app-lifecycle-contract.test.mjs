@@ -15,6 +15,17 @@ const backendWorkflow = parse(readFileSync(new URL('../.github/workflows/backend
 const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const deploy = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
 
+test('rootless Podman changes into the private service home after dropping privileges', () => {
+  const source = readFileSync(new URL('./push-app-lifecycle.mjs', import.meta.url), 'utf8');
+  const rootless = source.split('function rootlessPodman(args, options = {}) {')[1]
+    ?.split('export function publicError(error) {')[0];
+  assert.ok(rootless, 'the rootless Podman invocation must be present');
+  assert.ok(rootless.includes(`'/bin/bash', '-c', 'cd "$HOME" && exec "$@"'`),
+    'the private home chdir must happen after sudo switches to the rootless service UID');
+  assert.ok(rootless.includes("cwd: '/'"), 'runner must start sudo from a traversable working directory');
+  assert.doesNotMatch(rootless, /cwd:\\s*home/u, 'runner cannot enter a 0700 service home before invoking sudo');
+});
+
 function completedBackendProducer() {
   const sourceSha = 'a'.repeat(40);
   const run = { id: 123, run_attempt: 1, status: 'completed', conclusion: 'success',
