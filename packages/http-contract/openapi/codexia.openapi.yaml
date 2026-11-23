@@ -6636,10 +6636,7 @@ components:
             - type: number
               format: double
             - type: 'null'
-        result:
-          anyOf:
-            - {}
-            - type: 'null'
+        result: {}
         error:
           anyOf:
             - type: string

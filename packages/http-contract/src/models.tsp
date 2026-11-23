@@ -163,7 +163,7 @@ model PublicJobBody {
   type?: string;
   status?: "queued" | "running" | "done" | "error";
   progress?: float64 | null;
-  result?: unknown | null;
+  result?: unknown;
   error?: string | null;
   errorCode?: string;
   retryable?: boolean;
