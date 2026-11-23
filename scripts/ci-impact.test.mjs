@@ -163,7 +163,11 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     ['Profile packager', ['scripts/build/packaging/profile-package.mjs'], true],
     ['Model admission policy', ['scripts/ci-impact.mjs'], true],
     ['API emitted test', ['packages/api/src/server.test.ts'], true],
+    ['API emitted spec', ['packages/api/src/server.spec.ts'], true],
+    ['API emitted test helper', ['packages/api/src/test/fixtures.ts'], true],
     ['Persistence contract emitted test', ['packages/persistence-contracts/src/index.test.ts'], true],
+    ['Persistence contract emitted spec', ['packages/persistence-contracts/src/index.spec.ts'], true],
+    ['Persistence contract emitted test helper', ['packages/persistence-contracts/src/tests/helpers.ts'], true],
     ['Mixed source and test', ['modules/mcp/src/tool-catalog.test.ts', 'packages/api/src/server.ts'], true],
   ]) {
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);

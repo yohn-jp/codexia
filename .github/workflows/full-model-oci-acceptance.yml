@@ -32,9 +32,9 @@ on:
       - '!packages/**/tests/**'
       - '!packages/**/*.test.*'
       - '!packages/**/*.spec.*'
-      # Emitted test files are still inputs to the deployed package dist.
-      - 'packages/api/src/**/*.test.*'
-      - 'packages/persistence-contracts/src/**/*.test.*'
+      # Build-emitted source and test files remain runtime package inputs.
+      - 'packages/api/src/**'
+      - 'packages/persistence-contracts/src/**'
       - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
