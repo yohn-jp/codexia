@@ -16,7 +16,7 @@ Environment=POSTGRES_PASSWORD_FILE=/run/secrets/admin-password
 Environment=PGDATA=/var/lib/postgresql/data/pgdata
 ReadOnly=true
 Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m
-Tmpfs=/var/run/postgresql:rw,nosuid,nodev,noexec,size=16m
+Tmpfs=/run/postgresql:rw,nosuid,nodev,noexec,size=16m
 NoNewPrivileges=true
 HealthCmd=pg_isready -U codexia -d codexia
 HealthInterval=15s
