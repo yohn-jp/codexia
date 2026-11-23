@@ -33,10 +33,10 @@
     "@codexia/module-runtime": "workspace:*",
     "@codexia/module-story": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
-    "yaml": "^2.9.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "@huggingface/transformers": "4.3.2"
+    "yaml": "catalog:production",
+    "react": "catalog:production",
+    "react-dom": "catalog:production",
+    "@huggingface/transformers": "catalog:production"
   },
   "codexiaModule": {
     "id": "semantic",

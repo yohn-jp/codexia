@@ -171,6 +171,40 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  development:
+    '@types/react':
+      specifier: ^19.3.0
+      version: 19.3.0
+    '@types/react-dom':
+      specifier: ^19.3.0
+      version: 19.3.0
+  production:
+    '@better-auth/oauth-provider':
+      specifier: 1.7.26
+      version: 1.7.26
+    '@better-auth/passkey':
+      specifier: 1.7.26
+      version: 1.7.26
+    '@huggingface/transformers':
+      specifier: 4.3.2
+      version: 4.3.2
+    better-auth:
+      specifier: 1.7.26
+      version: 1.7.26
+    react:
+      specifier: ^19.3.1
+      version: 19.3.1
+    react-dom:
+      specifier: ^19.3.1
+      version: 19.3.1
+    yaml:
+      specifier: ^2.9.1
+      version: 2.9.1
+    zod:
+      specifier: 4.6.7
+      version: 4.6.7
+
 overrides:
   '@huggingface/transformers>sharp': 0.35.5
 
@@ -227,10 +261,10 @@ importers:
         specifier: ^24.19.2
         version: 24.19.2
       '@types/react':
-        specifier: ^19.3.0
+        specifier: 'catalog:development'
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.3.0
+        specifier: 'catalog:development'
         version: 19.3.0(@types/react@19.3.0)
       parse5:
         specifier: 8.1.1
@@ -245,10 +279,10 @@ importers:
   app:
     dependencies:
       '@better-auth/oauth-provider':
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(@better-auth/core@1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.18)(kysely@0.29.9)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(better-call@1.4.6(zod@4.6.7))
       '@better-auth/passkey':
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(@better-auth/core@1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.18)(kysely@0.29.9)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(better-call@1.4.6(zod@4.6.7))(nanostores@1.5.5)
       '@codemirror/commands':
         specifier: ^6.11.1
@@ -287,13 +321,13 @@ importers:
         specifier: 1.2.1
         version: 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       better-auth:
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1
       react-dom:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1(react@19.3.1)
       react-resizable-panels:
         specifier: 4.24.1
@@ -303,10 +337,10 @@ importers:
         version: 7.18.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@types/react':
-        specifier: ^19.3.0
+        specifier: 'catalog:development'
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.3.0
+        specifier: 'catalog:development'
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: ^6.3.0
@@ -339,10 +373,10 @@ importers:
         specifier: workspace:*
         version: link:../story
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
       zod:
-        specifier: 4.6.7
+        specifier: 'catalog:production'
         version: 4.6.7
 
   modules/diagnostics:
@@ -357,13 +391,13 @@ importers:
         specifier: workspace:*
         version: link:../../packages/module-runtime
       react:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1
       react-dom:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1(react@19.3.1)
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   modules/mcp:
@@ -375,7 +409,7 @@ importers:
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
       zod:
-        specifier: 4.6.7
+        specifier: 'catalog:production'
         version: 4.6.7
 
   modules/nlp:
@@ -387,19 +421,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/module-runtime
       '@huggingface/transformers':
-        specifier: 4.3.2
+        specifier: 'catalog:production'
         version: 4.3.2(@types/node@24.19.2)
       lindera-wasm-nodejs-ipadic:
         specifier: 2.0.0
         version: 2.0.0
       react:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1
       react-dom:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1(react@19.3.1)
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   modules/publishing:
@@ -417,7 +451,7 @@ importers:
         specifier: ^19.1.0
         version: 19.3.1(react@19.3.1)
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   modules/search:
@@ -444,16 +478,16 @@ importers:
         specifier: workspace:*
         version: link:../story
       '@huggingface/transformers':
-        specifier: 4.3.2
+        specifier: 'catalog:production'
         version: 4.3.2(@types/node@24.19.2)
       react:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1
       react-dom:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1(react@19.3.1)
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   modules/speaker:
@@ -474,10 +508,10 @@ importers:
         specifier: workspace:*
         version: link:../story
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
       zod:
-        specifier: 4.6.7
+        specifier: 'catalog:production'
         version: 4.6.7
 
   modules/story:
@@ -489,13 +523,13 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
       react:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1
       react-dom:
-        specifier: ^19.3.1
+        specifier: 'catalog:production'
         version: 19.3.1(react@19.3.1)
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   packages/api:
@@ -504,10 +538,10 @@ importers:
         specifier: 1.7.26
         version: 1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.18)(kysely@0.29.9)(nanostores@1.5.5)
       '@better-auth/oauth-provider':
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(@better-auth/core@1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.18)(kysely@0.29.9)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(better-call@1.4.6(zod@4.6.7))
       '@better-auth/passkey':
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(@better-auth/core@1.7.26(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.7))(jose@6.2.18)(kysely@0.29.9)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(better-call@1.4.6(zod@4.6.7))(nanostores@1.5.5)
       '@codexia/contracts':
         specifier: workspace:*
@@ -528,7 +562,7 @@ importers:
         specifier: 13.3.3
         version: 13.3.3
       better-auth:
-        specifier: 1.7.26
+        specifier: 'catalog:production'
         version: 1.7.26(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       fastify:
         specifier: ^5.12.8
@@ -540,7 +574,7 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
       zod:
-        specifier: 4.6.7
+        specifier: 'catalog:production'
         version: 4.6.7
     devDependencies:
       '@types/pg':
@@ -550,7 +584,7 @@ importers:
   packages/contracts:
     dependencies:
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
 
   packages/core:
@@ -562,7 +596,7 @@ importers:
         specifier: workspace:*
         version: link:../persistence-contracts
       yaml:
-        specifier: ^2.9.1
+        specifier: 'catalog:production'
         version: 2.9.1
     devDependencies:
       '@codexia/persistence-postgres':

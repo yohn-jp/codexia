@@ -3,6 +3,21 @@ packages:
   - modules/*
   - app
   - profiles/*
+catalogs:
+  # Types and test/build-only dependencies remain in devDependencies.
+  development:
+    '@types/react': ^19.3.0
+    '@types/react-dom': ^19.3.0
+  # Catalog ownership does not override package.json dependencies boundaries.
+  production:
+    '@better-auth/oauth-provider': 1.7.26
+    '@better-auth/passkey': 1.7.26
+    '@huggingface/transformers': 4.3.2
+    better-auth: 1.7.26
+    react: ^19.3.1
+    react-dom: ^19.3.1
+    yaml: ^2.9.1
+    zod: 4.6.7
 allowBuilds:
   esbuild: true
   onnxruntime-node: false

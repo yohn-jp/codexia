@@ -4,7 +4,7 @@
 
 以下の値は**直接依存のマニフェスト指定**であり、npmレジストリの最新安定版とは限らない。`^`と`~`はSemVer範囲指定、数値のみはマニフェストの厳密指定である。いずれもlockfileは実際の依存ツリーを固定する。`workspace:*`、`file:`、推移依存は下表の外で管理する。検査対象には`app/native`・`edge/frontend`の独立したnpm lockfile、SwiftPM、Python、GitHub Actions、OCIも含める。
 
-## 判定の意味
+pnpmワークスペースで共有する直接依存は、各manifestの`catalog:production`／`catalog:development`が`pnpm-workspace.yaml`の`catalogs`に指定した版を参照する。下表の版・範囲はCatalog参照時もその解決前の宣言値を示す。**実行時／開発時の実際の依存分類は各package.jsonの`dependencies`／`devDependencies`で決まり、Catalog名だけでは本番配布から除外されない。** 独立したnpm lockfileは別途管理する。\n\n## 判定の意味
 
 | 判定 | 意味 | 更新方針 |
 | --- | --- | --- |
