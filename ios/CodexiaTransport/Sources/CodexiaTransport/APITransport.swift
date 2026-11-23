@@ -24,7 +24,7 @@ public struct APITransport: Sendable {
     public let origin: URL
     private let session: URLSession
 
-    public init(origin: URL, session: URLSession? = nil) throws {
+    public init(origin: URL) throws {
         guard origin.scheme == "https", origin.host != nil,
               origin.user == nil, origin.password == nil,
               origin.query == nil, origin.fragment == nil,
@@ -32,15 +32,11 @@ public struct APITransport: Sendable {
             throw Failure.invalidOrigin
         }
         self.origin = origin
-        if let session {
-            self.session = session
-        } else {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.httpShouldSetCookies = false
-            configuration.httpCookieAcceptPolicy = .never
-            self.session = URLSession(configuration: configuration,
-                                      delegate: RejectRedirects(), delegateQueue: nil)
-        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        self.session = URLSession(configuration: configuration,
+                                  delegate: RejectRedirects(), delegateQueue: nil)
     }
 
     /// Performs exactly one request. Callers reconcile unknown outcomes using the
@@ -52,7 +48,7 @@ public struct APITransport: Sendable {
             throw Failure.invalidMethod
         }
         guard path.hasPrefix("/api/"), !path.contains("#"), !path.contains("?"),
-              !path.contains("\\"), !path.contains("//"),
+              !path.contains("\\"), !path.contains("//"), !path.contains("%"),
               !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }),
               let url = URL(string: path, relativeTo: origin)?.absoluteURL,
               url.scheme == origin.scheme, url.host == origin.host,
