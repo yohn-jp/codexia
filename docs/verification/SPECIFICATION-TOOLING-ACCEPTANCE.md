@@ -32,6 +32,25 @@
 
 **この表のG0〜G7は要求される受入モデルであり、現状存在するCI task名ではない。** 実装時は `scripts/ci-contract.mjs` / `ci-impact.mjs` / `verify.yml` / release certifierへ一貫して組み込み、既存の20 job目安などのCI予算とindependent task parallelismを保つ。新しい検証を追加しただけで旧検証を消さない。差し替え時は旧テストの検出能力と新テストの合致を示す。
 
+## 既存REQ-IDから検証義務への接続
+
+本書のG0〜G7の各ゲートは、**新しい独立製品要求ではなく既存要求の検証手段**である。最初の関連付けを以下に固定する（各gateの完全な合否は後続PRでテストにより証明する）。
+
+| 要求 | 対象gate | 必ず確認する内容 |
+| --- | --- | --- |
+| REQ-TRACE-001 | G0、G7 | REQのID、逆引き、テストおよびexact-source証拠の結合 |
+| REQ-API-001 | G1、G2 | method/path、OpenAPI Schema、error/authorizationと実APIの一致 |
+| REQ-API-002 | G2、G4 | 原稿保存の冪等性・409競合・receipt・ブラウザ復旧 |
+| REQ-DATA-001〜004 | G3、G4 | PostgreSQL物理schema、migration identity、実DB transaction |
+| REQ-AUTH-001〜005 | G1、G2、G4 | owner/MCP/setup/readerの分離と、未実装管理目標の区分 |
+| REQ-MCP-001〜002 | G2、G4 | SDK v2 transportとread/compute/propose・owner承認禁止 |
+| REQ-EXT-001〜002 | G2、G4、G5 | Edgeルーティング、外部OAuth/MCP接続とtrust boundary |
+| REQ-UI-001〜005 | G4 | 画面状態・保存保護・IME・アクセシビリティ |
+| REQ-OPS-001〜003 | G3、G4 | setup、更新、backup/restoreの実ホスト・実DB証拠 |
+| REQ-QUAL-001〜003 | G2〜G7 | 検証の配置、exact-source認証、性能budget |
+
+この対応表だけで各REQのobligationを列挙したことにはならない。業務別の検証シナリオID・source symbol・実行証拠は [Traceability](TRACEABILITY-REGISTER.md) の専用関係で後続詳細化する。G0〜G7の実行・失敗注入が未実施なら要求の適合状態は変更しない。
+
 ## OpenAPI lint・diff・runtime検証の分界
 
 - RedoclyはOpenAPI構造、参照、operationId一意性、HTTP status/scheme/response Schema、必要なタグ/説明/trace metadataをチェックする。アプリの認可は保証しない。
