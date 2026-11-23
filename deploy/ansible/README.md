@@ -1,5 +1,7 @@
 # Codexia Ansible push deployment
 
+> **Current-runbook boundary:** The existing bootstrap stage converges host, secrets, PostgreSQL and auth staging, but first-owner registration still uses the SSH-forward launcher below. The agreed target is a 256-bit Ansible-managed one-time grant with owner-controlled Passkey enrollment through the Workers `/console/setup` screen and a restricted setup-only Fastify API. Those target features are **not yet implemented**. See [initial deployment design](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [console UX](../../docs/design/ADMIN-SCREEN-FLOW.md).
+
 The [initial deployment state machine](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [compatible update/rollback state machine](../../docs/deployment/UPDATE-FLOW.md) are normative. The implemented `bootstrap` stage converges approved host, secrets, base, and auth-runtime tasks; owner enrollment and protected application activation remain separate.
 
 The protected GitHub Actions → Tailscale → SSH workflow is the only deployment controller. Under the rootless `codexia` service account, Ansible converges PostgreSQL, API and Tunnel Quadlets. `site.yml` rejects the obsolete pull-updater stages.
