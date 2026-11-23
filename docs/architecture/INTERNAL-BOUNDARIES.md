@@ -2,7 +2,7 @@
 
 > This is a normative architecture contract, not an audit log or implementation-status report. It defines the desired responsibility boundaries regardless of branch, release or verification date. Execution evidence belongs in tests, Issues, PRs and verification records.
 
-System-level ownership and authority are defined by [System design](SYSTEM-DESIGN.md) and [Documentation authority](DOCUMENTATION-AUTHORITY.md); implementation is checked against those contracts, not treated as their source.
+System-level ownership and authority are defined by [System design](SYSTEM-DESIGN.md) and [Documentation authority](DOCUMENTATION-AUTHORITY.md); implementation is checked against those contracts, not treated as their source. First-party path and filename conventions are governed by [Source layout and naming](SOURCE-LAYOUT-CONVENTIONS.md); the separate [migration Issue #690](https://github.com/yohn-jp/codexia/issues/690) changes paths only, not these module/application responsibility boundaries.
 
 ## 1. Authority and architectural decision
 
