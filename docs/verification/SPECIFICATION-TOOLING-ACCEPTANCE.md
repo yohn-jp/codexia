@@ -97,7 +97,7 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 - 追加検証がselectedなら、実行されたjob/attempt/artifactを同じplan digestとsource SHAに束縛する。selectedタスクがskipなら成功判定しない。
 - Node `node:test`、Playwright、Schemathesis、pgTAP、conformance、k6の出力は、**実際の情報が含まれる形式で**保持する。report形式に合わせて成功結果をでっち上げない。
 - StrictDocへの実行証拠リンクはexternal CI run/artifactを参照し、CI artifactのないソースコード参照をTEST PASSと誤認しない。
-- 初期導入PRでは、mockデータ・既存要求30件の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
+- 初期導入PRでは、mockデータ・登録済み全要求の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
 
 ## このPRの完了と次の受入
 
