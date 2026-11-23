@@ -85,6 +85,8 @@ All workspaces use PostgreSQL as their canonical project, document, revision, Kn
 
 PostgreSQL uses the persistent `codexia-postgres` volume on an internal-only Podman network. The VM operator owns encrypted, off-VM `pg_dump -Fc` backups, WAL/PITR retention if the recovery-point objective requires it, and recurring restore exercises. For example, run `podman exec codexia-db sh -ec 'PGPASSWORD="$(cat /run/secrets/app-password)" pg_dump -h 127.0.0.1 -U codexia -d codexia -Fc'` and direct stdout to a protected backup file; encrypt it before moving it off the VM. Restore into a blank replacement database or isolated replacement volume, verify the API readiness probe and project/document counts, and only then direct the service to the restored database. Do not restore over the only production copy.
 
+**Accepted future feature:** [Backup](BACKUP.md) defines S3-compatible object storage as an additional off-VM destination for the existing age-encrypted v2 backup artifacts, with verified upload/download and isolated restore. This is not yet implemented; it does not create a second backup producer, a database authority, or an alternate deployment controller.
+
 The operator also owns consistent backups and restore for `codexia-data` (`/data`) and `codexia-history` (`/history`), which contain derived module caches and private usage/job history. Stop the API or use a filesystem snapshot that guarantees a consistent point in time. Module cache data is derived and can be rebuilt. Retain the prior API image tag and origin UI image until rollback is rehearsed.
 
 ## Rollback and live acceptance
