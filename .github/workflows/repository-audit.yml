@@ -83,7 +83,7 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: '1'
         run: |
-          npm install --prefix "$RUNNER_TEMP/architecture-renderer" --ignore-scripts --no-audit --no-fund @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.0.0
+          npm install --prefix "$RUNNER_TEMP/architecture-renderer" --ignore-scripts --no-audit --no-fund @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.17.0
           CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)"
           test -x "$CHROME"
           echo "PUPPETEER_EXECUTABLE_PATH=$CHROME" >> "$GITHUB_ENV"
