@@ -493,6 +493,9 @@ fixture_image=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv
 fixture_image_id=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).imageId' "$fixture_manifest")
 rootless mkdir -p "$build_context"
 sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/authorized_keys"
+# Bind-mounted authorized_keys must belong to the sshd account (container UID 1000).
+# Map ownership through the service user's rootless user namespace, not host root.
+rootless_podman unshare chown 1000:1000 "$build_context/authorized_keys"
 sudo install -o codexia -g codexia -m 0644 "$CODEXIA_LIFECYCLE_FIXTURE_DIR/sshfs-fixture.tar" "$build_context/sshfs-fixture.tar"
 rootless_podman load --input "$build_context/sshfs-fixture.tar" >"$tmp/sshfs-load.log" 2>&1
 imported_fixture_image_id=$(rootless_podman image inspect "$fixture_image" --format '{{.Id}}')
