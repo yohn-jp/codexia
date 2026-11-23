@@ -2,7 +2,7 @@
 
 **詳細画面設計:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[画面状態遷移図](SCREEN-STATE-ATLAS.md)、[URL/API認可設計](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) が初回SETUP、owner-session管理、OIDC/OAuth、運用プレーンの権限を区別する。
 
-**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile 内の認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
+**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。既存の Desktop/Mobile 内の認証・セキュリティ UI は**現行実装**であり、専用 `/console` の画面・ルーティングは**未実装の設計目標**として区別する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）
 
@@ -87,7 +87,7 @@ flowchart LR
     EDGE --> ROUTE["公開 routing"]
 ```
 
-本番 API の更新、DB migration、Podman secret、Tailscale 接続、Cloudflare Access 改訂、復旧バックアップは**作者の Web 設定画面から実行しない**。これらには独立した運用者権限、保護された秘密情報、承認済み手順と監査証拠が必要である。経路は [初期デプロイ遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md) と [アップデート遷移](../deployment/UPDATE-FLOW.md) を正本とする。
+本番 API の更新、DB migration、Podman secret、Tailscale 接続、Cloudflare Access 改訂、**本番DB/運用資源の復元**は**作者の Web 設定画面から実行しない**。一方、**S3互換バックアップの保管先・ポリシー指定と検証・保全ジョブ要求・履歴参照**は `/console/backups` の機能として採用する。Webは任意のVMコマンド/SSH/RPCを実行せず、限定された設定とdurable requestのみをFastifyへ提出する。実行はoperatorが事前設置した専用バックアップexecutorが担い、既存backup.sh/host lockを再利用する。これらには独立した運用者権限、保護された秘密情報、承認済み手順と監査証拠が必要である。経路は [初期デプロイ遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md) と [アップデート遷移](../deployment/UPDATE-FLOW.md) を正本とする。
 
 ## 誤操作・障害時の遷移
 
@@ -111,6 +111,11 @@ flowchart LR
 | `/console/setup` | **初回所有者だけ**の登録ウィザード。セットアップの状態確認、初期登録キー入力、Passkey作成、登録完了 | 正本DBが新規構築を承認済み・owner未登録・期限内の一回限りのキー |
 | `/console/security` | Passkey一覧、追加・名称変更・削除、セッション一覧と終了、再認証 | owner session。危険操作はfresh reauthentication |
 | `/console/identity` | OIDCの登録・検証・有効化、OAuthクライアント・同意の参照／許可された取消し | owner sessionと操作ごとの認可。現在のIdP変更UIは未実装 |
+| `/console/backups` | S3バックアップ設定状態、検証済み保全点、手動ジョブ要求、運用状態 | owner session。操作ごとにfresh reauthentication。目標・未実装 |
+| `/console/backups/destination` | S3互換接続先・暗号化済資格情報のwrite-only設定、検証、有効化 | owner session＋検証/active revision。目標・未実装 |
+| `/console/backups/verification` | draftのS3疎通probeと適用結果を照合 | owner session。202受領は検証成功ではない。目標・未実装 |
+| `/console/backups/history` | 各実行と遠隔保全receipt、復旧演習結果への導線 | owner session。復元ボタンは提供しない。目標・未実装 |
+| `/console/backups/recovery` | 隔離復元証拠と保護された運用復旧手順を表示 | owner session。実本番復元はOPERATORだけ。目標・未実装 |
 | `/oauth/consent` | OAuthの同意。管理コンソールから**独立**した認可画面 | 既存のBetter Auth/OAuthプロトコル |
 
 静的UIは既存の**Cloudflare Workers Static Assets**で提供し、`/console/*` は同一のWeb UIのルートとして管理する。登録状態、初期キー検証、owner確定、Passkey ceremonyはCloudflare Workersでなく、Cloudflare Tunnel経由の**VM上のFastify + Better Auth / `codexia_auth`**が権威を持つ。**セットアップキーはインフラ権限でも通常のAPI bearerでもない**。Cloudflare AccessはUI入口の保護策として別途承認・検証し、owner権限の根拠としない。
@@ -135,8 +140,10 @@ flowchart TD
     GUARD -->|owner| HOME["/console 管理トップ"]
     HOME --> SEC["/console/security<br/>Passkey/セッション"]
     HOME --> IDENT["/console/identity<br/>IdP/OAuth設定"]
+    HOME --> BACKUP["/console/backups<br/>保管先/検証/履歴"]
     SEC --> HOME
     IDENT --> HOME
+    BACKUP --> HOME
     HOME --> BACK["元の作品/執筆画面へ戻る"]
     SETUP -->|登録と受入待ち| WAIT["公開有効化待ち<br/>DB/認証状態を再取得"]
     WAIT -->|本番有効化成功| SIGNIN
@@ -192,7 +199,7 @@ flowchart TD
 
 ### 管理トップと日常的な設定変更のUX
 
-`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）の三つの操作群を区別する。現在のDesktop dialogとMobile設定の実装を再利用・移行し、同じAPI状態を異なる画面で独立して書き換える実装を新設しない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
+`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）、**バックアップ**（S3保管先・検証・保全履歴）の四つの操作群を区別する。現在のDesktop dialogとMobile設定の実装を再利用・移行し、同じAPI状態を異なる画面で独立して書き換える実装を新設しない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
 
 既存のDesktop/Mobileの「認証・セキュリティ」入口は、実装移行後は`/console/security`への案内を正規導線とし、ログイン/戻り先は同一origin内の安全な既知ルートのみ許す。現在はdialog/settingsとして実装されており、`/console`へ切り替えたと主張しない。
 
@@ -203,3 +210,43 @@ flowchart TD
 - 既存owner、復旧中、キー失効・期限切れ・競合、非owner、API/DB障害、WebAuthn不正origin/UV不備をすべて拒否し、公開経路が作業APIへの抜け道にならない。
 - セキュリティ設定はログイン維持・再認証・最後のPasskey削除拒否・セッション失効・原稿へ戻る際の下書き保護を通す。
 - Cloudflare Access、Tunnel、Workers、独立VM・復旧ホストについて、必要な経路での公開/拒否を**実測**する。本文書の図だけでは本番受入としない。
+
+## バックアップ保管先と履歴の管理画面（`/console/backups`、採用済み目標）
+
+**目的:** ownerがSSHや環境変数の手入力を行わず、**保護済みのS3保存先をUIから指定し、接続を検証して有効化**できること。保全完了・復旧可能性を推測せず、ジョブ結果と証拠を区別する。画面ID `CON-30`〜`CON-34`、control ID、実認可は [Screen catalog](SCREEN-CONTROL-CATALOG.md)、[State Atlas](SCREEN-STATE-ATLAS.md)、[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) が正本。
+
+```mermaid
+flowchart TD
+    HOME["/console 管理トップ"] --> STATUS["CON-30 /console/backups<br/>設定・保全状態"]
+    STATUS --> CFG["CON-31 /console/backups/destination<br/>接続先・write-only資格情報"]
+    CFG --> DRAFT["Draftを保存"]
+    DRAFT --> PROBE["CON-32 /console/backups/verification<br/>S3接続検証要求"]
+    PROBE -->|FAILED / BLOCKED| CFG
+    PROBE -->|PASSED 同一revision| CONFIRM["再認証・対象/影響を確認"]
+    CONFIRM --> ACTIVE{"有効化の実行結果を再取得"}
+    ACTIVE -->|PENDING / UNKNOWN| ACTIVE
+    ACTIVE -->|ACTIVE| STATUS
+    ACTIVE -->|REJECTED / CONFLICT| CFG
+    STATUS --> HIST["CON-33 /console/backups/history<br/>run/remote receipt"]
+    HIST --> RECOVERY["CON-34 /console/backups/recovery<br/>独立復旧の証拠と運用導線"]
+    RECOVERY -->|本番復元要求| BLOCK["Webでは禁止<br/>保護された運用プレーンを参照"]
+    STATUS -->|明示確認| REQUEST["手動バックアップを要求<br/>202 = 受付のみ"]
+    REQUEST -->|実行中・接続断| HIST
+    HIST --> STATUS
+    STATUS --> HOME
+```
+
+画面の状態・回復を次のように区別する。
+
+| 表示 | 意味と次の操作 |
+| --- | --- |
+| 未設定 / Draft | オフVM保管先は未有効。接続先を設定し検査する。編集途中の秘匿値は保存後に再表示しない |
+| PROBE_PENDING / FAILED | テスト送信でありバックアップではない。エラー区分・設定を修正して再検証 |
+| PROBE_PASSED | S3に検証用暗号文を送受信できた。保全点やDR復元の証拠にはならない |
+| ACTIVE | 設定がexecutorに適用された状態。新しいbackup runがまだ無ければ「オフVM未保全」を表示 |
+| RUN_QUEUED / RUNNING / UNKNOWN | 現行writerの停止を伴い得る。API/Tunnel切断時もrun IDから再照合。成功・失敗を推測しない |
+| REMOTE_VERIFIED | 暗号文・manifest・独立保護receiptを一致確認したoff-VM保全点 |
+| DRILL_PASSED | 独立した復旧hostで実データ契約を満たす復号・復元を観測した別の証拠。REMOTE_VERIFIEDと混同しない |
+| DISABLED / DEGRADED | 既存のオフVM保全を削除しない。required保管先の停止は保護条件を検証し拒否する |
+
+本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Mobile/Web 320px・キーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。**現時点では画面・API・executorは未実装**。
