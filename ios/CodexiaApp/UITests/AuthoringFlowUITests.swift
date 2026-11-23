@@ -31,7 +31,10 @@ final class AuthoringFlowUITests: XCTestCase {
         editor.tap()
         editor.press(forDuration: 1.2)
         let paste = menuAction("Paste", in: app)
-        XCTAssertTrue(paste.waitForExistence(timeout: 5))
+        guard paste.waitForExistence(timeout: 5) else {
+            XCTFail("Paste menu is unavailable after same-app Copy. UI: \(app.debugDescription)")
+            return
+        }
         paste.tap()
         let after = editor.value as? String ?? ""
         XCTAssertGreaterThan(after.utf16.count, before.utf16.count)
