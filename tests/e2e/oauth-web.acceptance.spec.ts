@@ -268,6 +268,26 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
       assert.equal(request.status, request.method === "PATCH" ? 200 : 201);
     }
 
+    await test.step("owner settings show the saved app consent after recovering from a list outage", async () => {
+      const consentPath = "/api/auth/oauth2/get-consents";
+      const temporaryOutage = (route: Route) => route.fulfill({ status: 503, json: { error: "Unavailable" } });
+      await page.route(`**${consentPath}`, temporaryOutage, { times: 1 });
+      await page.getByRole("button", { name: "認証・セキュリティ", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "認証とセキュリティ" });
+      await expect(settings.getByText("所有者との連携はこの画面では未確認です。", { exact: false })).toBeVisible();
+      await expect(settings.getByRole("alert")).toHaveText("同意を読み込めませんでした。");
+      const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === consentPath && response.ok());
+      await settings.getByRole("button", { name: "同意を再読み込み" }).click();
+      const response = await loaded;
+      expect(response.request().headers().authorization).toBeUndefined();
+      const consent = settings.getByRole("list", { name: "保存したアプリ同意" }).getByRole("listitem")
+        .filter({ has: settings.getByRole("heading", { name: fixture.webClientId, exact: true }) });
+      await expect(consent).toContainText("codexia:api");
+      await page.keyboard.press("Escape");
+      await expect(settings).not.toBeVisible();
+      await expect(page.getByRole("button", { name: "認証・セキュリティ", exact: true })).toBeFocused();
+    });
+
     await test.step("an unprotected draft blocks OAuth reauthentication", async () => {
       const documentPath = new URL(page.url()).pathname;
       const authorizePath = `${new URL(fixture.issuer).pathname}/oauth2/authorize`;
