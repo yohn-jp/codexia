@@ -192,7 +192,8 @@ jobs:
         with:
           node-version: 24.22.3
       - uses: actions/setup-python@v6.1.0
-        if: matrix.group == 'tests'
+        # Use the canonical per-task plan; coverage/test-type checks do not need StrictDoc or Chromium.
+        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
         with:
           python-version: '3.12'
       - name: Prepare exact pnpm toolchain
@@ -210,7 +211,7 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Install pinned StrictDoc and Chromium
-        if: matrix.group == 'tests'
+        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
         run: |
           python -m venv "$RUNNER_TEMP/strictdoc"
           "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
