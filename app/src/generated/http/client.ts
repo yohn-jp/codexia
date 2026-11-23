@@ -10,7 +10,7 @@ import {
   PersistenceStatusResponse
 } from './schemas';
 import type {
-  PersistenceDocumentAnchorsPostBody,
+  PersistenceAnchorCreateRequest,
   PersistenceDocumentsGetParams
 } from './schemas';
 
@@ -77,14 +77,14 @@ export const getPersistenceDocumentAnchorsPostUrl = (projectId: string,
 
 export const persistenceDocumentAnchorsPost = async (projectId: string,
     documentId: string,
-    persistenceDocumentAnchorsPostBody: PersistenceDocumentAnchorsPostBody, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<PersistenceAnchorCreatedResponse> => {
+    persistenceAnchorCreateRequest: PersistenceAnchorCreateRequest, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<PersistenceAnchorCreatedResponse> => {
 
   return generatedHttpFetch<PersistenceAnchorCreatedResponse>(getPersistenceDocumentAnchorsPostUrl(projectId,documentId),
   {
     ...options,
     method: 'POST',
     headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
-    body: JSON.stringify(persistenceDocumentAnchorsPostBody),
+    body: JSON.stringify(persistenceAnchorCreateRequest),
     schema: PersistenceAnchorCreatedResponse
   }
 );}

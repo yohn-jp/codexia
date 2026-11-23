@@ -14,7 +14,7 @@ export const persistenceAnchorCreatedResponseAnchorQuoteSha256RegExp = new RegEx
 export const persistenceAnchorCreatedResponseAnchorVersionMin = 1;
 
 
-export const PersistenceAnchorCreatedResponse = zod.looseObject({
+export const PersistenceAnchorCreatedResponse = zod.object({
   "anchor": zod.looseObject({
   "id": zod.string(),
   "projectId": zod.string(),
