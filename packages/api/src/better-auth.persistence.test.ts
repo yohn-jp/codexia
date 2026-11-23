@@ -326,10 +326,19 @@ test("Better Auth PostgreSQL restart preserves JWKS signing key, session and ref
     assert.equal(firstSessionBody.user?.email, "fixture-owner@example.test");
     assert.ok(firstSessionBody.session?.id, "OIDC callback must return a persisted session");
 
-    assert.deepEqual(await firstRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header() })), { status: 200 });
-    assert.deepEqual(await firstRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin })), { status: 401 });
-    assert.deepEqual(await firstRuntime.checkOwnerSession(new Headers({ Origin: "https://attacker.example", Cookie: cookies.header() })), { status: 403 });
-    assert.deepEqual(await firstRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header(), Authorization: "Bearer unrelated" })), { status: 403 });
+    // Generic OAuth's provider sub is not Better Auth's persisted user ID.
+    // Admission must compare the configured owner against that actual user ID.
+    assert.ok(firstSessionBody.user?.id, "the fixture must create a Better Auth user");
+    assert.deepEqual(await firstRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header() })), { status: 403 });
+    const ownerRuntime = createBetterAuthRuntime({ ...config, ownerSubject: firstSessionBody.user.id });
+    try {
+      assert.deepEqual(await ownerRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header() })), { status: 200 });
+      assert.deepEqual(await ownerRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin })), { status: 401 });
+      assert.deepEqual(await ownerRuntime.checkOwnerSession(new Headers({ Origin: "https://attacker.example", Cookie: cookies.header() })), { status: 403 });
+      assert.deepEqual(await ownerRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header(), Authorization: "Bearer unrelated" })), { status: 403 });
+    } finally {
+      await ownerRuntime.pool.end();
+    }
     const nonOwnerRuntime = createBetterAuthRuntime({ ...config, ownerSubject: "different-owner-subject" });
     try {
       assert.deepEqual(await nonOwnerRuntime.checkOwnerSession(new Headers({ Origin: publicOrigin, Cookie: cookies.header() })), { status: 403 });
