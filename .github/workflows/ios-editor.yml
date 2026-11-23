@@ -1,0 +1,25 @@
+name: iOS editor
+on:
+  pull_request:
+    paths:
+      - 'ios/CodexiaEditor/**'
+      - '.github/workflows/ios-editor.yml'
+permissions:
+  contents: read
+jobs:
+  editor:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify Xcode
+        run: xcodebuild -version | grep -E '^Xcode 27\.'
+      - name: Build for iOS Simulator
+        working-directory: ios/CodexiaEditor
+        run: xcodebuild -scheme CodexiaEditor -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Test state model
+        working-directory: ios/CodexiaEditor
+        run: swift test
