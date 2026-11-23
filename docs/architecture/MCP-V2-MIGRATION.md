@@ -60,9 +60,9 @@ Existing Core / PostgreSQL snapshot / proposal
 1. OAuth protected-resource metadataのexact resource、issuer、JWKSとtoken typeは現行 [MCP OAuth](MCP-OAUTH.md) の規範を維持する。Cloudflare Accessの通過、Better Auth session、owner bearer、MCP bearerは代替可能な同一権限ではない。
 2. `CODEXIA_OAUTH_MCP_CLIENT_IDS` とserver側assigned projectsの保護を維持。管理画面でclientを表示したこと自体では認可許可にしない。
 3. `mcp:read` / `mcp:compute` / `mcp:propose` は効果上限。実ツールのeffect、project、object/revision権限の**両方**をAPI admission/adapterで検証する。
-4. 2026-07-28に要求されたissuer識別やtoken/credential分離、scope step-upはSDKのoptionが存在するだけで成立しない。Better Auth OAuth Providerと認可層のconfig/protocolが実際に満たすことを確認する。**公式 `createMcpHandler` はHost/Origin検査を実施しないため、Hono outer ingressで許可Host・OriginとDNS rebinding保護を実装し、ヘッダー不一致・Host偽装を負のテストで拒否する。**
+4. 2026-07-28に要求されたissuer識別やtoken/credential分離、scope step-upはSDKのoptionが存在するだけで成立しない。Better Auth OAuth Providerと認可層のconfig/protocolが実際に満たすことを確認する。**公式 `createMcpHandler` はHost/Origin検査を実施しないため、Fastify outer ingressで許可Host・OriginとDNS rebinding保護を実装し、ヘッダー不一致・Host偽装を負のテストで拒否する。**
 5. public metadataと/api/authのpathは [External interfaces](EXTERNAL-INTERFACES.md)・[HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)と一致させる。Better Auth公式endpointの変化をMCPからのアクセス拡大に使わない。
-6. strict `/mcp` と、割当作品を示す `?projectId` の正規化・URL逸脱を検証する。Cloudflare Edge、Hono、SDKでpath解釈が異なってはならない。
+6. strict `/mcp` と、割当作品を示す `?projectId` の正規化・URL逸脱を検証する。Cloudflare Edge、Fastify、SDKでpath解釈が異なってはならない。
 
 ## Tool Schemaと追跡
 
