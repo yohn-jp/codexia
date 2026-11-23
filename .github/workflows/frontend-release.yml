@@ -23,12 +23,12 @@ on:
       - '!packages/**/test/**'
       - '!packages/**/tests/**'
       - '!packages/**/*.test.*'
-      - 'app/src/test/**'
-      - 'app/src/tests/**'
-      - 'modules/**/src/test/**'
-      - 'modules/**/src/tests/**'
-      - 'packages/**/src/test/**'
-      - 'packages/**/src/tests/**'
+      - 'app/src/**/test/**'
+      - 'app/src/**/tests/**'
+      - 'modules/**/src/**/test/**'
+      - 'modules/**/src/**/tests/**'
+      - 'packages/**/src/**/test/**'
+      - 'packages/**/src/**/tests/**'
       # Build-emitted source and test files remain runtime package inputs.
       - 'packages/persistence-contracts/src/**'
       - deploy/cloudflare/**

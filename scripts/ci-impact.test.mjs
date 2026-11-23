@@ -134,12 +134,17 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
   assert.equal(Object.hasOwn(standalone.on, 'pull_request'), false);
   assert.deepEqual(pushPaths, FULL_MODEL_OCI_PATHS.filter(file => file !== '.github/workflows/verify.yml'));
 
-  // GitHub's standalone path declarations define which inputs require the real model suite.
+  // Verify the standalone GitHub glob selector against the independent PR selector.
+  // A synthetic path containing glob metacharacters can be unclassified and thus
+  // conservatively select the model even when a standalone exclusion matches.
   for (const expression of pushPaths) {
-    const excluded = expression.startsWith('!');
-    const pattern = excluded ? expression.slice(1) : expression;
+    const pattern = expression.startsWith('!') ? expression.slice(1) : expression;
     const changedPath = pattern.endsWith('/**') ? `${pattern.slice(0, -3)}/ci-impact-sentinel.mjs` : pattern;
-    assert.equal((await plan([changedPath])).full_model_oci, !excluded, changedPath);
+    const standaloneSelected = matchesWorkflowPaths(pushPaths, [changedPath]);
+    assert.equal(matchesFullModelOciPath(changedPath), standaloneSelected,
+      `Main push and PR glob policy disagree: ${changedPath}`);
+    if (standaloneSelected) assert.equal((await plan([changedPath])).full_model_oci, true,
+      `An admitted standalone model input cannot be dropped by the PR plan: ${changedPath}`);
   }
   assert.equal((await plan(['.github/workflows/verify.yml'])).full_model_oci, true, 'Verify caller changes require its model proof');
   assert.equal((await plan(['docs/deployment/IAC.md'])).full_model_oci, false,
@@ -176,6 +181,9 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     ['Module compiled spec input', ['modules/mcp/src/worker.spec.ts'], true],
     ['Module emitted test helper', ['modules/mcp/src/test/fixture.ts'], true],
     ['Database emitted test helper', ['packages/persistence-postgres/src/tests/fixture.ts'], true],
+    ['Nested module emitted helper', ['modules/mcp/src/domain/test/fixture.ts'], true],
+    ['Nested database emitted helper', ['packages/persistence-postgres/src/domain/tests/fixture.ts'], true],
+    ['Nested desktop typechecked helper', ['app/src/editor/test/fixture.ts'], true],
     ['Desktop typechecked spec input', ['app/src/editor.spec.ts'], true],
     ['Persistence contract emitted test', ['packages/persistence-contracts/src/index.test.ts'], true],
     ['Persistence contract emitted spec', ['packages/persistence-contracts/src/index.spec.ts'], true],

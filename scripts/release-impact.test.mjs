@@ -40,6 +40,10 @@ test('test-only changes do not request runtime component release builds', () => 
     ['frontend', 'app/src/save.spec.ts'],
     ['frontend', 'modules/story/src/editor.spec.ts'],
     ['frontend', 'packages/persistence-postgres/src/tests/fixture.ts'],
+    ['backend', 'modules/mcp/src/domain/test/fixture.ts'],
+    ['backend', 'packages/persistence-postgres/src/domain/tests/fixture.ts'],
+    ['frontend', 'app/src/editor/test/fixture.ts'],
+    ['frontend', 'modules/story/src/domain/tests/fixture.ts'],
   ]) assert.equal(componentReleaseAffected(component, [file]), true, `${component}: ${file}`);
   for (const [component, file] of [
     ['backend', 'packages/api/src/server.ts'],
