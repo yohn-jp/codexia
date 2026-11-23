@@ -811,6 +811,91 @@ extension Components {
                 case transaction
             }
         }
+        /// - Remark: Generated from `#/components/schemas/PersistenceAnchorCreatedResponse`.
+        public struct PersistenceAnchorCreatedResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceAnchorCreatedResponse/anchor`.
+            public var anchor: Components.Schemas.PersistenceEvidenceAnchor
+            /// - Remark: Generated from `#/components/schemas/PersistenceAnchorCreatedResponse/quote`.
+            public var quote: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceAnchorCreatedResponse/nodeId`.
+            public var nodeId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceAnchorCreatedResponse/authorId`.
+            public var authorId: Swift.String
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceAnchorCreatedResponse`.
+            ///
+            /// - Parameters:
+            ///   - anchor:
+            ///   - quote:
+            ///   - nodeId:
+            ///   - authorId:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                anchor: Components.Schemas.PersistenceEvidenceAnchor,
+                quote: Swift.String,
+                nodeId: Swift.String? = nil,
+                authorId: Swift.String,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.anchor = anchor
+                self.quote = quote
+                self.nodeId = nodeId
+                self.authorId = authorId
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case anchor
+                case quote
+                case nodeId
+                case authorId
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.anchor = try container.decode(
+                    Components.Schemas.PersistenceEvidenceAnchor.self,
+                    forKey: .anchor
+                )
+                self.quote = try container.decode(
+                    Swift.String.self,
+                    forKey: .quote
+                )
+                self.nodeId = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .nodeId
+                )
+                self.authorId = try container.decode(
+                    Swift.String.self,
+                    forKey: .authorId
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "anchor",
+                    "quote",
+                    "nodeId",
+                    "authorId"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.anchor,
+                    forKey: .anchor
+                )
+                try container.encode(
+                    self.quote,
+                    forKey: .quote
+                )
+                try container.encodeIfPresent(
+                    self.nodeId,
+                    forKey: .nodeId
+                )
+                try container.encode(
+                    self.authorId,
+                    forKey: .authorId
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/PersistenceDocument`.
         public struct PersistenceDocument: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PersistenceDocument/id`.
@@ -1407,6 +1492,203 @@ extension Components {
                 try container.encode(
                     self.createdAt,
                     forKey: .createdAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor`.
+        public struct PersistenceEvidenceAnchor: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/projectId`.
+            public var projectId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/documentId`.
+            public var documentId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/revisionId`.
+            public var revisionId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/fromUtf16`.
+            public var fromUtf16: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/toUtf16`.
+            public var toUtf16: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/quoteSha256`.
+            public var quoteSha256: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case confirmed = "confirmed"
+                case needs_review = "needs_review"
+                case orphaned = "orphaned"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/status`.
+            public var status: Components.Schemas.PersistenceEvidenceAnchor.statusPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/version`.
+            public var version: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/createdAt`.
+            public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/PersistenceEvidenceAnchor/updatedAt`.
+            public var updatedAt: Foundation.Date
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `PersistenceEvidenceAnchor`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - documentId:
+            ///   - revisionId:
+            ///   - fromUtf16:
+            ///   - toUtf16:
+            ///   - quoteSha256:
+            ///   - status:
+            ///   - version:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String,
+                projectId: Swift.String,
+                documentId: Swift.String,
+                revisionId: Swift.String,
+                fromUtf16: Swift.Int32,
+                toUtf16: Swift.Int32,
+                quoteSha256: Swift.String,
+                status: Components.Schemas.PersistenceEvidenceAnchor.statusPayload,
+                version: Swift.Int32,
+                createdAt: Foundation.Date,
+                updatedAt: Foundation.Date,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.documentId = documentId
+                self.revisionId = revisionId
+                self.fromUtf16 = fromUtf16
+                self.toUtf16 = toUtf16
+                self.quoteSha256 = quoteSha256
+                self.status = status
+                self.version = version
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case documentId
+                case revisionId
+                case fromUtf16
+                case toUtf16
+                case quoteSha256
+                case status
+                case version
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decode(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.projectId = try container.decode(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.documentId = try container.decode(
+                    Swift.String.self,
+                    forKey: .documentId
+                )
+                self.revisionId = try container.decode(
+                    Swift.String.self,
+                    forKey: .revisionId
+                )
+                self.fromUtf16 = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .fromUtf16
+                )
+                self.toUtf16 = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .toUtf16
+                )
+                self.quoteSha256 = try container.decode(
+                    Swift.String.self,
+                    forKey: .quoteSha256
+                )
+                self.status = try container.decode(
+                    Components.Schemas.PersistenceEvidenceAnchor.statusPayload.self,
+                    forKey: .status
+                )
+                self.version = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .version
+                )
+                self.createdAt = try container.decode(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decode(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "projectId",
+                    "documentId",
+                    "revisionId",
+                    "fromUtf16",
+                    "toUtf16",
+                    "quoteSha256",
+                    "status",
+                    "version",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encode(
+                    self.documentId,
+                    forKey: .documentId
+                )
+                try container.encode(
+                    self.revisionId,
+                    forKey: .revisionId
+                )
+                try container.encode(
+                    self.fromUtf16,
+                    forKey: .fromUtf16
+                )
+                try container.encode(
+                    self.toUtf16,
+                    forKey: .toUtf16
+                )
+                try container.encode(
+                    self.quoteSha256,
+                    forKey: .quoteSha256
+                )
+                try container.encode(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encode(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encode(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encode(
+                    self.updatedAt,
+                    forKey: .updatedAt
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }

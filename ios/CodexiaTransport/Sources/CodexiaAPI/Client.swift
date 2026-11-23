@@ -8756,7 +8756,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_document_anchors_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceAnchorCreatedResponse.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -8893,7 +8893,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_document_anchor_patch.Output.Ok.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceEvidenceAnchor.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
