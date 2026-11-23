@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { constants, createReadStream } from 'node:fs';
-import { access, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { access, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readRegularFile } from '../read-regular-file.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -77,30 +78,30 @@ export async function validateRelations(nodes, repositoryRoot) {
         violations.push(`${node.UID}: File relation resolves outside repository: ${relativePath}`);
         continue;
       }
-      // A single descriptor binds type verification and content consumption.
-      const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const nonFileMessage = `${node.UID}: File relation target is not a file: ${relativePath}`;
+      if (relation.LINE_RANGE === undefined) {
+        if (!(await lstat(source)).isFile()) violations.push(nonFileMessage);
+        continue;
+      }
+      const lineRange = String(relation.LINE_RANGE);
+      const match = /^(\d+)\s*,\s*(\d+)$/u.exec(lineRange);
+      if (!match) {
+        violations.push(`${node.UID}: Invalid line range for ${relativePath}: ${lineRange}`);
+        continue;
+      }
+      let content;
       try {
-        if (!(await handle.stat()).isFile()) {
-          violations.push(`${node.UID}: File relation target is not a file: ${relativePath}`);
-          continue;
-        }
-        if (relation.LINE_RANGE !== undefined) {
-          const lineRange = String(relation.LINE_RANGE);
-          const match = /^(\d+)\s*,\s*(\d+)$/u.exec(lineRange);
-          if (!match) {
-            violations.push(`${node.UID}: Invalid line range for ${relativePath}: ${lineRange}`);
-            continue;
-          }
-          const start = Number(match[1]);
-          const end = Number(match[2]);
-          const content = await handle.readFile('utf8');
-          const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/u).length - (content.endsWith('\n') ? 1 : 0);
-          if (start < 1 || end < start || end > lineCount) {
-            violations.push(`${node.UID}: ${relativePath} line range ${lineRange} exceeds source length (${lineCount} lines)`);
-          }
-        }
-      } finally {
-        await handle.close();
+        content = await readRegularFile(source, { message: nonFileMessage });
+      } catch (error) {
+        if (error?.code !== 'ERR_NOT_REGULAR_FILE') throw error;
+        violations.push(error.message);
+        continue;
+      }
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/u).length - (content.endsWith('\n') ? 1 : 0);
+      if (start < 1 || end < start || end > lineCount) {
+        violations.push(`${node.UID}: ${relativePath} line range ${lineRange} exceeds source length (${lineCount} lines)`);
       }
     }
   }
@@ -151,10 +152,10 @@ export async function validateScenarioNodes(scenarios, requirements, repositoryR
       try {
         const realSource = await realpath(resolved);
         if (!realSource.startsWith(`${root}${path.sep}`)) continue;
-        const source = await readFile(realSource, 'utf8');
+        const source = await readRegularFile(realSource);
         if (typeof caseName === 'string' && source.includes(caseName)) caseFound = true;
       } catch {
-        // The shared File relation validator reports the missing path.
+        // File relation failures are also checked by validateRelations.
       }
     }
     if (typeof caseName === 'string' && !caseFound) violations.push(`${uid} Case name was not found in its test source file`);
@@ -415,18 +416,15 @@ async function readScopedSourceFiles(root, paths, kind) {
     if (absolutePath !== repositoryRoot && !absolutePath.startsWith(`${repositoryRoot}${path.sep}`)) {
       throw new Error(`Inventory ${kind} source escapes the repository: ${relativePath}`);
     }
-    const sourcePath = await realpath(absolutePath);
-    if (!sourcePath.startsWith(`${repositoryRoot}${path.sep}`)) {
-      throw new Error(`Inventory ${kind} source is missing or not a repository file: ${relativePath}`);
-    }
-    const handle = await open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const message = `Inventory ${kind} source is missing or not a repository file: ${relativePath}`;
     try {
-      if (!(await handle.stat()).isFile()) {
-        throw new Error(`Inventory ${kind} source is missing or not a repository file: ${relativePath}`);
-      }
-      files.push({ relativePath: normalized, source: await handle.readFile('utf8') });
-    } finally {
-      await handle.close();
+      const sourcePath = await realpath(absolutePath);
+      if (!sourcePath.startsWith(`${repositoryRoot}${path.sep}`)) throw new Error(message);
+      const source = await readRegularFile(sourcePath, { message });
+      files.push({ relativePath: normalized, source });
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') throw new Error(message, { cause: error });
+      throw error;
     }
   }
   return files;

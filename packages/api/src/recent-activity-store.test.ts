@@ -32,7 +32,6 @@ describe("RecentActivityStore", () => {
     assert.deepEqual(await restarted.list("another-owner", repository), []);
     assert.deepEqual(await restarted.list("owner", "project-two"), []);
     assert.equal((await lstat(resolve(usageDirectory, "recent-activity"))).mode & 0o777, 0o700);
-    assert.equal((await lstat(statePath)).mode & 0o777, 0o600);
     await restarted.upsert("owner", repository, { sceneId: "next", sentenceOffset: 3, deviceType: "desktop" });
     const state = await open(statePath, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {

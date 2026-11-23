@@ -106,7 +106,7 @@ test("offline job history maintenance leaves missing state alone and rejects uns
   await writeFile(external, source, { mode: 0o600 });
   await symlink(external, path);
   assert.equal(cli(root, "--apply").status, 1);
-  assert.equal(await readFile(external, "utf8"), source);
+  assert.equal(await readStateFile(external), source);
   await rm(path);
 
   const invalid = '{"version":2,"jobs":[{}],"inbox":[],"legacySources":[]}';
