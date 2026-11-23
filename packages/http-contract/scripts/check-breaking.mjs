@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { resolveBaseCommit, selectBaseReference } from "./base-reference.mjs";
 import { resolveOasdiffBinary } from "./oasdiff.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,25 +24,6 @@ function git(args, options = {}) {
   return run("git", args, options);
 }
 
-function baseReference() {
-  if (process.env.CODEXIA_OASDIFF_BASE_REF) return process.env.CODEXIA_OASDIFF_BASE_REF;
-  if (process.env.GITHUB_BASE_REF) return `origin/${process.env.GITHUB_BASE_REF}`;
-  if (process.env.GITHUB_EVENT_NAME === "push" || process.env.GITHUB_EVENT_NAME === "workflow_dispatch") return "HEAD^";
-  return "origin/main";
-}
-
-function isValidCommit(reference) {
-  return git(["rev-parse", "--verify", `${reference}^{commit}`]).status === 0;
-}
-
-function fetchReference(reference) {
-  if (!reference.startsWith("origin/")) return reference;
-  const branch = reference.slice("origin/".length);
-  const result = git(["fetch", "--no-tags", "--depth=1", "origin", branch]);
-  if (result.status !== 0) throw new Error(`unable to fetch oasdiff base ${reference}: ${result.stderr || result.stdout}`);
-  return "FETCH_HEAD";
-}
-
 function candidateEpoch(spec) {
   const epoch = spec["x-codexia-api-epoch"];
   assert.ok(Number.isSafeInteger(epoch) && epoch > 0, "OpenAPI is missing a positive x-codexia-api-epoch");
@@ -56,20 +38,17 @@ try {
   const candidate = parse(readFileSync(candidatePath, "utf8"));
   candidateEpoch(candidate);
 
-  let reference = baseReference();
-  if (!isValidCommit(reference)) reference = fetchReference(reference);
-  const resolvedBase = git(["rev-parse", "--verify", `${reference}^{commit}`]);
-  if (resolvedBase.status !== 0) throw new Error(`unable to resolve oasdiff base commit ${reference}: ${resolvedBase.stderr || resolvedBase.stdout}`);
-  const baseSha = resolvedBase.stdout.trim();
+  const reference = selectBaseReference();
+  const baseSha = resolveBaseCommit(reference, git);
   const baseFile = path.join(tempRoot, "base.openapi.yaml");
-  const baseResult = git(["show", `${reference}:${packageContractPath}`]);
+  const baseResult = git(["show", `${baseSha}:${packageContractPath}`]);
   if (baseResult.status !== 0) {
-    const pathExistsInBase = git(["cat-file", "-e", `${reference}:${packageContractPath}`]).status === 0;
+    const pathExistsInBase = git(["cat-file", "-e", `${baseSha}:${packageContractPath}`]).status === 0;
     if (!pathExistsInBase) {
-      console.log(`No approved OpenAPI artifact exists at ${reference} (${baseSha}); this first contract establishes the generated baseline.`);
+      console.log(`No approved OpenAPI artifact exists at ${baseSha}; this first contract establishes the generated baseline.`);
       process.exitCode = 0;
     } else {
-      throw new Error(`unable to read oasdiff base ${reference}:${packageContractPath}: ${baseResult.stderr}`);
+      throw new Error(`unable to read oasdiff base ${baseSha}:${packageContractPath}: ${baseResult.stderr}`);
     }
   } else {
     writeFileSync(baseFile, baseResult.stdout);
@@ -83,9 +62,9 @@ try {
     process.stdout.write(comparison.stdout ?? "");
     process.stderr.write(comparison.stderr ?? "");
     if (comparison.status !== 0) {
-      throw new Error(`oasdiff detected a breaking OpenAPI change against ${reference}`);
+      throw new Error(`oasdiff detected a breaking OpenAPI change against approved base SHA ${baseSha}`);
     }
-    console.log(`oasdiff found no breaking changes at API epoch ${baseApiEpoch}, comparing approved ${packageContractPath} from ${reference} (${baseSha}).`);
+    console.log(`oasdiff found no breaking changes at API epoch ${baseApiEpoch}, comparing approved ${packageContractPath} from ${baseSha}.`);
   }
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });

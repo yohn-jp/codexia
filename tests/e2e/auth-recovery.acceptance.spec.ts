@@ -1,12 +1,13 @@
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CDPSession, Page } from "@playwright/test";
+import type { CDPSession, Page, Route } from "@playwright/test";
 import { expect, test } from "./author-oauth-fixture";
 import { createOAuthWritingFixture, manuscriptEditor, readPersistenceDrafts, fillDraft, seedWritingProject, writingFixturePath } from "./postgres-fixture";
 
 const mockShellOrigin = "http://127.0.0.1:4173";
 const shellAssets = fileURLToPath(new URL("../../app/dist/", import.meta.url));
 test.use({ baseURL: mockShellOrigin });
+test.use({ authFixtureHost: "localhost" });
 
 async function registerCurrentSessionPasskey(page: Page): Promise<CDPSession> {
   const session = await page.context().newCDPSession(page);
@@ -173,13 +174,17 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   expect(await reauthenticated.json()).toEqual({ authenticated: true });
   await expect(page.getByRole("heading", { name: "セキュリティ", exact: true })).toBeVisible();
 
-  await page.context().setExtraHTTPHeaders({ Authorization: "Bearer not-an-owner-session" });
-  const forbiddenCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
+  const ownerSessionWithBearer = `${origin}/api/auth/codexia/owner-session`;
+  const sendBearerToOwnerSession = (route: Route) => route.continue({
+    headers: { ...route.request().headers(), authorization: "Bearer not-an-owner-session" },
+  });
+  await page.route(ownerSessionWithBearer, sendBearerToOwnerSession);
+  const forbiddenCheck = page.waitForResponse(response => response.url() === ownerSessionWithBearer);
   await page.reload();
   expect((await forbiddenCheck).status()).toBe(403);
   await expect(page.getByRole("heading", { name: "管理権限がありません", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理コンソール" })).toHaveCount(0);
-  await page.context().setExtraHTTPHeaders({});
+  await page.unroute(ownerSessionWithBearer, sendBearerToOwnerSession);
   await virtualAuthenticator?.detach();
 });
 
