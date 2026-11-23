@@ -103,6 +103,23 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
+test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
+  const owners = [
+    ['packages/api/src/server.ts', 'unit-api'],
+    ['packages/api/src/persistence-routes.ts', 'unit-api'],
+    ['packages/api/src/owner-setup.ts', 'unit-api'],
+    ['packages/api/src/better-auth.ts', 'unit-api'],
+    ['modules/mcp/src/http.ts', 'unit-mcp'],
+    ['modules/publishing/src/http.ts', 'unit-publishing'],
+  ];
+  for (const [file, owner] of owners) {
+    const selection = await plan([file]);
+    assert.ok(selection.tasks.includes('unit-http-contract'), `${file} selects source-to-contract verification`);
+    assert.ok(selection.tasks.includes(owner), `${file} retains its runtime source owner`);
+    assert.ok(selection.groups.includes('unit-core'), `${file} runs the HTTP contract task’s existing Verify group`);
+  }
+});
+
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
   const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
