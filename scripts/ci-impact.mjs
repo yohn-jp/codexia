@@ -163,6 +163,11 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
     }
+    // The restore contract executes the canonical backup producer, not just DB fixtures.
+    if (file === 'deploy/backup/backup.sh') {
+      add('unit-root', 'db-contract');
+      continue;
+    }
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
       continue;
