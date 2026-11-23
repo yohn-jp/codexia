@@ -190,6 +190,17 @@ async function download(entry, directory, name) {
   return destination;
 }
 
+async function listFiles(directory, prefix = '') {
+  const result = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isSymbolicLink()) throw new Error(`Generated artifact contains an unexpected symlink: ${relative}`);
+    if (entry.isDirectory()) result.push(...await listFiles(path.join(directory, entry.name), relative));
+    else if (entry.isFile()) result.push(relative);
+  }
+  return result.sort((left, right) => left.localeCompare(right, 'en'));
+}
+
 async function encryptStream(command, args, agePath, recipient, destination, label) {
   const producer = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   const encryptor = spawn(agePath, ['-r', recipient, '-o', destination], { cwd: root, stdio: ['pipe', 'ignore', 'pipe'] });
@@ -564,14 +575,21 @@ async function main() {
     await mkdir(tblsOutput);
     stage = 'tbls data dictionary generation';
     const tblsReaderUrl = await prepareTblsReader({ adminPool, port, postgresPassword });
-    invoke(tblsPath, ['doc', '--dsn', `${tblsReaderUrl}?sslmode=disable`,
-      tblsOutput, '--force', '--er-format', 'mermaid', '--include', 'public.*', '--include', 'codexia_auth.*'],
+    invoke(tblsPath, ['doc', `${tblsReaderUrl}?sslmode=disable`, tblsOutput,
+      '--force', '--er-format', 'mermaid', '--include', 'public.*', '--include', 'codexia_auth.*'],
     { maxBuffer: 8 * 1024 * 1024 });
     stage = 'encrypted v2 isolated restore';
     const restore = await verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePath, sourceContainer: containerName,
       identity, expectedLedger: reviewedCatalog.migrationLedger, expectedAuthFingerprint: authFingerprint });
 
     const catalogFingerprint = `sha256:${digest(JSON.stringify(installedCatalog))}`;
+    const generatedTblsFiles = await listFiles(tblsOutput);
+    assert.ok(generatedTblsFiles.includes('README.md') && generatedTblsFiles.includes('public.project.md'),
+      'tbls must generate the data dictionary in the task artifact directory');
+    const generatedTblsIdentity = await Promise.all(generatedTblsFiles.map(async file => ({
+      path: file, sha256: digest(await readFile(path.join(tblsOutput, file))),
+    })));
+    const tblsArtifactFingerprint = `sha256:${digest(JSON.stringify(generatedTblsIdentity))}`;
     const manifest = {
       format: 'codexia-postgres-contract-evidence/v1', source,
       runtime: { postgresVersion, postgresMajor: toolchain.postgresMajor,
@@ -586,13 +604,15 @@ async function main() {
         artifactSha256: restore.artifactDigest, authFingerprint: restore.restoredAuthFingerprint,
         ownerIdentity: { ownerId: identity.ownerId, ownerEmail: identity.ownerEmail, projectId: identity.projectId,
           documentId: identity.documentId, revisionId: identity.revisionId }, canonicalScript: 'deploy/backup/backup.sh' },
-      artifacts: { tbls: 'tbls/', encryptedBackup: 'encrypted-backup-v2/', restoreProof: 'restore-proof/' },
+      artifacts: { tbls: 'tbls/', tblsFileCount: generatedTblsFiles.length,
+        tblsFingerprint: tblsArtifactFingerprint, encryptedBackup: 'encrypted-backup-v2/', restoreProof: 'restore-proof/' },
     };
     const serialized = JSON.stringify(manifest, null, 2);
     if (/postgres:\/\/|password|secret/iu.test(serialized)) throw new Error('Evidence manifest contains a forbidden connection or credential field');
     await writeFile(path.join(tblsOutput, '_source-identity.json'), `${JSON.stringify({ source, migrationFingerprint,
       authFingerprint, catalogFingerprint, postgresVersion,
       generator: { name: 'tbls', version: toolchain.tbls.version, archiveSha256: toolchain.tbls.archives[arch].sha256 },
+      generatedFiles: { count: generatedTblsFiles.length, fingerprint: tblsArtifactFingerprint },
     }, null, 2)}\n`, { flag: 'wx' });
     await writeFile(path.join(evidenceDirectory, 'manifest.json'), `${serialized}\n`, { flag: 'wx' });
     console.log(`DB contract PASS: PostgreSQL ${toolchain.postgresMajor}; ${pgTap.executed} pgTAP assertions; ${catalogFingerprint}`);
