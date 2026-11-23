@@ -7,7 +7,10 @@
   },
   "files": {
     "includes": [
-      "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+      "app/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+      "packages/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+      "modules/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+      "edge/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
       "!**/dist/**",
       "!**/build/**",
       "!**/generated/**",

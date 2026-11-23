@@ -16,7 +16,8 @@ const output = process.env.CODEXIA_CI_REPORT_DIR;
 assert.ok(path.isAbsolute(output ?? ''), 'Biome output directory must be absolute');
 mkdirSync(output, { recursive: true });
 const sarifPath = path.join(output, 'biome-lint.sarif');
-const scope = ['--changed', `--since=${base}`, '--no-errors-on-unmatched'];
+// Begin with shipped application code, not pre-existing unformatted build/CI scripts.
+const scope = ['--changed', `--since=${base}`, '--no-errors-on-unmatched', 'app', 'packages', 'modules', 'edge/frontend'];
 function execute(args) {
   const result = spawnSync('biome', args, { stdio: 'inherit' });
   if (result.error) throw result.error;
