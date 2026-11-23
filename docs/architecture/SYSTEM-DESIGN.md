@@ -29,7 +29,7 @@ flowchart TB
         M["外部 AI / MCP client"]
     end
     subgraph Edge["公開プレーン"]
-        A["Cloudflare Access / 静的UI"]
+        A["Cloudflare Workers Static Assets<br/>AccessでUI入口を保護"]
         T["Cloudflare Tunnel / API ingress"]
     end
     subgraph App["アプリケーションプレーン"]
@@ -52,6 +52,8 @@ flowchart TB
     P --> DB
     H --> DB
 ```
+
+通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
 
 UI 配信と API の外部認可は分離して管理する。Access の通過は Codexia の project/object 認可を代替しない。公開 reader は別の読み取り専用経路とする。HTTP MCP と stdio は同じ認可済みドメイン操作へ到達するアダプターであり、第二の writer を実装しない。
 
@@ -98,7 +100,7 @@ flowchart LR
 ```
 
 - **一つのデプロイ制御プレーン:** GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet。VM 上の polling updater、pull timer、別のリリース選択器、MCP によるデプロイは設けない。
-- 初期導入では専用の承認を要する。空ホストと既存データの採用を分け、資格情報、DB 初期化、owner 登録、本番初回起動を無断連結しない。`bootstrap` は承認された host、secrets、base、auth-runtime の順序収束を提供する。owner 登録と保護された本番 `deploy` は引き続き別の明示操作であり、CI と本番受入を混同しない。
+- VMの最小前提はAnsibleからのSSH到達と権限付きの構成変更。OSの適合性は`inspect`/`bootstrap`で検証する。初期導入では新規DBと既存DBの復旧を分け、Ansibleは256-bitの登録キー発行を管理するがownerを作成しない。本人はWorkersの`/console/setup`でPasskey登録を行い、保護された本番`deploy`の承認は別操作とする。今ある`bootstrap`はhost/secrets/base/auth-runtimeの構成収束まで実装済みであり、setup-only公開APIとコンソール登録UIは未実装。
 - 通常更新は **DB migration fingerprint、persistence format、API epoch、Full profile、認証スキーマ互換性** を検証し、互換なイメージのみ自動適用できる。互換でないものは承認済み別手順に隔離する。
 - 変更前バックアップ、host lock、停止、適用、health、失敗時の既知良好イメージへの復帰を一つのトランザクションとして扱う。コンテナーだけを戻してデータ変更が巻き戻ったと主張しない。
 
