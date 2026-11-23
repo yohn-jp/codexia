@@ -62,3 +62,48 @@ CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_pe
 Set `CODEXIA_E2E_CHROMIUM` and `CODEXIA_AUTH_TEST_DISPOSABLE=1` after a Core build to additionally execute the browser benchmark smoke and IndexedDB probes. The Core CI writing browser lane also executes the same smoke against a fresh disposable database on its private PostgreSQL service, through a loopback-only forwarding adapter. The smoke is not a full matched performance campaign. The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
 
 Historical Core64, Git/OCI and release probes are specific to their recorded source and artifact identities. The retired Core64 and C62 OCI probe sources are available at commit `91b6cb64a85da6c8f4b864a5843ac7fb776e08fa` under `scripts/performance/`. Use the source, runtime and artifact identities from the historical report for reproduction. The historical wave0 manifest remains accessible in the [pinned archive revision](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/performance/wave0/INDEX.json); use the current [artifact verifier](artifacts.mjs) with a local copy of that manifest.
+
+## k6 synthetic transport smoke and measurement
+
+Use Linux with a local Docker daemon at `/var/run/docker.sock`, Git, Node, and
+[k6 v2.4.0](https://github.com/grafana/k6/releases/tag/v2.4.0). Verify the
+download against the release's SHA-256 checksums. From the repository root:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @codexia/core... build
+node scripts/performance/k6-run.mjs smoke /tmp/codexia-k6-smoke /absolute/path/to/k6
+node scripts/performance/k6-run.mjs measurement /tmp/codexia-k6-measurement /absolute/path/to/k6
+CODEXIA_K6_TEST_BINARY=/absolute/path/to/k6 node --test scripts/performance/k6.test.mjs
+```
+
+Each invocation starts a fresh digest-pinned PostgreSQL container, generates
+the deterministic `small` dataset, applies migrations, and seeds the
+database with the existing fixture importer. The database and the synthetic
+HTTP fixture bind to dynamically assigned IPv4 loopback ports. The runner
+selects both targets itself and removes the database container on exit. k6
+accepts only a numeric loopback origin, confirms the current fixture's
+identity before starting iterations and follows no redirects.
+
+The smoke performs two iterations with one virtual user. The measurement
+profile runs two virtual users for 30 seconds with a 100 ms pause per
+iteration. Each iteration verifies a PostgreSQL-backed synthetic revision
+and consumes a finite two-event stream. The smoke fails on incorrect
+responses or an incomplete iteration count. Its thresholds are correctness
+checks. The optional real-k6 test injects an incorrect synthetic response
+and checks the process exit code and the exclusion from the scene latency
+samples.
+
+Use the new output directory outside the checkout to retain the dataset
+manifest, source and build identities, runtime and database settings,
+seeding time, raw k6 samples, metric summary and SHA-256 inventory. The run
+record stores the k6 process outcome. The runner reports success after the
+output files have been inventoried. Custom
+latency trends contain only checked responses. The PostgreSQL timing
+includes persistence and pool overhead. Stream timing covers first byte
+and full response receipt. The application RSS readings describe the
+fixture process, and its lifetime peak includes seeding. This fixture
+provides an executable measurement foundation. Product API and MCP
+scenarios, production SSE behavior, long-running certification and the
+approved G6 budgets require their respective runtime contracts and
+integration into the canonical verification plan.
