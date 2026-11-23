@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Uint8ArrayReader, ZipReader } from '@zip.js/zip.js';
@@ -152,8 +152,13 @@ async function withArtifactZip(bytes, {maxArchive, maxUncompressed, maxEntries},
     assert.ok(entries.length > 0, 'Invalid ZIP entry count');
     // The library exposes the central directory bounds. A ZIP64 end record adds
     // data between that directory and the classic end record.
-    assert.equal(reader.directoryOffset + reader.directoryLength + ZIP_END_RECORD_BYTES + reader.comment.length,
-      bytes.length, 'Invalid ZIP central directory bounds or unsupported ZIP64 archive');
+    const endOffset = bytes.length - ZIP_END_RECORD_BYTES - reader.comment.length;
+    assert.equal(reader.directoryOffset + reader.directoryLength, endOffset,
+      'Invalid ZIP central directory bounds or unsupported ZIP64 archive');
+    // zip.js accepts these fields on a single reader without enforcing that
+    // the central directory and all entries belong to that one disk.
+    assert.equal(bytes.readUInt16LE(endOffset + 6), 0, 'Multi-disk ZIP not supported');
+    assert.equal(bytes.readUInt16LE(endOffset + 8), entries.length, 'ZIP entry count mismatch');
     assert.ok(!reader.digitalSignature, 'Unsupported ZIP central directory signature');
 
     for (const {entry} of entries) {
@@ -222,9 +227,14 @@ export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX
         await mkdir(path.dirname(filename), {recursive: true});
         const file = await open(filename, 'wx', 0o644);
         try {
-          await readEntry(entry, maxUncompressed, chunk => file.writeFile(chunk));
-        } finally {
-          await file.close();
+          try {
+            await readEntry(entry, maxUncompressed, chunk => file.writeFile(chunk));
+          } finally {
+            await file.close();
+          }
+        } catch (error) {
+          await unlink(filename);
+          throw error;
         }
         written.push(pathname);
       }

@@ -108,6 +108,11 @@ test('extracts only one requested JSON entry and rejects missing or malformed JS
   execFileSync('zip', ['-q', 'artifact.zip', 'report.json', 'extra.txt'], { cwd: dir });
   const zip = await readFile(path.join(dir, 'artifact.zip'));
   assert.equal((await extractJsonEntry(zip, 'report.json')).toString(), '{"group":"browser-full-webkit"}');
+  for (const [offset, diagnostic] of [[6, /Multi-disk/], [8, /entry count/]]) {
+    const broken = Buffer.from(zip);
+    broken.writeUInt16LE(1, broken.length - 22 + offset);
+    await assert.rejects(extractJsonEntry(broken, 'report.json'), diagnostic);
+  }
   await assert.rejects(extractJsonEntry(zip, 'ci-plan.json'), /Missing required JSON entry/);
   await writeFile(path.join(dir, 'report.json'), 'not JSON');
   execFileSync('zip', ['-q', 'invalid.zip', 'report.json'], { cwd: dir });
@@ -170,7 +175,9 @@ test('JSON and frontend artifact extraction reject files with an incorrect CRC',
   assert.ok(offset > 0);
   archive.write('changed!', offset + content.indexOf('original'));
   await assert.rejects(extractJsonEntry(archive, 'profile-build.json'), /CRC|signature/i);
-  await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /CRC|signature/i);
+  const destination = path.join(directory, 'out');
+  await assert.rejects(extractArtifactFiles(archive, destination), /CRC|signature/i);
+  assert.deepEqual(await readdir(destination), []);
 });
 
 test('JSON extraction rejects an incorrect CRC on an unmaterialized diagnostic entry', async t => {
