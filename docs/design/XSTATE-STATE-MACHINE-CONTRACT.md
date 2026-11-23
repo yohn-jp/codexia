@@ -41,7 +41,7 @@
 
 | ID | 条件 |
 | --- | --- |
-| XST-001 | 保存・復旧について要件/画面ID/全イベント、非法遷移と失敗/中止のテストを写像 |
+| XST-001 | 保存・復旧について要件/画面ID/全イベント、不正遷移と失敗/中止のテストを写像 |
 | XST-002 | 409/412、応答消失、連続編集、2tab、別document/author、再起動、IME、IndexedDB quota不足で未確定原稿を失わない |
 | XST-003 | receiptが無い状態をDB確定表示にしない。各保存操作のidempotencyとrecoveryを実PostgreSQL/Chromium/WebKitで検証 |
 | XST-004 | 状態機械の拒否だけに依存する認可を作らず、既存APIのprincipal/owner/BOLA拒否を維持 |
