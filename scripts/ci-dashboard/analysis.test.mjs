@@ -229,6 +229,15 @@ test('inventory exposes pagination and preserves unresolved PR associations', as
   assert.equal([known,unresolved].filter(item=>identity(item)===null).length,1);
 });
 
+test('inventory continues with a dated cursor after the 1000-run search window', async () => {
+  const paths=[];
+  const request=async path=>{paths.push(path);return {workflow_runs:[],total_count:0};};
+  await collectInventoryPage(request,10,'2026-11-23T09:00:00Z');
+  assert.match(paths[0],/page=10&created=%3C%3D2026-11-23T09%3A00%3A00Z/u);
+  await assert.rejects(collectInventoryPage(request,11),/Invalid inventory page/u);
+  await assert.rejects(collectInventoryPage(request,1,'invalid'),/Invalid inventory cursor/u);
+});
+
 test('collector rejects invalid page and partial job inventory', async () => {
   await assert.rejects(collectInventoryPage(async()=>({workflow_runs:[]}),0),/Invalid inventory page/u);
   const metadata={...run(),workflow_id:7,pull_requests:[{number:42}]};
