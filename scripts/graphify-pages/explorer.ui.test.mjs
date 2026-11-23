@@ -72,8 +72,7 @@ function pageFor(data) {
   return template.replace('__GRAPHIFY_INDEX_JSON__', JSON.stringify(data).replaceAll('<', '\\u003c')).replace('__GRAPHIFY_SOURCE_LINKS__', sourceAnchors(data));
 }
 async function serveFixture(data, t) {
-  const modulePath=process.env.CODEXIA_GRAPHIFY_ANALYSIS_MODULE || new URL('./analysis.mjs', import.meta.url);
-  const runtime=await readFile(modulePath,'utf8');
+  const runtime=await readFile(new URL('./analysis.mjs', import.meta.url),'utf8');
   const server = createServer(async (request, response) => {
     if(new URL(request.url,'http://localhost').pathname==='/graph/analysis.mjs'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8'});response.end(runtime);return;}
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(pageFor(data));

@@ -139,17 +139,19 @@ try {
     assert.ok(main && ['ready', 'partial'].includes(audit.snapshots[main.sha]?.status));
     const snapshotUrl = new URL('snapshots/' + main.sha + '/', base);
     await page.goto(base + 'audit/');
-    const snapshotAnchor = page.locator('main a').filter({ hasText: /snapshot/i });
-    assert.ok(await snapshotAnchor.evaluateAll((links, href) => links.some(link => link.href === href), snapshotUrl.href));
-    assert.equal((await page.goto(snapshotUrl.href)).status(), 200);
+    await page.locator(`main a[href$="snapshots/${main.sha}/"]`).first().click();
+    assert.equal(page.url(), snapshotUrl.href);
     assert.ok(await page.locator('a[download][href$="repomix.json"]').first().isVisible());
 
-    const review = Object.entries(audit.reviews).find(([, item]) => ['ready', 'partial'].includes(item.status));
+    const review = Object.entries(audit.reviews ?? {}).find(([, item]) => ['ready', 'partial'].includes(item.status));
     if (review) {
       const [sha] = review;
       const reviewUrl = new URL('reviews/' + sha + '/', base);
       assert.equal((await page.goto(reviewUrl.href)).status(), 200);
       assert.ok(await page.locator('a[download][href$="gemini-review.md"]').first().isVisible());
+      await page.locator(`main a[href$="audit/#sha-${sha}"]`).click();
+      assert.equal(page.url(), base + 'audit/#sha-' + sha);
+      assert.ok(await page.locator('#sha-' + sha).isVisible());
     }
     assert.deepEqual(errors, [], 'Browser or generated asset errors at width ' + viewport.width);
     await page.close();
