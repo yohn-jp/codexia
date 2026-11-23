@@ -1113,7 +1113,11 @@ class PostgresTransaction implements PersistenceTransaction {
        title = COALESCE($6, title), order_key = COALESCE($7, order_key), version = version + 1,
        updated_at = clock_timestamp() WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
       [command.projectId, command.documentId, command.expectedVersion, command.parentId !== undefined, command.parentId ?? null, command.title ?? null, command.orderKey ?? null]);
-    if (!result.rows[0]) throw conflict("document", command.documentId, command.expectedVersion, (await this.getDocument(command.projectId, command.documentId))?.version ?? null);
+    if (!result.rows[0]) {
+      const current = await this.getDocument(command.projectId, command.documentId);
+      if (!current) throw notFound("document", command.documentId);
+      throw conflict("document", command.documentId, command.expectedVersion, current.version);
+    }
     this.markChanged(command.projectId);
     return mapDocument(result.rows[0]);
   }
@@ -1127,7 +1131,11 @@ class PostgresTransaction implements PersistenceTransaction {
       `UPDATE document SET deleted_at = clock_timestamp(), version = version + 1, updated_at = clock_timestamp()
        WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
       [command.projectId, command.documentId, command.expectedVersion]);
-    if (!result.rows[0]) throw conflict("document", command.documentId, command.expectedVersion, (await this.getDocument(command.projectId, command.documentId))?.version ?? null);
+    if (!result.rows[0]) {
+      const current = await this.getDocument(command.projectId, command.documentId);
+      if (!current) throw notFound("document", command.documentId);
+      throw conflict("document", command.documentId, command.expectedVersion, current.version);
+    }
     this.markChanged(command.projectId);
     return mapDocument(result.rows[0]);
   }

@@ -198,6 +198,82 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   assert.equal(restored.document.headRevisionId, restored.revision.id);
 });
 
+test("document mutations distinguish missing and soft-deleted targets from stale versions", async (t) => {
+  const { base, ownerHeaders } = await startAuthorApi(t);
+  const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: "POST", headers: ownerHeaders, body: JSON.stringify({ title: `Mutation status ${randomUUID()}` }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const projectId = (await projectResponse.json() as { project: { id: string } }).project.id;
+  const documentsPath = `${base}/api/v1/persistence/projects/${projectId}/documents`;
+  const missingId = randomUUID();
+  const missingMetadata = await fetch(`${documentsPath}/${missingId}/metadata`, {
+    method: "PATCH", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: 1, title: "Missing" }),
+  });
+  assert.equal(missingMetadata.status, 404);
+  assert.equal((await missingMetadata.json() as { code: string }).code, "PERSISTENCE_NOT_FOUND");
+  const missingDelete = await fetch(`${documentsPath}/${missingId}`, {
+    method: "DELETE", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: 1 }),
+  });
+  assert.equal(missingDelete.status, 404);
+  assert.equal((await missingDelete.json() as { code: string }).code, "PERSISTENCE_NOT_FOUND");
+
+  const otherProjectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: "POST", headers: ownerHeaders, body: JSON.stringify({ title: `Other scope ${randomUUID()}` }),
+  });
+  assert.equal(otherProjectResponse.status, 201);
+  const otherProjectId = (await otherProjectResponse.json() as { project: { id: string } }).project.id;
+  const foreignResponse = await fetch(`${base}/api/v1/persistence/projects/${otherProjectId}/documents`, {
+    method: "POST", headers: { ...ownerHeaders, "Idempotency-Key": `create-${randomUUID()}` },
+    body: JSON.stringify({ kind: "scene", title: "Foreign", orderKey: "0001", markdown: "" }),
+  });
+  assert.equal(foreignResponse.status, 201);
+  const foreign = (await foreignResponse.json() as { document: { id: string; version: number } }).document;
+  const foreignThroughWrongProject = await fetch(`${documentsPath}/${foreign.id}`, {
+    method: "DELETE", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: foreign.version }),
+  });
+  assert.equal(foreignThroughWrongProject.status, 404);
+  assert.equal((await foreignThroughWrongProject.json() as { code: string }).code, "PERSISTENCE_NOT_FOUND");
+
+  const createDocument = async (title: string) => {
+    const response = await fetch(documentsPath, {
+      method: "POST", headers: { ...ownerHeaders, "Idempotency-Key": `create-${randomUUID()}` },
+      body: JSON.stringify({ kind: "scene", title, orderKey: "0001", markdown: "" }),
+    });
+    assert.equal(response.status, 201);
+    return (await response.json() as { document: { id: string; version: number } }).document;
+  };
+  const removed = await createDocument("Removed");
+  const deleted = await fetch(`${documentsPath}/${removed.id}`, {
+    method: "DELETE", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: removed.version }),
+  });
+  assert.equal(deleted.status, 200);
+  const deletedMetadata = await fetch(`${documentsPath}/${removed.id}/metadata`, {
+    method: "PATCH", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: removed.version, title: "Still removed" }),
+  });
+  assert.equal(deletedMetadata.status, 404);
+  assert.equal((await deletedMetadata.json() as { code: string }).code, "PERSISTENCE_NOT_FOUND");
+  const deletedAgain = await fetch(`${documentsPath}/${removed.id}`, {
+    method: "DELETE", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: removed.version }),
+  });
+  assert.equal(deletedAgain.status, 404);
+  assert.equal((await deletedAgain.json() as { code: string }).code, "PERSISTENCE_NOT_FOUND");
+
+  const stale = await createDocument("Stale");
+  const updated = await fetch(`${documentsPath}/${stale.id}/metadata`, {
+    method: "PATCH", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: stale.version, title: "Updated" }),
+  });
+  assert.equal(updated.status, 200);
+  const staleMetadata = await fetch(`${documentsPath}/${stale.id}/metadata`, {
+    method: "PATCH", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: stale.version, title: "Stale update" }),
+  });
+  assert.equal(staleMetadata.status, 409);
+  const staleDelete = await fetch(`${documentsPath}/${stale.id}`, {
+    method: "DELETE", headers: ownerHeaders, body: JSON.stringify({ expectedVersion: stale.version }),
+  });
+  assert.equal(staleDelete.status, 409);
+});
+
 test("concurrent document POSTs stay within 999 active documents and deletion frees a slot", async (t) => {
   const { base, ownerHeaders, persistence } = await startAuthorApi(t);
   const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
