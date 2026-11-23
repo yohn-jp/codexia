@@ -374,14 +374,13 @@ export function IdentityManagementPanel({ placement }: { placement: "desktop" | 
       await loadSessions();
       setPasskeyMessage("パスキーで再認証しました。");
     } catch (error) {
-      if (outcomeWasUnconfirmed(error)) {
-        const token = await confirmOwnerSessionToken().catch(() => null);
-        if (token) {
-          setAccess({ ...access, currentSessionToken: token });
-          await loadSessions();
-        } else {
-          setAccess({ status: "unavailable", reason: "session" });
-        }
+      // Better Auth can report a verification transport failure as cancellation.
+      const token = await confirmOwnerSessionToken().catch(() => null);
+      if (!token) {
+        setAccess({ status: "unavailable", reason: "session" });
+      } else if (token !== access.currentSessionToken) {
+        setAccess({ ...access, currentSessionToken: token });
+        await loadSessions();
       }
       setPasskeyError(securityErrorMessage(error, "パスキーでの再認証を確認できませんでした。"));
     } finally {
