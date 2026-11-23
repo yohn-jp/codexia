@@ -387,7 +387,7 @@ export function verificationPlanOutputs(plan) {
   return {
     plan: JSON.stringify(plan),
     unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
-    types: JSON.stringify(['sources', 'tests'].filter(id => plan.groups.includes(`types-${id}`))),
+    types: JSON.stringify(['sources', 'tests', 'trace'].filter(id => plan.groups.includes(`types-${id}`))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
