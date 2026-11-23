@@ -77,23 +77,65 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
             controller.view.addSubview(view)
             XCTAssertTrue(view.becomeFirstResponder())
             view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
-            let start = CACurrentMediaTime()
-            view.insertText("あ")
-            view.setNeedsLayout()
-            view.layoutIfNeeded()
-            let inputLayoutMilliseconds = (CACurrentMediaTime() - start) * 1000
-            let scrollStart = CACurrentMediaTime()
-            view.setContentOffset(CGPoint(x: 0, y: max(0, view.contentSize.height - view.bounds.height)), animated: false)
-            view.layoutIfNeeded()
-            let scrollMilliseconds = (CACurrentMediaTime() - scrollStart) * 1000
+            var inputSamples: [Double] = []
+            var scrollSamples: [Double] = []
+            for _ in 0..<5 {
+                let start = CACurrentMediaTime()
+                view.insertText("あ")
+                view.setNeedsLayout()
+                view.layoutIfNeeded()
+                inputSamples.append((CACurrentMediaTime() - start) * 1000)
+                let scrollStart = CACurrentMediaTime()
+                view.setContentOffset(.zero, animated: false)
+                view.layoutIfNeeded()
+                view.setContentOffset(CGPoint(x: 0, y: max(0, view.contentSize.height - view.bounds.height)), animated: false)
+                view.layoutIfNeeded()
+                scrollSamples.append((CACurrentMediaTime() - scrollStart) * 1000)
+            }
             var usage = rusage()
             let memoryStatus = getrusage(RUSAGE_SELF, &usage)
-            print("FIXTURE_METRIC chars=\(count) input_layout_ms=\(inputLayoutMilliseconds) scroll_layout_ms=\(scrollMilliseconds) process_peak_rss_bytes=\(memoryStatus == 0 ? usage.ru_maxrss : -1)")
-            XCTAssertTrue(view.text.hasSuffix("あ"))
+            print("FIXTURE_METRIC chars=\(count) samples=5 input_layout_ms=\(inputSamples) scroll_roundtrip_layout_ms=\(scrollSamples) process_peak_rss_bytes=\(memoryStatus == 0 ? usage.ru_maxrss : -1)")
+            XCTAssertTrue(view.text.hasSuffix("あああああ"))
             view.resignFirstResponder()
             view.removeFromSuperview()
         }
         window.isHidden = true
+    }
+
+    func testPasteOverSelectionAndUndoRedoKeepsModelInSync() {
+        let box = Box()
+        let binding = Binding(get: { box.state }, set: { box.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: binding)
+        let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        view.frame = controller.view.bounds
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        let pasteboard = UIPasteboard.general
+        let previousItems = pasteboard.items
+        defer {
+            pasteboard.items = previousItems
+            view.resignFirstResponder()
+            window.isHidden = true
+        }
+        view.selectedRange = NSRange(location: 1, length: 1)
+        pasteboard.string = "日本語😀"
+        view.paste(nil)
+        XCTAssertEqual(view.text, "原日本語😀")
+        XCTAssertEqual(box.state.text, "原日本語😀")
+        XCTAssertFalse(box.state.canLeave)
+        guard let undo = view.undoManager else { return XCTFail("Undo manager unavailable") }
+        XCTAssertTrue(undo.canUndo)
+        undo.undo()
+        XCTAssertEqual(view.text, "原稿")
+        XCTAssertEqual(box.state.text, "原稿")
+        XCTAssertTrue(undo.canRedo)
+        undo.redo()
+        XCTAssertEqual(view.text, "原日本語😀")
+        XCTAssertEqual(box.state.text, "原日本語😀")
     }
 
     func testFocusDefersRemoteUntilEditingEnds() {
