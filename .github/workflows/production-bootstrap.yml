@@ -1,0 +1,183 @@
+name: Protected production bootstrap
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only controller and SSH preflight, or approved Ansible bootstrap
+        type: choice
+        options: [preflight, bootstrap]
+        default: preflight
+        required: true
+      main_sha:
+        description: Exact current main SHA reviewed by the operator
+        type: string
+        required: true
+      full_image:
+        description: Reviewed immutable Full image digest (required for bootstrap)
+        type: string
+        required: false
+      initialize_database:
+        description: Approve fresh Codexia schema initialization (no data deletion)
+        type: boolean
+        default: false
+      recreate_missing_database:
+        description: Also recreate only an absent codexia logical DB in the existing cluster
+        type: boolean
+        default: false
+      approval_phrase:
+        description: Enter BOOTSTRAP_CODEXIA for a mutating bootstrap
+        type: string
+        required: false
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/production-bootstrap.yml
+      - deploy/ansible/prepare-production-bootstrap.py
+      - deploy/ansible/test_production_bootstrap.py
+      - deploy/ansible/recreate-missing-app-database.yml
+      - deploy/ansible/site.yml
+      - docs/deployment/PRODUCTION-BOOTSTRAP.md
+permissions:
+  contents: read
+jobs:
+  contract:
+    name: Verify isolated bootstrap controller contract
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Ansible Python dependencies
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Verify protected controller inputs and Ansible syntax
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p test_production_bootstrap.py -v
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
+
+  bootstrap:
+    name: Protected production controller (${{ inputs.mode }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: codexia-bootstrap
+    concurrency:
+      group: codexia-production
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate reviewed main and independent approvals before acquiring privileged credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.main_sha }}
+          BOOTSTRAP_MODE: ${{ inputs.mode }}
+          BOOTSTRAP_ENABLED: ${{ vars.CODEXIA_BOOTSTRAP_ENABLED }}
+          DATABASE_GATE: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
+          INIT_REQUESTED: ${{ inputs.initialize_database }}
+          RECREATE_REQUESTED: ${{ inputs.recreate_missing_database }}
+          APPROVAL_PHRASE: ${{ inputs.approval_phrase }}
+          FULL_IMAGE: ${{ inputs.full_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[a-f0-9]{40}$ && "$REQUESTED_SHA" == "$GITHUB_SHA" ]] || { echo 'Reviewed SHA differs from the dispatch commit.' >&2; exit 1; }
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main advanced after dispatch; review the new source before retrying.' >&2; exit 1; }
+          case "$BOOTSTRAP_MODE" in
+            preflight)
+              [[ "$INIT_REQUESTED" == false && "$RECREATE_REQUESTED" == false ]] || exit 1
+              ;;
+            bootstrap)
+              [[ "$BOOTSTRAP_ENABLED" == true && "$APPROVAL_PHRASE" == BOOTSTRAP_CODEXIA ]] || { echo 'Protected environment enablement or per-run approval is missing.' >&2; exit 1; }
+              [[ "$FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || exit 1
+              if [[ "$INIT_REQUESTED" == true ]]; then
+                [[ "$DATABASE_GATE" == true ]] || { echo 'Separate database initialization approval is missing.' >&2; exit 1; }
+              fi
+              [[ "$RECREATE_REQUESTED" == false || "$INIT_REQUESTED" == true ]] || exit 1
+              ;;
+            *) exit 1 ;;
+          esac
+      - name: Check out the exact reviewed main source without persisted credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install the pinned Ansible control environment
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Prepare private inventory, exact secret inputs, pinned SSH identity, and run-scoped approvals
+        id: control
+        env:
+          CODEXIA_BOOTSTRAP_MODE: ${{ inputs.mode }}
+          CODEXIA_BOOTSTRAP_HOST: ${{ vars.CODEXIA_BOOTSTRAP_HOST }}
+          CODEXIA_BOOTSTRAP_SSH_USER: ${{ vars.CODEXIA_BOOTSTRAP_SSH_USER }}
+          CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
+          CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
+          CODEXIA_BOOTSTRAP_BUNDLE_B64: ${{ secrets.CODEXIA_BOOTSTRAP_BUNDLE_B64 }}
+          CODEXIA_BOOTSTRAP_FULL_IMAGE: ${{ inputs.full_image }}
+          CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
+          CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.recreate_missing_database && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
+        run: |
+          "$RUNNER_TEMP/codexia-ansible/bin/python" deploy/ansible/prepare-production-bootstrap.py
+      - name: Connect to the protected Tailnet with GitHub OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: ${{ steps.control.outputs.host }}
+      - name: Verify the independent bootstrap identity and noninteractive sudo
+        env:
+          CONTROL_SSH_CONFIG: ${{ steps.control.outputs.ssh_config }}
+          EXPECTED_USER: ${{ steps.control.outputs.user }}
+        run: |
+          set -euo pipefail
+          actual=$(ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'id -un')
+          [[ "$actual" == "$EXPECTED_USER" ]] || { echo 'The VM returned an unexpected SSH identity.' >&2; exit 1; }
+          ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'sudo -n true'
+      - name: Verify Ansible syntax and inspect only the declared target inventory
+        env:
+          CONTROL: ${{ steps.control.outputs.control }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
+            --extra-vars "@$CONTROL/runtime-vars.json" --syntax-check
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
+            --extra-vars "@$CONTROL/runtime-vars.json" --list-hosts
+      - name: Reverify main before any production mutation
+        if: inputs.mode == 'bootstrap'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main advanced during bootstrap preflight; no mutation was attempted.' >&2; exit 1; }
+      - name: Converge approved host, secrets, base and Better Auth runtime through canonical Ansible
+        if: inputs.mode == 'bootstrap'
+        env:
+          CONTROL: ${{ steps.control.outputs.control }}
+          ANSIBLE_HOST_KEY_CHECKING: 'True'
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
+            --limit codexia --extra-vars "@$CONTROL/runtime-vars.json"
+          echo 'Approved Ansible bootstrap converged; API deployment, owner enrollment and frontend release are separate operations.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove private controller inputs from the runner
+        if: always()
+        run: |
+          set -euo pipefail
+          controller="$RUNNER_TEMP/codexia-bootstrap"
+          if [[ -d "$controller" && ! -L "$controller" ]]; then
+            rm -rf -- "$controller"
+          fi

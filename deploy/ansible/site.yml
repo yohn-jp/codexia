@@ -63,6 +63,15 @@
           environment: "{{ service_runtime_env }}"
       when: codexia_stage in ['bootstrap', 'secrets']
 
+    - name: Recreate only a separately approved absent Codexia logical database
+      ansible.builtin.include_tasks:
+        file: recreate-missing-app-database.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
+      when: codexia_stage == 'bootstrap' and codexia_recreate_missing_app_database_approved | default(false) | bool
+
     - name: Converge canonical database, networks, volumes and Tunnel Quadlets
       ansible.builtin.include_tasks:
         file: base-runtime.yml
