@@ -1,5 +1,7 @@
 # Graphify code map on Repository Audit Pages
 
+> **設計上の拡張候補:** [Pages現状機能・不足台帳](PAGES-FUNCTION-INVENTORY.md#5-不足機能台帳設計候補)と[統合ポータル/Graph UX設計案](../design/DEVELOPMENT-PAGES-UX.md#4-graphifyの分析ux重点改善案)に多段参照、解析カバレッジ、relation filter、source位置、変更差分の期待動作を分離して記載する。現行`/graph/`にこれらが実装済みとの主張ではない。
+
 `repository-audit.yml` is the sole Pages publisher. `/graph/` is now the **file explorer**, built from the same Graphify AST graph as the upstream viewer. The native, aggregated Graphify graph remains available at `/graph/communities.html`. No additional publisher, Cloud account, secret, browser library, or external LLM backend is required.
 
 ## Generation and scope
