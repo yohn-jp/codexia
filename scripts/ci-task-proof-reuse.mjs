@@ -252,3 +252,4 @@ export async function assertReusedCoverageProof({ plan: planValue, report, curre
   }), ['coverage'], 'Candidate and exact-base task inputs are not equivalent');
   return true;
 }
+
