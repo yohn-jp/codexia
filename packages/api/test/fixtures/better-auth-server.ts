@@ -17,6 +17,7 @@ export interface BetterAuthFixtureOptions {
   readonly databaseUrl: string;
   readonly staticDirectory?: string;
   readonly apiPort?: number;
+  readonly apiHostname?: "127.0.0.1" | "localhost";
   readonly usePostgresPersistence?: boolean;
   /** A caller-owned store and pool that the fixture does not replace or close. */
   readonly domain?: Pick<ApiServerOptions, "store" | "persistence">;
@@ -237,7 +238,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       await close(probe);
       return port;
     })();
-    const apiOrigin = `http://127.0.0.1:${apiPort}`;
+    const apiOrigin = `http://${options.apiHostname ?? "127.0.0.1"}:${apiPort}`;
     const issuer = `${apiOrigin}/api/auth`;
     const audience = `${apiOrigin}/api`;
 
