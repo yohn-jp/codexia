@@ -4,6 +4,7 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels";
 import type { ApplicationShellProps, WorkspacePanelRequest } from "../../application/contracts";
 import { IdentityManagementPanel } from "../../settings/IdentityManagementPanel";
+import { requestConsoleNavigation } from "../../console/console-navigation";
 import { Workspace } from "../../workspace/Workspace";
 import "./desktop.css";
 import "../editorial.css";
@@ -61,6 +62,9 @@ export function DesktopShell({
           </div>
           <div className="st-studio-masthead-actions">
             {desktopActions}
+            <button type="button" className="st-studio-mobile-link st-studio-console-link" onClick={requestConsoleNavigation}>
+              管理コンソール
+            </button>
             <IdentityManagementPanel placement="desktop" />
             <div className="st-studio-header-slot">{header}</div>
             <button type="button" className="st-studio-mobile-link" onClick={() => void switchToMobile()} disabled={switching}>

@@ -84,6 +84,22 @@ test('iOS deployment documentation selects the root tests that assert its conten
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
 });
 
+test('StrictDoc authority and source files select only the trace task and its existing CI group', async () => {
+  for (const file of [
+    'docs/requirements/README.md',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/requirements/STRICTDOC-TRACEABILITY.md',
+    'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
+    'scripts/strictdoc/verify.mjs',
+    'scripts/strictdoc/strictdoc_config.py',
+    'scripts/strictdoc/requirements.lock.txt',
+  ]) {
+    const selected = await plan([file]);
+    assert.deepEqual(selected.tasks, ['coverage', 'requirements-trace'], file);
+    assert.deepEqual(selected.groups, ['types-tests'], file);
+  }
+});
+
 test('Full-model OCI selection follows the standalone workflow and the Verify caller', async () => {
   const { FULL_MODEL_OCI_PATHS } = await import('./ci-impact.mjs');
   const standalone = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));

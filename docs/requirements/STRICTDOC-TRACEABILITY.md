@@ -1,6 +1,6 @@
 # StrictDocによる要求・実装・検証追跡の詳細設計
 
-**種別: 選定済み目標・未導入。** [Requirements governance](README.md) と [Requirement register](REQUIREMENT-REGISTER.md) の既存REQ-IDを保持し、[Traceability](../verification/TRACEABILITY-REGISTER.md) を機械的に扱える関係管理へ移行する。ツール選定は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md)。この設計は、要求が正しいこと・テストに合格したことをStrictDocだけで証明すると宣言しない。
+**種別: 導入済み追跡基盤・部分適用。** [Requirements governance](README.md) と [Requirement register](REQUIREMENT-REGISTER.md) の既存採用REQ-ID 33件をStrictDoc Markdown nodeへ移行し、HTML/JSON生成・relation検査・CI taskを実装した。要求の正しさや製品適合をStrictDoc単独で証明するものではない。現状のgateと残件を末尾の表に記録する。ツール選定は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md)。
 
 ## 二択の結論と適用範囲
 
@@ -12,17 +12,17 @@
 
 ## 仕様のownershipと1回だけの変換
 
-現行 `docs/requirements/REQUIREMENT-REGISTER.md` は**Markdown表の要約台帳**であり、表の各行はそのままStrictDocの個別requirement nodeにならない。導入後は次の形へ**一回だけ、ID欠落/意図変更なしで移行**する。
+`docs/requirements/REQUIREMENT-REGISTER.md` はStrictDoc nodeの**唯一の編集正本**である。旧台帳の33件のREQ-ID、要求文、決定状態、設計owner参照を一度だけ移行した。現在のaccepted wordingを優先し、実装候補とテスト候補の参照を適合証拠とみなさない。
 
-1. 原要求の本文・合否観点・決定状態・将来目標区分を読み、`REQ-*`ごとに**個別のMarkdown見出しとStrictDoc metadata**を作る。既存の設計 ownerと要求の正確な意味をレビューする。正本の誤認があれば、実装へ合わせず変更承認する。
+1. 各`REQ-*`は個別のMarkdown見出しとStrictDoc metadataで管理する。変換時に最新accepted registerと各設計ownerを照合し、`REQ-UI-001`のDesktop React Web / iOS SwiftUI境界を含む現行の要求文と参照を維持した。
 2. `REQ-*` の既存IDは変更・再利用しない。`O01/O02` 等の個々の検証義務もrelation可能なnodeまたは検証IDとして管理する。
-3. 同一要求を「Markdown表」と「StrictDoc要求ノード」で**並行編集しない**。変換後は旧表を削除または生成専用の索引へ置換し、唯一の編集正本を明記する。
+3. 同一要求をMarkdown表とStrictDoc nodeで**並行編集しない**。Requirement registerだけを編集し、HTML/JSONを生成物として扱う。
 4. 既存の自由文・Mermaid・API/DB/External設計のMarkdown全文を機械的にStrictDoc固有dialectへ変換しない。必要な領域正本をURL/UIDで参照する。
 5. 生成されたHTML、matrix、JSON、ReqIFは派生物。公開済み表に誤りがあれば要求源と関連付けを直し、生成物を手編集しない。
 
-**採用するauthoring言語:** まずは**StrictDoc拡張Markdownを試験**する。公式Markdown構造はH1を1つ、飛ばさない見出し階層、metadata `**UID**:` とstatement等の指定を要求し、連続する空行や一部Markdown拡張の扱いにも制限がある。PoCでこの書式がCodexiaの要件・関係・差分レビューに十分に安定していることを実証する。未充足なら当該**要求ファイルだけ**をStrictDocネイティブ `.sdoc` とする（一般設計書はMarkdownを維持）。「すべてMarkdown」より追跡の正確性を優先する場合は、設計上の媒体変更をPRで明示する。
+**Authoring形式:** StrictDoc 0.32.1の拡張Markdown exportを実測した。Grammarは`REQUIREMENT`と`TEST` nodeを定義し、CIは同一sourceから2回HTML/JSONを生成し、HTMLの検索timestamp、確認済みのMarkdown document MID、およびStrictDoc検索indexのkey順と、生成元Python `set`に由来するdocument membership配列順だけを正規化する。membershipの値と他の出力は比較に残す。別のStrictDoc versionやMarkdown機能を使う場合は再評価する。
 
-推奨ノード例（**概念構造。実際にStrictDocでparseできるかはPoCで検証**）:
+現在の要求nodeは`REQUIREMENT-REGISTER.md`に記録し、StrictDoc grammarとJSON exportをCIで検査する。以下は簡略化した構造例:
 
 ~~~markdown
 # Codexia requirements
@@ -35,7 +35,7 @@
 全ての作品本文・Revision等の永続正本はPostgreSQLとする。
 ~~~
 
-`Status` の許容値と追加要素の文法は公式grammarでの設定検証に従う。生のMarkdown表からUIDを拾えると仮定しない。上例は仕様記述の例であり、現行REQ-DATA-001の詳細受入条件を置き換えるものではない。
+`Decision status`、`Conformance status`、`Applicability`等の属性はrepository grammarとNode verifierで許容値・ID一意性を検証する。実際の要求本文と受入条件は各nodeおよびowner文書が所有する。
 
 ## 関係モデル
 
@@ -61,16 +61,16 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 - test report: StrictDoc公式の自動JUnit ingestは限られた実装言語の形式に対応し実験的。Node/PlaywrightのJUnitを認識するために**拡張子だけを偽装しない**。公式対応と照合できない場合は、標準のGitHub Actions run/artifact URLへの関係を使う。
 - 公開: 必要なsummaryだけを静的HTMLへ掲載し、非公開のtoken、作者原稿、API cookie、内部VM情報、privileged CI artifactを配布しない。
 
-## 導入ゲート（実測が必要）
+## 導入ゲートと現状
 
-| ID | 試験 | 完了条件 |
+| ID | 試験 | 現状と証拠 |
 | --- | --- | --- |
-| TRC-01 | 登録済み**全REQ-ID**の変換 | 初期30件と追加採用要求を含む全ID・意味・設計参照が維持。重複/欠落・勝手な採用なし |
-| TRC-02 | Markdown parse→HTML/JSON生成→同一ソースから再生成 | Unicode/日本語、Markdownリンク、要件metadata、relationを検証。同一入力・同一versionで出力が決定的であることを比較する。HTML/JSONからMarkdownへ逆変換できるとは仮定しない |
-| TRC-03 | REQ→TS/TSX/SQL source | file/range relationで実装へ到達し、ファイル変更・削除・参照切れを検知 |
-| TRC-04 | 逆引き | 既知の余分なroute、DB object、MCP toolを列挙し、未リンクを誤ってVERIFIEDにしない |
-| TRC-05 | TEST→CI | Node unit + Playwrightのテスト名/IDとGitHub Actions run証拠が手戻りなく結合できる |
-| TRC-06 | 意図的な破壊 | REQ-ID重複、参照先削除、検証欠落、旧compatibilityを作り、対応する失敗が検出される |
-| TRC-07 | 静的サイト | 既存のRepository Audit Pagesの唯一の公開経路へ組み込み、SHA/権限/URLが一致 |
+| TRC-01 | 登録済み全REQ-IDを一度だけ変換 | **LOCAL_PASS**: main baselineの33 IDをStrictDoc requirement nodeと照合し、欠落・重複・余分なIDを検査 |
+| TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
+| TRC-03 | REQ→TS/TSX/SQL source | **PARTIAL**: File relationの存在と範囲を検査。symbol AST coverageと全obligationへの網羅は未証明 |
+| TRC-04 | 逆引きroute/tool/DB inventory | **PARTIAL**: verifierが独立して、登録済みソース範囲のliteral route/method dispatch、`server.tool`名、初期migrationの名前付きDDL objectを検出し、分類の欠落・stale entriesを検査する。dynamic route families、他の登録module、追加migrationとinline constraint等は未走査で、完全inventoryはIssue #671に残す |
+| TRC-05 | TEST→CI exact source evidence | Node fault-injectionとPlaywright static-page testはローカル実測済み。GitHub run/source SHA/task/artifact identityをreportに記録し、hosted resultは当該PRの実際のVerify runで判定 |
+| TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
+| TRC-07 | Repository Audit Pagesに静的サイトを公開 | **PENDING**: HTML/JSONをCI artifact pathへstageし、生成dashboardの絶対checkout pathをREPOSITORY_ROOTへ置換してからcredential/path検査し、Playwrightで要求ページを表示検査。公開経路の変更と公開SHA確認は依存Issue #669が所有 |
 
-PoCに不合格の論点があれば、StrictDoc導入が成功したと宣言しない。必要なら**要求ファイルのSDoc化**や、実装のtrace marker追加を別の決定として扱う。未検証事項のためにオリジナルの独自traceability engineを先行実装しない。
+StrictDoc導入の範囲は、要求nodeと局所的な自動trace verifier、正直な残件表示まで。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。symbol coverageと完全runtime inventoryはIssue #671の残件である。hosted green resultはexact source SHAごとにreportへ記録し、公開証跡はIssue #669のpublisherが確認する。

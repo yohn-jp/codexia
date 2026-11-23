@@ -226,3 +226,11 @@ test('architecture G5 proof binds its isolated tool lock, immutable image, invoc
   const changed = captureTaskInputSource({ root, sha: await git(root, 'rev-parse', 'HEAD'), runtime })('architecture-g5');
   assert.notEqual(changed.dependencies, closure.dependencies);
 });
+
+test('requirements trace invocation is canonical and captures runtime identity inputs', () => {
+  assert.deepEqual(taskInvocation('requirements-trace', '/opt/node/bin/node'), {
+    executable: '/opt/node/bin/node',
+    arguments: ['scripts/strictdoc/verify.mjs'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_CI_SOURCE_SHA', 'CODEXIA_CI_TASK', 'STRICTDOC_BIN'],
+  });
+});

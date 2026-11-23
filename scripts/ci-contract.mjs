@@ -27,8 +27,7 @@ export const VERIFICATION_TASKS = [
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
-  'coverage',
-  'architecture-g5',
+  'coverage', 'architecture-g5', 'requirements-trace',
 ];
 // Execution groups batch work without removing any validation obligation.
 // Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
@@ -39,7 +38,7 @@ export const VERIFICATION_GROUPS = {
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
-  'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
+  'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage', 'requirements-trace'],
   'build-core': ['build-core', 'audit-core'],
   'build-full': ['build-full'],
   'oci-core': ['oci-core'],

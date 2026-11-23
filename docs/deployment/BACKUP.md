@@ -33,7 +33,7 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 **運用設定UIの正本:** [バックアップ管理コンソール設計](../architecture/BACKUP-CONSOLE-CONTRACT.md)。ownerは`/console/backups`からS3の保存先・credential（write-only）・要求する保持期間・検証・有効化・run状態を操作する。通常の保存先指定にSSH/Ansible編集を要求しない。一方、既存の暗号化アーティファクト生成・host lock・writer停止は`backup.sh`が所有し、実本番復元やVM/IAM変更は引き続き保護されたOPERATORの経路で行う。local stagingとage受取公開鍵はoperator-controlledでありWeb変更を禁止する。
 
-**状態: 機能要件・設計採用済み、実装/本番検証は未完了。** 現行のローカル/独立mount先に加えて、**S3 API互換ストレージをオフVM保管先としてサポートする**。特定のクラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOはまだ確定していない。S3対応はバックアップの保管・取得機能であり、CodexiaのPostgreSQL正本やdeploy管理プレーンを変更しない。
+**状態: 機能要件・設計採用済み。OPS-01の転送アダプターと隔離fixtureを実装する。** 現行のローカル/独立mount先に加えて、**S3 API互換ストレージをオフVM保管先としてサポートする**。特定のクラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOはまだ確定していない。S3対応はバックアップの保管・取得機能であり、CodexiaのPostgreSQL正本やdeploy管理プレーンを変更しない。転送アダプターは既存v2 artifactだけを扱い、`backup.sh`、Ansible deployment admission、owner consoleにはまだ接続しない。
 
 ### 機能・データフロー
 
@@ -42,6 +42,48 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 3. **アップロード済みオブジェクトを再取得**し、manifestとchecksumを照合してからオフVM保管成功とする。S3のETagをSHA-256や完全性の唯一の証拠として扱わない。また、SHA-256は破損検出であり**作成者の真正性を証明しない**。復元時にはバックアップIDと暗号文digestを、S3オブジェクトとは独立した保護済みの運用receipt（実行主体・時刻・対象sourceを含む）と照合し、改ざんされたS3側manifestだけを信頼しない。
 4. 隔離restore hostは、明示したbackup IDとbucket/prefixから暗号文とmanifestを取得し、ローカルの一時領域で完全性を確認して、**既存の `backup.sh drill` の復号・PostgreSQL/history検証へ引き渡す**。本番DBへ直接復元しない。
 5. 現行バックアップ対象外であるPostgreSQL roles、Podman secrets、age秘密鍵、S3 credentialの復旧責務は別途維持し、これらを同一bucketに平文保管しない。
+
+### OPS-01 transfer adapter
+
+`deploy/backup/s3_transfer.py` は既存の `backup.sh` が作成したv2 artifact一式だけを読み、`database.dump.age`、`history.tar.age`、`manifest.age`、`SHA256SUMS` をアップロードする。第二のdumpや暗号化形式は作らない。AWS S3署名・retryはhash-locked Boto3 SDKへ委譲する。
+
+Profileは `schemaVersion`, `provider`, `region`, `bucket`, `prefix`, `endpointUrl`, `allowedOrigins`, `addressingStyle` を含むprivate JSON fileで、所有者が実行user、mode `0400` または `0600` であることを検査する。Credentialはprofileに置かず、Boto3の標準credential provider chainから取得する。HTTPS検証とredirect拒否を維持し、S3側のETagをSHA-256の代用にしない。
+
+例として、operatorが保護設定したprofile、artifact directory、独立したreceipt pathから実行する。
+
+```sh
+backup_id='replace-with-backup-id'
+source_identity='0123456789abcdef0123456789abcdef01234567'
+artifact_dir="/protected/backups/codexia-$backup_id"
+receipt_path="/protected/backup-receipts/$backup_id.json"
+deploy/backup/install-s3-runtime.sh /protected/codexia-s3-runtime
+/protected/codexia-s3-runtime/bin/python deploy/backup/s3_transfer.py upload \
+  --profile /protected/s3-profile.json \
+  --artifact-dir "$artifact_dir" \
+  --backup-id "$backup_id" \
+  --source-identity "$source_identity" \
+  --receipt "$receipt_path"
+/protected/codexia-s3-runtime/bin/python deploy/backup/s3_transfer.py download \
+  --profile /protected/s3-profile.json \
+  --backup-id "$backup_id" \
+  --receipt "$receipt_path" \
+  --output-dir /protected/restore-staging
+bash deploy/backup/backup.sh drill \
+  "/protected/restore-staging/codexia-$backup_id" \
+  /protected/age-recovery-identity --approved
+```
+
+`upload` verifies each uploaded object's size and SHA-256 by downloading it again. It publishes a commit marker only after every artifact object passes readback, then writes the independent receipt outside S3. Receipt directories must be private; receipt files are created mode `0600`. Retries use conditional object creation and refuse changed ciphertext under the same backup ID. Multipart upload IDs are held in a private local journal so the helper can abort the exact unfinished upload without `ListBucketMultipartUploads`; a provider lifecycle rule should also abort incomplete uploads left by a host loss before the local upload ID is recorded. The helper does not require object or bucket delete permissions.
+
+The writer needs `s3:PutObject`, `s3:GetObject`, and `s3:AbortMultipartUpload` on the fixed object prefix, plus `s3:ListBucket` scoped by `s3:prefix` to return an unambiguous missing-object result for conditional creation. It also reads bucket location, versioning, and Object Lock configuration to report observed capabilities. `s3:PutObjectRetention` is needed only when a retention mode is requested. The adapter never calls `ListMultipartUploads`, `DeleteObject`, or `DeleteBucket`.
+
+Run the separate synthetic-provider fixture with:
+
+```sh
+bash deploy/backup/s3-fixture.sh
+```
+
+It starts the pinned Silo S3-compatible service on loopback with a temporary CA, bucket, and restricted writer. It creates synthetic PostgreSQL 17 and history data, invokes the canonical `backup.sh` v2 producer, transfers and downloads the encrypted artifact, and runs the canonical isolated restore drill. Its local Podman command shim is backed by Docker; it does not change the production helper. Temporary credentials, identities, containers, volumes and artifacts are removed on completion. The fixture does not contact AWS or use AWS credentials.
 
 ### 接続・セキュリティ契約
 
@@ -75,4 +117,4 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 | BACKUP-S3-006 | 必須S3保管先の障害時はデプロイ停止。任意保管先の場合も監査可能な失敗を記録 |
 | BACKUP-S3-007 | bucket credential、age秘密鍵、原稿平文がログ・CI artifact・公開Pagesへ出ない |
 
-この機能は [External interfaces](../architecture/EXTERNAL-INTERFACES.md) の `EXT-OPS-003`、[Requirements](../requirements/REQUIREMENT-REGISTER.md) の `REQ-OPS-003` と関連付ける。導入時にS3 SDK/CLIの最新版・ライセンス・認証方式を比較して決める。**本PRでは実装、bucket作成、credential設定、実S3通信を行っていない。**
+この機能は [External interfaces](../architecture/EXTERNAL-INTERFACES.md) の `EXT-OPS-003`、[Requirements](../requirements/REQUIREMENT-REGISTER.md) の `REQ-OPS-003` と関連付ける。Production useにはprotected backup executorからの呼出し、Ansible admission接続、AWS S3での独立受入が別途必要であり、このtransport adapter単体をoff-VM disaster-recovery証拠として扱わない。
