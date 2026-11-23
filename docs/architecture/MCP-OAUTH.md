@@ -1,6 +1,6 @@
 # Standalone MCP OAuth contract
 
-Standalone MCP clients authenticate to the Codexia API with OAuth access tokens issued by the in-process Better Auth authorization server. Hosted/Praetorium keeps its existing grant issuer and protected-resource metadata contract.
+MCP clients authenticate to the Codexia API with OAuth access tokens issued by the in-process Better Auth authorization server.
 
 ## Resource and metadata
 

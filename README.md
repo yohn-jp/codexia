@@ -2,7 +2,7 @@
 
 A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. Desktop and Mobile share authoring and browser recovery while retaining their own shells. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
-Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One standalone server serves one trusted owner. Hosted access remains bound to verified assignment, permissions and an explicitly configured PostgreSQL project.
+Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One server serves one trusted owner. Registered MCP clients operate within their assigned projects and OAuth scopes.
 
 [Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
 
@@ -31,11 +31,11 @@ Search/Terminology is optional: it indexes snapshot revisions, using PostgreSQL 
 
 For a local preview of the Full composition, pass `--profile full` to `pnpm ui:preview`. Full includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent. Local writing and review remain available without a model provider.
 
-## Hosted MCP access
+## MCP access
 
-When the optional `mcp` module is included in a Praetorium Hosted composition, the stable application origin exposes `/mcp` (Streamable HTTP) and `/.well-known/oauth-protected-resource` (public OAuth resource discovery), also available at `/.well-known/oauth-protected-resource/mcp` for endpoint-path discovery. Configure a remote MCP client with `https://<stable-application-origin>/mcp`, not the physical Pod hostname or the Praetorium browser entry URL. The resource metadata points to Praetorium for user login, explicit client consent, PKCE token exchange and refresh. Codexia validates the issued short-lived repository/instance/epoch-bound bearer grant and retains the existing proposal/author approval boundary.
+The optional MCP module exposes Streamable HTTP at `/mcp`. Configure a registered client to use `https://<application-origin>/mcp`. A client assigned several projects selects one with `/mcp?projectId=<assigned-id>` and uses that URL for the session. Public OAuth resource metadata is available at `/.well-known/oauth-protected-resource` and describes how the client connects to Better Auth.
 
-A stopped Hosted instance is served by Praetorium's Instance Access fallback: the initial unauthenticated request receives OAuth discovery, while a valid bearer request can trigger the existing authorized Wake path and returns `503 Retry-After` until the same stable URL becomes ready. The caller must retry its request; no MCP request body is queued or replayed by the platform. This service consumes the reusable [Praetorium service MCP contract](https://github.com/yohn-jp/praetorium/blob/main/docs/architecture/SERVICE-MCP.md) rather than implementing an application-specific OAuth issuer.
+For local stdio, run `codexia-mcp` with an OAuth access token already issued to the registered MCP client in `CODEXIA_MCP_ACCESS_TOKEN`. Both transports enforce the same project assignments and `mcp:read`, `mcp:compute` and `mcp:propose` scopes. Applying proposals requires author approval. [MCP OAuth contract](docs/architecture/MCP-OAUTH.md)
 
 ## Single OCI image
 
@@ -77,6 +77,6 @@ pnpm build
 pnpm audit:core
 ```
 
-See [verification](docs/verification/README.md) for browser, OCI, MCP, model, recovery and Hosted producer checks. `pnpm verify` runs the local composed checks; inputs and separate integration gates are documented there. Repository CI certifies the exact source before the [gated release workflow](docs/verification/OCI-RELEASE.md) may publish.
+See [verification](docs/verification/README.md) for browser, OCI, MCP, model, recovery and deployment checks. `pnpm verify` runs the local composed checks; inputs and separate integration gates are documented there. Repository CI certifies the exact source before the [gated release workflow](docs/verification/OCI-RELEASE.md) may publish.
 
 See [Core architecture](docs/architecture/CORE.md), [Modules](docs/architecture/MODULES.md) and [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md) for ownership and safety contracts. Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [LICENSE](LICENSE) before contributing or distributing.

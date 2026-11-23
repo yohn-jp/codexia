@@ -16,7 +16,7 @@ The module runtime composes trusted built-in packages around public Core contrac
 | MCP | Stdio and Streamable HTTP tool adapters using shared actions |
 | Search | Lightweight lexical index, terminology registry and editor links |
 
-Profiles select packages at build time. The Core profile excludes optional modules; Full includes the module composition. Hosted builds select a resolved module dependency closure from the producer catalog. Unknown modules, cycles, incompatible contracts and missing required capabilities fail resolution.
+Profiles select packages at build time. The Core profile excludes optional modules. Full includes the module composition. Module resolution rejects unknown modules, cycles, incompatible contracts and missing required capabilities.
 
 ## Lifecycle
 

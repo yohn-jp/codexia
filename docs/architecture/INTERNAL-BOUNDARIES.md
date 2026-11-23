@@ -69,9 +69,9 @@ Document and module revisions, project version fences, scope membership guards a
 
 ## 7. API admission stays centralized
 
-Fastify's shared request handler remains the admission boundary for authentication, Hosted authorization, CSRF/origin checks, quiesce/drain, request cancellation, activity accounting and error serialization. Domain handlers may be isolated **inside** this boundary when a specific behavior change is proven; route-table fragmentation or a second authorization adapter is not part of internal maintainability work.
+Fastify's shared request handler remains the admission boundary for Better Auth authentication, author and MCP project authorization, CSRF/origin checks, lifecycle draining, request cancellation, activity accounting and error serialization. Domain handlers may be isolated **inside** this boundary when a specific behavior change is proven; route-table fragmentation or a second authorization adapter is not part of internal maintainability work.
 
-Hosted authorization dependency outages must remain distinguishable from authentication failures (502/503 versus 401/403), and previously successful JSON responses must continue to be validated at the browser boundary. Neither concern warrants weakening authorization or duplicating validators.
+OAuth verification and introspection outages fail closed. The browser continues to validate successful JSON responses at its API boundary.
 
 ## 8. Verification authority
 
@@ -87,7 +87,7 @@ Hosted authorization dependency outages must remain distinguishable from authent
 | Core pure helpers | Golden operation/proposal digests, serialized records, stale preconditions, replay, conflict, path safety and one-writer semantics match the prior behavior and acceptance fixtures |
 | CI workspace preparation | Independent unit-target preparation remains valid if root test orchestration is reordered without semantic change; current CI inventory, all gates, exact-source attestation and release-policy deny cases still pass |
 
-Run focused assertions at each changed boundary before full integrated verification. Report source SHA, commands, test outcomes and conditional skips precisely. A typecheck or a green historical run is not an executed browser, hosted deployment, release or model acceptance.
+Run focused assertions at each changed boundary before full integrated verification. Report source SHA, commands, test outcomes and conditional skips precisely. Browser, deployment, release and model acceptance require their own executed checks.
 
 ## 10. Implementation and evolution rules
 
