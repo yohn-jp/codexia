@@ -1,5 +1,6 @@
 name: iOS editor
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'ios/CodexiaEditor/**'
