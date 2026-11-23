@@ -1154,12 +1154,12 @@ test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene select
 test("Issue 42: failed PostgreSQL availability preserves the author session and offers explicit retry", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); let unavailable = true; let authorizationRequests = 0;
   await page.route("**/api/v1/persistence/status", (route) => unavailable ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "PostgreSQL unavailable" }) }) : route.continue());
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/auth/oauth2/authorize") authorizationRequests += 1;
-  });
   await page.reload();
   const author = await authorizeAuthor("desktop", page, { continueCurrentPage: true, expectedView: page.getByRole("heading", { name: "PostgreSQLへ接続できません" }) });
   expect((await author.fetch("/api/session")).status()).toBe(200);
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/auth/oauth2/authorize") authorizationRequests += 1;
+  });
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`));
   await expectEditor(page, f.one.revision.markdown);
