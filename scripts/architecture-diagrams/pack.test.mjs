@@ -16,10 +16,13 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   const manifest = createManifest(sha, sources);
   assert.equal(manifest.format, 'codexia-architecture-atlas/v1');
   assert.equal(manifest.sourceSha, sha);
-  assert.equal(manifest.diagrams.length, 14);
-  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, 14);
+  assert.equal(manifest.diagrams.length, 17);
+  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, 17);
   assert.deepEqual([...new Set(manifest.diagrams.map(d => d.group))],
     ['system', 'data', 'user', 'admin', 'first', 'update']);
+  assert.ok(manifest.diagrams.some(d => d.id === 'admin-4' && d.title.includes('管理コンソール')));
+  assert.ok(manifest.diagrams.some(d => d.id === 'admin-5' && d.title.includes('初回所有者登録')));
+  assert.ok(manifest.diagrams.some(d => d.id === 'first-3' && d.title.includes('VMの再構築')));
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
     /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));
