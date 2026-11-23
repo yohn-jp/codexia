@@ -115,9 +115,6 @@
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 | PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
 | Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
-| PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
-| Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
-
 ## アップデートの審査・記録
 
 1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
