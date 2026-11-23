@@ -1520,7 +1520,7 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
   });
   await authorizeAuthor("desktop", page, { path: "/desktop/?store=git", expectedView: page.getByRole("heading", { name: "PostgreSQLへ接続できません" }) });
   await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Gitワークスペースへの切替は提供していません");
+  await expect(page.getByRole("alert")).toContainText("PostgreSQL保存基盤が利用できません");
   await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
 });
 

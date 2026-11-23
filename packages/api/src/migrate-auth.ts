@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { readCodexiaEnvironment } from "./environment.js";
-import { CODEXIA_AUTH_SCHEMA, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
+import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
+import { createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
 import type { Pool } from "pg";
 import { fileURLToPath } from "node:url";

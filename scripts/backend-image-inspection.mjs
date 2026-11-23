@@ -35,7 +35,7 @@ export async function inspectBackendImageWithoutExecution(imageRef,expected,{tem
     const container=execFileSync('docker',['create','--entrypoint','/bin/false',imageRef],{encoding:'utf8'}).trim();
     const identityPath=path.join(directory,'update-identity.json');
     try{execFileSync('docker',['cp',container+':/app/update-identity.json',identityPath],{stdio:'ignore'});}
-    finally{execFileSync('docker',['rm','--force',container],{stdio:'ignore'});}
+    finally{execFileSync('docker',['rm','--force','--volumes',container],{stdio:'ignore'});}
     const identity=JSON.parse(await readFile(identityPath,'utf8'));
     return assertBackendImageIdentity(identity,observed,expected);
   }finally{await rm(directory,{recursive:true,force:true});}

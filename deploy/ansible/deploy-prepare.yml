@@ -19,7 +19,6 @@
   loop:
     - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
     - {path: "{{ home }}/.local/bin", mode: '0700'}
-    - {path: "{{ quadlet_dir }}", mode: '0750'}
 
 - name: Install the encrypted backup helper for the rootless deployment identity
   ansible.builtin.copy:

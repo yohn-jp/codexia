@@ -6,12 +6,12 @@ import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readComponentVersion } from './component-release-version.mjs';
+import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
 import { assertFrontendOAuthConfigIdentity } from './frontend-oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
-import { assertFrontendIdentity, compareFrontendVersions } from './verify-frontend-compatibility.mjs';
+import { assertFrontendIdentity } from './verify-frontend-compatibility.mjs';
 import { verifyReusableMainProof } from './reuse-pr-verification.mjs';
 
 const repository = 'yohn-jp/codexia';
@@ -160,7 +160,7 @@ export function assertFrontendPromotionArtifactEvidence(run, jobs, artifacts, pr
 export function shouldPromoteFrontendArtifact(candidate, deployed) {
   assertFrontendIdentity(candidate);
   assertFrontendIdentity(deployed);
-  return compareFrontendVersions(candidate.version, deployed.version) > 0;
+  return compareComponentVersions(candidate.version, deployed.version) > 0;
 }
 
 /** Select the newest matching UI workflow run; a newer failed attempt cannot

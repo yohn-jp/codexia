@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
@@ -41,7 +43,7 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.ok(ssh, 'production deployment must prepare its dedicated SSH key and pinned host key');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
-  assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
+  assert.equal(ssh.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
 
   const liveUi = deploy.steps.find(step => step.name === 'Verify deployed frontend epoch and Access boundary for certified backend recovery');
   assert.ok(liveUi, 'the job must admit the deployed frontend against the verified backend epoch before deployment');
@@ -384,12 +386,89 @@ test('the disposable entry point exercises the same auth transaction', () => {
   const fixture = parse(readFileSync(new URL('../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   assert.ok(fixture.some(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml'));
   const fixtureAdmission = fixture[0]['ansible.builtin.assert'].that;
-  assert.ok(fixtureAdmission.some(condition => condition.includes("['head', 'compatible', 'failed', 'auth-primary', 'auth-update', 'auth-failed']")));
+  assert.ok(fixtureAdmission.some(condition => condition.includes("['head', 'prior', 'failed', 'auth-primary', 'auth-update', 'auth-failed']")));
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const noOp = shell.slice(shell.indexOf('cmp -s -- "$candidate_unit" "$active_unit"'), shell.indexOf('echo "UNCHANGED'));
   assert.match(noOp, /run_auth_cli \/app\/node_modules\/@codexia\/api\/dist\/verify-auth-clients\.js/u);
   assert.doesNotMatch(noOp, /migrate-auth|backup-locked|systemctl --user stop/u);
+});
+
+test('both first-owner launchers require a clean API target under the deployment lock', t => {
+  const home = mkdtempSync(path.join(tmpdir(), 'codexia-first-owner-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, '.local/bin');
+  const state = path.join(home, '.local/state/codexia-deploy');
+  const quadlet = path.join(home, '.config/containers/systemd');
+  const auth = path.join(home, '.config/codexia-auth');
+  for (const dir of [bin, state, quadlet, auth]) mkdirSync(dir, { recursive: true });
+  const guard = path.join(bin, 'codexia-require-clean-api-target');
+  copyFileSync(new URL('../deploy/ansible/require-clean-api-target.sh', import.meta.url), guard);
+  chmodSync(guard, 0o700);
+  const mock = (name, body) => writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o700 });
+  mock('id', 'echo codexia');
+  mock('podman', `case "$1 $2" in
+    'info --format') echo true;;
+    'container exists') exit "$CONTAINER_STATUS";;
+    'inspect --format') echo healthy;;
+    'run --rm')
+      flock --nonblock "$HOME/.local/state/codexia-deploy/host.lock" true && exit 89
+      echo "STARTED $*";;
+    *) exit 90;;
+  esac`);
+  mock('systemctl', `case "$1 $2" in
+    '--user show') printf '%s\\n' "$UNIT_STATE"; exit "$UNIT_STATUS";;
+    '--user is-active') exit 0;;
+    *) exit 90;;
+  esac`);
+  writeFileSync(path.join(auth, 'runtime.env'), [
+    'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_ID=owner',
+    'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_EMAIL=owner@example.test',
+    'CODEXIA_AUTH_PASSKEY_BOOTSTRAP_OWNER_NAME=Owner',
+  ].join('\n'), { mode: 0o600 });
+  writeFileSync(path.join(auth, 'bootstrap.env'), [
+    'CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://setup.example.test',
+    'CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=https://app.example.test/desktop',
+  ].join('\n'), { mode: 0o600 });
+  for (const file of ['tls.crt', 'tls.key']) writeFileSync(path.join(auth, file), '', { mode: 0o600 });
+  const env = {
+    ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH,
+    CONTAINER_STATUS: '1', UNIT_STATUS: '4', UNIT_STATE: 'LoadState=not-found\nActiveState=inactive',
+  };
+  const image = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
+  const unit = path.join(quadlet, 'codexia-api.container');
+  for (const [source, cli] of [
+    ['bootstrap-auth-registration.sh', 'bootstrap-auth.js'],
+    ['grant-passkey-owner.sh', 'grant-passkey-owner.js'],
+  ]) {
+    const script = new URL('../deploy/ansible/' + source, import.meta.url).pathname;
+    const run = (overrides = {}) => spawnSync('bash', [script, '--apply', image], {
+      env: { ...env, ...overrides }, encoding: 'utf8',
+    });
+    for (const missingUnitStatus of ['0', '4']) {
+      const fresh = run({ UNIT_STATUS: missingUnitStatus });
+      assert.equal(fresh.status, 0, fresh.stderr);
+      assert.ok(fresh.stdout.includes('STARTED ') && fresh.stdout.includes(cli));
+    }
+    const refused = overrides => {
+      const result = run(overrides);
+      assert.equal(result.status, 1, result.stderr);
+      assert.doesNotMatch(result.stdout, /STARTED/u);
+    };
+    refused({ CONTAINER_STATUS: '0' }); // Includes a stopped container with no remaining unit.
+    refused({ CONTAINER_STATUS: '125' });
+    refused({ UNIT_STATE: '', UNIT_STATUS: '1' }); // Unreachable user manager.
+    refused({ UNIT_STATE: 'LoadState=loaded\nActiveState=inactive', UNIT_STATUS: '0' });
+    refused({ UNIT_STATE: 'LoadState=not-found\nActiveState=active', UNIT_STATUS: '0' });
+    writeFileSync(unit, 'Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token\n');
+    refused({ CONTAINER_STATUS: '0', UNIT_STATE: 'LoadState=loaded\nActiveState=active', UNIT_STATUS: '0' });
+    rmSync(unit);
+    for (const marker of [unit, ...['deploy-transaction.json', 'deployed-release.json', 'rollback-api.container'].map(name => path.join(state, name))]) {
+      symlinkSync('missing', marker);
+      refused({});
+      rmSync(marker);
+    }
+  }
 });
 
 test('the isolated registration launcher admits only complete OIDC or Passkey bootstrap tuples', () => {
@@ -428,10 +507,45 @@ test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without
   assert.equal(job.environment, 'codexia-production');
   const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
   assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');
-  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
-  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
-  assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
-  assert.match(ssh.run, /ssh-keygen -F 100\.100\.1\.68/u);
-  assert.match(ssh.run, /codexia@100\.100\.1\.68/u);
+  const target = job.steps.find(step => step.id === 'target');
+  assert.equal(target.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
+  assert.equal(target.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
+  assert.equal(target.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
+  assert.match(ssh.run, /ssh -F .*codexia-ssh\/config.*codexia-target.*id -un/u);
   assert.doesNotMatch(ssh.run, /ansible-playbook|podman (?:pull|run|rm)|CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
+});
+
+test('the declared VM must resolve to a protected SSH pin in both diagnosis and deployment', t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-ssh-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const key = path.join(directory, 'fixture');
+  assert.equal(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]).status, 0);
+  const publicKey = readFileSync(key + '.pub', 'utf8').trim();
+  const host = 'new-vm.example.test';
+  const pins = host + ' ' + publicKey;
+  const script = new URL('../deploy/ansible/prepare-deploy-ssh.sh', import.meta.url).pathname;
+  function prepare(knownHosts, target) {
+    const runner = mkdtempSync(path.join(directory, 'runner-'));
+    const output = path.join(runner, 'output');
+    const result = spawnSync('bash', [script], { encoding: 'utf8', env: {
+      ...process.env, RUNNER_TEMP: runner, GITHUB_OUTPUT: output, CODEXIA_DEPLOY_HOST: target,
+      CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: knownHosts, CODEXIA_DEPLOY_SSH_PRIVATE_KEY: readFileSync(key, 'utf8'),
+    } });
+    return { result, runner, output };
+  }
+  for (const target of ['', host]) {
+    const { result, runner, output } = prepare(pins, target);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(output, 'utf8'), 'host=' + host + '\n');
+    const config = spawnSync('ssh', ['-G', '-F', path.join(runner, 'codexia-ssh/config'), 'codexia-target'], { encoding: 'utf8' });
+    assert.equal(config.status, 0);
+    for (const line of ['hostname ' + host, 'user codexia', 'stricthostkeychecking true', 'identitiesonly yes',
+      'globalknownhostsfile /dev/null', 'userknownhostsfile ' + path.join(runner, 'codexia-ssh/known_hosts')]) {
+      assert.ok(config.stdout.split('\n').includes(line), line);
+    }
+  }
+  assert.notEqual(prepare(pins, 'different.example.test').result.status, 0);
+  assert.notEqual(prepare(pins, 'invalid\nHost other').result.status, 0);
+  assert.notEqual(prepare(pins + '\nother.example.test ' + publicKey, '').result.status, 0);
+  assert.equal(prepare(pins + '\nother.example.test ' + publicKey, host).result.status, 0);
 });

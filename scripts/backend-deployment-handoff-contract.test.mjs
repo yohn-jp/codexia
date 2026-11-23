@@ -39,6 +39,7 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(deploy.permissions['id-token'], 'write');
   assert.equal(deploy.concurrency.group, 'codexia-production');
   assert.equal(deploy.concurrency['cancel-in-progress'], false);
+  assert.equal(deploy.concurrency.queue, 'max');
   assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.verified-main-sha != ''/u);
   const deployCheckout = deploy.steps.find(step => step.uses?.startsWith('actions/checkout@'));
@@ -53,9 +54,18 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.match(deploymentGate.run, /enabled=true/u);
   assert.match(deploymentGate.run, /safely skipped/u);
   assert.match(deploymentGate.run, /GITHUB_STEP_SUMMARY/u);
-  assert.ok(deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1).every(step =>
-    step.if === "steps.deployment-gate.outputs.enabled == 'true'"),
-  'OIDC, SSH and Ansible steps must all stop when deployment is disabled');
+  const freshness = deploy.steps.find(step => step.id === 'freshness');
+  assert.equal(deployCheckout.with['fetch-depth'], 0);
+  assert.equal(freshness.run, 'node scripts/release-source-gate.mjs backend-deployment');
+  assert.equal(freshness.env.CODEXIA_VERIFIED_MAIN_SHA, deployCheckout.with.ref);
+  const afterEnablement = deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1);
+  const freshnessIndex = afterEnablement.indexOf(freshness);
+  assert.ok(freshnessIndex >= afterEnablement.indexOf(deployCheckout));
+  assert.ok(afterEnablement.slice(0, freshnessIndex + 1).every(step =>
+    step.if === "steps.deployment-gate.outputs.enabled == 'true'"));
+  assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step =>
+    step.if === "steps.freshness.outputs.current == 'true'"),
+    'Stale or disabled deployments must not connect to the target or run Ansible');
 });
 
 test('backend release emits certificate files only after exact-source publish and component release recording', () => {

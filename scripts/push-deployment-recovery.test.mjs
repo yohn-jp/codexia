@@ -141,6 +141,7 @@ test('recovery before first API unit installation does not require a nonexistent
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
   writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  writeFileSync(path.join(target.stateDir, 'deployed-release.json.tmp'), 'partial');
   rmSync(path.join(target.stateDir, 'rollback-api.container'));
   rmSync(path.join(target.stateDir, 'rollback-release.json'));
   target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
@@ -151,6 +152,7 @@ test('recovery before first API unit installation does not require a nonexistent
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /RECOVERED_PREVIOUS_RELEASE/u);
     assert.equal(existsSync(intentPath), false);
+    assert.equal(existsSync(path.join(target.stateDir, 'deployed-release.json.tmp')), false);
     assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
     assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
   } finally {

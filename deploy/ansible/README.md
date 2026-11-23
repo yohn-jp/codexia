@@ -8,13 +8,25 @@ Use a private inventory with pinned SSH host keys, externally supplied protected
 ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=inspect
 ```
 
-Supported stages are `inspect`, `host`, `secrets`, `base`, `auth-runtime`, `deploy`, `deploy-lifecycle-fixture` and `restore-drill`. The lifecycle fixture stage runs only from the run-bound disposable GitHub Actions workflow; it is not a production operation.
+Supported stages are `inspect`, `bootstrap`, `host`, `secrets`, `base`, `auth-runtime`, `deploy`, `deploy-lifecycle-fixture` and `restore-drill`. The lifecycle fixture stage runs only from the run-bound disposable GitHub Actions workflow; it is not a production operation.
 
-The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs four protected Podman secrets without implicit rotation. The `base` stage converges networks, volumes, PostgreSQL 17 and Tunnel Quadlets, verifying exact persistent storage and identities. These stages do not publish new API images.
+The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs the Tunnel credential and the two PostgreSQL credentials without implicit rotation. The `base` stage converges networks, volumes, PostgreSQL 17 and Tunnel Quadlets, verifying exact persistent storage and identities. These stages do not publish new API images.
 
-The `deploy` stage requires a certified immutable Full image, main-source provenance certificate, compatible deployed UI epoch and approved off-VM encrypted backup inputs. It recovers interrupted transactions, validates the backup destination, serializes application changes, backs up before replacing an existing API, and observes candidate health. Image-only updates refuse changed migration fingerprint, persistence format or API epoch. A failed candidate restores the prior Quadlet and release record.
+The `deploy` stage requires a certified immutable Full image, main-source provenance certificate, compatible deployed UI epoch and a backup directory and an age recipient. It recovers interrupted transactions, validates the backup destination, serializes application changes, backs up before replacing an existing API, and observes candidate health. Image-only updates refuse changed migration fingerprint, persistence format or API epoch. A failed candidate restores the prior Quadlet and release record.
 
-First activation requires `codexia_initial_install_approved=true` and `codexia_database_initialization_approved=true`. Inspect the database and run the approved `host`, `secrets`, `base`, and `auth-runtime` stages before `deploy`. For a pristine database, `auth-runtime` initializes the application schema using a locally available reviewed Full image before creating the separate authentication schema. Complete isolated owner enrollment and OAuth client registration before activation. See [the ordered first-activation procedure](../../docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation).
+## Bring up a new VM
+
+Use the [example inventory](inventory.example.yml) with the VM's management address, pinned SSH host key, existing bootstrap login with sudo, service UID/GID and private credential file paths. Set `codexia_deploy_ssh_public_key` to the public half of the protected workflow key, or provision that SSH access externally. Ansible installs the declared key with OpenSSH's `restrict` option on the service account. The bootstrap administrator retains its own SSH connection for enrollment.
+
+For a new host, enable the host, service-account creation, secrets, base, and database initialization approvals in the private inventory. Set `codexia_auth_runtime_approved: true` to include authentication, `codexia_auth_bootstrap_image` to the reviewed Full digest, and `codexia_auth_registration_pending: true` for initial enrollment. Prepare the [enrollment settings and TLS files](AUTH-RUNTIME.md#initial-owner-and-oauth-client-registration) in `codexia_auth_enrollment_files_dir`. Each file must be owned by the control user with mode 0400 or 0600. Apply the inventory from the reviewed checkout:
+
+```bash
+ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=bootstrap
+```
+
+The play provisions the host, rootless credentials, networks, volumes, PostgreSQL and Tunnel definition in order. When authentication is approved it also fetches the pinned Full image on demand, initializes a pristine application database, and stages the auth schema, secrets and enrollment inputs. The Tunnel and API first start at protected activation.
+
+Complete the owner and client registration over the administrative SSH connection. Use a local port forward on that connection and run the enrollment helpers as the service user with its user-systemd environment. Set registration pending to false, enter the returned internal owner ID, and reapply the same inventory. With the enrollment directory still declared, Ansible removes the three temporary files from the VM. The protected production workflow can then activate the certified image with the two first-install approvals and handle subsequent compatible updates. See the [first activation procedure](../../docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation).
 
 Schema and persistence-format changes are not currently supported by the image-only push workflow. No startup migration bypass is permitted. The candidate remains blocked until an independent migration procedure defines approval, backup, execution, verification, and tested restore.
 

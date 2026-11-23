@@ -81,7 +81,7 @@ mapfile -t recovery_fields <<< "$recovery"
 }
 
 if [[ "${recovery_fields[1]}" == committed ]]; then
-  rm -f -- "$intent" "$intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+  rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
   echo 'CLEANED_COMMITTED_TRANSACTION'
   exit 0
 fi
@@ -223,5 +223,5 @@ if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
   systemctl --user start codexia-tunnel.service
 fi
 
-rm -f -- "$intent" "$intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
 echo 'RECOVERED_PREVIOUS_RELEASE'

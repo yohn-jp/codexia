@@ -14,7 +14,7 @@ import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions } from "@co
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
-import { createServer, importLegacyJobHistory, start, type ApiServerOptions } from "./server.js";
+import { createServer, start, type ApiServerOptions } from "./server.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
 
 const ACCESS_TOKEN = "test-access-token-which-is-longer-than-32-characters";
@@ -1167,118 +1167,41 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(historyBytes.includes("must-not-be-captured"), false, "action input is not retained as job history");
   });
 
-  it("archives exact legacy jobs outside Core data and exposes only explicitly mapped owner history", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-"));
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-app-"));
-    tempDirs.push(root, staticDir);
-    const workspaceDataRoot = resolve(root, "core-data");
-    const appState = resolve(workspaceDataRoot, "app-state");
+  it("reads retained v3 jobs and persists the owner's inbox update without losing their history", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-retained-jobs-"));
+    tempDirs.push(root);
     const usageDirectory = resolve(root, "history");
-    await mkdir(appState, { recursive: true, mode: 0o700 });
-    const legacyState = {
-      jobs: [
-        {
-          id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-          result: { report: "explicitly mapped result" }, error: null,
-          projectKey: "legacy-project-id", userId: "legacy-owner-id",
-          createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-        },
-        {
-          id: "unmapped-job", type: "zukan-proposal", status: "error", progress: null,
-          result: { secretBody: "unmapped result stays private" }, error: "unmapped error stays private",
-          projectKey: "unknown-project-id", userId: "unknown-user-id",
-          createdAt: "2026-10-16T01:00:00.000Z", updatedAt: "2026-10-16T01:01:00.000Z", finishedAt: "2026-10-16T01:01:00.000Z",
-        },
-      ],
-      inbox: [
-        {
-          id: "mapped-inbox", kind: "job-complete", jobId: "mapped-job", jobType: "speaker-eval",
-          title: "Mapped report", body: "Mapped inbox result body", status: "done", read: false,
-          userId: "legacy-owner-id", projectKey: "legacy-project-id", createdAt: "2026-10-16T00:01:00.000Z",
-        },
-        {
-          id: "unmapped-inbox", kind: "job-complete", jobId: "unmapped-job", jobType: "zukan-proposal",
-          title: "Unmapped title", body: "unmapped inbox body stays private", status: "error", read: false,
-          userId: "unknown-user-id", projectKey: "unknown-project-id", createdAt: "2026-10-16T01:01:00.000Z",
-        },
-      ],
+    const jobs = resolve(usageDirectory, "jobs");
+    await mkdir(jobs, { recursive: true, mode: 0o700 });
+    const statePath = resolve(jobs, "jobs-state.json");
+    const now = "2026-10-16T00:01:00.000Z";
+    const job = {
+      id: "retained-job", type: "speaker-eval", status: "done", progress: 1,
+      result: { report: "retained" }, error: null, createdAt: now, updatedAt: now, finishedAt: now,
     };
-    const sourcePath = resolve(appState, "jobs-state.json");
-    const sourceBytes = Buffer.from(JSON.stringify(legacyState), "utf8");
-    await writeFile(sourcePath, sourceBytes, { mode: 0o600 });
-    const report = await importLegacyJobHistory({
-      workspaceDataRoot,
-      usageDirectory,
-      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
-      legacyUserMappings: { "legacy-owner-id": "owner" },
-    });
-    assert.equal(report.archived, true);
-    assert.equal(report.adoptedJobs, 1);
-    assert.equal(report.adoptedInbox, 1);
-    assert.deepEqual(report.mappingRequired, [{
-      projectKey: "unknown-project-id", userId: "unknown-user-id", jobCount: 1, inboxCount: 1,
-    }]);
-    assert.equal(JSON.stringify(report).includes("unmapped result stays private"), false);
-    const archivePath = resolve(usageDirectory, "jobs", "legacy", `${report.sourceHash}.json`);
-    assert.deepEqual(await readFile(archivePath), sourceBytes, "the hash-addressed host archive retains the exact source bytes");
-    assert.deepEqual(await readFile(sourcePath), sourceBytes, "migration leaves the source jobs file untouched");
-    const retry = await importLegacyJobHistory({
-      workspaceDataRoot,
-      usageDirectory,
-      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
-      legacyUserMappings: { "legacy-owner-id": "owner" },
-    });
-    assert.equal(retry.sourceHash, report.sourceHash);
-    assert.equal(retry.adoptedJobs, 0, "a repeated import must not duplicate mapped jobs");
-    assert.equal(retry.adoptedInbox, 0, "a repeated import must not duplicate inbox entries");
-
-    await rm(workspaceDataRoot, { recursive: true, force: true });
-    const apiServer = await startCustomApi(makeStore(), staticDir, { usageDirectory });
-    t.after(apiServer.close);
-    const owner = signedRequests.ownerHeaders();
-    const bearer = { Authorization: signedRequests.mcpHeaders().Authorization };
-    assert.equal((await fetch(`${apiServer.base}/api/jobs`, { headers: bearer })).status, 403,
-      "legacy private history is cookie-owner-only");
-    const jobListResponse = await fetch(`${apiServer.base}/api/jobs`, { headers: { Authorization: owner.Authorization } });
-    assert.equal(jobListResponse.status, 200);
-    assert.deepEqual(await jobListResponse.json(), [{
-      id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-      result: { report: "explicitly mapped result" }, error: null,
-      createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-    }]);
-    const mappedJob = await fetch(`${apiServer.base}/api/jobs/mapped-job`, { headers: { Authorization: owner.Authorization } });
-    assert.equal(mappedJob.status, 200);
-    assert.deepEqual(await mappedJob.json(), {
-      id: "mapped-job", type: "speaker-eval", status: "done", progress: 1,
-      result: { report: "explicitly mapped result" }, error: null,
-      createdAt: "2026-10-16T00:00:00.000Z", updatedAt: "2026-10-16T00:01:00.000Z", finishedAt: "2026-10-16T00:01:00.000Z",
-    });
-    assert.equal((await fetch(`${apiServer.base}/api/jobs/unmapped-job`, { headers: { Authorization: owner.Authorization } })).status, 404);
-    const inbox = await fetch(`${apiServer.base}/api/inbox`, { headers: { Authorization: owner.Authorization } });
-    const inboxBody = await inbox.json() as { items: Array<Record<string, unknown>>; unreadCount: number };
-    assert.equal(inboxBody.unreadCount, 1);
-    assert.equal(inboxBody.items.length, 1);
-    assert.deepEqual(inboxBody.items[0], {
-      id: "mapped-inbox", kind: "job-complete", jobId: "mapped-job", jobType: "speaker-eval",
-      title: "Mapped report", body: "Mapped inbox result body", status: "done", read: false,
-      userId: "owner",
-      projectKey: createHash("sha256").update(`postgres-project\0${SNAPSHOT.projectId}`).digest("hex"),
-      createdAt: "2026-10-16T00:01:00.000Z",
-    });
-    assert.equal(JSON.stringify(inboxBody).includes("unmapped inbox body stays private"), false);
-    const markRead = await fetch(`${apiServer.base}/api/inbox/mapped-inbox/read`, {
-      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
-    });
-    assert.equal(markRead.status, 200);
-    assert.equal(((await markRead.json() as { item: { read: boolean } }).item).read, true);
-    const readAll = await fetch(`${apiServer.base}/api/inbox/read-all`, {
-      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
-    });
-    assert.deepEqual(await readAll.json(), { marked: 0 });
-    assert.equal((await fetch(`${apiServer.base}/api/inbox/unmapped-inbox/read`, {
-      method: "POST", headers: { Authorization: owner.Authorization, Origin: apiServer.base },
-    })).status, 404);
-    assert.deepEqual(await readFile(archivePath), sourceBytes, "removing the Core data root cannot remove or mutate the legacy archive");
+    const projectKey = "a".repeat(64);
+    const item = {
+      id: "retained-inbox", kind: "job-complete", jobId: job.id, jobType: job.type, title: "Saved report",
+      body: "Evaluation complete", status: "done", read: false, userId: "owner", projectKey, createdAt: now,
+    };
+    const state = {
+      version: 3, jobs: [{ kind: "legacy", ownerKey: "b".repeat(64), projectKey, job }],
+      inbox: [item], legacySources: ["c".repeat(64)],
+    };
+    await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+    const api = await startCustomApi(makeStore(), resolve(root, "app"), { usageDirectory });
+    t.after(api.close);
+    const headers = { Authorization: signedRequests.ownerHeaders().Authorization };
+    const retained = await fetch(`${api.base}/api/jobs/${job.id}`, { headers });
+    assert.equal(retained.status, 200);
+    assert.deepEqual(await retained.json(), job);
+    const write = { method: "POST", headers: { ...headers, Origin: api.base } };
+    const marked = await fetch(`${api.base}/api/inbox/${item.id}/read`, write);
+    assert.equal(marked.status, 200);
+    assert.deepEqual(await marked.json(), { item: { ...item, read: true } });
+    const all = await fetch(`${api.base}/api/inbox/read-all`, write);
+    assert.deepEqual(await all.json(), { marked: 0 });
+    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { ...state, inbox: [{ ...item, read: true }] });
   });
 
   it("publishes real supervised worker jobs through owner-only history routes and SSE", async (t) => {

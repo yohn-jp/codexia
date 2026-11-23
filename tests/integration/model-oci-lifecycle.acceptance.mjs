@@ -256,7 +256,6 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
       "--env", "CODEXIA_PROFILE=full",
       "--env", "CODEXIA_DATA_DIR=/data",
       "--env", "CODEXIA_USAGE_DIR=/history",
-      "--env", "CODEXIA_MODULE_CACHE_DIR=/data/module-cache",
       "--env", "CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS=1",
       "--env", "ARCADIA_TOKENIZER_BACKEND=auto",
       "--env", "HF_HUB_OFFLINE=1",
@@ -336,7 +335,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     customStarted = false;
 
     await run(podman, [
-      "run", "--detach", "--name", replacementName, nodeUserNamespace, "--network", network, "--network-alias", "codexia-api",
+      "run", "--detach", "--read-only", "--name", replacementName, nodeUserNamespace, "--network", network, "--network-alias", "codexia-api",
       ...commonEnv, ...commonMounts, image,
     ], { timeout: 30_000 });
     replacementStarted = true;

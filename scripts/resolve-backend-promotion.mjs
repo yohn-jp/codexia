@@ -6,12 +6,11 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readComponentVersion } from './component-release-version.mjs';
+import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
 import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 import { verifyFrontendMainPromotionProof } from './verify-frontend-artifact.mjs';
-import { compareFrontendVersions } from './verify-frontend-compatibility.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution as inspectDockerImage } from './backend-image-inspection.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
 
@@ -58,7 +57,7 @@ export function assertBackendPromotionVersion(candidate, existing) {
   assert.match(candidate, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u, 'Backend producer version is invalid');
   if (existing !== null) {
     assert.match(existing, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u, 'Existing backend release version is invalid');
-    assert.ok(compareFrontendVersions(candidate, existing) > 0, 'Backend PR version is not strictly newer than published backend releases');
+    assert.ok(compareComponentVersions(candidate, existing) > 0, 'Backend PR version is not strictly newer than published backend releases');
   }
   return true;
 }
@@ -86,7 +85,7 @@ async function latestBackendReleaseVersion(token, fetchImpl) {
   const versions = releases.filter(value => value &&
     typeof value.tag_name === 'string' && /^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(value.tag_name))
     .map(value=>value.tag_name.slice('backend-v'.length));
-  return versions.reduce((latest, value)=>latest===null||compareFrontendVersions(value,latest)>0?value:latest,null);
+  return versions.reduce((latest, value)=>latest===null||compareComponentVersions(value,latest)>0?value:latest,null);
 }
 
 async function assertBackendVersionTagFree(version,token,fetchImpl){

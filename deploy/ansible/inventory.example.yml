@@ -4,22 +4,24 @@ all:
       hosts:
         node:
           ansible_host: codexia.example.invalid
-          ansible_user: codexia
+          ansible_user: codexia-bootstrap  # Existing SSH identity with sudo for initial provisioning
       vars:
-        # Supported stages: inspect, host, secrets, base, auth-runtime, deploy, restore-drill.
+        # Supported stages: inspect, bootstrap, host, secrets, base, auth-runtime, deploy, restore-drill.
         codexia_stage: inspect
         codexia_service_user: codexia
         codexia_service_group: codexia
         codexia_service_uid: 1001
         codexia_service_gid: 1001
         codexia_service_home: /home/codexia
+        # Public half of the dedicated protected workflow key, when managed here.
+        # codexia_deploy_ssh_public_key: "ssh-ed25519 <public-key>"
         codexia_host_approved: false
         codexia_create_service_account: false
         codexia_secrets_approved: false
         codexia_base_approved: false
         codexia_database_initialization_approved: false
-        # On a fresh database, supply the reviewed immutable Full image already
-        # present in rootless Podman, and approve database initialization.
+        # On a fresh database, supply the reviewed immutable Full digest and
+        # approve database initialization. Podman fetches that digest when missing.
         # codexia_auth_bootstrap_image: ghcr.io/yohn-jp/codexia-backend@sha256:<digest>
         codexia_auth_runtime_approved: false
         codexia_auth_database_url_file: /private/codexia-auth-database-url
@@ -30,7 +32,13 @@ all:
         codexia_oidc_issuer: https://idp.example.invalid/oidc
         codexia_oidc_client_id: codexia-web
         codexia_oauth_introspection_client_id: codexia-resource-server
-        codexia_oauth_owner_subject: owner-subject-from-provider
+        # For first enrollment, stage these three private files on the controller:
+        # bootstrap.env, tls.crt and tls.key. Keep the directory configured on
+        # finalization so Ansible removes the enrollment copies from the VM.
+        # codexia_auth_enrollment_files_dir: /private/codexia-enrollment
+        codexia_auth_registration_pending: true
+        # After enrollment, set pending to false and use the returned internal ID.
+        # codexia_oauth_owner_subject: enrolled-owner-id
         codexia_oauth_owner_client_ids: codexia-web,codexia-ios
         # Optional after owner enrollment, for separately registered MCP clients.
         # codexia_oauth_mcp_client_ids: approved-mcp-client
