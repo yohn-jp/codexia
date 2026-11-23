@@ -130,7 +130,10 @@ specific phases (tool downloads, fixture setup, build, browser, artifacts).
 `cancelled` run count is *not* equal to wasted runner minutes; check actual job
 start/logs before making a savings claim. Actions queued/waiting jobs may expose
 placeholder start timestamps; they consume no observed runner seconds and must
-not be counted as executed jobs. Prefer comparable exact-source and
+not be counted as executed jobs. Cancelled jobs may also expose placeholder
+timestamps even after becoming `completed`; require a positive assigned
+`runner_id` before claiming runner consumption, and report pre/post-runner
+cancellations separately. Prefer comparable exact-source and
 toolchain runs; record counterfactual estimates separately from observed results.
 Compare a full run, native-only changes, test-only DB changes, documentation-only
 changes, frontend/backend runtime changes, unknown/new paths and changed workflow
