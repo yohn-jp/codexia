@@ -468,6 +468,11 @@ async function chooseRevision(item) {
   try {
     const summary = await collectRevision(request, verifySource, group);
     if (version !== selectionVersion) return;
+    const currentGroup = groups.find(candidate => revisionKey(candidate) === key);
+    if (!currentGroup || groupSignature(currentGroup) !== groupSignature(group)) {
+      if (currentGroup) await chooseRevision(selected);
+      return;
+    }
     observed.set(key, { signature: groupSignature(group), summary });
     all = all.map(candidate => revisionKey(candidate) === key ? summary : candidate);
     selected = summary;
