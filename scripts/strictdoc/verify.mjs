@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { access, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -77,25 +77,30 @@ export async function validateRelations(nodes, repositoryRoot) {
         violations.push(`${node.UID}: File relation resolves outside repository: ${relativePath}`);
         continue;
       }
-      const sourceStat = await stat(source);
-      if (!sourceStat.isFile()) {
-        violations.push(`${node.UID}: File relation target is not a file: ${relativePath}`);
-        continue;
-      }
-      if (relation.LINE_RANGE !== undefined) {
-        const lineRange = String(relation.LINE_RANGE);
-        const match = /^(\d+)\s*,\s*(\d+)$/u.exec(lineRange);
-        if (!match) {
-          violations.push(`${node.UID}: Invalid line range for ${relativePath}: ${lineRange}`);
+      // A single descriptor binds type verification and content consumption.
+      const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        if (!(await handle.stat()).isFile()) {
+          violations.push(`${node.UID}: File relation target is not a file: ${relativePath}`);
           continue;
         }
-        const start = Number(match[1]);
-        const end = Number(match[2]);
-        const content = await readFile(source, 'utf8');
-        const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/u).length - (content.endsWith('\n') ? 1 : 0);
-        if (start < 1 || end < start || end > lineCount) {
-          violations.push(`${node.UID}: ${relativePath} line range ${lineRange} exceeds source length (${lineCount} lines)`);
+        if (relation.LINE_RANGE !== undefined) {
+          const lineRange = String(relation.LINE_RANGE);
+          const match = /^(\d+)\s*,\s*(\d+)$/u.exec(lineRange);
+          if (!match) {
+            violations.push(`${node.UID}: Invalid line range for ${relativePath}: ${lineRange}`);
+            continue;
+          }
+          const start = Number(match[1]);
+          const end = Number(match[2]);
+          const content = await handle.readFile('utf8');
+          const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/u).length - (content.endsWith('\n') ? 1 : 0);
+          if (start < 1 || end < start || end > lineCount) {
+            violations.push(`${node.UID}: ${relativePath} line range ${lineRange} exceeds source length (${lineCount} lines)`);
+          }
         }
+      } finally {
+        await handle.close();
       }
     }
   }
@@ -411,10 +416,18 @@ async function readScopedSourceFiles(root, paths, kind) {
       throw new Error(`Inventory ${kind} source escapes the repository: ${relativePath}`);
     }
     const sourcePath = await realpath(absolutePath);
-    if (!sourcePath.startsWith(`${repositoryRoot}${path.sep}`) || !(await stat(sourcePath)).isFile()) {
+    if (!sourcePath.startsWith(`${repositoryRoot}${path.sep}`)) {
       throw new Error(`Inventory ${kind} source is missing or not a repository file: ${relativePath}`);
     }
-    files.push({ relativePath: normalized, source: await readFile(sourcePath, 'utf8') });
+    const handle = await open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      if (!(await handle.stat()).isFile()) {
+        throw new Error(`Inventory ${kind} source is missing or not a repository file: ${relativePath}`);
+      }
+      files.push({ relativePath: normalized, source: await handle.readFile('utf8') });
+    } finally {
+      await handle.close();
+    }
   }
   return files;
 }

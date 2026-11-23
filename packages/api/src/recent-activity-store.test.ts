@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -33,7 +34,13 @@ describe("RecentActivityStore", () => {
     assert.equal((await lstat(resolve(usageDirectory, "recent-activity"))).mode & 0o777, 0o700);
     assert.equal((await lstat(statePath)).mode & 0o777, 0o600);
     await restarted.upsert("owner", repository, { sceneId: "next", sentenceOffset: 3, deviceType: "desktop" });
-    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")).legacySources, sources);
+    const state = await open(statePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      assert.equal((await state.stat()).mode & 0o777, 0o600);
+      assert.deepEqual(JSON.parse(await state.readFile("utf8")).legacySources, sources);
+    } finally {
+      await state.close();
+    }
   });
 
   it("fences reordered reports across store instances while merging only the omitted reading page", async (t) => {
