@@ -192,6 +192,13 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
   assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
+  // A valid but unclassified path selects full verification; Full-model OCI cannot
+  // silently disappear merely because it was absent from the older allowlist.
+  for (const unknown of ['scripts/new-unclassified-ci-helper.mjs', 'tests/new-domain/acceptance.mjs', 'docs/new-executable-policy.json']) {
+    const selected = await plan([unknown]);
+    assert.equal(selected.mode, 'full', `Unclassified path needs full verification: ${unknown}`);
+    assert.equal(selected.full_model_oci, true, `Unclassified path needs conservative model admission: ${unknown}`);
+  }
   for (const invalid of ['', '/packages/api/src/server.ts', '../packages/api/src/server.ts', 'packages\\api\\src\\server.ts']) {
     const selected = await plan([invalid]);
     assert.equal(selected.mode, 'full', 'Invalid changed paths must select full verification');

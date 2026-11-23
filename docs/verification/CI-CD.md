@@ -124,15 +124,21 @@ if effective rules cannot be read, do not deploy a potentially deadlocking filte
 ### Measurement and change acceptance
 
 Measure **run count**, cancellation before and after runner acquisition,
-per-PR workflow multiplicity, job count, p50/p95 queue time, runner seconds,
+per-PR workflow multiplicity, executed versus queued job count, p50/p95 queue time, runner seconds,
 critical path, wall clock, cold/warm cache state, failure/retry rate, and the
 specific phases (tool downloads, fixture setup, build, browser, artifacts).
 `cancelled` run count is *not* equal to wasted runner minutes; check actual job
-start/logs before making a savings claim. Prefer comparable exact-source and
+start/logs before making a savings claim. Actions queued/waiting jobs may expose
+placeholder start timestamps; they consume no observed runner seconds and must
+not be counted as executed jobs. Prefer comparable exact-source and
 toolchain runs; record counterfactual estimates separately from observed results.
 Compare a full run, native-only changes, test-only DB changes, documentation-only
 changes, frontend/backend runtime changes, unknown/new paths and changed workflow
-definitions before and after an admission change.
+definitions before and after an admission change. For rapid consecutive main merges,
+record each source SHA and its actual PR plan mode, base SHA, merge parent,
+reusable proof decision, queued jobs, executed jobs and runner seconds. A green
+`affected` PR check is not a complete main certificate; a stale base or
+unverified proof must trigger exact-source execution, not an implicit pass.
 
 A rollout passes only when (a) the canonical plan and actual workflow trigger
 agree; (b) every selected task is proven or blocked/fails, never silently skipped;

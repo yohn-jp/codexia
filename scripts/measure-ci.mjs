@@ -28,9 +28,11 @@ const runPath = `actions/runs/${runId}${attempt ? `/attempts/${attempt}` : ''}`;
 const run = await request(runPath);
 const jobs = await collectGitHubPages(page => request(`actions/runs/${runId}/attempts/${run.run_attempt}/jobs?per_page=100&page=${page}`), 'jobs');
 const observations = jobs.map(job => {
+  // The API may supply a non-null placeholder started_at even while still queued.
+  const runnerStartedAt = ['queued', 'waiting', 'pending', 'requested'].includes(job.status) ? null : job.started_at;
   const phase = pattern => (job.steps ?? []).filter(step => pattern.test(step.name)).map(step => ({ name: step.name, seconds: seconds(step.started_at, step.completed_at), result: step.conclusion }));
-  return { name: job.name, sha: job.head_sha, result: job.conclusion, queueSeconds: seconds(job.created_at, job.started_at),
-    durationSeconds: seconds(job.started_at, job.completed_at),
+  return { name: job.name, sha: job.head_sha, status: job.status, result: job.conclusion, queueSeconds: seconds(job.created_at, runnerStartedAt),
+    durationSeconds: seconds(runnerStartedAt, job.completed_at),
     runnerPreparation: phase(/Set up job|Initialize containers|setup-node/),
     dependencyInstall: phase(/Install frozen|Install exact|Prepare exact/),
     build: phase(/Build required|Build production|Build Core|Build native/),

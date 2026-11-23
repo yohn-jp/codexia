@@ -186,7 +186,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const selected = new Set(['coverage']);
   let full = event !== 'pull_request' || !Array.isArray(files);
   // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
-  const fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
+  let fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
     files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
       file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
@@ -245,6 +245,9 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         }
         continue;
       }
+      // An unknown root/source owner has no proven model input boundary: fail closed.
+      // Known core/API workspace tests retain their independently tested model exclusions.
+      if (!owner && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }

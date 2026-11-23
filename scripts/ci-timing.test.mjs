@@ -51,3 +51,20 @@ test('unknown timestamps and in-progress work do not become complete timing evid
   assert.equal(report.observedRunnerSeconds, 7);
   assert.equal(report.executedJobCount, 2);
 });
+
+test('rapid successive main merges leave pending checks out of executed runner counts', () => {
+  const report = summarizeCiTiming({ ...run, status: 'in_progress' }, [
+    { ...job('plan', 0, 1, 4), status: 'completed' },
+    { ...job('unit-core', 4, 4, 4), status: 'queued', completed_at: null, conclusion: null },
+    { ...job('browser-core-webkit', 4, 4, 4), status: 'waiting', completed_at: null, conclusion: null },
+    { ...job('browser-full-reference', 4, 4, 4), status: 'requested', completed_at: null, conclusion: null },
+  ]);
+  assert.equal(report.queuedJobCount, 3);
+  assert.equal(report.executedJobCount, 1);
+  assert.equal(report.observedRunnerSeconds, 3);
+  assert.equal(report.observedQueueSeconds, 1);
+  assert.equal(report.longestJobQueueSeconds, 1);
+  assert.equal(report.runnerSeconds, null);
+  assert.equal(report.queueSeconds, null);
+  assert.equal(report.wallClockSeconds, null);
+});
