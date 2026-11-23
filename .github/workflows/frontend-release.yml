@@ -188,6 +188,12 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+    env:
+      # Read-only checkout is mounted from the host with a different UID.
+      # Trust only this exact checkout for Git calls launched by build scripts.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
     timeout-minutes: 30
     permissions:
       contents: read
