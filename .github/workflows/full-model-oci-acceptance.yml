@@ -19,6 +19,19 @@ on:
       - modules/**
       - package.json
       - packages/**
+      # Unit/contract fixtures are not packaged into either runtime profile.
+      - '!app/**/test/**'
+      - '!app/**/tests/**'
+      - '!app/**/*.test.*'
+      - '!app/**/*.spec.*'
+      - '!modules/**/test/**'
+      - '!modules/**/tests/**'
+      - '!modules/**/*.test.*'
+      - '!modules/**/*.spec.*'
+      - '!packages/**/test/**'
+      - '!packages/**/tests/**'
+      - '!packages/**/*.test.*'
+      - '!packages/**/*.spec.*'
       - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
