@@ -41,7 +41,8 @@ export class PersistenceSaveConflictJournalError extends Error {
 }
 
 function isConflict(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "status" in error && (error as { status?: unknown }).status === 409);
+  return Boolean(error && typeof error === "object" && "status" in error &&
+    ((error as { status?: unknown }).status === 409 || (error as { status?: unknown }).status === 412));
 }
 
 /** Coordinates the single durable sequence shared by automatic, explicit and replayed saves. */
