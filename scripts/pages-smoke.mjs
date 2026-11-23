@@ -67,6 +67,10 @@ async function assertReflow(page, label) {
 // A page can have no document-level overflow while clipping an individual SHA.
 // Verify the actual text geometry and clipboard result, not a particular CSS rule.
 async function assertVisibleCopyableSha(page, selector, expected, label) {
+  const sentinel = 'codexia-clipboard-sentinel';
+  assert.notEqual(sentinel, expected);
+  await page.evaluate(value => navigator.clipboard.writeText(value), sentinel);
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), sentinel, `${label}: clipboard preflight failed`);
   const locator = page.locator(selector);
   assert.equal(await locator.count(), 1, `${label}: expected one SHA`);
   await locator.scrollIntoViewIfNeeded();
