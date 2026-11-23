@@ -104,5 +104,5 @@ test('the same public Web OAuth settings govern promotion, fallback builds, and 
   assert.deepEqual(staticConfig.env,Object.assign({},staticConfig.env,expected));
   assert.ok(staticAcceptance);
   assert.equal(staticAcceptance.if,undefined);
-  for(const path of ['scripts/frontend-oauth-config.mjs','scripts/frontend-oauth-config.test.mjs']) assert.ok(releasePaths.includes(path),path);
+  for(const path of ['scripts/build/frontend/oauth-config.mjs','scripts/build/frontend/oauth-config.test.mjs']) assert.ok(releasePaths.includes(path),path);
 });

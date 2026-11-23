@@ -40,10 +40,11 @@ export function buildAuthorBrowserAssets(
   if (build.status !== 0) throw new Error(`Author browser fixture build failed:\n${build.stdout}\n${build.stderr}`);
 }
 
-export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort, frontendSource }: {
+export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort, apiHostname, frontendSource }: {
   databaseUrl: string;
   profile: string;
   apiPort?: number;
+  apiHostname?: "localhost" | "127.0.0.1";
   frontendSource?: string;
 }): Promise<BetterAuthFixture> {
   const stateDirectory = await mkdtemp(join(tmpdir(), "codexia-author-browser-"));
@@ -58,6 +59,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
       databaseUrl,
       staticDirectory: assets,
       ...(apiPort === undefined ? {} : { apiPort }),
+      ...(apiHostname === undefined ? {} : { apiHostname }),
       usePostgresPersistence: true,
       appProfile: await browserServerProfile(profile, join(stateDirectory, "module-cache")),
     });
