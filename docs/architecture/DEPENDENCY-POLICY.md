@@ -24,6 +24,14 @@
 - **更新の可否は「連動更新」「再現された阻害による一時保留」「更新待ち」「削除・再評価」「制約根拠未確認」に区別する。** 依存している実行環境・peer API・型・生成物を切り離して更新しない。古い版が必要な場合は、再現できる阻害・保持範囲・解除条件を当該PRへ、継続的な採用条件を[台帳](DEPENDENCY-INVENTORY.md)へ記録する。
 - **非JS依存も対象**とする。SwiftPMのexact、Ansibleの`==`、GitHub Actions、OCIイメージdigest、Node/pnpmおよび複数のlockfileの整合を同様に審査する。
 
+### pnpm Catalog と依存の実行区分
+
+- pnpmワークスペースで複数利用される外部ライブラリの**共通バージョン指定**は `pnpm-workspace.yaml` の `catalogs.production`・`catalogs.development` に集約する。ワークスペース内の `package.json` は `catalog:production`／`catalog:development` を参照する。Catalogは版を管理するための仕組みであり、インストール／配布への採否を決める機構ではない。
+- **実行時・本番依存は各ワークスペースの `dependencies`、型・ビルド・テスト専用依存は `devDependencies` が正本**とする。Catalog名とフィールドを必ず対応させる。実行時利用のあるライブラリをキャッシュやバンドルサイズだけを理由にdevへ移動しない。型定義は原則devに保ち、Core/Full OCIの実配布閉包を別途検査する。
+- **実行時にマニフェストの依存宣言文字列をバージョン識別として利用する実装は、正規のパッケージメタデータ参照へ移行するまでCatalog化しない。** Catalog参照文字列が製品のAPI出力やモデルIDに混入してはならない。
+- 互換範囲が異なるpeer依存は、Catalogへの一律統合で契約を広げたり狭めたりしない。共通の候補がなく単一ワークスペースでしか利用されない依存や、`workspace:`・`file:`等のローカル参照は、必要性が認められる限り宣言元に保持する。
+- Catalog・manifest・lockfileは同時更新し、`pnpm install --frozen-lockfile`、workspace型検査、Core/Full実ビルド、API認証とDesktop E2E、OCIの本番依存閉包で整合性を検証する。DependabotのCatalog更新検知を維持し、Catalog導入により検証義務やリリース証拠を省略しない。独立したnpm lockfile（Edge／移行完了までの既存Native）はこのpnpm Catalogの対象外とする。
+
 ## Desktop Web技術選定（確定・未実装）
 
 Desktop Reactは **TypeScript 7 + Vite 8 + vanilla-extract** を正本とする。TypeScript 7のnative型検査を必須とし、既知のNode型解決障害を修正する。Vite 8を維持し、Rsbuild/StyleX/Tailwind/Panda/Bootstrapは本移行の採用対象としない。CSSは `@vanilla-extract/css` の型付きテーマ／トークン、`@vanilla-extract/recipes` のvariants、`@vanilla-extract/vite-plugin` のビルド統合を採用する。既存CSSは段階的に置換して不要分を削除し、重複した恒久スタイル正本を設けない。SwiftUI Nativeは独立したフロントエンドである。

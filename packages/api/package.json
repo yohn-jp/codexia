@@ -33,19 +33,19 @@
   },
   "dependencies": {
     "@better-auth/core": "1.7.26",
-    "@better-auth/oauth-provider": "1.7.26",
-    "@better-auth/passkey": "1.7.26",
+    "@better-auth/oauth-provider": "catalog:production",
+    "@better-auth/passkey": "catalog:production",
     "@codexia/contracts": "workspace:*",
     "@codexia/core": "workspace:*",
     "@codexia/module-runtime": "workspace:*",
     "@codexia/persistence-contracts": "workspace:*",
     "@codexia/persistence-postgres": "workspace:*",
     "@simplewebauthn/server": "13.3.3",
-    "better-auth": "1.7.26",
+    "better-auth": "catalog:production",
     "fastify": "^5.12.8",
     "jose": "6.2.18",
     "pg": "8.23.1",
-    "zod": "4.6.7"
+    "zod": "catalog:production"
   },
   "files": [
     "dist"

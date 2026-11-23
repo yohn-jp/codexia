@@ -31,9 +31,9 @@
   "dependencies": {
     "@codexia/contracts": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
-    "yaml": "^2.9.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
+    "yaml": "catalog:production",
+    "react": "catalog:production",
+    "react-dom": "catalog:production",
     "@codexia/module-runtime": "workspace:*"
   },
   "codexiaModule": {
