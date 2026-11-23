@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { expect, test, type Request, type Route } from "@playwright/test";
 import { expectServerSaved, manuscriptEditor } from "./postgres-fixture";
+import { buildAuthorBrowserAssets } from "./author-oauth-server";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
 import { startBetterAuthFixture, type BootstrapRegistration } from "../../packages/api/test/fixtures/better-auth-server.js";
 
-const appAssets = mkdtempSync(join(tmpdir(), "codexia-oauth-web-assets-"));
+const appAssetsRoot = mkdtempSync(join(tmpdir(), "codexia-oauth-web-assets-"));
+const appAssets = join(appAssetsRoot, "assets");
 const fixtureDatabaseUrl = process.env.CODEXIA_WEB_OAUTH_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
-test.afterAll(() => rmSync(appAssets, { recursive: true, force: true }));
+test.afterAll(() => rmSync(appAssetsRoot, { recursive: true, force: true }));
 
 interface SeenRequest {
   pathname: string;
@@ -60,27 +61,9 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
   });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
-    const buildEnvironment = {
-      ...process.env,
-      CODEXIA_PROFILE: process.env.CODEXIA_PROFILE ?? "core",
-      CODEXIA_VITE_BUILD_OUTPUT_ROOT: appAssets,
-      VITE_CODEXIA_OAUTH_ISSUER: fixture.issuer,
-      VITE_CODEXIA_OAUTH_CLIENT_ID: fixture.webClientId,
-      VITE_CODEXIA_API_AUDIENCE: fixture.audience,
-      VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: `${fixture.apiOrigin}/desktop`,
-      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: `${fixture.apiOrigin}/mobile`,
-      VITE_CODEXIA_OAUTH_SCOPES: "openid codexia:api",
-    };
-    // Never mutate app/dist: other Playwright shards concurrently serve its
-    // standard (non-OAuth) shells from the same checkout.
-    for (const ui of ["launcher", "desktop", "mobile", "oauth"]) {
-      const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build"], {
-        cwd: resolve("."),
-        encoding: "utf8",
-        env: { ...buildEnvironment, CODEXIA_UI: ui },
-      });
-      assert.equal(build.status, 0, `Isolated ${ui} OAuth build failed:\n${build.stdout}\n${build.stderr}`);
-    }
+    // Use the same exact-source, isolated OAuth build as all other browser shards.
+    // The dedicated OAuth acceptance still exercises the complete PKCE and consent flow.
+    buildAuthorBrowserAssets(fixture, process.env.CODEXIA_PROFILE ?? "core", appAssets);
 
     const discoveryResponse = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const request = httpRequest(`${fixture.apiOrigin}/.well-known/oauth-authorization-server/api/auth`, (response) => {
