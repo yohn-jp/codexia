@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
@@ -47,6 +52,30 @@ function ordinaryArtifacts() {
   }
   return artifacts;
 }
+
+test('single-artifact certification downloads retain the selected group directory', t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-evidence-selection-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const planPath = path.join(directory, 'plan.json');
+  const inventoryPath = path.join(directory, 'inventory.json');
+  const outputPath = path.join(directory, 'github-output');
+  const affected = createVerificationPlan({
+    files: ['scripts/strictdoc/surface-inventory.json'], event: 'pull_request', sha: sourceSha, base: 'b'.repeat(40),
+  });
+  assert.deepEqual(affected.groups, ['types-tests']);
+  writeFileSync(inventoryPath, JSON.stringify({ artifacts: ordinaryArtifacts(), jobs: successfulJobs, identity }));
+  for (const [selectedPlan, expectedSubdirectory] of [[affected, 'ci-evidence-types-tests'], [plan, '']]) {
+    writeFileSync(planPath, JSON.stringify(selectedPlan));
+    writeFileSync(outputPath, '');
+    execFileSync(process.execPath, [fileURLToPath(new URL('./select-ci-evidence.mjs', import.meta.url))], {
+      env: { ...process.env, GITHUB_OUTPUT: outputPath, GITHUB_RUN_ID: runId, CODEXIA_EXPECTED_SHA: sourceSha,
+        CODEXIA_CI_PLAN_PATH: planPath, CODEXIA_CI_INVENTORY_PATH: inventoryPath },
+    });
+    const ids = selectLatestEvidenceArtifacts(selectedPlan, ordinaryArtifacts(), successfulJobs, identity)
+      .map(item => item.id).join(',');
+    assert.equal(readFileSync(outputPath, 'utf8'), `artifact-ids=${ids}\nartifact-subdirectory=${expectedSubdirectory}\n`);
+  }
+});
 
 test('selects plan and evidence by latest successful job window and artifact created_at, not ID', () => {
   const artifacts = ordinaryArtifacts().filter(item => item.name !== 'ci-evidence-oci-core' && item.name !== 'ci-plan');
