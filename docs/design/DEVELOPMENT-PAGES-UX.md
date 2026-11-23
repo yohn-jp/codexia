@@ -147,6 +147,27 @@ flowchart TB
 
 `/ci/`は動的APIに依存する**読み取り専用観測画面**であり、マージ許可・リリース判定UIにしない。現行のPR選択、ジョブタイムライン、blocking chain、最長step、診断JSONコピーを維持する。未取得のtask時間を「0秒」と表示しない。必要なtask-level telemetryは別途収集の承認、権限・データサイズ・プライバシーの検証が必要である。
 
+**CI-01 のPR・リビジョン選択契約:** 初期表示では公開 Actions API の直近100 workflow runを列挙し、PR番号と実行済みSHAで重複を統合する。「残りのPR・リビジョンを全件読み込む」は追加ページを順に取得し、既存の選択・深いURLを維持する。固定20件制限、Verify未観測を理由とする非表示は禁止する。PR対応を特定できないrunは除外数を明示し、APIレート制限・検索上限・履歴保持による未取得を「全件取得成功」と表示しない。ジョブ・ステップ詳細は選択時のみ取得し、未選択リビジョンの時間は未計測。取得失敗時も読み込み済み一覧を失わず、再試行できること。
+
+```mermaid
+flowchart TD
+    ENTRY["CI-01 /ci/"] --> INDEX["直近100 runを取得<br/>PR番号 + executed SHAで一覧化"]
+    INDEX --> SELECT["PR・リビジョンを選択"]
+    INDEX --> MORE{"追加のrunがあるか"}
+    MORE -->|あり・利用者が全件読込| PAGE["次のAPIページを取得・重複排除"]
+    PAGE --> INDEX
+    MORE -->|なし| LIMIT["APIが返した履歴の読込完了<br/>未解決run・履歴制約を明示"]
+    PAGE -->|429/403等| PARTIAL["取得済み一覧を維持<br/>部分取得・再試行"]
+    SELECT --> DETAIL["選択リビジョンのジョブ詳細を取得"]
+    DETAIL -->|成功| METRIC["Timeline / Verify / 診断JSON"]
+    DETAIL -->|Verifyなし| UNKNOWN["NO VERIFY・比較対象外"]
+    DETAIL -->|失敗| RETRY["結果は未計測・再試行"]
+    METRIC --> SELECT
+    UNKNOWN --> SELECT
+    RETRY --> DETAIL
+```
+
+
 ### 図4: CI観測から実行証拠へ
 
 ```mermaid
