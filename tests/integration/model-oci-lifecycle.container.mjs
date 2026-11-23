@@ -503,6 +503,7 @@ async function runLifecycle() {
     await persistence.transaction(tx => tx.createProject({ id: PROJECT_ID, title: projectTitle }));
     await seedModelFixture(store, PROJECT_ID, files);
     failureStage = "oauth-startup";
+    const apiUrl = new URL("file:///app/node_modules/@codexia/api/dist/server.js");
     const { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } = await import(new URL("./better-auth.js", apiUrl).href);
     const { readBetterAuthMigrationConfig } = await import(new URL("./migrate-auth.js", apiUrl).href);
     const authConfig = readBetterAuthMigrationConfig();
