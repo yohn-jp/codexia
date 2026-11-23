@@ -865,6 +865,10 @@ async function runVerifier(args) {
         htmlPath: staticOutput.htmlPath,
         jsonPath: staticOutput.jsonPath,
         stagedFileCount: staticOutput.files.length,
+        rawFiles: await Promise.all(staticOutput.files.filter(file => file.startsWith('html/') || file.startsWith('json/')).sort().map(async name => {
+          const bytes = await readFile(path.join(finalOutput, name));
+          return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+        })),
         redactions: ['Exact absolute repository root string in generated text artifacts replaced with REPOSITORY_ROOT'],
         deterministic: true,
         normalizationRules: [

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { assertCatalogMatches, buildSourceIdentity, parseTapOutput } from "../../../../scripts/postgres-contract/contract-runner.mjs";
 
@@ -33,13 +32,14 @@ test("source identity binds sorted files, exact contents, and the checked out re
       { path: "migrations/0001-initial.sql", contents: "CREATE TABLE project(id uuid);\n" },
     ],
   });
-  const expectedFiles = [
-    { path: "migrations/0001-initial.sql", sha256: createHash("sha256").update("CREATE TABLE project(id uuid);\n").digest("hex") },
-    { path: "tests/schema.sql", sha256: createHash("sha256").update("SELECT 1;\n").digest("hex") },
-  ];
+  // Vectors from sha256sum over each literal SQL file and the compact canonical
+  // JSON file list in migration-first order, with no terminating LF on the JSON.
   assert.equal(identity.sourceSha, "a".repeat(40));
-  assert.deepEqual(identity.files, expectedFiles);
-  assert.equal(identity.filesSha256, createHash("sha256").update(JSON.stringify(expectedFiles)).digest("hex"));
+  assert.deepEqual(identity.files, [
+    { path: "migrations/0001-initial.sql", sha256: "130751361a9d0e32db24081ea4f5bf4d2b2a741d811e0dcb53869e7bb90e1d13" },
+    { path: "tests/schema.sql", sha256: "b4e0497804e46e0a0b0b8c31975b062152d551bac49c3c2e80932567b4085dcd" },
+  ]);
+  assert.equal(identity.filesSha256, "05f9805dd92a1f2c9b0048932ddb297520b98bed8b3acee2bfe160aaa127d6ee");
 });
 
 test("source identity changes when an input changes and contains no connection details", () => {

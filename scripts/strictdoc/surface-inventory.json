@@ -103,6 +103,11 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/auth/codexia/setup/status",
+      "classification": "candidate REQ-AUTH-004; production activation observed only after separate acceptance"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/health",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
     },
@@ -184,7 +189,7 @@
     {
       "kind": "route",
       "id": "POST /api/auth/codexia/owner-session",
-      "classification": "candidate REQ-AUTH-005 / API-OWNER-SESSION-001: cookie-only owner confirmation, no API bearer elevation; conformance remains unverified"
+      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
     },
     {
       "kind": "route",

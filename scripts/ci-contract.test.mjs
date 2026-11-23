@@ -104,6 +104,17 @@ test('HTTP contract sources select the dedicated unit and typecheck tasks', () =
   assert.ok(matchesFullModelOciPath('packages/api/src/server.ts'));
   assert.ok(matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
 });
+test('OpenAPI changes also select the Desktop Web client regeneration check', () => {
+  const plan = createVerificationPlan({
+    files: ['packages/http-contract/openapi/codexia.openapi.yaml'],
+    event: 'pull_request',
+    sha: 'a'.repeat(40),
+    base: 'b'.repeat(40),
+  });
+  assert.equal(plan.mode, 'affected');
+  assert.ok(plan.tasks.includes('unit-http-contract'));
+  assert.ok(plan.tasks.includes('unit-app'));
+});
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {
     group: 'verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}',
@@ -125,7 +136,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-plan');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
-  const evidenceDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-evidence');
+  const evidenceDownload = gate.steps.find(step => step.name === 'Download selected execution evidence by exact artifact ID');
   assert.ok(planSelector);
   assert.ok(planDownload);
   assert.match(planSelector.run, /node scripts\/select-ci-plan\.mjs/);
@@ -140,6 +151,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.equal(evidenceSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(evidenceDownload);
   assert.equal(evidenceDownload.with['artifact-ids'], '${{ steps.select-evidence.outputs.artifact-ids }}');
+  assert.equal(evidenceDownload.with.path, '${{ runner.temp }}/ci-evidence/${{ steps.select-evidence.outputs.artifact-subdirectory }}');
   assert.ok(gate.steps.indexOf(planSelector) < gate.steps.indexOf(planDownload));
   assert.ok(gate.steps.indexOf(planDownload) < gate.steps.indexOf(evidenceSelector));
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));

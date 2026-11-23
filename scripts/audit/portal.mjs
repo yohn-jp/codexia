@@ -7,6 +7,8 @@ import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, 
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
+import { verifySpecifications } from './specifications.mjs';
+import { parseGeneratedMermaid } from '../architecture/contract.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const CANONICAL_ORIGIN = 'https://yohn-jp.github.io/codexia';
@@ -42,13 +44,37 @@ function page(site, route) {
   return join(site, path);
 }
 
+function likec4Provenance(site, sourceSha) {
+  const atlasPath = join(site, 'architecture', 'manifest.json');
+  if (!existsSync(atlasPath)) return undefined;
+  const atlas = JSON.parse(readPageFile(atlasPath, 'utf8'));
+  const diagram = atlas.diagrams?.find(item => item.id === 'system-1');
+  assert.ok(diagram, 'LikeC4 system-1 view missing');
+  assert.equal(atlas.sourceSha, sourceSha, 'LikeC4 Atlas source mismatch');
+  const paths = { model:'docs/architecture/likec4/model.likec4', derivative:'docs/architecture/likec4/generated/system-overview.mmd', lock:'scripts/architecture/package-lock.json' };
+  const atSource = path => execFileSync('git', ['show', `${sourceSha}:${path}`]);
+  const model = atSource(paths.model), derivative = atSource(paths.derivative), lock = atSource(paths.lock);
+  const parsed = parseGeneratedMermaid(derivative.toString('utf8'));
+  assert.equal(parsed.sourceSha256, sha256(model), 'LikeC4 derivative source digest mismatch');
+  assert.equal(diagram.sourceModel, paths.model, 'LikeC4 model path mismatch');
+  assert.equal(diagram.sourceModelSha256, sha256(model), 'LikeC4 model digest mismatch');
+  assert.equal(diagram.image, 'svg/system-1.svg', 'LikeC4 SVG path mismatch');
+  const packageLock = JSON.parse(lock.toString('utf8'));
+  const version = packageLock.packages?.['']?.dependencies?.likec4;
+  assert.equal(version, '1.61.0', 'Unexpected LikeC4 generator version');
+  assert.equal(packageLock.packages?.['node_modules/likec4']?.version, version, 'LikeC4 lock version mismatch');
+  const svg = readPageFile(join(site,'architecture','svg','system-1.svg'));
+  return { sourceSha, generatedAt: new Date().toISOString(), publication:'public', model:{path:paths.model,sha256:sha256(model)}, derivative:{path:paths.derivative,sha256:sha256(derivative)}, generator:{name:'likec4',version,lockPath:paths.lock,lockSha256:sha256(lock)}, output:{path:'architecture/svg/system-1.svg',sha256:sha256(svg)} };
+}
+
 function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
-  const rootLinks = ['architecture/','graph/','ci/','security/','audit/','manifest.json',
+  const rootLinks = ['requirements/html/','architecture/','graph/','ci/','security/','audit/','manifest.json',
     ...snapshotBranches.flatMap(sha => [`snapshots/${sha}/`,`snapshots/${sha}/repomix.json`]), ...reviewBranches.map(sha => `reviews/${sha}/index.html`)];
   const routes = [
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
+    { route:'/requirements/html/', label:'Requirements and traceability', description:'StrictDoc requirements and trace matrix; source references are not test results.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/html/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs/requirements', internalLinks:existsSync(page(site,'/requirements/html/')) ? ['../../','requirements/REQUIREMENT-REGISTER.md-TRACE.html'] : ['../../'] },
     { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
     { route:'/graph/', label:'Code Map', description:'Static code relationships extracted by Graphify.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['../','communities.html'] },
     { route:'/ci/', label:'CI Observatory', description:'Public GitHub Actions run and job observations, fetched by the browser.', category:'Verification', generationStatus: existsSync(page(site,'/ci/')) ? 'ready':'unavailable', coverageStatus:'live-public-actions-api', dataKind:'browser-live', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/actions', internalLinks:['../'] },
@@ -64,7 +90,8 @@ function makeRoutes(site, sourceSha, origin, audit) {
     const review=audit.reviews[sha], outputs=JSON.parse(readFileSync(join(site,'reviews',sha,'manifest.json'),'utf8')).outputs;
     routes.push({ route:`/reviews/${sha}/`,label:`Review Materials ${sha.slice(0,12)}`,description:'OCR-selected review input materials. These are not AI review findings.',category:'Audit',sourceSha:sha,generationStatus:'ready',coverageStatus:review.status,dataKind:'branch-head-snapshot',observedAt:audit.observedAt,externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sha}`,internalLinks:[`../../audit/#sha-${sha}`,'manifest.json',...outputs.map(item=>item.name)] });
   }
-  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), routes };
+  const likec4=likec4Provenance(site,sourceSha);
+  return { schemaVersion:1, siteOrigin:origin, sourceSha, generatedAt:new Date().toISOString(), ...(likec4 ? {likec4} : {}), routes };
 }
 
 function renderPortal(manifest,audit) {
@@ -83,7 +110,7 @@ function renderPortal(manifest,audit) {
     'branch-head-snapshots':'Observed branch heads',
   };
   const label=value=>esc(labels[value]??value);
-  const cards = manifest.routes.filter(x => ['/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
+  const cards = manifest.routes.filter(x => ['/requirements/html/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
     const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
@@ -125,7 +152,7 @@ function generateSnapshotPages(site,audit) {
 }
 
 function renderUnavailable(item,sourceSha) {
-  const local=item.route==='/graph/communities.html'?'../':item.route.split('/').filter(Boolean).length>2?'../../':'../';
+  const local=item.route==='/graph/communities.html'?'../':item.route.split('/').filter(Boolean).length>=2?'../../':'../';
   const fallback=item.externalDocumentationUrl?`<a class="cx-pages-action" href="${esc(item.externalDocumentationUrl)}">Open the related GitHub source</a>`:'';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(item.label)} unavailable</title></head><body><main class="cx-pages-container cx-pages-main"><section class="cx-pages-empty"><h1>${esc(item.label)} unavailable</h1><p>This page was not generated for Pages build source SHA <code class="cx-pages-code">${esc(sourceSha)}</code>.</p><p>Return to the portal to open another project route.</p><div class="cx-pages-actions"><a class="cx-pages-action cx-pages-action--primary" href="${local}">Return to the Development Portal</a>${fallback}</div></section></main></body></html>\n`;
 }
@@ -163,7 +190,7 @@ function inspectSecrets(files) {
 function localTarget(site, htmlPath, href, origin) {
   if (!href || /^(?:mailto:|tel:|data:|javascript:)/iu.test(href)) return null;
   const pageRel = relative(site, htmlPath).split(sep).join('/');
-  const pageDir = pageRel.includes('/') ? pageRel.slice(0,pageRel.lastIndexOf('/')+1) : '';
+  const pageDir = pageRel;
   let targetUrl;
   try { targetUrl=new URL(href,origin+'/'+pageDir); }
   catch { throw new Error('Invalid local HTML link'); }
@@ -297,7 +324,7 @@ function verifyAuditArtifacts(site,audit) {
 }
 
 function validateRegistry(site,manifest,audit,origin) {
-  const base=['/','/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
+  const base=['/','/requirements/html/','/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
   const expected=[...base,...snapshotRoutes,...reviewRoutes];
@@ -337,10 +364,20 @@ function validateRegistry(site,manifest,audit,origin) {
       assertFragment(local);
     }
   }
+  const requirements=manifest.routes.find(item=>item.route==='/requirements/html/');
+  if (requirements.generationStatus === 'ready') verifySpecifications(site, sourceSha);
   const architecture=manifest.routes.find(item=>item.route==='/architecture/');
   if (architecture.generationStatus==='ready') {
     const atlas=JSON.parse(readFileSync(join(site,'architecture','manifest.json'),'utf8'));
     assert.ok(atlas.sourceSha===sourceSha,'Architecture source SHA differs from Pages build');
+    const expectedLikec4=likec4Provenance(site,sourceSha);
+    if (expectedLikec4) {
+      assert.ok(manifest.likec4, 'LikeC4 publication provenance missing');
+      const {generatedAt:ignored, ...expected}=expectedLikec4;
+      const {generatedAt, ...recorded}=manifest.likec4;
+      assert.ok(!Number.isNaN(Date.parse(generatedAt)), 'LikeC4 generation time invalid');
+      assert.deepEqual(recorded,expected,'LikeC4 publication digest or provenance mismatch');
+    } else assert.equal(manifest.likec4,undefined,'LikeC4 provenance has no published view');
     assert.ok(Array.isArray(atlas.diagrams) && atlas.diagrams.length>0,'Architecture diagram manifest is empty');
     const images=[];
     const diagramIds=[];
@@ -432,7 +469,7 @@ export function verify(siteDir, originValue) {
     for (const match of html.matchAll(/\b(?:href|src)\s*=\s*(["'])(.*?)\1/giu)) {
       const target=localTarget(site,absolute,match[2],origin);
       if (target) {
-        assert.ok(existsSync(target.path),'Broken internal link in generated HTML');
+        assert.ok(existsSync(target.path),`Broken internal link in generated HTML: ${rel} ${match[2]}`);
         assertFragment(target);
       }
     }

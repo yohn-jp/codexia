@@ -74,7 +74,7 @@ test('identifies invalid reverse-inventory source paths by their inventory kind'
   await assert.rejects(discoverSourceInventory(root, { routes: ['directory'] }), /Inventory route source.*directory/u);
 });
 
-test('rejects FIFO references and inventory paths without blocking', { skip: process.platform === 'win32', timeout: 5000 }, async (t) => {
+test('rejects FIFO relations and inventory paths without blocking', { skip: process.platform === 'win32', timeout: 5000 }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-fifo-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const fifo = path.join(root, 'named.pipe');
