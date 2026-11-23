@@ -14,7 +14,7 @@ test("browser version stays under the author application and only retries a lega
     if (path === "/api/browser/version" && legacyOrigin) {
       return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
     }
-    return Response.json({ name: "codexia", version: "0.1.0", hosted: false, profile: "full" });
+    return Response.json({ name: "codexia", version: "0.1.0", profile: "full" });
   });
 
   await api.version();
@@ -32,24 +32,19 @@ test("browser version stays under the author application and only retries a lega
 
 test("OAuth API requests send a bearer token without ambient cookies", async () => {
   const originalFetch = globalThis.fetch;
-  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   let requestInit: RequestInit | undefined;
-  Object.defineProperty(globalThis, "document", { configurable: true, value: { cookie: "__Host-praetorium_csrf=csrf-token" } });
   globalThis.fetch = async (_input, init) => {
     requestInit = init;
-    return Response.json({ name: "codexia", version: "0.1.0", hosted: false, profile: "core" });
+    return Response.json({ name: "codexia", version: "0.1.0", profile: "core" });
   };
   setOAuthAccessToken("short-lived-api-token");
   try {
     await api.version();
     assert.equal(new Headers(requestInit?.headers).get("Authorization"), "Bearer short-lived-api-token");
-    assert.equal(new Headers(requestInit?.headers).has("X-CSRF-Token"), false);
     assert.equal(requestInit?.credentials, "omit");
   } finally {
     setOAuthAccessToken(null);
     globalThis.fetch = originalFetch;
-    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
-    else Reflect.deleteProperty(globalThis, "document");
   }
 });
 
@@ -74,16 +69,14 @@ test("OAuth API admission preserves 401, 403, and 503 without refresh or downgra
 });
 
 test("native API requests use only the configured HTTPS transport and omit WebView credentials", async () => {
-  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   const nativeCalls: Array<{ url: string; init: RequestInit }> = [];
   const tokenRequests: string[] = [];
-  Object.defineProperty(globalThis, "document", { configurable: true, value: { cookie: "__Host-praetorium_csrf=must-not-be-read-or-sent" } });
   configureNativeApiSession({
     apiOrigin: "https://api.example.test",
     accessTokenFor: async (requestUrl) => { tokenRequests.push(requestUrl); return "native-api-access-token"; },
     fetchRequest: async (url, init) => {
       nativeCalls.push({ url, init });
-      return Response.json({ name: "codexia", version: "0.1.0", hosted: false, profile: "core" });
+      return Response.json({ name: "codexia", version: "0.1.0", profile: "core" });
     },
   });
   try {
@@ -91,12 +84,9 @@ test("native API requests use only the configured HTTPS transport and omit WebVi
     assert.deepEqual(tokenRequests, ["https://api.example.test/api/version"]);
     assert.equal(nativeCalls[0]?.url, "https://api.example.test/api/version");
     assert.equal(new Headers(nativeCalls[0]?.init.headers).get("Authorization"), "Bearer native-api-access-token");
-    assert.equal(new Headers(nativeCalls[0]?.init.headers).has("X-CSRF-Token"), false);
     assert.equal(nativeCalls[0]?.init.credentials, "omit");
   } finally {
     clearNativeApiSession();
-    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
-    else Reflect.deleteProperty(globalThis, "document");
   }
 });
 
@@ -127,193 +117,24 @@ test("native job streaming reports unsupported instead of using WebView fetch or
   } finally { clearNativeApiSession(); }
 });
 
-test("concurrent expired Hosted requests share the rotating refresh exchange", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  let projectRequests = 0;
-  let refreshRequests = 0;
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: undefined } });
-  globalThis.fetch = async (input) => {
+test("browser mutations never retry automatically after authorization or response loss", async (t) => {
+  setOAuthAccessToken("author-token");
+  t.after(() => setOAuthAccessToken(null));
+  const requests: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/_platform/refresh") {
-      refreshRequests += 1;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      return Response.json({ refreshed: true });
-    }
-    if (path === "/api/v1/persistence/projects?limit=100") {
-      projectRequests += 1;
-      return projectRequests <= 2
-        ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json({ projects: [], nextCursor: null });
-    }
-    throw new Error(`Unexpected request: ${path}`);
-  };
-  try {
-    await api.version();
-    const results = await Promise.all([api.persistenceProjectPage(100), api.persistenceProjectPage(100)]);
-    assert.deepEqual(results, [{ projects: [], nextCursor: null }, { projects: [], nextCursor: null }]);
-    assert.equal(refreshRequests, 1);
-    assert.equal(projectRequests, 4);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
-    else Reflect.deleteProperty(globalThis, "navigator");
-  }
-});
-
-test("concurrent Hosted tabs serialize refresh-cookie rotation", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  let projectRequests = 0;
-  let refreshRequests = 0;
-  let grantFresh = false;
-  let lockTail = Promise.resolve();
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { locks: { request: async (_name: string, callback: () => Promise<Response>) => {
-      const task = lockTail.then(callback, callback);
-      lockTail = task.then(() => undefined, () => undefined);
-      return task;
-    } } },
-  });
-  globalThis.fetch = async (input) => {
-    const path = String(input);
-    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/_platform/refresh") {
-      refreshRequests += 1;
-      grantFresh = true;
-      return Response.json({ refreshed: true });
-    }
-    if (path === "/api/v1/persistence/projects?limit=100") {
-      projectRequests += 1;
-      return !grantFresh
-        ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json({ projects: [], nextCursor: null });
-    }
-    throw new Error(`Unexpected request: ${path}`);
-  };
-  try {
-    await api.version();
-    assert.deepEqual(await Promise.all([api.persistenceProjectPage(100), api.persistenceProjectPage(100)]), [{ projects: [], nextCursor: null }, { projects: [], nextCursor: null }]);
-    assert.equal(refreshRequests, 1);
-    assert.equal(projectRequests, 5);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
-    else Reflect.deleteProperty(globalThis, "navigator");
-  }
-});
-
-test("Hosted dependency authorization failures do not trigger browser grant refresh", async () => {
-  const originalFetch = globalThis.fetch;
-  let refreshRequests = 0;
-  let redirectedToReauth = false;
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { assign: (url: string) => { redirectedToReauth = url === "/_platform/reauth"; } } },
-  });
-  globalThis.fetch = async (input) => {
-    const path = String(input);
-    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/api/v1/persistence/projects/project-1") {
-      return Response.json({ error: "Remote repository authorization failed", code: "REMOTE_AUTHORIZATION_FAILED" }, { status: 401 });
-    }
-    if (path === "/_platform/refresh") {
-      refreshRequests += 1;
-      return Response.json({ error: "Refresh grant unavailable" }, { status: 401 });
-    }
-    throw new Error(`Unexpected request: ${path}`);
-  };
-  try {
-    await api.version();
-    await assert.rejects(api.persistenceProject("project-1"), (error: unknown) =>
-      error instanceof Error && error.message === "Remote repository authorization failed");
-    assert.equal(refreshRequests, 0);
-    assert.equal(redirectedToReauth, false);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
-    else Reflect.deleteProperty(globalThis, "window");
-  }
-});
-
-test("transient Hosted refresh failures preserve their error without reauthentication", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  let redirectedToReauth = false;
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { assign: (url: string) => { redirectedToReauth = url === "/_platform/reauth"; } } },
-  });
-  globalThis.fetch = async (input) => {
-    const path = String(input);
-    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/api/v1/persistence/projects?limit=100") return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
-    if (path === "/_platform/refresh") return Response.json({ error: "Gateway unavailable", code: "GATEWAY_UNAVAILABLE" }, { status: 503 });
-    throw new Error(`Unexpected request: ${path}`);
-  };
-  try {
-    await api.version();
-    await assert.rejects(api.persistenceProjectPage(100), (error: unknown) =>
-      error instanceof Error && "status" in error && error.status === 503 && error.message === "Gateway unavailable");
-    assert.equal(redirectedToReauth, false);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
-    else Reflect.deleteProperty(globalThis, "window");
-  }
-});
-
-test("Hosted mutation retries only after an explicit admission denial, never after response loss", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  let registrationRequests = 0;
-  let refreshRequests = 0;
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: undefined } });
-  globalThis.fetch = async (input) => {
-    const path = String(input);
-    if (path === "/api/browser/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
+    requests.push(path);
+    assert.equal(init?.method, "POST");
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer author-token");
     if (path === "/api/v1/persistence/projects") {
-      registrationRequests += 1;
-      return registrationRequests === 1
-        ? Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json({ project: { id: "project-1", title: "Novel", settings: {}, version: 1, createdAt: "2026-11-09", updatedAt: "2026-11-09" } });
+      return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
     }
-    if (path === "/_platform/refresh") {
-      refreshRequests += 1;
-      return Response.json({ refreshed: true });
-    }
-    throw new Error(`Unexpected request: ${path}`);
-  };
-  try {
-    await api.version();
-    assert.deepEqual(await api.createPersistenceProject({ title: "Novel" }), {
-      project: { id: "project-1", title: "Novel", settings: {}, version: 1, createdAt: "2026-11-09", updatedAt: "2026-11-09" },
-    });
-    assert.equal(registrationRequests, 2);
-    assert.equal(refreshRequests, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
-    else Reflect.deleteProperty(globalThis, "navigator");
-  }
-
-  let lostResponseRequests = 0;
-  globalThis.fetch = async (input) => {
-    if (String(input) === "/api/inbox/read-all") {
-      lostResponseRequests += 1;
-      throw new TypeError("connection reset after request send");
-    }
-    throw new Error(`Unexpected request: ${String(input)}`);
-  };
-  try {
-    await assert.rejects(api.markAllInboxRead(), /connection reset after request send/);
-    assert.equal(lostResponseRequests, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(path, "/api/inbox/read-all");
+    throw new TypeError("connection reset after request send");
+  });
+  await assert.rejects(api.createPersistenceProject({ title: "Novel" }), { status: 401, code: "UNAUTHORIZED" });
+  await assert.rejects(api.markAllInboxRead(), { message: "connection reset after request send" });
+  assert.deepEqual(requests, ["/api/v1/persistence/projects", "/api/inbox/read-all"]);
 });
 
 test("module snapshot requests only the active document revision", async () => {

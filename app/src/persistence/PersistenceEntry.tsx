@@ -17,8 +17,6 @@ export interface NativePersistenceAuth {
 export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null }) {
   const nativeShell = nativeAuth !== undefined;
   const [state, setState] = useState<EntryState>("checking");
-  const [accessMode, setAccessMode] = useState(false);
-  const [hostedMode, setHostedMode] = useState(false);
   const [oauthConfig, setOAuthConfig] = useState<OAuthWebConfig | null>(null);
   const [authorScope, setAuthorScope] = useState("owner");
   const [busy, setBusy] = useState(false);
@@ -37,24 +35,19 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     setMessage("");
     let versionChecked = false;
     try {
-      const version = await api.version();
+      await api.version();
       if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
-      setHostedMode(version.hosted);
-      setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
-      if (version.browserAuth === "cloudflare-access" && session.authorScope !== "owner") {
-        throw new Error("Cloudflare Accessの作者認証を確認できませんでした。");
-      }
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== "postgres") {
         throw new Error("PostgreSQL保存基盤が利用できません。Gitワークスペースへの切替は提供していません。");
       }
-      if (session.permissions && !session.permissions.some((permission) => permission === "write" || permission === "maintain" || permission === "admin")) {
+      if (!session.authorScope) {
         throw new Error("このアカウントには原稿編集権限がありません。");
       }
       if (sequence !== inspectSequenceRef.current) return;
-      const scope = session.authorScope || "owner";
+      const scope = session.authorScope;
       if (workspaceScopeRef.current !== null && workspaceScopeRef.current !== scope) throw new Error("認証された作者が変わりました。現在の下書きを保護してから再読み込みしてください。");
       workspaceScopeRef.current = scope;
       setAuthorScope(scope);
@@ -208,45 +201,11 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     }
   }
 
-  async function completeHostedLogout(): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      if (!await protectBeforeAuthTransition("ログアウト")) return;
-      setSessionBlocked(true);
-      await api.logoutHosted();
-      workspaceScopeRef.current = null;
-      setSessionBlocked(false);
-      setState("signed-out");
-    } catch (error) {
-      const detail = error instanceof Error ? ` ${error.message}` : "";
-      setMessage(`ログアウトの完了を確認できませんでした。原稿を保護したまま認証状態を再確認し、必要ならログアウトを再試行してください。${detail}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function completeAccessLogout(): Promise<void> {
-    if (!await protectBeforeAuthTransition("ログアウト")) return;
-    window.location.assign("/cdn-cgi/access/logout");
-  }
-
-  async function reenterHosted(): Promise<void> {
-    if (!protectionRef.current || !await protectionRef.current()) {
-      setMessage("入力を保護できないためHosted環境への移動を停止しました。接続を再確認してください。");
-      return;
-    }
-    window.location.assign("/_platform/reauth");
-  }
-
   if (state === "database") return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} hosted={hostedMode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (nativeShell) { void completeNativeLogout(); return; }
-        if (oauthConfig) { void completeWebOAuthLogout(); return; }
-        if (accessMode && !hostedMode) { void completeAccessLogout(); return; }
-        if (hostedMode) void completeHostedLogout();
+        if (oauthConfig) void completeWebOAuthLogout();
       }} />
     </div>
     {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
@@ -258,8 +217,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       {nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeSignIn()}>ネイティブ認証で再入場</button>}
       {nativeShell && nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeLogout()}>ログアウトを再試行</button>}
       {!nativeShell && oauthConfig && <button type="button" disabled={busy} onClick={() => void completeWebOAuthLogout()}>ログアウトを再試行</button>}
-      {!nativeShell && !oauthConfig && hostedMode && <button type="button" disabled={busy} onClick={() => void completeHostedLogout()}>ログアウトを再試行</button>}
-      {hostedMode && <button type="button" disabled={busy} onClick={() => void reenterHosted()}>Praetoriumから再入場</button>}
       <button type="button" disabled={busy} onClick={() => void (async () => {
         if (!protectionRef.current || !await protectionRef.current()) { setMessage("入力を保護できないため再読み込みを停止しました。接続を再確認してください。"); return; }
         window.location.reload();
@@ -274,24 +231,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       <p role="alert">{message}</p>
       <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
       <button type="button" disabled={busy} onClick={() => window.location.reload()}>ページを再読み込み</button>
-      <a href="/">画面選択へ戻る</a>
-    </section>
-  </main>;
-  if (hostedMode) return <main className={`pg-entry pg-${mode}`}>
-    <section className="pg-login" aria-labelledby="pg-hosted-entry-title">
-      <p className="eyebrow">Codexia · Hosted</p>
-      <h1 id="pg-hosted-entry-title">Praetoriumから再入場してください</h1>
-      <p>このHosted環境の認証はPraetorium Instance Accessが管理しています。GatewayからこのInstanceへ再入場してください。</p>
-      <a href="/_platform/reauth">Praetoriumから再入場</a>
-      <a href="/">画面選択へ戻る</a>
-    </section>
-  </main>;
-  if (accessMode && !oauthConfig) return <main className={`pg-entry pg-${mode}`}>
-    <section className="pg-login" aria-labelledby="pg-access-title">
-      <p className="eyebrow">Codexia</p>
-      <h1 id="pg-access-title">Cloudflare Accessで認証してください</h1>
-      <p>認証が確認できませんでした。ページを再読み込みして認証を確認してください。</p>
-      <button type="button" onClick={() => window.location.reload()}>再認証</button>
       <a href="/">画面選択へ戻る</a>
     </section>
   </main>;

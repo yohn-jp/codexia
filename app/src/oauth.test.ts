@@ -176,7 +176,7 @@ test("API origin resolver accepts only explicit API paths and an HTTPS origin", 
   assert.equal(apiRequestUrl("/api/session"), "/api/session");
   assert.equal(apiRequestUrl("/api/session", "https://api.example.test", "https://codexia.example.test"), "https://api.example.test/api/session");
   assert.equal(apiRequestUrl("/api/session", "https://codexia.example.test", "https://codexia.example.test"), "/api/session");
-  assert.throws(() => apiRequestUrl("/_platform/logout", "https://api.example.test"), /Only Codexia API paths/u);
+  assert.throws(() => apiRequestUrl("/oauth/consent", "https://api.example.test"), /Only Codexia API paths/u);
   assert.throws(() => apiRequestUrl("/api/session", "http://api.example.test"), /HTTPS/u);
   assert.throws(() => apiRequestUrl("/api/session", "https://api.example.test/v1"), /only an origin/u);
 });

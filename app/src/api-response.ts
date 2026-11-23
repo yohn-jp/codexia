@@ -116,9 +116,8 @@ const persistenceAnchorView: ResponseGuard<PersistenceAnchorView> = (v): v is Pe
 /** The guards follow the public DTOs; additive fields are retained, not silently stripped. */
 export const responseContracts = {
   empty: (v: unknown): v is void => v === undefined,
-  version: (v: unknown): v is RuntimeVersion => record(v) && [v.name, v.version, v.profile].every(text) && bool(v.hosted) && (v.browserAuth === undefined || v.browserAuth === "cloudflare-access"),
-  loggedOut: (v: unknown): v is { authenticated: false } => record(v) && v.authenticated === false,
-  session: (v: unknown): v is Session => record(v) && v.authenticated === true && text(v.authorScope) && (v.permissions === undefined || (Array.isArray(v.permissions) && v.permissions.every(p => oneOf(p, ["read", "write", "maintain", "admin"])))),
+  version: (v: unknown): v is RuntimeVersion => record(v) && [v.name, v.version, v.profile].every(text),
+  session: (v: unknown): v is Session => record(v) && v.authenticated === true && text(v.authorScope),
   tree, treeRead: (v: unknown): v is TreeRead => record(v) && snapshot(v.snapshot) && tree(v.tree),
   scene, sceneRead,
   moduleSnapshot: (v: unknown): v is EditorSnapshotRead => record(v) && snapshot(v.snapshot)

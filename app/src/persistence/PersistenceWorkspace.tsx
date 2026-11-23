@@ -281,27 +281,25 @@ function persistSelectionSafely(authorScope: string, selection: { projectId: str
   try { writeWorkspaceSelection(window.localStorage, authorScope, selection); } catch { /* Route and journal state do not depend on preferences. */ }
 }
 
-export function PersistenceWorkspace({ mode, authorScope, hosted = false, onSignOut, registerProtection, sessionBlocked = false }: {
+export function PersistenceWorkspace({ mode, authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
   authorScope: string;
-  hosted?: boolean;
   onSignOut: () => void;
   registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
   sessionBlocked?: boolean;
 }) {
-  if (mode === "mobile") return <MobilePersistenceWorkspace hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-  return <PersistenceWorkspaceController mode="desktop" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function MobilePersistenceWorkspace({ hosted, authorScope, onSignOut, registerProtection, sessionBlocked }: { hosted: boolean; authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
+function MobilePersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked }: { authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
   const navigate = useNavigate();
   const navigateUrl = useCallback((url: string, replace: boolean) => { navigate(url, { replace }); }, [navigate]);
-  return <PersistenceWorkspaceController mode="mobile" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
+function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
-  hosted: boolean;
   authorScope: string;
   onSignOut: () => void;
   navigateUrl?: (url: string, replace: boolean) => void;
@@ -502,7 +500,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
-    if (!creationIntent || (hosted && creationIntent === "project")) return;
+    if (!creationIntent) return;
     let cancelled = false;
     let attempts = 0;
     const focusCreation = () => {
@@ -522,15 +520,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     };
     window.setTimeout(focusCreation, 0);
     return () => { cancelled = true; };
-  }, [creationIntent, hosted, requestedPanel?.sequence]);
+  }, [creationIntent, requestedPanel?.sequence]);
   const openCreation = useCallback((kind: "project" | "document") => {
-    if (hosted && kind === "project") return;
     setCreationIntent(kind);
     if (mode === "mobile") {
       const sequence = ++panelRequestSequenceRef.current;
       setRequestedPanel({ id: "outline", sequence });
     }
-  }, [hosted, mode]);
+  }, [mode]);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -2426,25 +2423,23 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {projectPageLoading ? "作品一覧を読み込み中" : projectPageReady ? "さらに作品を読み込む" : "作品一覧を読み込む"}
           </button>}
           {projectPageReady && <p>読み込み済みの作品: {projects.length}</p>}
-          {!hosted && <details className="pg-library-create">
+          <details className="pg-library-create">
             <summary>作品を作成</summary>
             <form onSubmit={(event) => void createProject(event)}>
               <label htmlFor="pg-project-title">作品名</label>
               <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
               <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
             </form>
-          </details>}
+          </details>
           <details>
-            <summary>{hosted ? "作品のエクスポート" : "作品のエクスポート・インポート"}</summary>
+            <summary>作品のエクスポート・インポート</summary>
             <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
             {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
               選択中の作品をJSONでエクスポート
             </button>}
-            {!hosted && <>
-              <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
-              <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
-                onChange={(event) => void importPortableWork(event)} />
-            </>}
+            <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
+            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+              onChange={(event) => void importPortableWork(event)} />
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
             {workTransferStatus && <p role="status">{workTransferStatus}</p>}
           </details>
@@ -2567,14 +2562,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty">
-          {hosted ? <>
-            <h2>{loading ? "割り当てられた作品を確認しています" : pageError ? "割当作品を確認できません" : "割り当てられた作品がありません"}</h2>
-            <p>Hosted環境では割り当てられた作品だけを利用できます。</p>
-          </> : <>
-            <h2>最初の作品を作成してください</h2>
-            <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
-            <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
-          </>}
+          <h2>最初の作品を作成してください</h2>
+          <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
+          <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
         </section>}
         {missingExplicitRouteDocument && <section className="pg-empty" role="status"><h2>指定された文書が見つかりません</h2><p>この作品に指定された文書はありません。目次から開く文書を選択してください。</p></section>}
         {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
@@ -2884,7 +2874,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </article>,
       document.body,
     )}
-    <Shell mode={mode} hosted={hosted}
+    <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={writingContext}

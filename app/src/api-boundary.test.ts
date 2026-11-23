@@ -12,12 +12,12 @@ test("audit browser API rejects malformed, empty and incorrectly shaped successf
     globalThis.fetch = async () => response;
     await assert.rejects(api.session(), invalid);
   }
-  globalThis.fetch = async () => Response.json({ authenticated: true, authorScope: "owner", permissions: ["read", "write"], futureField: true });
+  globalThis.fetch = async () => Response.json({ authenticated: true, authorScope: "owner", futureField: true });
   assert.equal((await api.session()).authorScope, "owner");
 });
 
-test("audit browser API rejects a partial runtime-version DTO rather than configuring refresh from it", async () => {
-  globalThis.fetch = async () => Response.json({ hosted: true });
+test("audit browser API rejects an invalid runtime profile in the version response", async () => {
+  globalThis.fetch = async () => Response.json({ name: "codexia", version: "0.1.0", profile: null });
   await assert.rejects(api.version(), invalid);
 });
 
