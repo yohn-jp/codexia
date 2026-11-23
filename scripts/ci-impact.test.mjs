@@ -193,6 +193,19 @@ test('impact selection is independent of proof availability; unknown diffs still
   assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
 });
 
+test('certification rejects tampered PR base or changed-file inventory without historical proofs', async () => {
+  const { createVerificationPlan, assertExactPrImpact } = await import('./ci-impact.mjs');
+  const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  const affected = createVerificationPlan({ ...input, files: ['docs/architecture/SYSTEM-DESIGN.md'] });
+  assert.doesNotThrow(() => assertExactPrImpact(affected, input.base, affected.files));
+  assert.throws(() => assertExactPrImpact(affected, 'c'.repeat(40), affected.files), /PR base/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, ['packages/api/src/server.ts']), /exact PR diff/);
+  assert.throws(() => assertExactPrImpact(affected, input.base, null), /exact PR diff/);
+  const full = createVerificationPlan({ ...input, files: null });
+  assert.doesNotThrow(() => assertExactPrImpact(full, input.base, null), 'Unknown diff already selects full verification');
+  assert.throws(() => assertExactPrImpact(full, 'c'.repeat(40), null), /PR base/);
+});
+
 test('OAuth browser acceptance is selected in both profile browser lanes', async () => {
   const selected = await plan(['tests/e2e/oauth-web.acceptance.spec.ts']);
   assert.ok(selected.tasks.includes('test-types-app-e2e'));
