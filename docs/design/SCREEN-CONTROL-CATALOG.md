@@ -23,7 +23,7 @@
 
 | 画面ID | 入口・表示形態 | principal | 主タスクと通常の戻り先 | 種別 |
 | --- | --- | --- | --- | --- |
-| ENTRY-01 | `/`（現行legacy選択あり）→目標は`/desktop/` | ANON | Desktop React Webを起動。iOSはnative app entry | Web現行・目標変更 |
+| ENTRY-01 | `/`（現行legacy選択あり）→目標は`/desktop/` | ANON | Desktop React Webを起動。iOSはnative app entry | 実装 |
 | AUTH-01 | `/oauth/login` | 正しいsigned request→OWNER-SESSION | Passkey/連携IdPログイン → AUTH-02／中止→ENTRY | 実装 |
 | AUTH-02 | `/oauth/consent` | OWNER-SESSION＋登録済みclient | scopeとclientを確認→許可/拒否→検証済みcallback | 実装 |
 | LIB-01 | Desktop Web `/desktop/`・iOS Native Library（旧`/mobile/`廃止） | OWNER-API | 作品を選択/作成/取込/書出→構成・本文 | 実装 |

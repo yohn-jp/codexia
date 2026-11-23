@@ -21,6 +21,7 @@ Web static assets remain under Cloudflare Access; the app uses an independently 
 - Prefer a native system authentication flow with exact callback, discovery, PKCE S256, CSRF state, OAuth resource/scope checks and secure Keychain refresh-token rotation. Evaluate the current AppAuth-iOS integration for native-only reuse; a Capacitor bridge is not retained solely to preserve it.
 - Native HTTPS URLSession networking accepts only the configured API origin and approved API paths, rejects cross-origin redirects/ambient cookies, never uses the upstream IdP ID token as an API bearer, and separates the public reader URL origin.
 - Token expiry, cancellation, revoked credentials, API outage, lost response, conflict and logout must preserve recoverable pending drafts. Do not grant the app different API permissions from Desktop.
+- **Sign-out does not revoke already-issued API access tokens.** It clears client-side tokens and attempts the provider's refresh-token/session termination; an individual still-valid access token can be explicitly revoked through the authenticated RFC 7009 endpoint `/api/auth/oauth2/revoke`. Verify revocation separately from UI logout, and preserve unresolved drafts during either operation.
 - The native client must verify job/events streaming rather than inherit the buffering limitation of the legacy Capacitor bridge. The actual capabilities are a native-client acceptance item.
 
 ## Personal-device signing boundary
