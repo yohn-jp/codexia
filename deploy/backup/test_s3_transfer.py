@@ -48,6 +48,9 @@ class FakeS3Client:
         self.corrupt_readback_for: str | None = None
         self.race_conditional_create = False
         self.race_key: str | None = None
+        self.fail_head_code: str | None = None
+        self.fail_put_for: str | None = None
+        self.fail_get_for: str | None = None
 
     @staticmethod
     def _body(value: object) -> bytes:
@@ -56,6 +59,8 @@ class FakeS3Client:
 
     def head_object(self, *, Bucket: str, Key: str, **_: object) -> dict[str, object]:
         self.events.append(("head", Key))
+        if self.fail_head_code:
+            raise FakeClientError(self.fail_head_code)
         item = self.objects.get((Bucket, Key))
         if item is None:
             raise FakeClientError("404")
@@ -63,6 +68,8 @@ class FakeS3Client:
 
     def get_object(self, *, Bucket: str, Key: str, **_: object) -> dict[str, object]:
         self.events.append(("get", Key))
+        if Key == self.fail_get_for:
+            raise OSError("simulated remote read failure containing secret-token")
         item = self.objects.get((Bucket, Key))
         if item is None:
             raise FakeClientError("NoSuchKey")
@@ -73,6 +80,8 @@ class FakeS3Client:
 
     def put_object(self, *, Bucket: str, Key: str, Body: object, IfNoneMatch: str | None = None, **kwargs: object) -> dict[str, object]:
         self.events.append(("put", Key))
+        if Key == self.fail_put_for:
+            raise OSError("simulated credential denial containing secret-token")
         if Key.endswith("/COMMIT.json") and self.fail_commit_marker_once:
             self.fail_commit_marker_once = False
             raise OSError("simulated marker write interruption")
@@ -203,6 +212,119 @@ class S3TransferTests(unittest.TestCase):
     def make_transfer(self, client: FakeS3Client, **profile_values: object):
         return s3_transfer.S3BackupTransfer(profile(**profile_values), client=client)
 
+    def test_profile_admission_rejects_untrusted_paths_and_credentials(self) -> None:
+        for invalid in (
+            "../other-environment",
+            "codexia//backups",
+            "codexia/./backups",
+            "codexia/backups/../production",
+            "/codexia/backups",
+            "codexia/backups\nother",
+        ):
+            with self.subTest(prefix=invalid), self.assertRaises(s3_transfer.TransferError):
+                s3_transfer.validate_profile(profile(prefix=invalid))
+
+        with self.assertRaises(s3_transfer.TransferError):
+            s3_transfer.validate_profile(profile(accessKeyId="must-not-be-in-profile"))
+
+    def test_profile_file_admission_requires_private_owner_file(self) -> None:
+        profile_path = self.root / "profile.json"
+        profile_path.write_text(json.dumps(profile()), encoding="utf-8")
+        profile_path.chmod(0o640)
+
+        with self.assertRaises(s3_transfer.TransferError):
+            s3_transfer.load_profile(profile_path)
+
+        profile_path.chmod(0o600)
+        self.assertEqual(s3_transfer.load_profile(profile_path)["bucket"], "codexia-fixture")
+
+    def test_tls_client_keeps_certificate_verification_enabled(self) -> None:
+        captures: dict[str, object] = {}
+
+        class FakeConfig:
+            def __init__(self, **kwargs: object):
+                captures["config"] = kwargs
+
+        class FakeClient:
+            def __init__(self):
+                self.meta = type("Meta", (), {
+                    "endpoint_url": "https://objects.example.test",
+                    "events": type("Events", (), {"register_first": lambda *_args, **_kwargs: None})(),
+                })()
+
+        class FakeSession:
+            def client(self, service: str, **kwargs: object):
+                captures["service"] = service
+                captures["client_kwargs"] = kwargs
+                return FakeClient()
+
+        fake_boto3 = type("Boto3", (), {"session": type("SessionModule", (), {"Session": FakeSession})})()
+        fake_botocore_config = type("BotocoreConfig", (), {"Config": FakeConfig})
+        with patch.dict(sys.modules, {
+            "boto3": fake_boto3,
+            "botocore": type("Botocore", (), {"config": fake_botocore_config})(),
+            "botocore.config": fake_botocore_config,
+        }):
+            s3_transfer._make_client(profile(caBundle="/protected/fixture-ca.pem"))
+
+        client_kwargs = captures["client_kwargs"]
+        self.assertEqual(captures["service"], "s3")
+        self.assertEqual(client_kwargs["verify"], "/protected/fixture-ca.pem")
+        self.assertNotEqual(client_kwargs["verify"], False)
+
+    def test_credential_denial_is_redacted_and_never_publishes_recovery_point(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        client.fail_head_code = "AccessDenied"
+
+        with self.assertRaises(s3_transfer.TransferError) as caught:
+            self.make_transfer(client).upload_artifact(
+                self.artifact,
+                backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+                source_identity="a" * 40,
+                receipt_path=self.receipts / "backup.json",
+            )
+
+        self.assertNotIn("secret", str(caught.exception).lower())
+        self.assertFalse(any(key.endswith("/COMMIT.json") for _, key in client.objects))
+        self.assertFalse((self.receipts / "backup.json").exists())
+
+    def test_partial_single_object_write_never_publishes_commit_or_receipt(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        failed_key = "codexia/backups/" + "a" * 40 + "/20261123T120000Z-12345678-1234-4234-9234-1234567890ab/history.tar.age"
+        client.fail_put_for = failed_key
+
+        with self.assertRaises(s3_transfer.TransferError) as caught:
+            self.make_transfer(client).upload_artifact(
+                self.artifact,
+                backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+                source_identity="a" * 40,
+                receipt_path=self.receipts / "backup.json",
+            )
+
+        self.assertNotIn("secret-token", str(caught.exception))
+        self.assertTrue(any(key.endswith("/database.dump.age") for _, key in client.objects))
+        self.assertFalse(any(key.endswith("/COMMIT.json") for _, key in client.objects))
+        self.assertFalse((self.receipts / "backup.json").exists())
+
+    def test_commit_marker_readback_failure_never_writes_external_receipt(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        commit_key = "codexia/backups/" + "a" * 40 + "/20261123T120000Z-12345678-1234-4234-9234-1234567890ab/COMMIT.json"
+        client.fail_get_for = commit_key
+
+        with self.assertRaises(s3_transfer.TransferError):
+            self.make_transfer(client).upload_artifact(
+                self.artifact,
+                backup_id="20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+                source_identity="a" * 40,
+                receipt_path=self.receipts / "backup.json",
+            )
+
+        self.assertIn(("codexia-fixture", commit_key), client.objects)
+        self.assertFalse((self.receipts / "backup.json").exists())
+
     def test_profile_rejects_non_tls_redirectable_or_unapproved_origins(self) -> None:
         valid = profile()
         self.assertEqual(s3_transfer.validate_profile(valid)["endpointUrl"], valid["endpointUrl"])
@@ -225,6 +347,10 @@ class S3TransferTests(unittest.TestCase):
         response = (type("Response", (), {"status_code": 307})(), {})
         with self.assertRaises(s3_transfer.TransferError):
             guard.needs_retry(response=response)
+        for status in (301, 302, 303, 307, 308):
+            response = (type("Response", (), {"status_code": status})(), {})
+            with self.subTest(status=status), self.assertRaises(s3_transfer.TransferError):
+                guard.needs_retry(response=response)
         with self.assertRaises(s3_transfer.TransferError):
             guard.before_send(type("Request", (), {"url": "https://metadata.example.test/latest/meta-data"})())
 

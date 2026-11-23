@@ -368,10 +368,21 @@ import json, pathlib, sys
 script_dir, profile_path, artifact, backup_id, source_identity, receipt_path = sys.argv[1:]
 sys.path.insert(0, script_dir)
 import s3_transfer
+from botocore.exceptions import SSLError
 
 try:
     profile = s3_transfer.load_profile(pathlib.Path(profile_path))
     transfer = s3_transfer.S3BackupTransfer(profile, _allow_private_test_addresses=True)
+    untrusted_profile = {**profile, 'caBundle': '/dev/null'}
+    untrusted_client = s3_transfer.S3BackupTransfer(
+        untrusted_profile, _allow_private_test_addresses=True,
+    ).client
+    try:
+        untrusted_client.get_bucket_location(Bucket=profile['bucket'])
+    except SSLError:
+        pass
+    else:
+        raise s3_transfer.TransferError('Fixture S3 endpoint accepted an untrusted TLS authority')
     receipt = transfer.upload_artifact(
         pathlib.Path(artifact), backup_id=backup_id,
         source_identity=source_identity, receipt_path=pathlib.Path(receipt_path),
