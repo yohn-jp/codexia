@@ -108,14 +108,14 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   await expect(page.getByRole("alert").filter({ hasText: "管理コンソールへの移動" })).toBeVisible();
   await page.evaluate(() => { (window as Window & { __consoleDraftFailure?: boolean }).__consoleDraftFailure = false; });
   await fillDraft(page, draft);
-  await page.route(url => url.origin === origin && url.pathname.startsWith("/console/"), route => route.fulfill({
-    path: resolve(shellAssets, "desktop/index.html"),
-    contentType: "text/html; charset=utf-8",
-  }));
-  await page.route(url => url.origin === origin && url.pathname === "/console", route => route.fulfill({
-    path: resolve(shellAssets, "desktop/index.html"),
-    contentType: "text/html; charset=utf-8",
-  }));
+  // Serve the exact Desktop entry from this API fixture. A locally generated
+  // app/dist/index.html can name different hashed assets than the prebuilt
+  // API's staticDir and leave the console stranded on its loading screen.
+  await page.route(url => url.origin === origin &&
+    (url.pathname === "/console" || url.pathname.startsWith("/console/")), async route => {
+    const entry = await route.fetch({ url: `${origin}/desktop/` });
+    await route.fulfill({ response: entry });
+  });
 
   const ownerCheck = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/codexia/owner-session");
   await page.getByRole("button", { name: "管理コンソール", exact: true }).click();

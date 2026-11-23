@@ -237,3 +237,12 @@ flowchart LR
 6. 生成した公開siteのサイトマップ、ナビリンク、asset、manifestの**存在と相互一致**を機械検査する。PR previewのブラウザースモークとmainのPages配信実測は別の証拠にする。
 
 複数版 Graph の保持、追加のソース位置索引、タスク単位の CI テレメトリ公開は将来の設計候補とする。
+
+## Code scanning エクスポート（認可境界）
+
+- `/security/` は静的 Pages 上の**利用者認証による読み取り専用エクスポート**。既存の単一 Pages publisher から配布し、アラート情報は Pages アーティファクトに格納しない。
+- GitHub Code scanning アラートは公開リポジトリでも write / security alert 閲覧権限を要する保護情報。Pages への無認証コピー、CI トークンの静的埋め込み、独自中継バックエンドは禁止。
+- GitHub fine-grained PAT（対象リポジトリの `Code scanning alerts: Read-only`）を入力。ブラウザーは `api.github.com` へ認証送信し、入力欄を消去。Cookie、localStorage、URL、Pages 公開物への永続化は行わない。CSP は connect-src を GitHub API のみに制限する。
+- 対象は `refs/heads/main` の GitHub Code scanning アラートで、CodeQL・Trivy・Gitleaks・Impeccable 等の登録済みツールを横断する。JSON は API アラートの全フィールド、CSV はルール、重大度、ファイル位置、状態等を抽出。**SARIF 原本ではない**。
+- 全ページ取得できた場合だけダウンロードを許可する。401/403/429/接続断/形式不正/件数上限は失敗として扱う。CSV は表計算ソフトの式注入を無害化する。
+- 件数、観測時刻、表示上限100件と全件ダウンロードの違いを表示する。再読み込み後の情報を再利用しない。Chromium の 320〜1440px で認証失敗、成功、ファイルダウンロード、再読み込みを検証する。

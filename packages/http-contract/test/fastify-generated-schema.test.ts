@@ -103,3 +103,49 @@ test("generated Fastify schemas validate project creation and preserve actual pe
     idempotencyKey: "import-1",
   });
 });
+
+test("generated Fastify document response schema preserves PostgreSQL DTOs and additive fields", async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  for (const schema of schemas) app.addSchema(schema);
+
+  const documentRoute = routes.find(({ method, url }) => method === "GET" && url === "/api/v1/persistence/projects/:projectId/documents/:documentId");
+  assert.ok(documentRoute);
+  app.route({
+    method: documentRoute.method,
+    url: documentRoute.url,
+    schema: documentRoute.schema as FastifySchema,
+    handler: async () => ({
+      document: {
+        id: "document-1",
+        projectId: "project-1",
+        parentId: null,
+        kind: "chapter",
+        title: "Opening",
+        orderKey: "0001",
+        headRevisionId: "revision-1",
+        version: 1,
+        createdAt: "2026-11-23T00:00:00Z",
+        updatedAt: "2026-11-23T00:00:00Z",
+        projectionMetadata: { generation: 1 },
+      },
+      revision: {
+        id: "revision-1",
+        projectId: "project-1",
+        documentId: "document-1",
+        parentRevisionId: null,
+        markdown: "First page",
+        sha256: "a".repeat(64),
+        authorId: "owner-1",
+        createdAt: "2026-11-23T00:00:00Z",
+        projectionMetadata: { source: "postgres" },
+      },
+    }),
+  });
+
+  const response = await app.inject({ method: "GET", url: "/api/v1/persistence/projects/project-1/documents/document-1" });
+  assert.equal(response.statusCode, 200, response.payload);
+  assert.equal(response.json().document.title, "Opening");
+  assert.deepEqual(response.json().document.projectionMetadata, { generation: 1 });
+  assert.deepEqual(response.json().revision.projectionMetadata, { source: "postgres" });
+});
