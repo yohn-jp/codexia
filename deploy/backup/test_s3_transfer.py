@@ -516,6 +516,41 @@ class S3TransferTests(unittest.TestCase):
         self.assertEqual(writes_after_retry - writes_before_retry, 1)
         self.assertTrue(any(key.endswith("/COMMIT.json") for _, key in client.objects))
 
+    def test_retry_preserves_marker_when_bucket_capability_lookup_changes(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        arguments = {
+            "backup_id": "20261123T120000Z-12345678-1234-4234-9234-1234567890ab",
+            "source_identity": "a" * 40,
+            "receipt_path": self.receipts / "backup.json",
+        }
+        write_receipt = s3_transfer._write_receipt
+
+        def lose_receipt(path, value):
+            if path == arguments["receipt_path"]:
+                raise s3_transfer.TransferError("simulated failure writing the final receipt")
+            return write_receipt(path, value)
+
+        with patch.object(s3_transfer, "_write_receipt", side_effect=lose_receipt):
+            with self.assertRaisesRegex(s3_transfer.TransferError, "simulated failure"):
+                self.make_transfer(client).upload_artifact(self.artifact, **arguments)
+
+        self.assertFalse(arguments["receipt_path"].exists())
+        marker_key = next(key for _, key in client.objects if key.endswith("/COMMIT.json"))
+        marker_bytes = bytes(client.objects[("codexia-fixture", marker_key)]["Body"])
+        client.events.clear()
+        with patch.object(client, "get_bucket_versioning", side_effect=OSError("unavailable")):
+            receipt = self.make_transfer(client).upload_artifact(self.artifact, **arguments)
+            self.assertEqual(self.make_transfer(client).upload_artifact(self.artifact, **arguments), receipt)
+
+        self.assertNotIn("put", [operation for operation, _ in client.events])
+        self.assertEqual(receipt["markerSha256"], sha256(marker_bytes))
+        self.assertEqual(receipt["capabilities"]["versioning"], "Enabled")
+        self.assertEqual(list(self.receipts.iterdir()), [arguments["receipt_path"]])
+        self.make_transfer(client).download_artifact(
+            backup_id=arguments["backup_id"], receipt_path=arguments["receipt_path"], output_dir=self.output
+        )
+
     def test_download_requires_the_external_receipt_and_rejects_tampered_bytes(self) -> None:
         files = self.write_artifact()
         client = FakeS3Client()
