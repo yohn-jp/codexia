@@ -479,6 +479,18 @@ export const api = {
     projectPath(projectId, `actions/${encodeURIComponent(actionId)}`),
     { method: "POST", body: JSON.stringify({ input, ...(snapshot ? { snapshot } : {}) }), ...(signal ? { signal } : {}) },
   ),
+  resolveDocumentReference: async (projectId: string, path: string, snapshot?: SnapshotId): Promise<string | null> => {
+    const resolution = await api.action(projectId, "core.document.resolve", { path }, undefined, snapshot);
+    if (!resolution.ok) throw new Error(resolution.error.message);
+    const { data } = resolution;
+    if (resolution.snapshot.projectId !== projectId ||
+        (snapshot && resolution.snapshot.projectVersion !== snapshot.projectVersion) ||
+        !data || typeof data !== "object" || !("documentId" in data) ||
+        (data.documentId !== null && (typeof data.documentId !== "string" || !data.documentId.trim()))) {
+      throw new ApiError("The server returned an invalid document reference", 502, "INVALID_RESPONSE");
+    }
+    return data.documentId;
+  },
   persistenceStatus: (signal?: AbortSignal) => request(dto.persistenceStatus, "/api/v1/persistence/status", { ...(signal ? { signal } : {}) }),
   exportWorkArchive: (projectId: string, signal?: AbortSignal) => request(dto.portableWorkArchive,
     persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),

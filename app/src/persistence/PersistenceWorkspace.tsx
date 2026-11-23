@@ -2313,13 +2313,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     // Snapshot file revisions are content hashes; PostgreSQL headRevisionId is a
     // revision UUID. Never equate them when resolving a module's document link.
     const canonicalPath = /^documents\/([^/]+)\.md$/u.exec(path);
-    let target = canonicalPath ? documents.find((item) => item.id === canonicalPath[1]) : undefined;
-    if (!target) {
-      const resolution = await api.action(projectId, "core.document.resolve", { path }, undefined, moduleSnapshot ?? undefined);
-      if (!resolution.ok) throw new Error(resolution.error.message);
-      const sceneId = (resolution.data as { sceneId?: unknown }).sceneId;
-      target = documents.find((item) => item.id === sceneId);
-    }
+    const findDocument = (id: string | null | undefined) => documents.find((item) => item.projectId === projectId && item.id === id);
+    let target = findDocument(canonicalPath?.[1]);
+    if (!target) target = findDocument(await api.resolveDocumentReference(projectId, path, moduleSnapshot ?? undefined));
+    if (projectIdRef.current !== projectId || sessionBlockedRef.current) return;
     if (!target) throw new Error("この作品の文書が見つかりません。");
     if (!await selectDocument(target.id)) throw new Error("回復JournalまたはIMEを確認できないため、参照先を開けませんでした。");
     // Search and terminology may be shown in another workspace tab. Reveal the

@@ -53,6 +53,32 @@ test("audit browser API rejects successful actions missing their required opaque
   assert.equal(result.ok && result.data, null);
 });
 
+test("mapped manuscript references use the canonical document ID from the selected project snapshot", async () => {
+  const snapshot = { projectId: "project-1", projectVersion: 23 };
+  const path = "manuscript/vol-story/ch-story/sc-story.md";
+  const documentId = "00000000-0000-4000-8000-000000000002";
+  let result: unknown = { ok: true, snapshot, data: { documentId } };
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/projects/project-1/actions/core.document.resolve");
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(init?.body)), { input: { path }, snapshot });
+    return Response.json(result);
+  };
+
+  assert.equal(await api.resolveDocumentReference(snapshot.projectId, path, snapshot), documentId);
+  result = { ok: true, snapshot, data: { documentId: null, document: null } };
+  assert.equal(await api.resolveDocumentReference(snapshot.projectId, path, snapshot), null);
+  for (const response of [
+    { ok: true, snapshot, data: { sceneId: "sc-story" } },
+    { ok: true, snapshot, data: { documentId: "" } },
+    { ok: true, snapshot: { ...snapshot, projectId: "another-project" }, data: { documentId } },
+    { ok: true, snapshot: { ...snapshot, projectVersion: 24 }, data: { documentId } },
+  ]) {
+    result = response;
+    await assert.rejects(api.resolveDocumentReference(snapshot.projectId, path, snapshot), invalid);
+  }
+});
+
 test("audit browser API rejects jobs missing their required opaque result", async () => {
   const job = { id: "job-1", type: "fixture", status: "done", progress: 1, error: null, createdAt: "2026-10-23T00:00:00Z", updatedAt: "2026-10-23T00:00:00Z", finishedAt: null };
   globalThis.fetch = async () => Response.json([job]);
