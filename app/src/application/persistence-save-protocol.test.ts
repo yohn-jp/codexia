@@ -84,6 +84,18 @@ test("409 clears only the exact pending save identity while preserving the recov
   assert.deepEqual(events, ["journal:bind:save-operation-1", "journal:clear:save-operation-1"]);
 });
 
+test("412 precondition conflict clears only the exact pending save identity while preserving the recovery draft", async () => {
+  const { events, journal } = journalHarness();
+  const conflict = Object.assign(new Error("precondition failed"), { status: 412 });
+  await assert.rejects(runPersistenceSaveProtocol({
+    authorScope, pending, reconcileReplay: false, journal,
+    async save() { throw conflict; },
+    async readHead() { throw new Error("precondition conflicts are handled by the caller"); },
+    signal: new AbortController().signal,
+  }), (error) => error === conflict);
+  assert.deepEqual(events, ["journal:bind:save-operation-1", "journal:clear:save-operation-1"]);
+});
+
 test("server receipt identity and content mismatches never acknowledge or clear the recovery operation", async (context) => {
   const malformed = [
     { label: "returned text", result: { ...response, markdown: "different text" } },

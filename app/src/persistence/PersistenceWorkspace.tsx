@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { useActorRef, useSelector } from "@xstate/react";
 import { useNavigate } from "react-router-dom";
 import { nextOrderKey, snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
@@ -8,6 +9,7 @@ import { formatHandoffHint, loadWritingResume, loadReadingPage, mergeContinueCan
 import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } from "@codexia/contracts";
 import { availableModulePanels } from "../application/AvailableModulePanels";
 import { PersistenceSaveConflictJournalError, runPersistenceSaveProtocol, type PersistenceSaveRequest } from "../application/persistence-save-protocol";
+import { createPersistenceSaveMachine, type PersistenceSaveMachineServices } from "../application/persistence-save-machine";
 import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, resolvePersistenceSaveSuccess, type ActiveDocument as PersistenceActiveDocument } from "../application/persistence-save-state";
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
@@ -373,7 +375,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
   const [active, setActive] = useState<ActiveDocument | null>(null);
-  const [protectingDraft, setProtectingDraft] = useState(false);
+  const saveMachineHandlersRef = useRef<PersistenceSaveMachineServices>({
+    async protectDraft() { return "protected"; },
+    async saveOperation(input) { return { kind: "unknown", operationId: input.operationId, generation: input.generation }; },
+  });
+  const saveMachine = useMemo(() => createPersistenceSaveMachine({
+    protectDraft: (input, signal) => saveMachineHandlersRef.current.protectDraft(input, signal),
+    saveOperation: (input, signal) => saveMachineHandlersRef.current.saveOperation(input, signal),
+  }), []);
+  const saveMachineActor = useActorRef(saveMachine, { input: { identity: { projectId: "", documentId: "" } } });
+  const protectingDraft = useSelector(saveMachineActor, (snapshot) => snapshot.matches({ active: { journal: "protecting" } }));
+  const saveMachineBusy = useSelector(saveMachineActor, (snapshot) => snapshot.matches({ active: { server: "saving" } }));
   const activeRef = useRef<ActiveDocument | null>(null);
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
   // Tracks only recovery records this editor instance successfully wrote. A clean
@@ -381,7 +393,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   // keeps a newer tab generation safe.
   const ownedDraftsRef = useRef(new Map<string, { generation: number; baseRevisionId: string; baseMarkdown: string; markdown: string }>());
   const draftChainsRef = useRef(new Map<string, Promise<boolean>>());
-  const saveInFlightRef = useRef(false);
   const restoreInFlightRef = useRef(false);
   const [restoring, setRestoring] = useState(false);
   const saveControllerRef = useRef<AbortController | null>(null);
@@ -978,6 +989,16 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const baseRevisionId = draft?.baseRevisionId ?? revision.id;
       const dirty = markdown !== baseMarkdown || (staleDraft && markdown !== revision.markdown);
       const textChanges = recoveredTextChanges(draft?.textChanges, baseMarkdown, markdown, recoverablePending);
+      const generation = dirty ? Math.max(1, draft?.generation ?? 0) : draft?.generation ?? 0;
+      saveMachineActor.send({
+        type: "RECOVERY.READY",
+        identity: { projectId: currentProject.id, documentId: nextDocumentId },
+        recovery: recoverablePending ? "pending-save" : dirty ? "draft" : "clean",
+        generation,
+        draftProtected: !dirty || Boolean(draft),
+        remoteConflict: staleDraft && !recoverablePending,
+        ...(recoverablePending ? { operationId: recoverablePending.idempotencyKey, operationGeneration: recoverablePending.generation } : {}),
+      });
       publishEditor({
         document: read.document,
         revision,
@@ -985,7 +1006,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         baseMarkdown,
         markdown,
         textChanges,
-        generation: dirty ? Math.max(1, draft?.generation ?? 0) : draft?.generation ?? 0,
+        generation,
         dirty,
         recovery: dirty ? "pending" : "stored",
         save: dirty ? "idle" : "saved",
@@ -1019,7 +1040,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     } finally {
       if (openSequence === openSequenceRef.current) setLoading(false);
     }
-  }, [authorScope, projectId, projects, publishEditor, updateRouteSelection]);
+  }, [authorScope, projectId, projects, publishEditor, saveMachineActor, updateRouteSelection]);
 
   const persistDraft = useCallback(async (value: ActiveDocument): Promise<boolean> => {
     const currentJournal = journalRef.current;
@@ -1062,47 +1083,69 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     finally { if (draftChainsRef.current.get(ownershipKey) === operation) draftChainsRef.current.delete(ownershipKey); }
   }, [authorScope, journalError]);
 
+  const protectMachineDraft = useCallback(async (input: { identity: { projectId: string; documentId: string }; generation: number; dirty: boolean }, signal: AbortSignal): Promise<"protected" | "other-tab"> => {
+    const captured = activeRef.current;
+    if (!captured || captured.document.projectId !== input.identity.projectId || captured.document.id !== input.identity.documentId || captured.generation !== input.generation) {
+      throw new DOMException("The editor generation changed before journal protection started", "AbortError");
+    }
+    try {
+      const stored = await persistDraft(captured);
+      if (signal.aborted) throw new DOMException("Journal protection was superseded", "AbortError");
+      const latest = activeRef.current;
+      if (!latest || latest.document.projectId !== input.identity.projectId || latest.document.id !== input.identity.documentId || latest.generation !== input.generation) {
+        throw new DOMException("The editor generation changed during journal protection", "AbortError");
+      }
+      if (!stored) {
+        publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブに、より新しい回復下書きがあります。回復記録を上書きせず、この文書の自動保存を止めました。" });
+        return "other-tab";
+      }
+      if (captured.dirty) {
+        publishEditor({ ...latest, recovery: "stored", error: "" });
+        if (!latest.remoteConflict && !sessionBlockedRef.current) {
+          window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
+        }
+        return "protected";
+      }
+
+      const currentJournal = journalRef.current;
+      if (!currentJournal) throw new Error(journalError || "IndexedDB回復Journalを利用できません。");
+      const remaining = await currentJournal.getPersistenceDraft(input.identity.projectId, input.identity.documentId, authorScope);
+      if (signal.aborted) throw new DOMException("Journal protection was superseded", "AbortError");
+      const afterWrite = activeRef.current;
+      if (!afterWrite || afterWrite.document.projectId !== input.identity.projectId || afterWrite.document.id !== input.identity.documentId ||
+          afterWrite.generation !== input.generation || afterWrite.dirty || afterWrite.recovery !== "pending" || afterWrite.save !== "idle" ||
+          afterWrite.remoteConflict || afterWrite.baseRevisionId !== afterWrite.revision.id || afterWrite.markdown !== afterWrite.revision.markdown ||
+          pendingSaveRef.current.has(JSON.stringify([input.identity.projectId, input.identity.documentId]))) return "protected";
+      if (remaining) {
+        publishEditor({ ...afterWrite, recovery: "other-tab", save: "failed", error: "別タブの回復用の下書きを保持しています。" });
+        return "other-tab";
+      }
+      publishEditor({ ...afterWrite, recovery: "stored", save: "saved" });
+      return "protected";
+    } catch (error) {
+      const latest = activeRef.current;
+      if (latest?.document.projectId === input.identity.projectId && latest.document.id === input.identity.documentId && latest.generation === input.generation && !signal.aborted) {
+        publishEditor({ ...latest, recovery: "failed", save: "failed", error: error instanceof Error ? error.message : "回復Journalへ保存できませんでした。" });
+      }
+      throw error;
+    }
+  }, [authorScope, journalError, persistDraft, publishEditor]);
+  saveMachineHandlersRef.current.protectDraft = protectMachineDraft;
+
   const retryDraftProtection = useCallback(async (): Promise<void> => {
     const captured = activeRef.current;
     if (!captured?.dirty || captured.recovery !== "failed" || sessionBlockedRef.current) return;
-    setProtectingDraft(true);
-    try {
-      const stored = await persistDraft(captured);
-      const latest = activeRef.current;
-      if (!latest || latest.document.projectId !== captured.document.projectId || latest.document.id !== captured.document.id ||
-          latest.generation !== captured.generation || latest.markdown !== captured.markdown) return;
-      if (!stored) {
-        publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブに新しい回復下書きがあります。比較してから操作してください。" });
-        return;
-      }
-      publishEditor({ ...latest, recovery: "stored", save: "idle", error: "" });
-      // Retry the existing save only after this exact generation is durable.
-      if (!latest.remoteConflict) window.setTimeout(() => {
-        const current = activeRef.current;
-        if (current?.document.projectId === captured.document.projectId && current.document.id === captured.document.id &&
-            current.generation === captured.generation && current.recovery === "stored" && !current.remoteConflict) {
-          void saveDocumentRef.current();
-        }
-      }, 900);
-    } catch (error) {
-      const latest = activeRef.current;
-      if (latest?.document.projectId === captured.document.projectId && latest.document.id === captured.document.id &&
-          latest.generation === captured.generation) {
-        publishEditor({ ...latest, recovery: "failed", save: "failed", error: error instanceof Error ? error.message : "復旧用の下書きを記録できませんでした。" });
-      }
-    } finally {
-      setProtectingDraft(false);
-    }
-  }, [persistDraft, publishEditor]);
+    saveMachineActor.send({ type: "DRAFT.CHANGED", identity: { projectId: captured.document.projectId, documentId: captured.document.id }, generation: captured.generation, dirty: captured.dirty });
+  }, [saveMachineActor]);
 
   const revalidateActiveDocument = useCallback(async (signal: AbortSignal): Promise<void> => {
     const captured = activeRef.current;
     const currentProject = projects.find((item) => item.id === projectId);
-    if (sessionBlockedRef.current || saveInFlightRef.current || restoreInFlightRef.current || !captured || !currentProject || captured.document.id !== documentId || captured.document.projectId !== projectId) return;
+    if (sessionBlockedRef.current || saveMachineActor.getSnapshot().matches({ active: { server: "saving" } }) || restoreInFlightRef.current || !captured || !currentProject || captured.document.id !== documentId || captured.document.projectId !== projectId) return;
     const sequence = ++openSequenceRef.current;
     try {
       const read = await api.persistenceDocument(projectId, captured.document.id, signal);
-      if (sessionBlockedRef.current || saveInFlightRef.current || restoreInFlightRef.current || signal.aborted || sequence !== openSequenceRef.current || !read.revision) return;
+      if (sessionBlockedRef.current || saveMachineActor.getSnapshot().matches({ active: { server: "saving" } }) || restoreInFlightRef.current || signal.aborted || sequence !== openSequenceRef.current || !read.revision) return;
       const latest = activeRef.current;
       if (!latest || latest.document.id !== captured.document.id) return;
       if (latest.revision.id === read.revision.id) {
@@ -1124,6 +1167,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }
       const newest = activeRef.current;
       if (!newest || newest.document.id !== captured.document.id) return;
+      saveMachineActor.send({ type: "SAVE.CONFLICT.OBSERVED", identity: { projectId: newest.document.projectId, documentId: newest.document.id } });
       publishEditor({
         ...newest,
         document: read.document,
@@ -1134,7 +1178,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     } catch (error) {
       if (!signal.aborted && sequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : "開いている文書を再確認できませんでした。");
     }
-  }, [documentId, openDocument, persistDraft, projectId, projects, publishEditor]);
+      }, [documentId, openDocument, persistDraft, projectId, projects, publishEditor, saveMachineActor]);
 
   useEffect(() => {
     if (sessionBlocked || !journal || !projectId || !documentId || explicitRouteDocumentUnavailable) return;
@@ -1180,66 +1224,121 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   useEffect(() => {
     if (!journal || !active || active.generation < 1) return;
-    if (!active.dirty) {
-      let cancelled = false;
-      void persistDraft(active).then(async () => {
-        if (cancelled || active.recovery !== "pending" || active.save !== "idle" || active.remoteConflict) return;
-        const { projectId, id } = active.document;
-        const remaining = await journal.getPersistenceDraft(projectId, id, authorScope);
-        const latest = activeRef.current;
-        if (cancelled || !latest || sessionBlockedRef.current || latest.document.projectId !== projectId || latest.document.id !== id ||
-            latest.generation !== active.generation || latest.dirty || latest.recovery !== "pending" || latest.save !== "idle" ||
-            latest.remoteConflict || latest.baseRevisionId !== latest.revision.id || latest.markdown !== latest.revision.markdown ||
-            pendingSaveRef.current.has(JSON.stringify([projectId, id]))) return;
-        if (remaining) {
-          publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブの回復用の下書きを保持しています。" });
-        } else {
-          publishEditor({ ...latest, recovery: "stored", save: "saved" });
-        }
-      }).catch((error: unknown) => {
-        if (!cancelled) setJournalError(error instanceof Error ? error.message : "回復Journalの古い下書きを解除できませんでした。");
-      });
-      return () => { cancelled = true; };
+    const identity = { projectId: active.document.projectId, documentId: active.document.id };
+    if (active.recovery === "other-tab") {
+      saveMachineActor.send({ type: "DRAFT.OTHER_TAB", identity, generation: active.generation });
+    } else if (active.recovery === "pending") {
+      saveMachineActor.send({ type: "DRAFT.CHANGED", identity, generation: active.generation, dirty: active.dirty });
     }
-    if (active.recovery === "other-tab") return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const current = active;
-    publishEditor({ ...current, recovery: "pending", error: current.error });
-    void persistDraft(current).then((stored) => {
-      if (cancelled) return;
-      const latest = activeRef.current;
-      if (latest?.document.id !== current.document.id || latest.generation !== current.generation) return;
-      if (!stored) {
-        publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブに、より新しい回復下書きがあります。回復記録を上書きせず、この文書の自動保存を止めました。" });
-        return;
+  }, [active?.document.id, active?.document.projectId, active?.generation, active?.dirty, active?.recovery, journal, saveMachineActor]);
+
+  const executeSaveOperation = useCallback(async (input: Parameters<PersistenceSaveMachineServices["saveOperation"]>[0], actorSignal: AbortSignal) => {
+    const currentJournal = journalRef.current;
+    const pendingKey = JSON.stringify([input.identity.projectId, input.identity.documentId]);
+    const pending = pendingSaveRef.current.get(pendingKey);
+    if (!currentJournal || !pending || pending.idempotencyKey !== input.operationId || pending.generation !== input.generation) {
+      throw new Error("The exact IndexedDB save operation is unavailable for replay");
+    }
+    const controller = new AbortController();
+    if (actorSignal.aborted) controller.abort();
+    const abortFromActor = () => controller.abort();
+    actorSignal.addEventListener("abort", abortFromActor, { once: true });
+    saveControllerRef.current = controller;
+    const navigation = openSequenceRef.current;
+    const inScope = (value: ActiveDocument | null): boolean => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
+    if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
+    try {
+      const protocol = await runPersistenceSaveProtocol({
+        authorScope,
+        pending,
+        reconcileReplay: input.reconcileReplay,
+        journal: currentJournal,
+        save: editorAdapter.save ?? (async () => undefined),
+        readHead: (projectId, documentId, signal) => api.persistenceDocument(projectId, documentId, signal),
+        signal: controller.signal,
+      });
+      const { acknowledgedDocument, acknowledgedRevision, replayWasSuperseded, acknowledgement, remainingDraft: remaining } = protocol;
+      if (controller.signal.aborted) return { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+      const removed = acknowledgement.acknowledged && !acknowledgement.draft;
+      if (removed) {
+        const ownershipKey = JSON.stringify([pending.projectId, pending.documentId]);
+        const owned = ownedDraftsRef.current.get(ownershipKey);
+        if (owned?.generation === pending.generation && owned.markdown === pending.markdown && owned.baseRevisionId === pending.baseRevisionId && owned.baseMarkdown === pending.baseMarkdown) {
+          ownedDraftsRef.current.delete(ownershipKey);
+        }
       }
-      publishEditor({ ...latest, recovery: "stored", error: "" });
-      if (!latest.remoteConflict && !sessionBlockedRef.current) timer = window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
-    }).catch((error: unknown) => {
-      if (cancelled) return;
+      if (acknowledgement.acknowledged) pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
-      if (latest?.document.id === current.document.id && latest.generation === current.generation) {
-        publishEditor({ ...latest, recovery: "failed", save: "failed", error: error instanceof Error ? error.message : "回復Journalへ保存できませんでした。" });
+      if (replayWasSuperseded && (!latest || !inScope(latest))) {
+        if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
+          setResumeEpoch((value) => value + 1);
+        }
+        return acknowledgement.acknowledged
+          ? { kind: "confirmed" as const, operationId: pending.idempotencyKey, generation: pending.generation, receiptId: acknowledgedRevision.id }
+          : { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
       }
-    });
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-    // Save only after this exact editor generation has been written to IndexedDB.
-  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, authorScope, journal, persistDraft, publishEditor, sessionBlocked]);
+      if (latest && inScope(latest)) {
+        const decision = resolvePersistenceSaveSuccess({
+          current: latest, pending, acknowledgedDocument, acknowledgedRevision, replayWasSuperseded,
+          journalAcknowledged: acknowledgement.acknowledged, remainingDraft: remaining,
+        });
+        if (decision.kind === "publish") publishEditor(decision.active);
+      } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
+        setResumeEpoch((value) => value + 1);
+      } else if (latest?.dirty) {
+        window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
+      }
+      return acknowledgement.acknowledged
+        ? { kind: "confirmed" as const, operationId: pending.idempotencyKey, generation: pending.generation, receiptId: acknowledgedRevision.id }
+        : { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+    } catch (error) {
+      if (controller.signal.aborted) return { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+      if (error instanceof PersistenceSaveConflictJournalError) {
+        const latest = activeRef.current;
+        if (latest && inScope(latest)) publishEditor({ ...latest, recovery: "failed", save: "failed", error: error.message });
+        return { kind: "conflict" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+      } else if (error instanceof ApiError && (error.status === 409 || error.status === 412)) {
+        pendingSaveRef.current.delete(pendingKey);
+        try {
+          const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
+          const latest = activeRef.current;
+          if (latest && inScope(latest)) {
+            publishEditor(resolvePersistenceSaveConflict(latest, currentRead.revision ?? null));
+          }
+        } catch (readError) {
+          const latest = activeRef.current;
+          if (latest && inScope(latest)) publishEditor(resolvePersistenceConflictReadFailure(latest, readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした."));
+        }
+        return { kind: "conflict" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+      } else {
+        const latest = activeRef.current;
+        if (latest && inScope(latest)) {
+          publishEditor({ ...latest, save: "failed", error: error instanceof Error ? error.message : "PostgreSQLへ保存できませんでした。回復下書きは保持しています。" });
+        }
+        return { kind: "unknown" as const, operationId: pending.idempotencyKey, generation: pending.generation };
+      }
+    } finally {
+      actorSignal.removeEventListener("abort", abortFromActor);
+      if (saveControllerRef.current === controller) saveControllerRef.current = null;
+      const latest = activeRef.current;
+      if (latest?.dirty && latest.recovery === "stored" && !latest.remoteConflict && (latest.document.id !== pending.documentId || latest.document.projectId !== pending.projectId) && !controller.signal.aborted) {
+        window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
+      }
+    }
+  }, [authorScope, publishEditor]);
+
+  saveMachineHandlersRef.current.saveOperation = executeSaveOperation;
 
   const saveDocument = useCallback(async (): Promise<void> => {
     const currentJournal = journalRef.current;
-    if (!currentJournal || saveInFlightRef.current || restoreInFlightRef.current || sessionBlockedRef.current) return;
+    if (!currentJournal || saveMachineActor.getSnapshot().matches({ active: { server: "saving" } }) || restoreInFlightRef.current || sessionBlockedRef.current) return;
     const current = activeRef.current;
     if (!current || current.recovery === "other-tab" || current.remoteConflict) return;
     const pendingKey = JSON.stringify([current.document.projectId, current.document.id]);
     const existingPending = pendingSaveRef.current.get(pendingKey);
-    let pending: PendingSave;
-    if (!existingPending) {
-      if (!current?.dirty || current.remoteConflict || current.recovery !== "stored") return;
+    let pending = existingPending;
+    if (!pending) {
+      if (!current.dirty || current.recovery !== "stored") return;
       pending = {
         projectId: current.document.projectId,
         documentId: current.document.id,
@@ -1253,84 +1352,21 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         clientId: clientIdRef.current ||= crypto.randomUUID(),
       };
       pendingSaveRef.current.set(pendingKey, pending);
-    } else pending = existingPending;
-    saveInFlightRef.current = true;
-    const controller = new AbortController();
-    saveControllerRef.current = controller;
-    const navigation = openSequenceRef.current;
-    const inScope = (value: ActiveDocument | null): boolean => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
-    if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
-    try {
-      const protocol = await runPersistenceSaveProtocol({
-        authorScope,
-        pending,
-        reconcileReplay: Boolean(existingPending),
-        journal: currentJournal,
-        save: editorAdapter.save ?? (async () => undefined),
-        readHead: (projectId, documentId, signal) => api.persistenceDocument(projectId, documentId, signal),
-        signal: controller.signal,
-      });
-      const { acknowledgedDocument, acknowledgedRevision, replayWasSuperseded, acknowledgement, remainingDraft: remaining } = protocol;
-      if (controller.signal.aborted) return;
-      const removed = acknowledgement.acknowledged && !acknowledgement.draft;
-      if (removed) {
-        const ownershipKey = JSON.stringify([pending.projectId, pending.documentId]);
-        const owned = ownedDraftsRef.current.get(ownershipKey);
-        if (owned?.generation === pending.generation && owned.markdown === pending.markdown && owned.baseRevisionId === pending.baseRevisionId && owned.baseMarkdown === pending.baseMarkdown) {
-          ownedDraftsRef.current.delete(ownershipKey);
-        }
-      }
-      pendingSaveRef.current.delete(pendingKey);
-      const latest = activeRef.current;
-      if (replayWasSuperseded && (!latest || !inScope(latest))) {
-        if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
-          setResumeEpoch((value) => value + 1);
-        }
-        return;
-      }
-      if (latest && inScope(latest)) {
-        const decision = resolvePersistenceSaveSuccess({
-          current: latest, pending, acknowledgedDocument, acknowledgedRevision, replayWasSuperseded,
-          journalAcknowledged: acknowledgement.acknowledged, remainingDraft: remaining,
-        });
-        if (decision.kind === "publish") publishEditor(decision.active);
-      } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
-        setResumeEpoch((value) => value + 1);
-      } else if (latest?.dirty) {
-        window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
-      }
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      if (error instanceof PersistenceSaveConflictJournalError) {
-        const latest = activeRef.current;
-        if (latest && inScope(latest)) publishEditor({ ...latest, recovery: "failed", save: "failed", error: error.message });
-      } else if (error instanceof ApiError && error.status === 409) {
-        pendingSaveRef.current.delete(pendingKey);
-        try {
-          const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
-          const latest = activeRef.current;
-          if (latest && inScope(latest)) {
-            publishEditor(resolvePersistenceSaveConflict(latest, currentRead.revision ?? null));
-          }
-        } catch (readError) {
-          const latest = activeRef.current;
-          if (latest && inScope(latest)) publishEditor(resolvePersistenceConflictReadFailure(latest, readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした."));
-        }
-      } else {
-        const latest = activeRef.current;
-        if (latest && inScope(latest)) {
-          publishEditor({ ...latest, save: "failed", error: error instanceof Error ? error.message : "PostgreSQLへ保存できませんでした。回復下書きは保持しています。" });
-        }
-      }
-    } finally {
-      saveInFlightRef.current = false;
-      if (saveControllerRef.current === controller) saveControllerRef.current = null;
-      const latest = activeRef.current;
-      if (latest?.dirty && latest.recovery === "stored" && !latest.remoteConflict && (latest.document.id !== pending.documentId || latest.document.projectId !== pending.projectId) && !controller.signal.aborted) {
-        window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
-      }
     }
-  }, [authorScope, publishEditor]);
+    const machineSnapshot = saveMachineActor.getSnapshot();
+    if (machineSnapshot.matches({ active: { server: "conflict" } })) return;
+    if (existingPending && machineSnapshot.matches({ active: { server: "unknown" } })) {
+      saveMachineActor.send({ type: "SAVE.RETRY" });
+    } else {
+      saveMachineActor.send({
+        type: "SAVE.MANUAL",
+        identity: { projectId: current.document.projectId, documentId: current.document.id },
+        operationId: pending.idempotencyKey,
+        generation: pending.generation,
+        reconcileReplay: Boolean(existingPending),
+      });
+    }
+  }, [saveMachineActor]);
 
   saveDocumentRef.current = saveDocument;
 
@@ -1589,6 +1625,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }
 
   const protectTransition = useCallback(async (): Promise<boolean> => {
+    const requestId = crypto.randomUUID();
+    saveMachineActor.send({ type: "NAVIGATION.REQUESTED", requestId });
+    let protectedIdentity: { projectId: string; documentId: string } | null = null;
+    let protectedGeneration: number | null = null;
     try {
       transitionErrorRef.current = "";
       // Capture the IME guard synchronously, before scratch/journal promises can
@@ -1600,26 +1640,48 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       await protectEditorTransition(() => activeRef.current, () => {
         const markdown = editorRef.current?.readForNavigation();
         const current = activeRef.current;
+        if (current) {
+          protectedIdentity = { projectId: current.document.projectId, documentId: current.document.id };
+          protectedGeneration = current.generation;
+        }
         if (current && markdown !== undefined && markdown !== current.markdown) {
           const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
-          publishEditor({
+          const next = {
             ...current,
             markdown,
             textChanges: composeDraftChanges(current, pending, markdown, minimalTextChanges(current.markdown, markdown)),
             generation: current.generation + 1,
             dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
-            recovery: current.recovery === "other-tab" ? "other-tab" : "pending",
-            save: current.recovery === "other-tab" ? "failed" : current.save === "saving" ? "saving" : "idle",
+            recovery: current.recovery === "other-tab" ? "other-tab" as const : "pending" as const,
+            save: current.recovery === "other-tab" ? "failed" as const : current.save === "saving" ? "saving" as const : "idle" as const,
+          };
+          protectedGeneration = next.generation;
+          publishEditor({
+            ...next,
           });
         }
       }, persistDraft);
+      const protectedEditor = activeRef.current;
+      const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
+      const capturedGeneration = protectedGeneration as number | null;
+      if (capturedIdentity && capturedGeneration !== null && protectedEditor && protectedEditor.document.projectId === capturedIdentity.projectId && protectedEditor.document.id === capturedIdentity.documentId && protectedEditor.generation === capturedGeneration) {
+        saveMachineActor.send({ type: "DRAFT.PROTECTED", identity: capturedIdentity, generation: capturedGeneration });
+      }
+      saveMachineActor.send({ type: "NAVIGATION.ALLOWED", requestId });
       return true;
     } catch (error) {
+      const current = activeRef.current;
+      const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
+      const capturedGeneration = protectedGeneration as number | null;
+      if (capturedIdentity && capturedGeneration !== null && current && current.recovery !== "other-tab" && current.document.projectId === capturedIdentity.projectId && current.document.id === capturedIdentity.documentId && current.generation === capturedGeneration) {
+        saveMachineActor.send({ type: "DRAFT.FAILED", identity: capturedIdentity, generation: capturedGeneration, message: error instanceof Error ? error.message : "回復Journalを保存できませんでした。" });
+      }
+      saveMachineActor.send({ type: "NAVIGATION.BLOCKED", requestId });
       transitionErrorRef.current = error instanceof Error ? error.message : "回復Journalを保存できませんでした。";
       setPageError(transitionErrorRef.current);
       return false;
     }
-  }, [persistDraft, publishEditor, resume.flush]);
+  }, [persistDraft, publishEditor, resume.flush, saveMachineActor]);
 
   useEffect(() => {
     registerProtection?.(protectTransition);
@@ -2140,11 +2202,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   async function restoreRevision(source: DocumentRevision): Promise<void> {
     const captured = activeRef.current;
-    if (!project || !captured || captured.dirty || captured.remoteConflict || saveInFlightRef.current || restoreInFlightRef.current || sessionBlockedRef.current) return;
+    if (!project || !captured || captured.dirty || captured.remoteConflict || saveMachineActor.getSnapshot().matches({ active: { server: "saving" } }) || restoreInFlightRef.current || sessionBlockedRef.current) return;
     if (source.projectId !== captured.document.projectId || source.documentId !== captured.document.id) return;
     if (!await protectTransition()) return;
     const current = activeRef.current;
-    if (!current || current !== captured || current.dirty || restoreInFlightRef.current || saveInFlightRef.current || sessionBlockedRef.current) return;
+    if (!current || current !== captured || current.dirty || restoreInFlightRef.current || saveMachineActor.getSnapshot().matches({ active: { server: "saving" } }) || sessionBlockedRef.current) return;
     const navigation = openSequenceRef.current;
     const projectId = captured.document.projectId;
     const documentId = captured.document.id;
@@ -2194,6 +2256,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           if (!stillSelected()) return;
           if (!latest.revision) throw new Error("競合した最新Revisionを確認できませんでした。");
           const current = activeRef.current!;
+          saveMachineActor.send({ type: "SAVE.CONFLICT.OBSERVED", identity: { projectId, documentId } });
           publishEditor({ ...current, remoteConflict: latest.revision, save: "failed", error: "復元前にRevisionが更新されました。最新Revisionを確認してください。" });
         } catch (cause) {
           if (stillSelected()) setPageError(cause instanceof Error ? cause.message : "競合した最新Revisionを確認できませんでした。");
@@ -2247,6 +2310,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         evidence: initializeDocumentEvidence(read.revision.markdown, read.revision.id, snapshot),
         evidenceLoadKey: current.evidenceLoadKey + 1,
       });
+      saveMachineActor.send({ type: "SAVE.CONFLICT.RESOLVED" });
       setNotice("PostgreSQLの最新版を開きました。回復Draftは明示的に破棄しました。");
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "PostgreSQLの最新版を開けませんでした。");
@@ -2258,6 +2322,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const remote = current?.remoteConflict;
     if (!current || !remote) return;
     pendingSaveRef.current.delete(JSON.stringify([current.document.projectId, current.document.id]));
+    saveMachineActor.send({ type: "SAVE.CONFLICT.RESOLVED" });
     publishEditor({
       ...current,
       revision: remote,
@@ -2581,7 +2646,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
-            <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
+            <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving" || saveMachineBusy}>
               {active.save === "failed" && pendingSaveForDisplay ? "保存結果を確認して再試行" : active.save === "failed" ? "作品への保存を再試行" : "今すぐ保存"}
             </button>
             <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
