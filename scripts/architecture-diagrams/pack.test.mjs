@@ -34,6 +34,22 @@ test('all canonical system, UI, administration and delivery diagrams have stable
     d.line > 0 && d.title.length > 0 && !('source' in d)));
 });
 
+test('every cataloged product screen has an owned, rendered transition diagram', () => {
+  const catalog = readFileSync(join(root, 'docs/design/SCREEN-CONTROL-CATALOG.md'), 'utf8');
+  const section = DIAGRAM_DOCUMENTS.find(item => item.id === 'screen');
+  assert.ok(section, 'Screen diagram authority must be registered');
+  const markdown = readFileSync(join(root, section.path), 'utf8');
+  const diagrams = parseMermaidDiagrams(markdown, section);
+  const screens = [...catalog.matchAll(/^\\|\\s([A-Z]+-\\d\\d)\\s\\|/gmu)].map(match => match[1]);
+  assert.ok(screens.length >= 28, 'Screen inventory must include product and security surfaces');
+  const unmodeled = screens.filter(id => id !== 'OPS-01' &&
+    !diagrams.some(diagram => diagram.title.includes(id)));
+  assert.deepEqual(unmodeled, [],
+    'All product screens require a transition graph; OPS-01 is a separate SSH/Ansible control plane');
+  assert.ok(diagrams.some(d => d.title.includes('KNO-03') && d.title.includes('未実装')),
+    'Unadopted knowledge graph screen must not be mistaken for a deployed feature');
+});
+
 test('reject malformed Mermaid and unknown diagram types before publishing', () => {
   const section = DIAGRAM_DOCUMENTS[0];
   assert.throws(() => parseMermaidDiagrams('## Head\n```mermaid\nflowchart LR\nA --> B', section),
