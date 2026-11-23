@@ -389,18 +389,9 @@ jobs:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci-profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
-      - name: Build reusable OAuth browser assets once per job
-        if: steps.restore-profile.outcome == 'success'
-        env:
-          CODEXIA_PROFILE: ${{ matrix.profile }}
-          CODEXIA_E2E_AUTH_ASSET_TEMPLATE: ${{ runner.temp }}/oauth-browser-assets
-        run: |
-          node --import tsx tests/e2e/prepare-author-assets.ts
-          node --import tsx --test tests/e2e/oauth-asset-template.test.ts
       - name: Run selected validations
         if: always() && !cancelled()
         env:
-          CODEXIA_E2E_AUTH_ASSET_TEMPLATE: ${{ runner.temp }}/oauth-browser-assets
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
           CODEXIA_UI_REVIEW_CAPTURE_DIR: ${{ runner.temp }}/ui-review-screens
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
