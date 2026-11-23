@@ -29,11 +29,14 @@
 | REQ-UI-003 | 画面、操作、遷移、戻り先、エラー、principalを画面ID/CTRL IDで特定する | [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md) | ACCEPTED／設計済み・適合未認定 |
 | REQ-UI-004 | IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可能性を保持する | [UX contract](../design/UX-CONTRACT.md) | ACCEPTED／適合未認定 |
 | REQ-UI-005 | 適用可能なWCAG 2.2 A/AA、keyboard、reflow等の受入義務を満たす | [UX contract](../design/UX-CONTRACT.md) | ACCEPTED／適合未認定 |
+| REQ-UI-006 | 原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない | [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md) | ACCEPTED／XState v5導入は**目標・未実装** |
 | REQ-EXT-001 | Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore認可の代わりにしない | [Deployment](../deployment/README.md)、[System design](../architecture/SYSTEM-DESIGN.md) | ACCEPTED／適合未認定 |
 | REQ-EXT-002 | OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を個別に検証する | [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[External interfaces](../architecture/EXTERNAL-INTERFACES.md) | ACCEPTED／適合未認定 |
 | REQ-OPS-001 | 新規VMのbootstrap、owner登録、公開、復旧を明示した別状態として扱う | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | ACCEPTED／一部目標・適合未認定 |
 | REQ-OPS-002 | 更新はexact-source検証、互換性、snapshot保全、失敗時停止/rollback規則を守る | [Update flow](../deployment/UPDATE-FLOW.md)、[CI/CD](../verification/CI-CD.md) | ACCEPTED／適合未認定 |
 | REQ-OPS-003 | バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。**S3互換ストレージへのage暗号化済みバックアップの転送・検証・取得・隔離復元をサポートする（追加機能は未実装）** | [Backup](../deployment/BACKUP.md) | ACCEPTED／S3対応は未実装・適合未認定 |
+| REQ-OPS-004 | ownerは管理コンソールからS3互換バックアップ先のdraft/検証/有効化/停止を操作できる。資格情報write-only、revisionとfresh再認証、operator保護のlocal staging/age鍵の非変更を保証する | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Admin flow](../design/ADMIN-SCREEN-FLOW.md) | ACCEPTED／画面/API/secret storeは**未実装** |
+| REQ-OPS-005 | ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する | [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md) | ACCEPTED／executor/画面/ジョブは**未実装** |
 | REQ-QUAL-001 | テストは契約の正常/異常/境界と実DB/API/UI/hostを分け、モックでは境界統合を証明しない | [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) | ACCEPTED／適合未認定 |
 | REQ-QUAL-002 | CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未実行/欠落をPASSとしない | [CI/CD](../verification/CI-CD.md) | ACCEPTED／適合未認定 |
 | REQ-QUAL-003 | INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別々の実測で評価する | [UX contract](../design/UX-CONTRACT.md)、[Performance](../performance/README.md) | ACCEPTED／計測状態未認定 |
