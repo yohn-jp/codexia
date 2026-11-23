@@ -50,8 +50,15 @@ function run(executable, args, options = {}) {
 
 /** @param {string} dockerBin @param {string} modelFile @param {string} outputDirectory */
 function runThreagile(dockerBin, modelFile, outputDirectory) {
+  // The parent scratch directory is private (0700); use its owner's UID/GID
+  // rather than the non-root UID baked into the pinned Threagile image.
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  assert.ok(Number.isSafeInteger(uid) && Number.isSafeInteger(gid),
+    'Threagile requires a Unix host UID/GID for private evidence mounts');
   return run(dockerBin, [
     'run', '--rm', '--network', 'none', '--read-only',
+    '--user', `${uid}:${gid}`,
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m',
     '--mount', `type=bind,src=${resolve(modelFile)},dst=/model.yaml,readonly`,
     '--mount', `type=bind,src=${resolve(outputDirectory)},dst=/output`,
