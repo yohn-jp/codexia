@@ -10,6 +10,7 @@ const CORE_PAGES = new Map([
   ['index.html', { id: 'overview', title: 'Development Portal', section: '概要', mode: 'サイトマップ', source: 'Pages artifact' }],
   ['audit/index.html', { id: 'audit', title: 'Source Audit', section: 'Source Audit', mode: 'branch snapshots', source: 'Branch and snapshot materials' }],
   ['ci/index.html', { id: 'ci', title: 'CI Observatory', section: 'CI', mode: 'live public Actions metadata', source: 'GitHub Actions public API' }],
+  ['security/index.html', { id: 'security', title: 'Code scanning export', section: 'Security', mode: 'authorized on-demand', source: 'GitHub Code scanning API (authorized locally)' }],
   ['graph/index.html', { id: 'graph', title: 'Code Map', section: 'Code Map', mode: 'build snapshot', source: 'Graphify static analysis' }],
   ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'Canonical design documents' }],
 ]);
@@ -19,6 +20,7 @@ const NAV_ITEMS = [
   ['architecture', 'Architecture', 'architecture/'],
   ['graph', 'Code Map', 'graph/'],
   ['ci', 'CI', 'ci/'],
+  ['security', 'Security', 'security/'],
   ['audit', 'Source Audit', 'audit/'],
   ['docs', 'GitHub Docs', 'https://github.com/yohn-jp/codexia/tree/main/docs'],
 ];
