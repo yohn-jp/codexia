@@ -1,0 +1,43 @@
+name: Native iOS API
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ios-api.yml
+      - ios/CodexiaTransport/**
+      - packages/http-contract/openapi/codexia.openapi.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-api-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  api:
+    name: Generated API and native transport
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Verify native SDK and generator inputs
+        run: |
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          swift --version
+          python3 -m pip install PyYAML==6.0.3
+      - name: Compare regenerated client and operation IDs
+        run: ios/CodexiaTransport/generate.sh --check
+      - name: Run Swift contract tests
+        run: swift test --package-path ios/CodexiaTransport --force-resolved-versions --jobs 4
+      - name: Compile OAuth, Keychain and transport for iOS Simulator
+        working-directory: ios/CodexiaTransport
+        run: >-
+          xcodebuild -scheme CodexiaTransport -destination 'generic/platform=iOS Simulator'
+          -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
