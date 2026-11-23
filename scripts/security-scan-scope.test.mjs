@@ -42,6 +42,15 @@ test('Gitleaks PR scope includes renamed and prior committed secret additions; m
     git('commit', '-qm', 'add fixture');
     git('mv', 'fixture.txt', 'renamed-fixture.txt');
     git('commit', '-qm', 'rename fixture');
+    git('checkout', '-qb', 'second-parent', base);
+    writeFileSync(path.join(root, 'other.txt'), 'second parent\n');
+    git('add', '.');
+    git('commit', '-qm', 'side branch');
+    git('checkout', '-q', 'feature');
+    git('merge', '--no-commit', 'second-parent');
+    writeFileSync(path.join(root, 'merge-result.txt'), 'synthetic-merge-result-marker\n');
+    git('add', '.');
+    git('commit', '-qm', 'record merge result');
     const head = git('rev-parse', 'HEAD');
     const invoke = (event, prBase, prHead) => {
       const output = path.join(root, 'scope-output');
@@ -56,11 +65,15 @@ test('Gitleaks PR scope includes renamed and prior committed secret additions; m
     };
     const pr = invoke('pull_request', base, head);
     assert.equal(pr.result.status, 0, pr.result.stderr);
-    assert.equal(pr.line, `log_opts=${base}..${head}`);
-    assert.match(git('log', '-p', `${base}..${head}`), /synthetic-scope-marker/u);
+    assert.ok(pr.line.endsWith(`${base}..${head}`));
+    const prPatch = git('log', '-p', '-U0', ...pr.line.slice('log_opts='.length).split(' '));
+    assert.match(prPatch, /synthetic-scope-marker/u);
+    assert.match(prPatch, /synthetic-merge-result-marker/u);
     const main = invoke('push', '', '');
     assert.equal(main.result.status, 0, main.result.stderr);
-    assert.equal(main.line, 'log_opts=HEAD');
+    assert.ok(main.line.endsWith('HEAD'));
+    const mainPatch = git('log', '-p', '-U0', ...main.line.slice('log_opts='.length).split(' '));
+    assert.match(mainPatch, /synthetic-merge-result-marker/u);
     assert.notEqual(invoke('pull_request', base, 'badsha').result.status, 0);
     assert.notEqual(invoke('pull_request', 'f'.repeat(40), head).result.status, 0);
     assert.notEqual(invoke('pull_request', base, base).result.status, 0);

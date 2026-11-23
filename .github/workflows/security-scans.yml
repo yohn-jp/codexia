@@ -65,8 +65,9 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
           set -euo pipefail
+          # Emit merge-result patches without restricting ancestry traversal.
           if [[ "$GITHUB_EVENT_NAME" != 'pull_request' ]]; then
-            printf 'log_opts=HEAD\n' >> "$GITHUB_OUTPUT"
+            printf 'log_opts=--diff-merges=first-parent HEAD\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           [[ "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid PR base identity' >&2; exit 1; }
@@ -78,7 +79,7 @@ jobs:
             echo 'PR contains no verifiable commits to scan' >&2
             exit 1
           }
-          printf 'log_opts=%s..%s\n' "$PR_BASE_SHA" "$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          printf 'log_opts=--diff-merges=first-parent %s..%s\n' "$PR_BASE_SHA" "$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Scan Git history
         run: |
           docker run --rm --network none \
