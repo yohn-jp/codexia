@@ -76,7 +76,7 @@ async function assertVisibleCopyableSha(page, selector, expected, label) {
     const text = element.firstChild;
     if (!text || text.nodeType !== Node.TEXT_NODE || element.childNodes.length !== 1) return { error: 'SHA is not selectable text' };
     const clips = [];
-    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    for (let parent = element; parent; parent = parent.parentElement) {
       const style = getComputedStyle(parent);
       const x = ['hidden', 'clip'].includes(style.overflowX);
       const y = ['hidden', 'clip'].includes(style.overflowY);
