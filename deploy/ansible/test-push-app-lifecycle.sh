@@ -27,6 +27,26 @@ user_created=false
 system_config_created=false
 runtime_ready=false
 cleanup_status=0
+declare -A mitogen_traversal_paths=()
+
+# Mitogen's local become needs directory traversal but not content access.
+# This is restricted to the disposable numeric UID and runner-owned directories.
+grant_mitogen_traversal() {
+  [[ "${ANSIBLE_STRATEGY:-}" == mitogen_linear ]] || {
+    echo 'Lifecycle CI must use the pinned mitogen_linear strategy' >&2
+    exit 1
+  }
+  local dir
+  for dir in "$repo_root/deploy/ansible" "$tmp"; do
+    while [[ "$dir" != /home && "$dir" != / ]]; do
+      if [[ -d "$dir" && -O "$dir" && ! -L "$dir" && ! -v mitogen_traversal_paths["$dir"] ]]; then
+        sudo setfacl -m "u:$fixture_uid:--x" "$dir"
+        mitogen_traversal_paths["$dir"]=1
+      fi
+      dir=${dir%/*}
+    done
+  done
+}
 
 set_state() {
   node - "$report" "$1" "$2" "${3:-}" <<'NODE'
@@ -134,8 +154,12 @@ run_playbook() {
   local vars=$1 name=$2 status=0
   local -a shared_vars=()
   if [[ -n ${3:-} ]]; then shared_vars=(--extra-vars "@$3"); fi
+  local started_ms elapsed_ms
+  started_ms=$(date +%s%3N)
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
     "$repo_root/deploy/ansible/site.yml" "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
+  elapsed_ms=$(( $(date +%s%3N) - started_ms ))
+  echo "LIFECYCLE_ANSIBLE_TIMING stage=$name duration_ms=$elapsed_ms status=$status"
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   return "$status"
 }
@@ -319,6 +343,10 @@ cleanup() {
     sudo rm -rf -- /etc/codexia || cleanup_failed "$LINENO"
     [[ ! -e /etc/codexia && ! -L /etc/codexia ]] || cleanup_failed "$LINENO"
   fi
+  local acl_path
+  for acl_path in "${!mitogen_traversal_paths[@]}"; do
+    sudo setfacl -x "u:$fixture_uid" "$acl_path" || cleanup_failed "$LINENO" 'Mitogen directory traversal ACL removal'
+  done
   if [[ -f "$tmp/cleanup-errors.log" ]]; then
     redact_log "$tmp/cleanup-errors.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/cleanup-errors-bounded.log"
   fi
@@ -434,6 +462,7 @@ YAML
 system_config_created=true
 user_created=true
 runtime_ready=true
+grant_mitogen_traversal
 run_playbook "$tmp/bootstrap.yml" bootstrap
 rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
 service_uid=$(id -u codexia)

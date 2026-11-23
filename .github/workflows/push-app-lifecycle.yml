@@ -54,6 +54,7 @@ on:
       - deploy/ansible/test-push-*-lifecycle.sh
       - deploy/ansible/push-deployment-recover.sh
       - deploy/ansible/requirements.txt
+      - deploy/ansible/callback_plugins/**
       - deploy/backup/**
       - deploy/quadlet/**
       - deploy/update-compatibility.json
@@ -208,7 +209,25 @@ jobs:
             exit 78
           fi
           rm -f "$setup_log"
-          echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" >> "$GITHUB_ENV"
+          # Base Secrets CI already proves this pinned strategy on rootless
+          # local become; the lifecycle lane previously installed it but ran linear.
+          python="$RUNNER_TEMP/codexia-ansible/bin/python"
+          plugin_dir=$("$python" -c 'import ansible_mitogen, os; print(os.path.join(os.path.dirname(ansible_mitogen.__file__), "plugins", "strategy"))')
+          test -f "$plugin_dir/mitogen_linear.py"
+          "$python" -c 'from importlib.metadata import version; assert version("mitogen") == "0.3.55"'
+          # ansible-doc requires plugin documentation even when a strategy is
+          # loadable. Mitogen does not ship that metadata, so check the pinned
+          # module and strategy file directly instead (as Base Secrets CI does).
+          callback_dir="$GITHUB_WORKSPACE/deploy/ansible/callback_plugins"
+          "$python" -m py_compile "$callback_dir/codexia_profile.py"
+          {
+            echo "ANSIBLE_PLAYBOOK=$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook"
+            echo "ANSIBLE_STRATEGY=mitogen_linear"
+            echo "ANSIBLE_STRATEGY_PLUGINS=$plugin_dir"
+            echo "ANSIBLE_CALLBACK_PLUGINS=$callback_dir"
+            echo "ANSIBLE_CALLBACKS_ENABLED=codexia_profile"
+          } >> "$GITHUB_ENV"
+          echo "LIFECYCLE_ANSIBLE_PROFILE strategy=mitogen_linear callback=codexia_profile"
           for script in deploy/ansible/test-push-{app,auth}-lifecycle.sh; do bash -n "$script"; done
           node --check scripts/push-auth-lifecycle-oidc.mjs
       - name: Run exact-source image selection and real app lifecycle fixture
