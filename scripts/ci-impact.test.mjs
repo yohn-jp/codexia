@@ -191,12 +191,10 @@ test('PostgreSQL contract fixture changes select the real database contract lane
   }
 });
 
-test('canonical backup producer changes retain the isolated DB restore contract', async () => {
+test('the canonical age backup script selects both DBV-007 and existing root backup verification', async () => {
   const selected = await plan(['deploy/backup/backup.sh']);
   assert.equal(selected.mode, 'affected');
-  assert.ok(selected.tasks.includes('unit-root'), 'retain the existing operational proof');
-  assert.ok(selected.tasks.includes('db-contract'), 'rerun the real PostgreSQL restore proof');
-  assert.ok(!selected.tasks.includes('unit-api'), 'do not expand to unrelated application unit checks');
+  assert.deepEqual(selected.tasks, ['unit-root', 'db-contract', 'coverage']);
 });
 
 test('existing PostgreSQL migration changes retain full verification', async () => {
@@ -260,7 +258,10 @@ test('known operational inputs retain root proof without unrelated browser or OC
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
-    assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage']
+      : ['unit-root','coverage'];
+    assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
   for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
@@ -379,7 +380,10 @@ test('push backup changes retain root and independent exact-head verification', 
     '.github/workflows/push-backup.yml',
   ];
   for (const file of source) {
-    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    const expected = file === 'deploy/backup/backup.sh'
+      ? ['unit-root', 'db-contract', 'coverage']
+      : ['unit-root', 'coverage'];
+    assert.deepEqual((await plan([file])).tasks, expected, file);
     assert.equal((await plan([file])).full_model_oci, false, file);
     for (const event of ['pull_request', 'push']) {
       const paths = backup.on[event].paths;

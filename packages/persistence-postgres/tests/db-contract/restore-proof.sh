@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 database="codexia-schema-proof-$(cat /proc/sys/kernel/random/uuid)"
-cleanup(){ /usr/bin/podman rm -f "$database" >/dev/null 2>&1 || true; }
+cleanup(){ podman rm -f "$database" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 podman run -d --name "$database" --network none --security-opt no-new-privileges \
@@ -14,7 +14,7 @@ for attempt in $(seq 1 60); do
 done
 podman exec "$database" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d codexia -c 'SELECT 1' >/dev/null
 
-age -d -i /contract/identity /contract/backup/database.dump.age |
+age -d -i "${CODEXIA_RESTORE_IDENTITY:-/contract/identity}" /contract/backup/database.dump.age |
   podman exec -i "$database" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
 podman exec -i "$database" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d codexia \
   -c 'SELECT json_agg(json_build_array(version,btrim(checksum)) ORDER BY version)::text FROM public.codexia_schema_migrations' \

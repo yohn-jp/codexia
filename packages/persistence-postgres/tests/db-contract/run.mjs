@@ -382,7 +382,7 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const postgresId = output('docker', ['image', 'inspect', '--format', '{{.Id}}', pgImage]);
   const toolsDirectory = path.join(tempDirectory, 'restore-tools');
   await mkdir(toolsDirectory);
-  const wrapper = '#!/bin/bash\nset -euo pipefail\nargs=()\nfor arg in "$@"; do\n  if [[ "$arg" == "$CODEXIA_PG_IMAGE_REF" ]]; then args+=("$CODEXIA_PG_IMAGE_ID"); else args+=("$arg"); fi\ndone\nexec /usr/bin/podman "${args[@]}"\n';
+  const wrapper = '#!/bin/bash\nset -euo pipefail\nargs=()\nfor arg in "$@"; do\n  if [[ "$arg" == "$CODEXIA_PG_IMAGE_REF" ]]; then args+=("$CODEXIA_PG_IMAGE_ID"); else args+=("$arg"); fi\ndone\nexec /usr/bin/podman --storage-driver=vfs "${args[@]}"\n';
   await writeFile(path.join(toolsDirectory, 'podman'), wrapper, { mode: 0o700 });
   await writeFile(path.join(toolsDirectory, 'ip'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
   await writeFile(path.join(toolsDirectory, 'age'), await readFile(agePath), { mode: 0o700 });
@@ -397,18 +397,23 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
     'restore proof query matches the API auth schema fingerprint source');
   const toolImage = toolchain.restoreDrill.podmanImage;
   const innerCommand = [
-    'mkdir -p /tmp/xdg-1000 /tmp/codexia-state /contract/restore-proof',
-    'chmod 700 /tmp/xdg-1000 /tmp/codexia-state',
+    'mkdir -p /run/user/0 /tmp/codexia-state /contract/restore-proof',
+    'chmod 700 /run/user/0 /tmp/codexia-state',
+    'cp /contract/identity /tmp/codexia-restore-identity',
+    'chmod 600 /tmp/codexia-restore-identity',
+    'export CODEXIA_RESTORE_IDENTITY=/tmp/codexia-restore-identity',
     'export PATH=/contract/tools:/usr/local/bin:/usr/bin:/bin',
     'podman load -i /contract/postgres-image.tar >/dev/null',
     `loaded_id="$(podman image inspect --format '{{.Id}}' ${postgresId})"`,
     'test "${loaded_id#sha256:}" = "' + postgresId.replace(/^sha256:/u, '') + '"',
-    'bash /contract/backup.sh drill /contract/backup /contract/identity --approved',
+    'bash /contract/backup.sh drill /contract/backup "$CODEXIA_RESTORE_IDENTITY" --approved',
     'bash /contract/restore-proof.sh',
+    'chown -R "$CODEXIA_HOST_UID:$CODEXIA_HOST_GID" /contract/restore-proof',
   ].join('\n');
   invoke('docker', [
-    'run', '--rm', '--privileged', '--security-opt', 'label=disable', '--user', `${process.getuid()}:${process.getgid()}`,
-    '--env', 'HOME=/tmp', '--env', 'XDG_RUNTIME_DIR=/tmp/xdg-1000', '--env', 'CODEXIA_PUSH_STATE_DIR=/tmp/codexia-state',
+    'run', '--rm', '--privileged', '--security-opt', 'label=disable', '--user', '0:0',
+    '--env', 'HOME=/root', '--env', 'XDG_RUNTIME_DIR=/run/user/0', '--env', 'CODEXIA_PUSH_STATE_DIR=/tmp/codexia-state',
+    '--env', `CODEXIA_HOST_UID=${process.getuid()}`, '--env', `CODEXIA_HOST_GID=${process.getgid()}`,
     '--env', `CODEXIA_PG_IMAGE_REF=${pgImage}`, '--env', `CODEXIA_PG_IMAGE_ID=${postgresId}`,
     '--env', `CODEXIA_RESTORE_PROJECT_ID=${identity.projectId}`,
     '--volume', `${backup}:/contract/backup:rw`, '--volume', `${proof}:/contract/restore-proof:rw`,
