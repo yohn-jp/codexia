@@ -14,6 +14,7 @@
 | `/architecture/` | Architecture Atlas | ビルド対象 SHA の正本 Markdown。図の URL ハッシュと原文行を保持 |
 | `/graph/` | Code Map | 同じビルド対象 SHA から Graphify が抽出した静的参照。既存の `?file=` と集約概観の URL を保持 |
 | `/ci/` | CI Observatory | 閲覧時に公開 API から取得した run、job、step の標本。個別タスクの時間は未計測 |
+| `/security/` | Code scanning export | 利用者ブラウザーの読み取り専用認証で `main` の全状態アラートを GitHub API から取得、JSON/CSV に出力。公開ファイルに検出情報なし |
 | `/audit/` | Source Audit | 公開リポジトリで観測したブランチ HEAD。root の `manifest.json` と SHA 別の snapshot、review の URL を保持 |
 
 PR ではパッケージを `repository-audit-preview` に保存する。
@@ -134,3 +135,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 確認した生成元: [publisher](../../.github/workflows/repository-audit.yml)、[audit exporter](../../scripts/audit/export.mjs)、[delegate](../../scripts/audit/delegate.mjs)、[CI packer](../../scripts/ci-dashboard/collect.mjs)、[CI client](../../scripts/ci-dashboard/site/dashboard.js)、[Graph packer](../../scripts/graphify-pages/pack.mjs)、[Graph UI](../../scripts/graphify-pages/explorer.html)、[Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[Atlas UI](../../scripts/architecture-diagrams/atlas.js)、および各[既存のCI説明](CI-DASHBOARD.md)・[Graph説明](GRAPHIFY-PAGES.md)・[Atlas説明](ARCHITECTURE-ATLAS.md)。
 
 未確認: 公開Pagesの実到達・現物スクリーンショット、最新main公開のartifact内容、対象全ブランチの公開可否、Graphify実データ内のソース位置属性、GitHub REST APIの現時点のレート制限、現行本番のページセキュリティヘッダー。**これらを未検証のまま「正常」「安全」と記載しない。**
+
+## Code scanning export（2026-11-23 追加）
+
+`/security/` の JavaScript が利用者権限で GitHub REST `/code-scanning/alerts` をページネーション取得する。CodeQL 等の tool 名、状態、位置、ルールをブラウザー内で表示し、認可された取得結果を JSON と CSV で保存する。PAT と API レスポンスは Pages ビルド時に取得しない。ソースは `scripts/code-scanning-pages/`、導線は既存 portal/navigation、受入は Pages の Chromium smoke。

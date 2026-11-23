@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Download your authorized Codexia Code scanning alerts without publicly publishing findings">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://api.github.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>Code scanning export — Codexia</title>
+  <link rel="stylesheet" href="./security.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <main class="cx-pages-container cx-pages-main security-page">
+    <header class="cx-pages-hero">
+      <p class="security-eyebrow">SECURITY / AUTHORIZED EXPORT</p>
+      <h1>Code scanning</h1>
+      <p class="cx-pages-lede">GitHub が検出したコード解析アラートを、権限のある利用者が取得して JSON / CSV で保存します。</p>
+      <div class="security-context"><span>Repository <strong>yohn-jp/codexia</strong></span><span>Ref <code>refs/heads/main</code></span><span>Source <strong>GitHub REST API</strong></span></div>
+    </header>
+
+    <div class="security-layout">
+      <section class="security-panel" aria-labelledby="authentication-title">
+        <h2 id="authentication-title">読み取り権限</h2>
+        <p>GitHub fine-grained personal access token を使用します。対象リポジトリだけに <strong>Code scanning alerts: Read-only</strong> を付与してください。</p>
+        <form id="credential-form" autocomplete="off">
+          <label for="access-token">GitHub トークン</label>
+          <input id="access-token" type="password" name="access-token" autocomplete="off" autocapitalize="off" spellcheck="false" required aria-describedby="token-privacy" placeholder="github_pat_...">
+          <button type="submit" class="cx-pages-action cx-pages-action--primary" id="load-alerts">アラートを取得</button>
+        </form>
+        <p id="token-privacy" class="security-small">トークンは GitHub API への認証にだけ使い、取得後に入力欄から消去します。Pages、localStorage、Cookie、ログへ保存しません。</p>
+        <p class="security-small"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub で読み取り専用トークンを作成</a></p>
+      </section>
+
+      <section class="security-panel" aria-labelledby="scope-title">
+        <h2 id="scope-title">データの範囲</h2>
+        <p>現在の <code>main</code> に対する全状態のアラートを取得します。CodeQL 以外のツールも GitHub Code scanning に登録されていれば対象です。</p>
+        <p>JSON は GitHub API のアラート全項目、CSV はルール・重大度・ファイル位置・状態などを出力します。秘密情報を含む可能性があるため、ダウンロードしたファイルの共有範囲に注意してください。</p>
+        <p class="security-small">この画面ではアラートを公開サーバーへ転送しません。取得結果はタブを閉じるか再読み込みすると消去されます。GitHub Actions の SARIF 原本そのものではありません。</p>
+      </section>
+    </div>
+
+    <section class="security-results security-panel" aria-labelledby="results-title">
+      <div class="security-results-heading">
+        <div><h2 id="results-title">検出結果</h2><p id="status" role="status" aria-live="polite" data-state="idle">未取得。トークンを入力してください。</p></div>
+        <div class="cx-pages-actions"><button type="button" class="cx-pages-action" id="download-json" disabled>JSON をダウンロード</button><button type="button" class="cx-pages-action" id="download-csv" disabled>CSV をダウンロード</button></div>
+      </div>
+      <p class="security-small" id="coverage">未取得 · 対象 refs/heads/main · フィルターなしの全件エクスポート</p>
+      <div class="security-table-wrap" role="region" tabindex="0" aria-label="Code scanning アラート一覧">
+        <table>
+          <thead><tr><th scope="col">Alert</th><th scope="col">状態</th><th scope="col">重大度</th><th scope="col">ツール / ルール</th><th scope="col">位置</th></tr></thead>
+          <tbody id="alerts"><tr><td colspan="5">アラートはまだ取得していません。</td></tr></tbody>
+        </table>
+      </div>
+      <p class="security-small">画面には最大100件を表示します。ダウンロードは取得できた全件を含みます。取得が失敗・途中で中断した場合はダウンロードを許可しません。</p>
+    </section>
+  </main>
+</body>
+</html>
