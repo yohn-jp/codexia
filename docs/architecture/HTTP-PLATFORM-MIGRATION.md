@@ -11,7 +11,7 @@
 | HTTP runtime | **Fastify v5系（導入時に最新安定を確認）** | Hono: Web標準とOrval Hono server generatorは利点だが、VM上のNode専用APIではFastifyのAjv validation、response serializer、encapsulated plugins、onClose等の既存機能を置き換える利益が限定的。全面移行は不要 |
 | Wire契約 | **TypeSpec + OpenAPI 3.1** | OpenAPI YAMLの独立手書き: DTO/operationを重複管理する |
 | HTTP検証 | **Fastify JSON Schema/Ajv + response serializer** | ZodをHTTP wireの第二の手書き正本にする方式: schemaの二重定義が発生する |
-| 生成client | **Orval（fetch client等）** | Hey API: 既存選定を維持。ただしOrvalのHono server generatorは使用しない |
+| 生成client | **Web TypeScript: Orval / iOS SwiftUI: 同一OpenAPIからSwift生成client** | OrvalをSwift generatorとみなさず、iOS wire DTOの第二手書き正本を作らない。詳細は[iOS Native設計](IOS-SWIFTUI-ARCHITECTURE.md) |
 | 業務/MCP schema | **Zod v4** | TypeBoxを別のHTTP schema正本として導入する方式: 生成されたJSON Schemaと二重化する |
 
 **公式参照:** [Fastify validation/serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/)、[Fastify plugins/encapsulation](https://fastify.dev/docs/latest/Reference/Encapsulation/)、[Fastify lifecycle](https://fastify.dev/docs/latest/Reference/Lifecycle/)、[TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval output configuration](https://orval.dev/docs/reference/configuration/output/)。
@@ -25,9 +25,9 @@
                          |
               OpenAPI 3.1（生成・lint）
                   /              \
-         JSON Schema          Orval typed client
+         JSON Schema          Generated clients
             |                        |
-     Fastify explicit routes     Web / iOS
+     Fastify explicit routes     Web TS / iOS Swift
      Ajv input validation
      response serialization
             |
@@ -37,7 +37,7 @@
 - TypeSpecが所有: method/path、operationId、request/response DTO、status/error、headers、content type、OAuth security schemeの**ワイヤ表現**。
 - TypeSpecの出力をFastifyのroute `schema` に適合させるための**一方向の変換**を導入する。OpenAPI 3.1 SchemaとFastify/Ajvが受け付けるJSON Schema方言の差（nullable、oneOf/anyOf、discriminator、additionalProperties、formats、coercion、default、response status別schema）を明示して検査する。**OpenAPIのcomponentsをFastifyへそのまま渡せるとは仮定しない。**
 - `@codexia/contracts` はCoreの業務契約、TypeSpecはHTTP wire契約。重なるDTOは生成またはadapterで接続し、同じwire DTOを二つの独立編集可能な正本にしない。
-- Orvalはクライアント生成専用。生成clientのrequest headers、OAuth token、Idempotency-Key、abort/retry、error handlingは既存のWeb/iOS受入で検証する。
+- OrvalはWeb TypeScriptの生成client専用。iOS Native Swiftは同じOpenAPI 3.1からSwift clientを生成し、OAuth、headers、Idempotency-Key、abort/retry、status別error/receipt、streamingを個別に検証する。iOS実装は[iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md)が所有する。
 - Fastifyが所有: request lifecycle、content parser、Ajv validation、response serializer、route registration、error handling、streaming/abort、graceful shutdown。schema validationが成功しても認可成功とはみなさない。
 - 既存Core/DBが所有: project/object/revision/effect、author-only approve/apply、idempotency、transaction、receipt。これをHTTP schema/validatorへ移管しない。
 
@@ -68,7 +68,7 @@
 ## 導入と受入
 
 - **A: インベントリ** — Fastify catch-all、persistence dispatch、Better Auth、MCP、module contributions、share reader、health、SSEの全method/pathとschema/認可を列挙。
-- **B: 契約生成** — TypeSpec→OpenAPI 3.1→Redocly/oasdiff、OpenAPI→Fastify schema/route定義とOrval clientを生成・照合。変換後のSchemaで正常/異常/境界を試し、変換で情報を失ったらfail。
+- **B: 契約生成** — TypeSpec→OpenAPI 3.1→Redocly/oasdiff、OpenAPI→Fastify schema/route定義とOrval Web clientを生成・照合。iOS Swift生成の受入は[iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md)に分離する。変換後のSchemaで正常/異常/境界を試し、変換で情報を失ったらfail。
 - **C: 明示ルート** — Fastify上でrouteを段階移管し、中央admission、Ajv、response serializer、エラーとstreamingを検証。業務handlerをgenerator-owned directoryへ置かない。
 - **D: 特殊経路** — Better Auth、MCP SDK v2、module HTTP、SSE、public reader、graceful shutdownを検証。旧catch-all/二重validator/不要compatibilityを除去。
 - **E: 実動作認定** — 実DB/API/MCP/Chromium/WebKit/OCIの既存受入を維持し、contract testとexact-source CI証拠を結合する。
