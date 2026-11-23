@@ -176,8 +176,8 @@ try {
 
     await page.goto(base + 'architecture/#' + relatedDiagram.id);
     const evidence = page.locator('#implementation-evidence');
-    const architectureLink = evidence.getByRole('link', { name: relatedFile, exact: true });
     await expandContainingDisclosure(evidence);
+    const architectureLink = evidence.locator(`a[href="../graph/?file=${encodeURIComponent(relatedFile)}"]`);
     await architectureLink.press('Enter');
     await page.waitForURL(url => url.pathname === prefix + 'graph/' && url.searchParams.get('file') === relatedFile);
     await page.waitForFunction(path => document.querySelector('#selected-path')?.textContent === path, relatedFile);
@@ -189,7 +189,9 @@ try {
     await page.goto(graphLink.href);
     await page.reload();
     await page.waitForFunction(path => document.querySelector('#selected-path')?.textContent === path, firstFile);
-    await page.locator('#search').fill(firstFile);
+    const graphSearch = page.locator('#search');
+    await expandContainingDisclosure(graphSearch);
+    await graphSearch.fill(firstFile);
     const selection = page.locator('#file-list .file-button[aria-current="true"]');
     await selection.waitFor();
     assert.equal(new URL(page.url()).searchParams.get('file'), firstFile);
@@ -206,7 +208,9 @@ try {
     assert.ok(main && ['ready', 'partial'].includes(audit.snapshots[main.sha]?.status));
     const snapshotUrl = new URL('snapshots/' + main.sha + '/', base);
     await page.goto(base + 'audit/');
-    await page.locator(`main a[href$="snapshots/${main.sha}/"]`).first().click();
+    const snapshotLink = page.locator(`main a[href$="snapshots/${main.sha}/"]`).first();
+    await expandContainingDisclosure(snapshotLink);
+    await snapshotLink.click();
     assert.equal(page.url(), snapshotUrl.href);
     const repomix = audit.snapshots[main.sha].outputs.find(output => output.name === 'repomix.json');
     assert.ok(repomix);
@@ -240,6 +244,11 @@ try {
         await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
         await assertReflow(page, `${destination || 'Portal'} with 200% text`);
         assert.ok(await page.getByRole('heading', { level: 1 }).first().isVisible());
+        const menu = page.locator('.cx-pages-menu-button');
+        if (!destination && await menu.isVisible()) {
+          await menu.press('Enter');
+          await assertReflow(page, 'Expanded navigation with 200% text');
+        }
       }
     }
 
