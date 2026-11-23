@@ -318,7 +318,10 @@ test("project switch fences a late unified-feed response and read-only sessions 
   await expect(page.getByText("この作品にネイティブ提案はありません。", { exact: true })).toBeVisible();
   await expect(page.locator(".native-changeset-card")).toHaveCount(0);
 
-  const readOnlyPage = await browser.newPage();
+  // Simulate reduced UI permissions for the enrolled owner without starting a
+  // second OIDC identity in this single-owner standalone fixture.
+  const readOnlyContext = await browser.newContext({ storageState: await page.context().storageState() });
+  const readOnlyPage = await readOnlyContext.newPage();
   await readOnlyPage.route("**/api/session", async (route) => {
     const response = await route.fetch();
     if (!response.ok()) { await route.fulfill({ response }); return; }
@@ -331,7 +334,7 @@ test("project switch fences a late unified-feed response and read-only sessions 
     await expect(missingAuthorControls).toBeVisible();
     await expect(readOnlyPage.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
     await expect(readOnlyPage.getByRole("button", { name: "承認する" })).toHaveCount(0);
-  } finally { await readOnlyPage.close(); }
+  } finally { await readOnlyContext.close(); }
 });
 
 
