@@ -646,7 +646,10 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
 
 test("project reconstruction retains PostgreSQL revisions and removed Git lifecycle has no fallback", async ({ page, authorizeAuthor, authorServer }) => {
   const f = await fixture(page, authorizeAuthor); const text = "Survives process reconstruction.";
-  await editor(page).fill(text); await saved(page, f, text); const revision = (await read(f)).revision.id;
+  await replaceEditor(page, text);
+  await expectEditor(page, text);
+  await saved(page, f, text);
+  const revision = (await read(f)).revision.id;
   await authorServer.restartApi(); await reopen(page, f); await expectEditor(page, text);
   expect((await read(f)).revision.id).toBe(revision);
   for (const suffix of ["publish", "reconcile", "checkpoints"]) {
@@ -1133,12 +1136,16 @@ test("late document activation cannot replace explicit scene navigation", async 
 
 test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigation during draft flush", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
+  const draft = "Pending Scene One draft before explicit navigation.";
   try {
-    await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(f, "External PostgreSQL version.");
+    await replaceEditor(page, draft);
+    await expectEditor(page, draft);
+    await gate.seen;
+    await replace(f, "External PostgreSQL version.");
     await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     await expectEditor(page, f.two.revision.markdown); gate.release();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Pending Scene One draft before explicit navigation.")).toBe(true);
+    await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === draft)).toBe(true);
   } finally { gate.release(); }
 });
 
