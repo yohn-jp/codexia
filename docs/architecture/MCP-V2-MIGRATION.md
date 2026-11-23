@@ -94,4 +94,4 @@ conformanceの `--requirements 2026-07-28` は仕様リリース時点のrequire
 4. Fastifyのouter admissionとMCP handlerを接続。OAuth metadata、tool limits、stream/recoveryの負のtestを実行する。
 5. 保護された実クライアント/テストの受入が成立した後、不要なv1 session mapと恒久compatibilityを撤去する。
 
-**本PRではSDKの更新・tool実装・protocol acceptanceは未実施。** バージョン番号は導入PR時点の最新安定を個別に検証し、Node/TypeScript/Zod/Hono adapterのpeer互換をlockfileで固定する。
+**本PRではSDKの更新・tool実装・protocol acceptanceは未実施。** バージョン番号は導入PR時点の最新安定を個別に検証し、Node/TypeScript/Zod/FastifyへのWeb標準handler adapterのpeer互換をlockfileで固定する。
