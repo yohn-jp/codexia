@@ -55,6 +55,7 @@ test('publishes a searchable file explorer and keeps native community graph inta
   assert.match(explorer, /Graphify File Explorer/);
   assert.match(explorer, /packages\/api\/server.ts/);
   assert.match(explorer, /参照元/);
+  assert.match(explorer, /https:\/\/github.com\/yohn-jp\/codexia\/blob\/a{40}\/packages\/api\/server.ts/);
   assert.doesNotMatch(explorer, /<script>alert\(1\)<\/script>/);
   assert.match(explorer, /\\u003c\/script>/);
   assert.deepEqual(JSON.parse(await readFile(join(published, 'source.json'), 'utf8')), {

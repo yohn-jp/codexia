@@ -36,6 +36,7 @@
   main { padding:24px clamp(16px,3vw,36px);min-width:0; }
   .head { display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap; }
   .head h2 { overflow-wrap:anywhere;font-size:20px;max-width:70ch; }
+  .source-links a[hidden] { display:none; }
   .pills { display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px; }
   .pill { border:1px solid var(--line);border-radius:8px;padding:4px 10px;color:var(--muted);font-variant-numeric:tabular-nums; }
   .canvas-wrap { background:radial-gradient(ellipse at 50% 40%,#22314d,#101829);border:1px solid var(--line);border-radius:12px;overflow-x:auto; }
@@ -85,7 +86,7 @@
     <div id="file-list" class="file-list" aria-label="ファイル一覧"></div>
   </aside>
   <main>
-    <div class="head"><div><h2 id="selected-path">ファイルを選択</h2><div id="file-metrics" class="pills"></div></div><a id="source-link" target="_blank" rel="noopener noreferrer" hidden>GitHubでソースを開く</a></div>
+    <div class="head"><div><h2 id="selected-path">ファイルを選択</h2><div id="file-metrics" class="pills"></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
     <div class="canvas-wrap">
       <div class="canvas-head"><span class="legend-in">● 参照元 → 選択ファイル</span><span class="legend-out">● 選択ファイル → 参照先</span><span>最大各8件を表示（一覧は全件）</span></div>
       <svg id="neighbor-graph" role="img" aria-label="選択ファイルと隣接ファイルのグラフ"></svg>
@@ -113,7 +114,9 @@
   for (const area of areas) { const opt=document.createElement('option');opt.value=area;opt.textContent=area;$('area').append(opt); }
   const short = path => path.length > 33 ? '…' + path.slice(-32) : path;
   const basename = path => path.split('/').pop();
-  const getSourceUrl = path => 'https://github.com/yohn-jp/codexia/blob/' + data.sourceSha + '/' + path.split('/').map(encodeURIComponent).join('/');
+  const sourceLinks = [...$('source-links').querySelectorAll('a')];
+  const sourceLinkByPath = new Map(files.map((f, i) => [f.path, sourceLinks[i]]));
+  let shownSourceLink = null;
   function select(path) {
     const next = byPath.get(path);
     if (!next) return;
@@ -171,7 +174,9 @@
   function renderSelected() {
     const f=selected;
     $('selected-path').textContent=f.path;
-    const link=$('source-link');link.href=getSourceUrl(f.path);link.hidden=false;
+    if (shownSourceLink) shownSourceLink.hidden=true;
+    shownSourceLink=sourceLinkByPath.get(f.path);
+    if (shownSourceLink) shownSourceLink.hidden=false;
     const pills=$('file-metrics');pills.replaceChildren();
     for(const item of [`参照元 ${f.incoming.length} ファイル`,`参照先 ${f.outgoing.length} ファイル`,`シンボル ${f.symbols.length} 件`]){const p=document.createElement('span');p.className='pill';p.textContent=item;pills.append(p);}
     renderGraph(f);

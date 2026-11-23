@@ -8,6 +8,7 @@ const MAX_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_GRAPH_BYTES = 80 * 1024 * 1024;
 const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const DATA_SLOT = '__GRAPHIFY_INDEX_JSON__';
+const LINKS_SLOT = '__GRAPHIFY_SOURCE_LINKS__';
 // Only directional source references; containment and similarity do not mean a file uses another.
 const REFERENCE_RELATIONS = new Set(['imports', 'imports_from', 're_exports', 'calls', 'references', 'depends_on', 'instantiates', 'inherits', 'implements', 'extends', 'uses']);
 
@@ -83,8 +84,10 @@ export async function packGraph(sourceDir, pagesDir, sha) {
   // The JSON is part of the HTML, but source snippets, graph.json and raw graph edges aren't published separately.
   const payload = JSON.stringify(index).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const template = await readFile(new URL('./explorer.html', import.meta.url), 'utf8');
-  if (template.split(DATA_SLOT).length !== 2) throw new Error('Explorer template requires exactly one data slot');
-  const explorer = template.replace(DATA_SLOT, payload);
+  if (template.split(DATA_SLOT).length !== 2 || template.split(LINKS_SLOT).length !== 2) throw new Error('Explorer template requires one data and source-links slot');
+  // Pre-render fixed-origin, SHA-pinned source anchors rather than deriving HTML URLs from DOM text.
+  const sourceLinks = index.files.map(f => '<a hidden target="_blank" rel="noopener noreferrer" href="https://github.com/yohn-jp/codexia/blob/' + sha + '/' + f.path.split('/').map(encodeURIComponent).join('/') + '">GitHubでソースを開く</a>').join('');
+  const explorer = template.replace(DATA_SLOT, payload).replace(LINKS_SLOT, sourceLinks);
   const explorerBytes = Buffer.from(explorer, 'utf8');
   if (explorerBytes.byteLength > MAX_INDEX_BYTES) throw new Error('Graph explorer exceeds 16 MiB limit');
 
