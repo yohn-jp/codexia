@@ -44,6 +44,7 @@ grant_mitogen_traversal() {
         mitogen_traversal_paths["$dir"]=1
       fi
       dir=${dir%/*}
+      [[ -n "$dir" ]] || dir=/
     done
   done
 }
