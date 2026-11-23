@@ -533,7 +533,7 @@ async function loadDashboard() {
     }
     if (!all.length) {
       resetPanels('取得した範囲に対応付けられたPRがありません。');
-      setStatus('Bounded recent pull_request workflow sample: 対応するPRがありません。' +
+      setStatus('公開Actions APIの取得範囲に対応するPRがありません。' +
         ' Unresolved runs: ' + coverage.unresolvedRunCount + '.', 'empty');
       return;
     }
