@@ -13,6 +13,9 @@ public struct EditorState {
     private let session = UUID()
     private var version: UInt64 = 0
     private var protectedVersion: UInt64 = 0
+    private var focused = false
+    public private(set) var isComposing = false
+    private var pendingRemote: (String, Snapshot)?
 
     public init(documentID: String, text: String) {
         self.documentID = documentID
@@ -20,17 +23,38 @@ public struct EditorState {
     }
 
     public var snapshot: Snapshot { Snapshot(session: session, documentID: documentID, version: version) }
-    public var canLeave: Bool { version == protectedVersion }
+    public var canLeave: Bool { version == protectedVersion && !isComposing }
 
     public mutating func edit(_ text: String) {
         guard self.text != text else { return }
         self.text = text
         version += 1
+        pendingRemote = nil
+    }
+
+    public mutating func setComposing(_ active: Bool) {
+        isComposing = active
+        applyPendingIfPossible()
+    }
+
+    public mutating func setFocused(_ active: Bool) {
+        focused = active
+        applyPendingIfPossible()
+    }
+
+    private mutating func applyPendingIfPossible() {
+        guard !focused, !isComposing, let pending = pendingRemote else { return }
+        pendingRemote = nil
+        _ = applyRemote(pending.0, for: pending.1)
     }
 
     @discardableResult
     public mutating func applyRemote(_ text: String, for request: Snapshot) -> Bool {
-        guard request == snapshot, canLeave else { return false }
+        guard request == snapshot, version == protectedVersion else { return false }
+        if focused || isComposing {
+            pendingRemote = (text, request)
+            return true
+        }
         self.text = text
         version += 1
         protectedVersion = version

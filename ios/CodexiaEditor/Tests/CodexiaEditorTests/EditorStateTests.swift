@@ -28,6 +28,35 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(state.text, "second")
     }
 
+    func testCompositionBlocksLeavingWithoutChangingCommittedText() {
+        var state = EditorState(documentID: "a", text: "original")
+        state.setComposing(true)
+        XCTAssertFalse(state.canLeave)
+        XCTAssertEqual(state.text, "original")
+        state.setComposing(false)
+        XCTAssertTrue(state.canLeave)
+    }
+
+    func testFocusedRemoteIsDeferredAndCannotOverwriteTyping() {
+        var state = EditorState(documentID: "a", text: "original")
+        let request = state.snapshot
+        state.setFocused(true)
+        XCTAssertTrue(state.applyRemote("remote", for: request))
+        XCTAssertEqual(state.text, "original")
+        state.edit("typed")
+        state.setFocused(false)
+        XCTAssertEqual(state.text, "typed")
+    }
+
+    func testFocusedRemoteAppliesAfterFocusEndsWhenNoTypingOccurs() {
+        var state = EditorState(documentID: "a", text: "original")
+        let request = state.snapshot
+        state.setFocused(true)
+        XCTAssertTrue(state.applyRemote("remote", for: request))
+        state.setFocused(false)
+        XCTAssertEqual(state.text, "remote")
+    }
+
     func testProtectedVersionDoesNotProtectLaterEdits() {
         var state = EditorState(documentID: "a", text: "initial")
         state.edit("first")

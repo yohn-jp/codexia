@@ -30,7 +30,7 @@ private struct FixtureListView: View {
         List {
             ForEach([10_000, 100_000, 500_000], id: \.self) { count in
                 Button("\(count.formatted()) 文字のサンプル") {
-                    editor = EditorState(documentID: "fixture-\(count)", text: fixture(count))
+                    editor = EditorState(documentID: "fixture-\(count)", text: manuscriptFixture(characterCount: count))
                 }
             }
         }
@@ -48,8 +48,4 @@ private struct FixtureListView: View {
         }
     }
 
-    private func fixture(_ count: Int) -> String {
-        let sample = "長い場面名——夏の終わりに見た夢。｜東京《とうきょう》で😀を書く。\r\n次の行。\n"
-        return String(String(repeating: sample, count: count / sample.count + 1).prefix(count))
-    }
 }

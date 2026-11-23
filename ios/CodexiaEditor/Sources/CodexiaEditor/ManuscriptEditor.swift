@@ -11,9 +11,13 @@ public struct ManuscriptEditor: UIViewRepresentable {
     public func makeCoordinator() -> Coordinator { Coordinator(state: $state) }
 
     public func makeUIView(context: Context) -> UITextView {
+        Self.makeTextView(text: state.text, coordinator: context.coordinator)
+    }
+
+    static func makeTextView(text: String, coordinator: Coordinator) -> UITextView {
         let view = UITextView(usingTextLayoutManager: true)
-        view.delegate = context.coordinator
-        view.text = state.text
+        view.delegate = coordinator
+        view.text = text
         view.font = UIFont.preferredFont(forTextStyle: .body)
         view.adjustsFontForContentSizeCategory = true
         view.accessibilityLabel = "原稿本文"
@@ -39,9 +43,35 @@ public struct ManuscriptEditor: UIViewRepresentable {
 
     public final class Coordinator: NSObject, UITextViewDelegate {
         fileprivate var state: Binding<EditorState>
-        fileprivate init(state: Binding<EditorState>) { self.state = state }
-        public func textViewDidChange(_ textView: UITextView) {
-            state.wrappedValue.edit(textView.text)
+        init(state: Binding<EditorState>) { self.state = state }
+
+        private func synchronize(_ textView: UITextView) {
+            var current = state.wrappedValue
+            if textView.markedTextRange != nil {
+                current.setComposing(true)
+            } else {
+                current.edit(textView.text)
+                current.setComposing(false)
+            }
+            state.wrappedValue = current
+        }
+
+        public func textViewDidChange(_ textView: UITextView) { synchronize(textView) }
+        public func textViewDidChangeSelection(_ textView: UITextView) {
+            if textView.markedTextRange != nil || state.wrappedValue.isComposing {
+                synchronize(textView)
+            }
+        }
+        public func textViewDidBeginEditing(_ textView: UITextView) {
+            var current = state.wrappedValue
+            current.setFocused(true)
+            state.wrappedValue = current
+        }
+        public func textViewDidEndEditing(_ textView: UITextView) {
+            synchronize(textView)
+            var current = state.wrappedValue
+            current.setFocused(false)
+            state.wrappedValue = current
         }
     }
 }
