@@ -231,6 +231,8 @@ test('PostgreSQL author pipeline records receipts without manuscript Git process
       assert.ok(sample && sample.status === 'complete' && sample.ms > 0 && sample.counters.gitProcesses === 0, name);
     }
     assert.equal(git(join(datasetPath, 'seed'), 'rev-parse', 'HEAD'), fixture.transport.commit);
+    const { manifest: verified } = await verifyFixture(datasetPath);
+    assert.equal(verified.fixtureSha256, fixture.fixtureSha256, 'post-workload fixture must match its original content identity');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
