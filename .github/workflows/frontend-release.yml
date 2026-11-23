@@ -4,7 +4,6 @@ on:
     branches: [main]
     paths:
       - app/**
-      - app/public/**
       - edge/frontend/**
       - profiles/**
       - modules/**
@@ -13,6 +12,32 @@ on:
       - packages/module-runtime/**
       - packages/persistence-contracts/**
       - packages/persistence-postgres/**
+      # Test-only files are not source-bound runtime or host-lifecycle inputs.
+      - '!app/**/test/**'
+      - '!app/**/tests/**'
+      - '!app/**/*.test.*'
+      - '!modules/**/test/**'
+      - '!modules/**/tests/**'
+      - '!modules/**/*.test.*'
+      - '!packages/**/test/**'
+      - '!packages/**/tests/**'
+      - '!packages/**/*.test.*'
+      - 'app/src/**/test/**'
+      - 'app/src/**/tests/**'
+      - 'modules/**/src/**/test/**'
+      - 'modules/**/src/**/tests/**'
+      # Restore shipped public assets and source helpers only within the frontend closure.
+      - 'app/public/**'
+      - 'packages/core/src/**/test/**'
+      - 'packages/core/src/**/tests/**'
+      - 'packages/contracts/src/**/test/**'
+      - 'packages/contracts/src/**/tests/**'
+      - 'packages/module-runtime/src/**/test/**'
+      - 'packages/module-runtime/src/**/tests/**'
+      - 'packages/persistence-postgres/src/**/test/**'
+      - 'packages/persistence-postgres/src/**/tests/**'
+      # Build-emitted source and test files remain runtime package inputs.
+      - 'packages/persistence-contracts/src/**'
       - deploy/cloudflare/**
       - deploy/frontend-compatibility.json
       - scripts/ci/impact/contract.mjs

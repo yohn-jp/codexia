@@ -24,9 +24,30 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'modules/**',
   'package.json',
   'packages/**',
+  // Model OCI uses packaged runtime sources, not local unit/contract test fixtures.
+  // Ordered negations must match the standalone main-push workflow exactly.
+  '!app/**/test/**',
+  '!app/**/tests/**',
+  '!app/**/*.test.*',
+  '!modules/**/test/**',
+  '!modules/**/tests/**',
+  '!modules/**/*.test.*',
+  '!packages/**/test/**',
+  '!packages/**/tests/**',
+  '!packages/**/*.test.*',
+  'app/src/**/test/**',
+  'app/src/**/tests/**',
+  'modules/**/src/**/test/**',
+  'modules/**/src/**/tests/**',
+  'packages/**/src/**/test/**',
+  'packages/**/src/**/tests/**',
+  // api and persistence-contracts package their entire compiled source trees, including tests/specs.
+  'packages/api/src/**',
+  'packages/persistence-contracts/src/**',
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
+  'scripts/ci/impact/plan.mjs',
   'scripts/ci/execution/workspace.mjs',
   'scripts/ci/execution/parallel.mjs',
   'scripts/build/packaging/profile-build.mjs',
@@ -51,9 +72,7 @@ export function matchesFullModelOciPath(file) {
   for (const expression of FULL_MODEL_OCI_PATHS) {
     const exclude = expression.startsWith('!');
     const pattern = exclude ? expression.slice(1) : expression;
-    if (pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern) {
-      included = !exclude;
-    }
+    if (path.matchesGlob(file, pattern)) included = !exclude;
   }
   return included;
 }
@@ -166,11 +185,14 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
   const selected = new Set(['coverage']);
   let full = event !== 'pull_request' || !Array.isArray(files);
-  const fullModelOci = event === 'pull_request' && Array.isArray(files) && files.some(matchesFullModelOciPath);
+  // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
+  let fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
+    files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
+      file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
-    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
@@ -224,6 +246,13 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         }
         continue;
       }
+      // The declared workspace root test/ and tests/ directories are outside
+      // the runtime package source tree. Unknown owners remain fail-closed.
+      const knownWorkspaceFixture = WORKSPACES.some(item =>
+        file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
+      // The Swift native client is built by its independent iOS lifecycle, not model OCI.
+      const knownNativeClientSource = file.startsWith('ios/CodexiaTransport/Sources/') && file.endsWith('.swift');
+      if (!owner && !knownWorkspaceFixture && !knownNativeClientSource && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }

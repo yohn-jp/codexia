@@ -173,6 +173,8 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   for (const link of await page.locator('.relation-evidence a').all()) {
     assert.ok((await link.evaluate(element => element.getBoundingClientRect().height)) >= 44, 'source evidence links meet the minimum touch target');
   }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForFunction(() => document.getElementById('file-explorer').open, null, { timeout: 5_000 });
 });
 
 test('Graphify neighbor graph caps dense directions and preserves the chosen limit in the URL', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR, timeout: 30_000 }, async t => {
