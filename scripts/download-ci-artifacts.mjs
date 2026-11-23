@@ -2,8 +2,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
-import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const MAX_ARCHIVE = 16 * 1024 * 1024;
 const MAX_JSON = 4 * 1024 * 1024;
@@ -265,4 +266,35 @@ export function extractProfileJson(bytes, filename = 'profile-build.json') {
 export async function extractJsonEntry(bytes, filename) {
   assert.ok(['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json'].includes(filename), 'Invalid evidence filename');
   return extractBoundedJson(bytes, filename, filename === 'profile-build.json' ? 128 * 1024 * 1024 : MAX_JSON);
+}
+
+export async function downloadSelectedArtifacts({ inventory, ids, identity, kind, directory, repository, token, request }) {
+  const selected = selectedArtifacts(inventory, ids, identity, kind);
+  const filename = kind === 'plan' ? 'ci-plan.json' : 'report.json';
+  for (const artifact of selected) {
+    const bytes = await downloadArtifact(artifact, repository, token, request);
+    const json = await extractJsonEntry(bytes, filename);
+    const destination = kind === 'plan' ? directory : path.join(directory, artifact.name);
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, filename), json, { flag: 'wx', mode: 0o600 });
+    console.log(`Downloaded and verified artifact ${artifact.id} (${artifact.name})`);
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA,
+    CODEXIA_CI_INVENTORY_PATH, CODEXIA_CI_ARTIFACT_IDS, CODEXIA_CI_ARTIFACT_DIR, CODEXIA_CI_ARTIFACT_KIND } = process.env;
+  assert.match(GITHUB_RUN_ID ?? '', /^\d+$/u);
+  assert.match(CODEXIA_EXPECTED_SHA ?? '', /^[a-f0-9]{40}$/u);
+  assert.ok(CODEXIA_CI_INVENTORY_PATH && CODEXIA_CI_ARTIFACT_DIR, 'Inventory and output directory required');
+  assert.match(CODEXIA_CI_ARTIFACT_IDS ?? '', /^\d+(?:,\d+)*$/u, 'Selected artifact IDs required');
+  await downloadSelectedArtifacts({
+    inventory: JSON.parse(await readFile(CODEXIA_CI_INVENTORY_PATH, 'utf8')),
+    ids: CODEXIA_CI_ARTIFACT_IDS.split(',').map(Number),
+    identity: { runId: GITHUB_RUN_ID, sourceSha: CODEXIA_EXPECTED_SHA },
+    kind: CODEXIA_CI_ARTIFACT_KIND,
+    directory: CODEXIA_CI_ARTIFACT_DIR,
+    repository: GITHUB_REPOSITORY,
+    token: GH_TOKEN,
+  });
 }

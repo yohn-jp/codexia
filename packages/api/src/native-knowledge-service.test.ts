@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { ModuleActionContext } from "@codexia/contracts";
 import { CoreStore } from "@codexia/core";
-import type { ChangeSetOperation, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetOperation, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
 import {
@@ -110,6 +110,48 @@ test("native proposals stay noncanonical until approval, apply atomically, and r
   const durable = await getNativeChangeSet(persistence, p.id, approved.id);
   assert.equal(durable?.receipt?.changeSet.status, "applied");
   assert.equal(durable?.receipt?.results.length, 1);
+});
+
+test("native proposal action replays the original PostgreSQL record under a newer reader", async () => {
+  const p = await project("native-action-replay");
+  const core = new CoreStore({ persistence });
+  const unusedAccess = async () => assert.fail("native proposal does not use other module capabilities");
+  const context: ModuleActionContext = {
+    projectId: p.id,
+    reader: await core.reader(p.id),
+    signal: new AbortController().signal,
+    invoke: unusedAccess, listActions: unusedAccess, linkedReader: unusedAccess, propose: unusedAccess, runJob: unusedAccess,
+  };
+  const actions = createNativeKnowledgeActions({
+    persistence, projectId: p.id, actorId: "external-proposer", origin: "external-agent", authorizeProposal: async () => {},
+  });
+  const action = actions.find(action => action.id === "core.knowledge.propose")!;
+  const operation = nodeOperation(p.id, "Original proposal");
+  const request = { projectVersion: context.reader.snapshot.projectVersion, idempotencyKey: "action-replay", operations: [operation] };
+  const original = await action.invoke(request, context);
+  assert.ok(original.ok);
+  const submitted = original.data as { changeSet: ChangeSet; replayed: boolean };
+  assert.equal(submitted.replayed, false);
+  assert.equal(submitted.changeSet.status, "proposed");
+  assert.equal(submitted.changeSet.provenance.details.projectVersion, p.version);
+
+  const updated = await persistence.transaction(tx => tx.updateProject({ projectId: p.id, expectedVersion: p.version, title: "Intervening edit" }));
+  const newer = { ...context, reader: await core.reader(p.id) };
+  assert.ok(updated.version > request.projectVersion);
+  assert.equal(newer.reader.snapshot.projectVersion, updated.version);
+
+  const replay = await action.invoke(request, newer);
+  assert.ok(replay.ok, replay.ok ? undefined : replay.error.code);
+  assert.deepEqual(replay.snapshot, newer.reader.snapshot);
+  assert.deepEqual(replay.data, { changeSet: submitted.changeSet, replayed: true });
+
+  const changed = await action.invoke({
+    ...request, operations: [{ ...operation, command: { ...operation.command, name: "Changed proposal" } }],
+  }, newer);
+  assert.ok(!changed.ok);
+  assert.equal(changed.error.code, "idempotency_conflict");
+  assert.deepEqual(await persistence.read(reader => reader.listChangeSets(p.id)), [submitted.changeSet]);
+  assert.equal(await persistence.read(reader => reader.getKnowledgeNode(p.id, operation.command.id)), undefined);
 });
 
 test("native snapshot scope, rollback, rejection, and stale source fences fail closed", async () => {

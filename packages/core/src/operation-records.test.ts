@@ -5,7 +5,6 @@ import type { ChangeOperation, ChangeProposal, ModuleId, SnapshotId } from "@cod
 import {
   assertPersistedProposal,
   normalizedOperation,
-  normalizedProposal,
   operationDigest,
   proposalDigest,
 } from "./operation-records.js";
@@ -50,15 +49,23 @@ function goldenProposal(): ChangeProposal {
   } as ChangeProposal;
 }
 
-test("operation and proposal digests bind PostgreSQL identity and canonical evidence",()=>{
- const operation=goldenOperation(),proposal=goldenProposal();
- assert.equal(normalizedOperation(operation).projectId,snapshot.projectId);
- assert.notEqual(operationDigest(operation),operationDigest({...operation,baseProjectVersion:8}));
- assert.equal(operationDigest(operation),operationDigest({...operation,readDocumentSets:[{kind:"scene",parentId:"chapter-id",documentIds:["scene-b","scene-a"]}]}));
- assert.notEqual(operationDigest(operation),operationDigest({...operation,readDocumentSets:[{kind:"scene",parentId:"chapter-id",documentIds:["scene-a"]}]}));
- const reordered=goldenProposal();reordered.evidence![0]!.details={a:true,z:["last",{x:1,y:2}]};
- assert.equal(proposalDigest(proposal),proposalDigest(reordered));
- assert.deepEqual(normalizedProposal(proposal).snapshot,snapshot);
+test("operation and proposal digests retain their persisted identities and canonical evidence", () => {
+  const operation = goldenOperation();
+  const proposal = goldenProposal();
+  // These hashes pin the persisted format using independently authored UTF-8 JSON bytes.
+  assert.equal(operationDigest(operation), "64373fa868c9dad0e599e1023c2c64895e71a68b7c8b167b1b72d72545775de9");
+  assert.equal(proposalDigest(proposal), "c6e068fcc3debe871f3c352e48490d1a3925e8404a11a6289ab40c322c164d17");
+
+  assert.notEqual(operationDigest(operation), operationDigest({ ...operation, baseProjectVersion: 8 }));
+  assert.equal(operationDigest(operation), operationDigest({
+    ...operation, readDocumentSets: [{ kind: "scene", parentId: "chapter-id", documentIds: ["scene-b", "scene-a"] }],
+  }));
+  assert.notEqual(operationDigest(operation), operationDigest({
+    ...operation, readDocumentSets: [{ kind: "scene", parentId: "chapter-id", documentIds: ["scene-a"] }],
+  }));
+  const reordered = goldenProposal();
+  reordered.evidence![0]!.details = { a: true, z: ["last", { x: 1, y: 2 }] };
+  assert.equal(proposalDigest(proposal), proposalDigest(reordered));
 });
 
 test("ranged manuscript writes are included in proposal approval digests", () => {

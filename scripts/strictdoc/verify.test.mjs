@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -71,6 +72,19 @@ test('identifies invalid reverse-inventory source paths by their inventory kind'
   await mkdir(path.join(root, 'directory'));
   await assert.rejects(discoverSourceInventory(root, { routes: ['missing.ts'] }), /Inventory route source.*missing\.ts/u);
   await assert.rejects(discoverSourceInventory(root, { routes: ['directory'] }), /Inventory route source.*directory/u);
+});
+
+test('rejects FIFO relations and inventory paths without blocking', { skip: process.platform === 'win32', timeout: 5000 }, async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-fifo-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fifo = path.join(root, 'named.pipe');
+  const created = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+  assert.equal(created.status, 0, created.stderr);
+  const violations = await validateRelations([
+    { UID: 'REQ-FIFO-001', RELATIONS: [{ TYPE: 'File', VALUE: 'named.pipe', LINE_RANGE: '1, 1' }] },
+  ], root);
+  assert.deepEqual(violations, ['REQ-FIFO-001: File relation target is not a file: named.pipe']);
+  await assert.rejects(discoverSourceInventory(root, { routes: ['named.pipe'] }), /Inventory route source.*named.pipe/u);
 });
 
 test('reports discovered runtime surfaces that lack an explicit classification', () => {

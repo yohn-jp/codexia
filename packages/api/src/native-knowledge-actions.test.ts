@@ -102,21 +102,6 @@ test("native read refuses a projectVersion different from its selected reader", 
   if (!result.ok) assert.equal(result.error.code, "snapshot_unavailable");
 });
 
-test("proposal accepts original source version for exact retry under a newer action reader", async () => {
-  let sourceVersion = 0;
-  const persistence = {
-    transaction: async (work: (transaction: unknown) => Promise<unknown>) => work({ createChangeSet: async (value: Record<string, unknown>) => {
-      sourceVersion = ((value.provenance as { details: { projectVersion: number } }).details.projectVersion);
-      return { changeSet: { id: "native-change-set", projectId, status: "proposed" }, replayed: true };
-    } }),
-  } as unknown as Persistence;
-  const action = createNativeKnowledgeActions({ persistence, projectId, actorId, origin: "external-agent", authorizeProposal: async () => {} }).find(item => item.id === "core.knowledge.propose")!;
-  const operation = { type: "knowledge.node.save", command: { projectId, id: "22222222-2222-4222-8222-222222222222", type: "person", name: "A", attributes: {}, status: "proposed", expectedVersion: null } };
-  const result = await action.invoke({ projectVersion: 3, idempotencyKey: "retry-1", operations: [operation] }, context) as ActionResult;
-  assert.equal(result.ok, true);
-  assert.equal(sourceVersion, 3);
-});
-
 test("proposal authorization denial prevents the native transaction", async () => {
   let transactions = 0;
   const persistence = { async transaction() { transactions++; throw new Error("transaction must not run"); } } as unknown as Persistence;

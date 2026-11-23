@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { EvidenceId, RevisionId } from "@codexia/persistence-contracts";
 import { api, setOAuthAccessToken } from "./api.js";
-import { getPersistenceStatusGetUrl } from "./generated/http/client.js";
+import { getPersistenceDocumentsGetUrl, getPersistenceStatusGetUrl } from "./generated/http/client.js";
 
 test("generated persistence status uses the authenticated transport and preserves response errors", async (t) => {
   const controller = new AbortController();
@@ -32,4 +33,89 @@ test("generated persistence status uses the authenticated transport and preserve
   controller.abort();
   await assert.rejects(api.persistenceStatus(controller.signal), (error) => error === controller.signal.reason);
   assert.equal(fetch.mock.callCount(), 4);
+});
+
+test("the generated document list URL preserves Desktop queries and the response boundary", async (t) => {
+  const projectId = "project/with space?#";
+  const parentId = "volume/with space&";
+  const controller = new AbortController();
+  const document = {
+    id: "document-1", projectId, parentId: null, kind: "scene", title: "A scene",
+    orderKey: "0001", headRevisionId: null, version: 2 ** 31,
+    createdAt: "2026-11-23T00:00:00.000Z", updatedAt: "2026-11-23T00:00:00.000Z",
+    summary: "retained",
+  };
+  const list = { documents: [document], future: true };
+  let respond = () => Response.json(list);
+  const requestedUrls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestedUrls.push(String(input));
+    assert.equal(init?.signal, controller.signal);
+    assert.equal(init?.credentials, "omit");
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer list-token");
+    return respond();
+  });
+  setOAuthAccessToken("list-token");
+  t.after(() => setOAuthAccessToken(null));
+
+  assert.deepEqual(await api.persistenceDocuments(projectId, undefined, controller.signal), list);
+  assert.deepEqual(await api.persistenceDocuments(projectId, null, controller.signal), list);
+  assert.deepEqual(await api.persistenceDocuments(projectId, parentId, controller.signal), list);
+
+  const root = "/api/v1/persistence/projects/project%2Fwith%20space%3F%23/documents?limit=1000";
+  assert.deepEqual(requestedUrls, [
+    root,
+    root + "&parentId=root",
+    root + "&parentId=volume%2Fwith+space%26",
+  ]);
+  assert.equal(getPersistenceDocumentsGetUrl(projectId, { limit: 1000, parentId }), requestedUrls[2]);
+
+  respond = () => Response.json({ documents: [{ ...document, version: -1 }] });
+  await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 502, code: "INVALID_RESPONSE" });
+  respond = () => Response.json({ error: "Invalid query", code: "INVALID_QUERY" }, { status: 400 });
+  await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 400, code: "INVALID_QUERY" });
+  assert.equal(requestedUrls.length, 5);
+});
+
+test("generated Text Anchor creation preserves the authored request and response invariants", async (t) => {
+  const projectId = "project/with space";
+  const documentId = "document?with#markers";
+  const controller = new AbortController();
+  const input = {
+    id: "anchor-1" as EvidenceId, revisionId: "revision-1" as RevisionId,
+    fromUtf16: 1, toUtf16: 3, status: "confirmed", nodeId: "node-1",
+  } as const;
+  const anchor = {
+    ...input, projectId, documentId, quoteSha256: "a".repeat(64), version: 1,
+    createdAt: "2026-11-23T00:00:00.000Z", updatedAt: "2026-11-23T00:00:00.000Z",
+    future: "retained",
+  };
+  const result = { anchor, quote: "😀", nodeId: input.nodeId, authorId: "author-1", future: true };
+  let respond = () => Response.json(result, { status: 201 });
+  const fetch = t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    assert.equal(url, "/api/v1/persistence/projects/project%2Fwith%20space/documents/document%3Fwith%23markers/anchors");
+    assert.equal(init.method, "POST");
+    assert.equal(init.signal, controller.signal);
+    assert.equal(init.credentials, "omit");
+    const headers = new Headers(init.headers);
+    assert.equal(headers.get("Authorization"), "Bearer anchor-token");
+    assert.equal(headers.get("Content-Type"), "application/json");
+    assert.deepEqual(JSON.parse(String(init.body)), input);
+    return respond();
+  });
+  setOAuthAccessToken("anchor-token");
+  t.after(() => setOAuthAccessToken(null));
+  const create = () => api.createPersistenceAnchor(projectId, documentId, input, controller.signal);
+
+  assert.deepEqual(await create(), result);
+  respond = () => Response.json({ ...result, anchor: { ...anchor, toUtf16: 0 } }, { status: 201 });
+  await assert.rejects(create(), { status: 502, code: "INVALID_RESPONSE" });
+  respond = () => Response.json({ ...result, anchor: { ...anchor, createdAt: "invalid timestamp" } }, { status: 201 });
+  await assert.rejects(create(), { status: 502, code: "INVALID_RESPONSE" });
+  respond = () => Response.json({ error: "Anchor conflict", code: "PERSISTENCE_CONFLICT" }, { status: 409 });
+  await assert.rejects(create(), { status: 409, code: "PERSISTENCE_CONFLICT" });
+  respond = () => { throw controller.signal.reason; };
+  controller.abort();
+  await assert.rejects(create(), (error) => error === controller.signal.reason);
+  assert.equal(fetch.mock.callCount(), 5);
 });

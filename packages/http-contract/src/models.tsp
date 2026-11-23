@@ -240,6 +240,33 @@ model PersistenceDocumentEnvelope {
   ...Record<unknown>;
 }
 
+model PersistenceEvidenceAnchor {
+  id: string;
+  projectId: string;
+  documentId: string;
+  revisionId: string;
+  @minValue(0)
+  fromUtf16: int32;
+  @minValue(0)
+  toUtf16: int32;
+  @pattern("^[0-9a-f]{64}$")
+  quoteSha256: string;
+  status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+  @minValue(1)
+  version: int32;
+  createdAt: utcDateTime;
+  updatedAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model PersistenceAnchorCreatedResponse {
+  anchor: PersistenceEvidenceAnchor;
+  quote: string;
+  nodeId: string | null;
+  authorId: string;
+  ...Record<unknown>;
+}
+
 model DocumentRevisionPageResponse {
   revisions: PersistenceDocumentRevision[];
   nextBefore: string | null;

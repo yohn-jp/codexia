@@ -134,7 +134,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.equal(gate.if, '${{ always() && !cancelled() }}');
   assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
-  const planDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-plan');
+  const planDownload = gate.steps.find(step => step.name === 'Download selected plan by exact artifact ID');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
   const evidenceDownload = gate.steps.find(step => step.name === 'Download selected execution evidence by exact artifact ID');
   assert.ok(planSelector);
@@ -142,20 +142,27 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.match(planSelector.run, /node scripts\/select-ci-plan\.mjs/);
   assert.equal(planSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
   assert.equal(planSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.equal(planDownload.with['artifact-ids'], '${{ steps.select-plan.outputs.artifact-id }}');
-  assert.equal(planDownload.with['merge-multiple'], true);
   assert.ok(evidenceSelector);
   assert.match(evidenceSelector.run, /node scripts\/select-ci-evidence\.mjs/);
   assert.equal(evidenceSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
   assert.equal(evidenceSelector.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
   assert.equal(evidenceSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(evidenceDownload);
-  assert.equal(evidenceDownload.with['artifact-ids'], '${{ steps.select-evidence.outputs.artifact-ids }}');
-  assert.equal(evidenceDownload.with.path, '${{ runner.temp }}/ci-evidence/${{ steps.select-evidence.outputs.artifact-subdirectory }}');
+  for (const download of [planDownload, evidenceDownload]) {
+    assert.equal(download.run, 'node scripts/download-ci-artifacts.mjs');
+    assert.equal(download.env.GH_TOKEN, '${{ github.token }}');
+    assert.equal(download.env.CODEXIA_EXPECTED_SHA, planSelector.env.CODEXIA_EXPECTED_SHA);
+    assert.equal(download.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
+  }
+  assert.equal(planDownload.env.CODEXIA_CI_ARTIFACT_IDS, '${{ steps.select-plan.outputs.artifact-id }}');
+  assert.equal(planDownload.env.CODEXIA_CI_ARTIFACT_DIR, '${{ runner.temp }}/ci-plan');
+  assert.equal(planDownload.env.CODEXIA_CI_ARTIFACT_KIND, 'plan');
+  assert.equal(evidenceDownload.env.CODEXIA_CI_ARTIFACT_IDS, '${{ steps.select-evidence.outputs.artifact-ids }}');
+  assert.equal(evidenceDownload.env.CODEXIA_CI_ARTIFACT_DIR, '${{ runner.temp }}/ci-evidence');
+  assert.equal(evidenceDownload.env.CODEXIA_CI_ARTIFACT_KIND, 'evidence');
   assert.ok(gate.steps.indexOf(planSelector) < gate.steps.indexOf(planDownload));
   assert.ok(gate.steps.indexOf(planDownload) < gate.steps.indexOf(evidenceSelector));
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));
-  assert.equal(evidenceDownload.uses, 'actions/download-artifact@v8.0.2');
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;

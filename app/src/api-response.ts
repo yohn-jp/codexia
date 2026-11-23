@@ -159,7 +159,6 @@ export const responseContracts = {
   persistenceRevisionPage,
   persistenceAnchors: (v: unknown): v is PersistenceDocumentAnchors => record(v) && nullableText(v.revisionId) && Array.isArray(v.anchors) && v.anchors.every(persistenceAnchorView),
   persistenceAnchor: persistenceEvidence,
-  persistenceAnchorCreated: (v: unknown): v is { anchor: EvidenceAnchor; quote: string; nodeId: string | null; authorId: string } => record(v) && persistenceEvidence(v.anchor) && text(v.quote) && nullableText(v.nodeId) && text(v.authorId),
   persistenceMention,
   persistenceNode: (v: unknown): v is PersistenceNodeRead => record(v) && persistenceKnowledgeNode(v.node) && array(persistenceKnowledgeAlias)(v.aliases) && array(persistenceKnowledgeRelation)(v.relations),
   persistenceMergePreview: (v:unknown):v is {projectVersion:number;previewDigest:string;source:KnowledgeNode;target:KnowledgeNode;conflicts:string[];sourceAliases:KnowledgeAlias[];sourceRelations:KnowledgeRelation[];sourceMentions:MentionLink[];assertions:Assertion[]} => record(v)&&integer(v.projectVersion)&&text(v.previewDigest)&&persistenceKnowledgeNode(v.source)&&persistenceKnowledgeNode(v.target)&&strings(v.conflicts)&&array(persistenceKnowledgeAlias)(v.sourceAliases)&&array(persistenceKnowledgeRelation)(v.sourceRelations)&&array(persistenceMention)(v.sourceMentions)&&array(persistenceAssertion)(v.assertions),
