@@ -35,6 +35,234 @@ public struct Client: APIProtocol {
     private var converter: Converter {
         client.converter
     }
+    /// - Remark: HTTP `GET /api/auth/codexia/auth-methods`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/auth-methods/get(auth_methods_get)`.
+    public func auth_methods_get(_ input: Operations.auth_methods_get.Input) async throws -> Operations.auth_methods_get.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.auth_methods_get.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/auth-methods",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.auth_methods_get.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.AuthMethodsBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// - Remark: HTTP `POST /api/auth/codexia/owner-session`.
+    /// - Remark: Generated from `#/paths//api/auth/codexia/owner-session/post(owner_session_confirm_post)`.
+    public func owner_session_confirm_post(_ input: Operations.owner_session_confirm_post.Input) async throws -> Operations.owner_session_confirm_post.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.owner_session_confirm_post.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/auth/codexia/owner-session",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Origin",
+                    value: input.headers.Origin
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .json(value):
+                    body = try converter.setRequiredRequestBodyAsJSON(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/json; charset=utf-8"
+                    )
+                }
+                return (request, body)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let headers: Operations.owner_session_confirm_post.Output.Ok.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_session_confirm_post.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_session_confirm_post.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.OwnerSessionBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let headers: Operations.owner_session_confirm_post.Output.BadRequest.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_session_confirm_post.Output.BadRequest.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_session_confirm_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 401:
+                    let headers: Operations.owner_session_confirm_post.Output.Unauthorized.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_session_confirm_post.Output.Unauthorized.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_session_confirm_post.Output.Unauthorized.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unauthorized(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 403:
+                    let headers: Operations.owner_session_confirm_post.Output.Forbidden.Headers = .init(Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "Cache-Control",
+                        as: Operations.owner_session_confirm_post.Output.Forbidden.Headers.Cache_hyphen_ControlPayload.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.owner_session_confirm_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// - Remark: HTTP `POST /api/auth/codexia/setup/authorize`.
     /// - Remark: Generated from `#/paths//api/auth/codexia/setup/authorize/post(owner_setup_authorize_post)`.
     public func owner_setup_authorize_post(_ input: Operations.owner_setup_authorize_post.Input) async throws -> Operations.owner_setup_authorize_post.Output {
@@ -4343,6 +4571,21 @@ public struct Client: APIProtocol {
                     method: .get
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Last-Event-ID",
+                    value: input.headers.Last_hyphen_Event_hyphen_ID
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -4462,6 +4705,16 @@ public struct Client: APIProtocol {
                     method: .post
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -4590,6 +4843,16 @@ public struct Client: APIProtocol {
                     method: .delete
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -5809,6 +6072,28 @@ public struct Client: APIProtocol {
             deserializer: { response, responseBody in
                 switch response.status.code {
                 case 200:
+                    let headers: Operations.public_share_get.Output.Ok.Headers = .init(
+                        Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Cache-Control",
+                            as: Operations.public_share_get.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                        ),
+                        X_hyphen_Robots_hyphen_Tag: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "X-Robots-Tag",
+                            as: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload.self
+                        ),
+                        Referrer_hyphen_Policy: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Referrer-Policy",
+                            as: Operations.public_share_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload.self
+                        ),
+                        X_hyphen_Content_hyphen_Type_hyphen_Options: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "X-Content-Type-Options",
+                            as: Operations.public_share_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload.self
+                        )
+                    )
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.public_share_get.Output.Ok.Body
                     let chosenContentType = try converter.bestContentType(
@@ -5820,7 +6105,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.public_share_get.Output.Ok.Body.jsonPayload.self,
+                            Components.Schemas.PublicShareIndexBody.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -5829,7 +6114,10 @@ public struct Client: APIProtocol {
                     default:
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
-                    return .ok(.init(body: body))
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
                 case 404:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.public_share_get.Output.NotFound.Body
@@ -5893,6 +6181,28 @@ public struct Client: APIProtocol {
             deserializer: { response, responseBody in
                 switch response.status.code {
                 case 200:
+                    let headers: Operations.public_share_scene_get.Output.Ok.Headers = .init(
+                        Cache_hyphen_Control: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Cache-Control",
+                            as: Operations.public_share_scene_get.Output.Ok.Headers.Cache_hyphen_ControlPayload.self
+                        ),
+                        X_hyphen_Robots_hyphen_Tag: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "X-Robots-Tag",
+                            as: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Robots_hyphen_TagPayload.self
+                        ),
+                        Referrer_hyphen_Policy: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "Referrer-Policy",
+                            as: Operations.public_share_scene_get.Output.Ok.Headers.Referrer_hyphen_PolicyPayload.self
+                        ),
+                        X_hyphen_Content_hyphen_Type_hyphen_Options: try converter.getRequiredHeaderFieldAsURI(
+                            in: response.headerFields,
+                            name: "X-Content-Type-Options",
+                            as: Operations.public_share_scene_get.Output.Ok.Headers.X_hyphen_Content_hyphen_Type_hyphen_OptionsPayload.self
+                        )
+                    )
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.public_share_scene_get.Output.Ok.Body
                     let chosenContentType = try converter.bestContentType(
@@ -5904,7 +6214,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.public_share_scene_get.Output.Ok.Body.jsonPayload.self,
+                            Components.Schemas.PublicShareSceneBody.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -5913,7 +6223,10 @@ public struct Client: APIProtocol {
                     default:
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
-                    return .ok(.init(body: body))
+                    return .ok(.init(
+                        headers: headers,
+                        body: body
+                    ))
                 case 404:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.public_share_scene_get.Output.NotFound.Body
@@ -6240,7 +6553,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_import_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.WorkImportResult.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -6294,6 +6607,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .conflict(.init(body: body))
+                case 413:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.persistence_import_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -6970,7 +7305,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_assertion_put.Output.Ok.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceAssertionEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -7196,7 +7531,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_assertion_evidence_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceEvidenceEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -9030,7 +9365,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_anchor_assertions_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceAssertionEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -9084,6 +9419,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .notFound(.init(body: body))
+                case 409:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.persistence_anchor_assertions_post.Output.Conflict.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .conflict(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -9133,6 +9490,28 @@ public struct Client: APIProtocol {
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.persistence_anchor_mentions_post.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.PersistenceMentionLink.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
                 case 201:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.persistence_anchor_mentions_post.Output.Created.Body
@@ -9145,7 +9524,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_anchor_mentions_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceMentionLink.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -9199,6 +9578,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .notFound(.init(body: body))
+                case 409:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.persistence_anchor_mentions_post.Output.Conflict.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .conflict(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -9869,7 +10270,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_node_put.Output.Ok.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceKnowledgeNodeEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -10005,7 +10406,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_node_aliases_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceKnowledgeAliasEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -10488,7 +10889,7 @@ public struct Client: APIProtocol {
                     switch chosenContentType {
                     case "application/json":
                         body = try await converter.getResponseBodyAsJSON(
-                            Operations.persistence_node_relations_post.Output.Created.Body.jsonPayload.self,
+                            Components.Schemas.PersistenceKnowledgeRelationEnvelope.self,
                             from: responseBody,
                             transforming: { value in
                                 .json(value)
@@ -11178,6 +11579,21 @@ public struct Client: APIProtocol {
                     method: .get
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Last-Event-ID",
+                    value: input.headers.Last_hyphen_Event_hyphen_ID
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -11295,6 +11711,16 @@ public struct Client: APIProtocol {
                     method: .post
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -11421,6 +11847,16 @@ public struct Client: APIProtocol {
                     method: .delete
                 )
                 suppressMutabilityWarning(&request)
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Session-Id",
+                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
