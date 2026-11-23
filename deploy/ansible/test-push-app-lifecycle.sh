@@ -17,7 +17,6 @@ environment_generator_dir=/run/systemd/user-environment-generators
 environment_generator="$environment_generator_dir/99-codexia-lifecycle-xdg-$fixture_uid"
 environment_generator_dir_created=false
 environment_generator_installed=false
-fixture_ip=''
 backup_mounted=false
 build_context=''
 fixture_image=''
@@ -275,10 +274,6 @@ cleanup() {
       rootless rm -r "$build_context" || cleanup_failed "$LINENO"
       rootless test ! -e "$build_context" || cleanup_failed "$LINENO"
     fi
-  fi
-  if [[ -n "$fixture_ip" ]]; then
-    sudo sed -i "\\|^$fixture_ip codexia-backup-fixture$|d" /etc/hosts || cleanup_failed "$LINENO"
-    grep -q "^$fixture_ip codexia-backup-fixture$" /etc/hosts && cleanup_failed "$LINENO"
   fi
   if [[ "$registry_configured" == true ]]; then
     rootless rm -f "$fixture_home/.config/containers/registries.conf" || cleanup_failed "$LINENO"
