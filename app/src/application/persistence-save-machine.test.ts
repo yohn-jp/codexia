@@ -52,6 +52,15 @@ test("an unprotected edit cannot start a server save", async () => {
   actor.stop();
 });
 
+test("a journal-protected imported generation can start its server save", async () => {
+  const { actor, calls } = harness();
+  actor.send({ type: "DRAFT.PROTECTED", identity, generation: 1, dirty: true });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "imported-draft", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.equal(calls.some((call) => call.kind === "save" && call.generation === 1), true);
+  actor.stop();
+});
+
 test("a newer edit cancels stale journal work and protects only its generation", async () => {
   let releaseOlderProtection!: (result: "protected") => void;
   const protectionSignals = new Map<number, AbortSignal>();

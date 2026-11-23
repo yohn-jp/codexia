@@ -1670,7 +1670,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
       const capturedGeneration = protectedGeneration as number | null;
       if (capturedIdentity && capturedGeneration !== null && protectedEditor && protectedEditor.document.projectId === capturedIdentity.projectId && protectedEditor.document.id === capturedIdentity.documentId && protectedEditor.generation === capturedGeneration) {
-        saveMachineActor.send({ type: "DRAFT.PROTECTED", identity: capturedIdentity, generation: capturedGeneration });
+        saveMachineActor.send({ type: "DRAFT.PROTECTED", identity: capturedIdentity, generation: capturedGeneration, dirty: protectedEditor.dirty });
       }
       saveMachineActor.send({ type: "NAVIGATION.ALLOWED", requestId });
       return true;
@@ -1812,11 +1812,20 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         throw new Error("Journal保存中に原稿が変わりました。元Draftは保持しています。");
       }
       publishEditor({ ...imported, recovery: "stored" });
+      saveMachineActor.send({
+        type: "DRAFT.PROTECTED",
+        identity: { projectId: imported.document.projectId, documentId: imported.document.id },
+        generation: imported.generation,
+        dirty: imported.dirty,
+      });
+      if (imported.dirty && !imported.remoteConflict && !sessionBlockedRef.current) {
+        window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
+      }
       setNotice(imported.dirty ? "旧DraftをIndexedDB回復Journalへ取り込みました。PostgreSQLへ保存します。" : "旧DraftとPostgreSQLの原稿は同じ内容でした。");
     } finally {
       setLegacyImportBusy(false);
     }
-  }, [authorScope, documentId, persistDraft, projectId, publishEditor]);
+  }, [authorScope, documentId, persistDraft, projectId, publishEditor, saveMachineActor]);
 
   useEffect(() => {
     const onPopState = () => {

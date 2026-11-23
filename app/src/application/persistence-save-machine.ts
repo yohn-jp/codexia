@@ -45,7 +45,7 @@ interface PersistenceSaveMachineContext {
 type PersistenceSaveMachineEvent =
   | { type: "RECOVERY.READY"; identity: PersistenceSaveIdentity; recovery: RecoveryKind; generation: number; draftProtected?: boolean; remoteConflict?: boolean; operationId?: string; operationGeneration?: number }
   | { type: "DRAFT.CHANGED"; identity?: PersistenceSaveIdentity; generation: number; dirty: boolean }
-  | { type: "DRAFT.PROTECTED"; identity?: PersistenceSaveIdentity; generation: number }
+  | { type: "DRAFT.PROTECTED"; identity?: PersistenceSaveIdentity; generation: number; dirty: boolean }
   | { type: "DRAFT.FAILED"; identity?: PersistenceSaveIdentity; generation: number; message?: string }
   | { type: "DRAFT.OTHER_TAB"; identity?: PersistenceSaveIdentity; generation: number }
   | { type: "SAVE.MANUAL"; identity?: PersistenceSaveIdentity; operationId?: string; generation?: number; reconcileReplay?: boolean }
@@ -144,11 +144,14 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
         remoteConflict: context.remoteConflict,
         error: "",
       } : {}),
-      markDraftProtected: assign(({ context, event }) => {
-        const generation = event.type === "DRAFT.PROTECTED" ? event.generation : context.generation;
-        const identity = event.type === "DRAFT.PROTECTED" && event.identity ? event.identity : context.identity;
-        return { protectedIdentity: identity, protectedGeneration: generation, error: "" };
-      }),
+      markDraftProtected: assign(({ context, event }) => event.type === "DRAFT.PROTECTED" ? {
+        identity: event.identity ?? context.identity,
+        generation: event.generation,
+        dirty: event.dirty,
+        protectedIdentity: event.identity ?? context.identity,
+        protectedGeneration: event.generation,
+        error: "",
+      } : {}),
       markProtectionFailed: assign(({ context, event }) => ({
         error: event.type === "DRAFT.FAILED" ? event.message ?? "IndexedDB protection failed" : context.error,
       })),
