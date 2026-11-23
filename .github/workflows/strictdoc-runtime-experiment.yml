@@ -30,4 +30,5 @@ jobs:
             corepack pnpm@12.21.0 --version
           '
       - name: Report local build size
-        run: docker image inspect --format 'StrictDoc runtime uncompressed bytes: {{.Size}}' codexia-strictdoc-ci:experiment >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          docker image inspect --format 'StrictDoc runtime uncompressed bytes: {{.Size}}' codexia-strictdoc-ci:experiment >> "$GITHUB_STEP_SUMMARY"
