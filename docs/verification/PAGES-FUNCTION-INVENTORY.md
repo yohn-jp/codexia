@@ -17,7 +17,9 @@
 | `/audit/` | Source Audit | 公開リポジトリで観測したブランチ HEAD。root の `manifest.json` と SHA 別の snapshot、review の URL を保持 |
 
 PR ではパッケージを `repository-audit-preview` に保存する。
-アップロード前に生成済みサイトの台帳、内部リンク、監査公開物を検査し、Chromium で幅 1440px と 320px の画面遷移を確認する。
+アップロード前に生成済みサイトの台帳、内部リンク、監査公開物を検査する。
+Chromium は 1440×900、768×1024、390×844、320×800 で画面遷移、ディープリンク、監査ファイルのダウンロード、CI API のエラーと再試行を確認する。
+PR の `repository-audit-screenshots` には検証時の画面を保存する。
 本番公開は main の Pages デプロイジョブが担当し、配信先での受入は対象デプロイに対して確認する。
 
 ## PR #646 時点の観測記録
