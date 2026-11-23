@@ -22,16 +22,16 @@
 
 ## 3. 選定済みライブラリ台帳
 
-次の選定は**設計上の採用決定**であり、コードへの依存追加・置換・CI実行が完了したという意味ではない。導入後も担当領域と実行時の依存閉包を確認する。
+次の選定は**設計上の採用決定**であり、コードへの依存追加・置換・CI実行が完了したという意味ではない。具体的な実装・CI適合の状態はPRと検証証拠で判定し、この設計台帳へ時系列の進捗を記載しない。
 
-| 用途 | 選定済みパッケージ／初期基準版 | 対象と導入状態 | バージョン・互換性制約 |
+| 用途 | 選定済みパッケージ／初期基準版 | 適用対象／責務 | バージョン・互換性制約 |
 | --- | --- | --- | --- |
-| ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象。未導入 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop/Mobile Webは対応ブラウザーで検証する |
-| 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/download-ci-artifacts.mjs`の独自ZIP構文解析を置換する対象。未導入 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
-| API・MCP・外部データの実行時検証 | [`zod`](https://zod.dev/) `4.6.7` | API、MCP、Assistant等で**導入済み**。手動境界検査の統一対象 | Zod 4はTypeScript 5.5以上で検証されている。`strict`設定・Core-only依存閉包を維持 |
-| GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象。未導入 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
-| 厳格JSON構文と重複キーの検出 | [`jsonc-parser`](https://github.com/microsoft/node-jsonc-parser) `3.3.1` | `packages/api/src/oauth-mcp.ts`のJSONキー抽出正規表現の置換対象。未導入 | JSONCの許容は**禁止**。コメント、末尾カンマ、構文エラー、同一オブジェクト内の重複キーを拒否 |
-| JS/TS品質・フォーマット・import管理 | [`@biomejs/biome`](https://biomejs.dev/) `2.6.8` | リポジトリのLint・Formatter正本、Code ScanningへのSARIF送信。未導入 | CLIの安定版。CodeQLと型検査を代替しない。SARIFはLintに限定しFormatterはCIの合否で扱う |
+| ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop/Mobile Webは対応ブラウザーで検証する |
+| 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/download-ci-artifacts.mjs`の独自ZIP構文解析を置換する対象 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
+| API・MCP・外部データの実行時検証 | [`zod`](https://zod.dev/) `4.6.7` | API、MCP、Assistant等の境界検証の正本。手動検査の統一対象 | Zod 4はTypeScript 5.5以上で検証されている。`strict`設定・Core-only依存閉包を維持 |
+| GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
+| 厳格JSON構文と重複キーの検出 | [`jsonc-parser`](https://github.com/microsoft/node-jsonc-parser) `3.3.1` | `packages/api/src/oauth-mcp.ts`のJSONキー抽出正規表現の置換対象 | JSONCの許容は**禁止**。コメント、末尾カンマ、構文エラー、同一オブジェクト内の重複キーを拒否 |
+| JS/TS品質・フォーマット・import管理 | [`@biomejs/biome`](https://biomejs.dev/) `2.6.8` | リポジトリのLint・Formatter正本、Code ScanningへのSARIF送信 | CLIの安定版。CodeQLと型検査を代替しない。SARIFはLintに限定しFormatterはCIの合否で扱う |
 
 ### ブラウザーOAuth：`oauth4webapi`を採用
 
