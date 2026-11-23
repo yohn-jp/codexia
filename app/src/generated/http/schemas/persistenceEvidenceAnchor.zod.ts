@@ -11,6 +11,7 @@ export const persistenceEvidenceAnchorFromUtf16Min = 0;
 export const persistenceEvidenceAnchorToUtf16Min = 0;
 
 export const persistenceEvidenceAnchorQuoteSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const persistenceEvidenceAnchorVersionMin = 1;
 
 
 export const PersistenceEvidenceAnchor = zod.looseObject({
@@ -22,7 +23,7 @@ export const PersistenceEvidenceAnchor = zod.looseObject({
   "toUtf16": zod.int().min(persistenceEvidenceAnchorToUtf16Min),
   "quoteSha256": zod.string().regex(persistenceEvidenceAnchorQuoteSha256RegExp),
   "status": zod.enum(['proposed', 'confirmed', 'needs_review', 'orphaned']),
-  "version": zod.int().min(1),
+  "version": zod.int().min(persistenceEvidenceAnchorVersionMin),
   "createdAt": zod.iso.datetime({"offset":true}),
   "updatedAt": zod.iso.datetime({"offset":true})
 })
