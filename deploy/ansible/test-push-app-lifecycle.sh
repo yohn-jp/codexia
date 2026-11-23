@@ -744,7 +744,9 @@ set_state database_volume_writer_quadlet_release_continuity PASS 'database senti
 scenario_started=$(date +%s%3N)
 case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
   app)
-    run_application_lifecycle
+    # The standalone API requires the same approved Better Auth bootstrap as the auth lane.
+    source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
+    run_better_auth_lifecycle app
     ;;
   auth)
     source "$repo_root/deploy/ansible/test-push-auth-lifecycle.sh"
