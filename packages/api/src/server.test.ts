@@ -6,13 +6,12 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
 import { fromNodeHeaders } from "better-auth/node";
-import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { ChangeSetApplicationResult, ChangeSetId, ChangeSetResult, JsonObject, Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
-import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions } from "@codexia/module-runtime";
+import { ModuleRuntime, type ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { advertisePublicClientTokenAuth } from "./better-auth.js";
-import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
 import { createServer, start, type ApiServerOptions } from "./server.js";
 import { createOAuthMcpAuthenticator } from "./oauth-mcp.js";
@@ -476,51 +475,6 @@ async function startApi(staticDir: string, trustProxy = false) {
   return startCustomApi(makeStore(), staticDir, { trustProxy });
 }
 
-function usageEvent(projectId: string, id: string, startedAt: string, options: Partial<ModelUsageEvent> = {}): ModelUsageEvent {
-  return {
-    id, projectId, feature: "assistant.story-draft", provider: "openai", model: "gpt-4o-mini",
-    startedAt, completedAt: new Date(Date.parse(startedAt) + 1_000).toISOString(), state: "completed",
-    inputTokens: 12, outputTokens: 8, cost: 0.00002, ...options,
-  };
-}
-
-function modelUsageRuntimeOptions(cacheDirectory: string): Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string } {
-  const manifest: ModuleManifest = {
-    id: "assistant", version: "0.1.0", contractVersion: 1,
-    dependencies: [], provides: [], requires: [], optionalRequires: [MODEL_USAGE_CAPABILITY], statePaths: [], locality: "optional-external",
-  };
-  const schema: ValueSchema = { parse(value) { return value; } };
-  const loader: ModuleLoader = async (moduleContext: ModuleContext) => ({
-    manifest,
-    actions: [{
-      id: "assistant.model-usage-history", effect: "compute", inputSchema: schema, outputSchema: schema,
-      async invoke(rawInput, context): Promise<ActionResult> {
-        const input = rawInput as { event?: ModelUsageEvent; query?: { from?: string; to?: string; limit?: number; cursor?: string } };
-        const lease = await moduleContext.acquireCapability<ModelUsageStore>(MODEL_USAGE_CAPABILITY);
-        try {
-          if (input.event) await lease.value.append(input.event);
-          const history = await lease.value.list(context.reader.snapshot.projectId, input.query);
-          return { ok: true, snapshot: context.reader.snapshot, data: history };
-        } catch (error) {
-          const candidate = error as { code?: unknown; message?: unknown };
-          return { ok: false, snapshot: context.reader.snapshot, error: {
-            code: typeof candidate?.code === "string" ? candidate.code : "model_usage_test_failed",
-            message: typeof candidate?.message === "string" ? candidate.message : "Model usage test action failed",
-            retryable: false,
-          } };
-        } finally {
-          await lease.release();
-        }
-      },
-    }],
-    ui: [],
-    async dispose() {},
-  });
-  return {
-    manifests: [manifest], enabled: ["assistant"], loaders: { assistant: loader }, cacheDirectory,
-  };
-}
-
 async function waitForJob(base: string, ownerAuthorization: string, id: string): Promise<{ status: string; result: unknown }> {
   for (let attempt = 0; attempt < 100; attempt++) {
     const response = await fetch(`${base}/api/jobs/${encodeURIComponent(id)}`, { headers: { Authorization: ownerAuthorization } });
@@ -845,83 +799,6 @@ describe("Codexia HTTP boundary", () => {
     const rollbackAlias = await fetch(`${apiServer.base}/main.js`);
     assert.equal(await rollbackAlias.text(), "launcher legacy bundle", "a legacy manifest remains usable after rollback");
     assert.equal(rollbackAlias.headers.get("cache-control"), "no-store");
-  });
-
-  it("stores bounded immutable model usage with complete paginated history and no symlink traversal", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-"));
-    tempDirs.push(root);
-    const usageDirectory = resolve(root, "host-history");
-    const unusedDirectory = resolve(root, "unused-history");
-    assert.deepEqual(await new HistoricalModelUsageStore(unusedDirectory).list(SNAPSHOT.projectId), { events: [] });
-    await assert.rejects(lstat(unusedDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "an empty history read must not create host storage");
-    const store = new HistoricalModelUsageStore(usageDirectory);
-    const first = usageEvent(SNAPSHOT.projectId, "usage-1", "2026-10-17T00:00:00.000Z", {
-      cacheHit: true, promptVersion: "rewrite@1", durationMs: 217, queueWaitMs: 18,
-    });
-    const second = usageEvent(SNAPSHOT.projectId, "usage-2", "2026-10-17T00:00:02.000Z", { state: "aborted", errorCode: "request_cancelled" });
-    const third = usageEvent(SNAPSHOT.projectId, "usage-3", "2026-10-17T00:00:04.000Z");
-    await Promise.all([store.append(first), store.append(first), store.append(second), store.append(third)]);
-
-    const pageOne = await store.list(SNAPSHOT.projectId, { limit: 2 });
-    assert.deepEqual(pageOne.events.map(({ id }) => id), [first.id, second.id]);
-    assert.deepEqual(pageOne.events[0], first, "source cache and prompt/timing metadata survive append and list");
-    assert.ok(pageOne.nextCursor);
-    const pageTwo = await store.list(SNAPSHOT.projectId, { limit: 2, cursor: pageOne.nextCursor });
-    assert.deepEqual(pageTwo.events.map(({ id }) => id), [third.id]);
-    assert.equal(pageTwo.nextCursor, undefined);
-    const ranged = await store.list(SNAPSHOT.projectId, { from: second.startedAt, to: third.startedAt, limit: 10 });
-    assert.deepEqual(ranged.events.map(({ id }) => id), [second.id, third.id]);
-    await assert.rejects(store.list(SNAPSHOT.projectId, { limit: 1_001 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_query_invalid");
-    await assert.rejects(store.append({ ...first, outputTokens: 9 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
-    await assert.rejects(store.append({ ...first, cacheHit: false }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
-    for (const invalid of [
-      { cacheHit: "true" },
-      { promptVersion: "v1\nprivate prompt" },
-      { promptVersion: "v".repeat(129) },
-      { durationMs: Number.POSITIVE_INFINITY },
-      { durationMs: -1 },
-      { durationMs: 86_400_001 },
-      { queueWaitMs: Number.NaN },
-      { queueWaitMs: -1 },
-      { queueWaitMs: 86_400_001 },
-    ]) {
-      await assert.rejects(store.append({ ...first, id: `invalid-${Object.keys(invalid)[0]}`, ...invalid } as ModelUsageEvent),
-        (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    }
-    await assert.rejects(store.append({
-      ...first, prompt: "private prompt", headers: { Authorization: "secret" }, key: "private key", body: "private body",
-    } as ModelUsageEvent), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-
-    const reopened = new HistoricalModelUsageStore(usageDirectory);
-    assert.deepEqual((await reopened.list(SNAPSHOT.projectId, { limit: 10 })).events, [first, second, third],
-      "source cache and prompt/timing metadata survive reopening the host-owned store");
-
-    const alias = resolve(root, "history-alias");
-    await symlink(usageDirectory, alias, "dir");
-    await assert.rejects(new HistoricalModelUsageStore(alias).list(SNAPSHOT.projectId), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_path_invalid");
-  });
-
-  it("keeps accepted offset timestamps readable and rejects normalized dates outside the stored format", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-offsets-"));
-    tempDirs.push(root);
-    const store = new HistoricalModelUsageStore(resolve(root, "host-history"));
-    const offsetEvent = usageEvent(SNAPSHOT.projectId, "offset-event", "2026-10-17T01:00:00+01:00");
-    await store.append({ ...offsetEvent, completedAt: "2026-10-17T01:00:01+01:00" });
-    assert.deepEqual((await store.list(SNAPSHOT.projectId)).events, [{
-      ...offsetEvent,
-      startedAt: "2026-10-17T00:00:00.000Z",
-      completedAt: "2026-10-17T00:00:01.000Z",
-    }]);
-
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "year-underflow", startedAt: "0000-01-01T00:00:00+01:00", completedAt: "0000-01-01T00:00:01+01:00",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "year-overflow", startedAt: "9999-12-31T23:59:59-01:00", completedAt: "9999-12-31T23:59:59-01:00",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
-    await assert.rejects(store.append({
-      ...offsetEvent, id: "invalid-calendar-day", startedAt: "2026-02-30T00:00:00Z", completedAt: "2026-02-30T00:00:01Z",
-    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
   });
 
   it("stores only bounded worker lifecycle metadata and durable completion inbox state", async () => {
@@ -1331,70 +1208,6 @@ describe("Codexia HTTP boundary", () => {
     const job = await statusResponse.json() as { status: string; error: string };
     assert.equal(job.status, "error");
     assert.equal(job.error, "job_cancelled");
-  });
-
-  it("wires model usage lazily into the host and retains it after Core reconstruction", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "codexia-native-core-api-"));
-    const persistence = await nativePersistence(t);
-    tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-app-"));
-    tempDirs.push(staticDir);
-    const usageDirectory = resolve(root, "history");
-    const cacheDirectory = resolve(root, "module-cache");
-    let coreStore = new CoreStore({ persistence });
-    let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
-    t.after(async () => { if (apiServer) await apiServer.close(); });
-    const openApi = (store: CoreStore) => startCustomApi(store, staticDir, {
-      usageDirectory, persistence,
-      runtimeOptions: modelUsageRuntimeOptions(cacheDirectory),
-    });
-    apiServer = await openApi(coreStore);
-    let owner = signedRequests.ownerHeaders();
-    const ownerHeaders = () => ({ Authorization: owner.Authorization, Origin: apiServer!.base, "Content-Type": "application/json" });
-    const register = async () => {
-      const response = await fetch(`${apiServer!.base}/api/projects`, { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }) });
-      assert.equal(response.status, 201);
-      return response.json() as Promise<{ id: string }>;
-    };
-    const invokeHistory = async (projectId: string, input: unknown) => fetch(
-      `${apiServer!.base}/api/projects/${projectId}/actions/assistant.model-usage-history`,
-      { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ input }) },
-    );
-
-    assert.equal((await fetch(`${apiServer.base}/api/health`)).status, 200);
-    await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "server startup must not touch unused usage history");
-    const project = await register();
-    const identity = (await coreStore.observe(project.id)).snapshot.projectId;
-    const event = usageEvent(identity, "host-usage-1", "2026-10-17T01:00:00.000Z", {
-      cacheHit: true, promptVersion: "assistant-story-v2", durationMs: 1_842, queueWaitMs: 73,
-    });
-    const descriptors = await fetch(`${apiServer.base}/api/projects/${project.id}/actions`, { headers: { Authorization: owner.Authorization } });
-    assert.equal(descriptors.status, 200);
-    assert.ok((await descriptors.json() as { actions: Array<{ id: string }> }).actions.some(({ id }) => id === "assistant.model-usage-history"));
-    await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "module activation alone must not create the history directory");
-    const saved = await invokeHistory(project.id, { event });
-    assert.equal(saved.status, 200);
-    const savedResult = await saved.json() as ActionResult<{ events: ModelUsageEvent[] }>;
-    assert.equal(savedResult.ok, true, JSON.stringify(savedResult));
-    if (!savedResult.ok) return;
-    assert.deepEqual(savedResult.data.events, [event]);
-    assert.ok((await lstat(usageDirectory)).isDirectory());
-
-    await apiServer.close();
-    apiServer = undefined;
-    coreStore = new CoreStore({ persistence });
-    apiServer = await openApi(coreStore);
-    owner = signedRequests.ownerHeaders();
-    const reconstructed = (await coreStore.listProjects()).find((item) => item.id === project.id)!;
-    const newIdentity = (await coreStore.observe(reconstructed.id)).snapshot.projectId;
-    assert.equal(newIdentity, identity, "reopening Core retains the native project identity");
-    const restored = await invokeHistory(reconstructed.id, { query: { limit: 10 } });
-    assert.equal(restored.status, 200);
-    const restoredResult = await restored.json() as ActionResult<{ events: ModelUsageEvent[] }>;
-    assert.equal(restoredResult.ok, true, JSON.stringify(restoredResult));
-    if (!restoredResult.ok) return;
-    assert.deepEqual(restoredResult.data.events, [event]);
-    assert.ok((await lstat(usageDirectory)).isDirectory(), "host history remains available in its separately configured directory");
   });
 
   it("keeps direct manuscript writes retired for the OAuth author", async (t) => {

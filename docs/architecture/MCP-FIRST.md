@@ -6,7 +6,7 @@ Status: accepted architecture contract. This defines the target architecture, no
 
 Codexia owns manuscript and creative knowledge, structured retrieval, deterministic validation, proposals, review and durable application. External AI clients (ChatGPT, Codex and other MCP clients) own generative inference, reasoning and drafting. MCP is the primary integration surface for these clients, not a second business logic or persistence layer.
 
-Internal LLM API execution is frozen: do not extend provider integrations, model selection, generation, streaming, inference queues, token charging or provider-backed workflows. Preserve existing Assistant assets, stored data and compatibility while transitioning; their presence is not authority to expand or depend on them. Integration of previously prepared work is a baseline consolidation, not an exception permitting new provider development. Runtime removal or default changes must preserve author data and be separately verified. Optional local NLP, lexical/semantic retrieval, embeddings, speaker attribution and deterministic diagnostics remain distinct capabilities; do not make them Core dependencies.
+Internal LLM API execution is retired. The application must not load provider integrations or expose model selection, generation, provider streaming, inference queues, token charging, or provider-backed workflows. Assistant may retain local deterministic review, source-bound context/prompt previews, but no internal outbound model API. Retired Assistant provider settings and model usage features have no runtime or migration compatibility path. Do not introduce cleanup helpers or preservation adapters for them; manuscript and accepted-proposal integrity remains the responsibility of their existing owners. Optional local NLP, lexical/semantic retrieval, embeddings, speaker attribution and deterministic diagnostics remain distinct capabilities; do not make them Core dependencies.
 
 ## Logical architecture
 
@@ -26,7 +26,7 @@ Retain the trusted module runtime and its profile, capability and lifecycle cont
 
 ## Action and authorization boundary
 
-Use the existing discovery and invocation interfaces and typed domain contracts. Publish bounded, documented input/output schemas for feature tools; generic dispatch cannot bypass the same exposure policy. A read/compute/propose effect alone is insufficient to authorize provider execution or author-only operations. The target MCP surface must not invoke internal generative LLMs, directly or transitively, including through generic dispatch, named tools or streaming routes. Enforce this in the shared server-side admission/dispatch path rather than only hiding tools. Existing generation features remain frozen legacy behavior until the transition is implemented and verified.
+Use the existing discovery and invocation interfaces and typed domain contracts. Publish bounded, documented input/output schemas for feature tools; generic dispatch cannot bypass the same exposure policy. A read/compute/propose effect alone is insufficient to authorize provider execution or author-only operations. The target MCP surface must not invoke internal generative LLMs, directly or transitively, including through generic dispatch, named tools or streaming routes. Enforce this in the shared server-side admission/dispatch path rather than only hiding tools. Retired generation features and their HTTP endpoints must be absent from installed runtimes, including indirect dispatch and stale UI contributions.
 
 Bind requests to the authenticated actor, authorized project and selected snapshot. Derive actor/provenance server-side. Enforce enabled capabilities, read and proposal scopes, cancellation, bounded results and stale preconditions. Context returned through MCP is subject to explicit authenticated project access and scope; author, character and reader views must not be confused. Do not forward MCP data to a separate model provider. MCP tool results are limited to 8 MiB of UTF-8 JSON. An oversized result returns `RESULT_TOO_LARGE`. When an accepted proposal submission exceeds the response limit, the error reports up to 50 known proposal IDs for the existing review flow.
 
@@ -58,7 +58,7 @@ The external client reads context, generates alternatives outside Codexia, submi
 
 ## Acceptance
 
-- With Assistant absent, disabled or provider none, the primary MCP workflows remain usable; instrument both transports and dispatch to prove no internal generative provider execution, including transitive and generic actions.
+- With Assistant absent, disabled or local-only, the primary MCP workflows remain usable; verify that no internal generative provider can execute through direct HTTP, module actions, generic dispatch or either MCP transport.
 - Stdio and Streamable HTTP expose consistent authorized operations; disabled capabilities, cross-project access and author-only operations fail closed.
 - Native Knowledge/Evidence proposals preserve IDs, source revisions, links and history; unapproved changes cannot alter canon, approval/application are transactional and stale/replay cases are tested against real PostgreSQL.
 - Ordinary lexical search works without Semantic. Ambiguous aliases do not auto-link. Context and Story results are tied to one snapshot and respect perspective.

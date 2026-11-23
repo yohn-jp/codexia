@@ -445,11 +445,10 @@ async function runLifecycle() {
   await mkdir("/data/.arcadia", { recursive: true });
   await symlink("/models", "/data/.arcadia/models", "dir");
 
-  const [{ CoreStore }, { ModuleRuntime }, { start }, { MODEL_USAGE_CAPABILITY }, composition] = await Promise.all([
+  const [{ CoreStore }, { ModuleRuntime }, { start }, composition] = await Promise.all([
     import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js"),
     import("/app/node_modules/.pnpm/node_modules/@codexia/module-runtime/dist/index.js"),
     import("/app/node_modules/@codexia/api/dist/server.js"),
-    import("/app/node_modules/.pnpm/node_modules/@codexia/contracts/dist/index.js"),
     import("/app/generated/server.mjs"),
   ]);
   assert.equal(composition.profile, "full");
@@ -473,9 +472,6 @@ async function runLifecycle() {
     diagnostics: async (context) => composition.moduleLoaders.diagnostics(createObservationGate("diagnostics", context, diagnosticGate, capabilityEvents, valueIds, sharedUseObservation)),
     semantic: async (context) => composition.moduleLoaders.semantic(createObservationGate("semantic", context, undefined, capabilityEvents, valueIds, sharedUseObservation)),
   };
-  const apiUrl = new URL("file:///app/node_modules/@codexia/api/dist/server.js");
-  const { HistoricalModelUsageStore } = await import(new URL("./historical-store.js", apiUrl).href);
-  const usageStore = new HistoricalModelUsageStore("/history");
   const runtime = new ModuleRuntime({
     manifests: composition.moduleManifests,
     enabled: ["story", "nlp", "diagnostics", "semantic"],
@@ -483,9 +479,6 @@ async function runLifecycle() {
     moduleDirectories: composition.moduleDirectories,
     workerEntries: composition.moduleWorkerEntries,
     cacheDirectory: "/data/module-cache",
-    capabilityProviders: {
-      [MODEL_USAGE_CAPABILITY]: { create: () => usageStore },
-    },
   });
   sharedUseObservation.captureWorkerState = () => ({
     semanticPids: workerPids(runtime, composition.moduleWorkerEntries.semantic),
