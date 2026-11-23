@@ -41,9 +41,9 @@
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | `^5.12.8` | API・単一認可境界 | **既存採用**: Fastify 5。最新版・major互換性の証拠は別途評価 |
-| `jose` | `6.2.17` | API・JWT検証 | **更新対象**: 6.2.18へのDependabot PRあり。ローカルのJWTプロファイル・失効判定の契約を維持 |
-| `pg` | API `8.16.3` / persistence `^8.23.1` | API/Auth・PostgreSQL | **更新対象**: API側が遅れている。8.23.1への更新と、二つのDB接続主体の動作を確認 |
-| `@types/pg` | API `8.15.6` / persistence `^8.23.1` | PostgreSQL型 | **更新対象**: 型定義もAPI側を8.23.1系列へ合わせる。ランタイムとの型整合を検証 |
+| `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
+| `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
+| `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
 | `zod` | `4.6.7` | API/MCP/Assistant/Speaker・境界入力 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
@@ -55,8 +55,8 @@
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
 | `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
-| `react-router-dom` | `7.18.5` | app・画面遷移 | **更新対象**: 7.18.6へのPRあり。画面遷移・リロード・保護ルートを検証 |
-| `react-resizable-panels` | `4.24.0` | app・パネル | **更新対象**: 4.24.1へのPRあり。Desktop配置・ドラッグ・復元を検証 |
+| `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
+| `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
 | `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
 | `@codemirror/state` | `^6.7.6` | app・編集状態 | **要検証** |
