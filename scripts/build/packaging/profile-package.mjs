@@ -6,12 +6,12 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const modulePackagePrefix = '@codexia/module-';
 const knownModules = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
 
 function usage() {
-  console.error('Usage: node scripts/profile-package.mjs --profile <core|full> --out <new-directory> [--server-only]');
+  console.error('Usage: node scripts/build/packaging/profile-package.mjs --profile <core|full> --out <new-directory> [--server-only]');
   process.exit(2);
 }
 
@@ -58,7 +58,7 @@ export function createBuildCommands(profileName, profile, { includeUi = true, in
     const filters = profile.modules.flatMap((id) => ['--filter', `${modulePackagePrefix}${id}...`]);
     commands.push({ command: 'pnpm', args: [...filters, 'run', 'build'] });
   }
-  commands.push({ command: process.execPath, args: [path.join(root, 'scripts/profile-build.mjs'), '--profile', profileName] });
+  commands.push({ command: process.execPath, args: [path.join(root, 'scripts/build/packaging/profile-build.mjs'), '--profile', profileName] });
   if (includeUi) {
     commands.push({ command: 'pnpm', args: ['--filter', '@codexia/app', 'run', 'build'], env: { CODEXIA_PROFILE: profileName } });
   }
@@ -131,7 +131,7 @@ async function main() {
     await cp(path.join(root, 'profiles/launch.mjs'), path.join(outputDirectory, 'launch.mjs'));
     if (!serverOnly) await cp(path.join(root, 'app/dist'), path.join(outputDirectory, 'app/dist'), { recursive: true });
     run(process.execPath, [
-      path.join(root, 'scripts/profile-build.mjs'), '--profile', profileName, '--verify-deploy', outputDirectory,
+      path.join(root, 'scripts/build/packaging/profile-build.mjs'), '--profile', profileName, '--verify-deploy', outputDirectory,
     ]);
     if (profileName === 'core') {
       const apiPackage = await realpath(path.join(outputDirectory, 'node_modules/@codexia/api'));

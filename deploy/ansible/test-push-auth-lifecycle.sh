@@ -243,6 +243,11 @@ NODE
   rootless rm -- "$orphan_record"
   require_inactive_api
   run_application_lifecycle
+  if [[ "${1:-auth}" == app ]]; then
+    # The independent auth lane owns the login/session-specific acceptance.
+    set_state better_auth_activation NOT_CHECKED "tested by the separate auth scenario"
+    return 0
+  fi
 
   run_deploy auth-primary false '' auth-verified-activation
   auth_fixture authorize "$web" "$owner" >"$tmp/auth-session.json"

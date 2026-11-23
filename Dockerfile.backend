@@ -24,7 +24,7 @@ ARG CODEXIA_PRODUCER_REVISION
 ARG CODEXIA_RELEASE_VERSION
 ENV CODEXIA_RELEASE_VERSION=${CODEXIA_RELEASE_VERSION}
 ENV CODEXIA_PROFILE=${PROFILE}
-RUN node scripts/profile-package.mjs --profile "${PROFILE}" --server-only --out /runtime
+RUN node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --server-only --out /runtime
 RUN node scripts/backend-update-identity.mjs build /runtime "${PROFILE}" "${CODEXIA_PRODUCER_REVISION}"
 
 FROM ${NODE_IMAGE} AS backend
