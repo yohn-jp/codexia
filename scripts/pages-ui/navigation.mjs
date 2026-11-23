@@ -15,7 +15,7 @@ const CORE_PAGES = new Map([
 ]);
 
 const NAV_ITEMS = [
-  ['overview', '概要', 'index.html'],
+  ['overview', '概要', ''],
   ['architecture', 'Architecture', 'architecture/'],
   ['graph', 'Code Map', 'graph/'],
   ['ci', 'CI', 'ci/'],
@@ -38,14 +38,14 @@ function breadcrumbsFor(pagePath, page) {
   if (page.id === 'snapshot' || page.id === 'review') {
     const type = page.id === 'snapshot' ? 'Snapshots' : 'Reviews';
     return [
-      { label: '概要', href: 'index.html' },
+      { label: '概要', href: '' },
       { label: 'Source Audit', href: 'audit/' },
       { label: type, href: `audit/` },
       { label: page.sha, current: true },
     ];
   }
   return [
-    { label: '概要', href: 'index.html' },
+    { label: '概要', href: '' },
     { label: page.section, current: true },
   ];
 }
@@ -61,7 +61,7 @@ function renderShell(pagePath, page, skipTarget) {
   const context = `<div class="cx-pages-context" aria-label="ページ情報"><span class="cx-pages-page-title">${escapeHtml(page.title)}</span><span class="cx-pages-source">${escapeHtml(page.source)}</span><span class="cx-pages-mode">${escapeHtml(page.mode)}${page.sha ? ` · ${escapeHtml(page.sha)}` : ''}</span></div>`;
   return `<a class="cx-pages-skip" href="#${escapeHtml(skipTarget)}">本文へ移動</a>
 <header class="cx-pages-header">
-  <a class="cx-pages-brand" href="${escapeHtml(pathFromPage('', pagePath, 'index.html'))}" aria-label="Codexia Development Portal">Codexia <span>/ Development</span></a>
+  <a class="cx-pages-brand" href="${escapeHtml(pathFromPage(pagePath, ''))}" aria-label="Codexia Development Portal">Codexia <span>/ Development</span></a>
   <button class="cx-pages-menu-button" type="button" aria-expanded="true" aria-controls="cx-pages-navigation">メニュー</button>
   <nav class="cx-pages-navigation" id="cx-pages-navigation" aria-label="サイト内">
     <ul>${nav}</ul>
@@ -73,6 +73,9 @@ function renderShell(pagePath, page, skipTarget) {
 export function decoratePage(html, { pagePath, page }) {
   if (typeof html !== 'string' || !pagePath || !page) throw new TypeError('decoratePage requires HTML, pagePath, and page metadata');
   if (html.includes('class="cx-pages-header"')) return html;
+  if (!/<html\b/i.test(html) || !/<head\b[^>]*>/i.test(html) || !/<\/head\s*>/i.test(html) || !/<body\b[^>]*>/i.test(html) || !/<\/body\s*>/i.test(html)) {
+    throw new Error(`Expected a standalone HTML document with explicit head and body elements: ${pagePath}`);
+  }
   const cssPath = escapeHtml(pathFromPage(pagePath, 'pages-ui/navigation.css'));
   const jsPath = escapeHtml(pathFromPage(pagePath, 'pages-ui/navigation.js'));
   const withStyles = html.replace(/<\/head\s*>/i, `<link rel="stylesheet" href="${cssPath}">\n</head>`);

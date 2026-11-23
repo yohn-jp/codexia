@@ -13,7 +13,7 @@ test('decoratePage uses project-subpath-safe relative assets and destination lin
   assert.match(decorated, /href="\.\.\/pages-ui\/navigation\.css"/);
   assert.match(decorated, /src="\.\.\/pages-ui\/navigation\.js"/);
   assert.match(decorated, /href="\.\.\/architecture\/"/);
-  assert.match(decorated, /href="\.\.\/index\.html"/);
+  assert.match(decorated, /href="\.\.\/"/);
   assert.match(decorated, /class="cx-pages-skip" href="#main-content"/);
   assert.match(decorated, /<main id="main-content" tabindex="-1">/);
   assert.match(decorated, /aria-current="page"/);
@@ -24,6 +24,35 @@ test('decoratePage adds a focusable main target without duplicating landmarks', 
   assert.match(decorated, /href="#main"/);
   assert.match(decorated, /<main id="main" tabindex="-1">/);
   assert.equal((decorated.match(/<main\b/g) ?? []).length, 1);
+});
+
+test('brand and overview links point to the site root at every page depth', () => {
+  const examples = [
+    ['index.html', './'],
+    ['audit/index.html', '../'],
+    ['ci/index.html', '../'],
+    ['graph/index.html', '../'],
+    ['architecture/index.html', '../'],
+    [`reviews/${'a'.repeat(40)}/index.html`, '../../'],
+    [`snapshots/${'b'.repeat(40)}/index.html`, '../../'],
+  ];
+  for (const [pagePath, expectedRoot] of examples) {
+    const decorated = decoratePage('<html><head></head><body><main>Content</main></body></html>', { pagePath, page });
+    assert.match(decorated, new RegExp(`class="cx-pages-brand" href="${expectedRoot.replaceAll('.', '\\.')}"`), pagePath);
+    assert.match(decorated, new RegExp(`<a href="${expectedRoot.replaceAll('.', '\\.')}"[^>]*>概要</a>`), pagePath);
+  }
+});
+
+test('decoratePage requires complete standalone HTML documents', () => {
+  assert.throws(
+    () => decoratePage('<html><body>Missing head</body></html>', { pagePath: 'audit/index.html', page }),
+    /explicit head and body elements/,
+  );
+});
+
+test('shared metadata allows unbroken SHA text to wrap on narrow screens', async () => {
+  const css = await readFile(new URL('./navigation.css', import.meta.url), 'utf8');
+  assert.match(css, /\.cx-pages-source, \.cx-pages-mode\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });
 
 test('CLI decorates only selected entry points and preserves community HTML bytes', async () => {

@@ -116,9 +116,9 @@
 .cx-pages-breadcrumbs a { color: var(--cx-pages-accent); }
 .cx-pages-breadcrumbs li + li::before { content: "/"; margin-inline: 0.45rem; color: var(--cx-pages-secondary); }
 .cx-pages-breadcrumbs [aria-current="page"] { color: var(--cx-pages-text); font-weight: 650; }
-.cx-pages-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.85rem; }
+.cx-pages-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.85rem; min-width: 0; max-width: 100%; }
 .cx-pages-page-title { font-weight: 650; }
-.cx-pages-source, .cx-pages-mode { color: var(--cx-pages-secondary); }
+.cx-pages-source, .cx-pages-mode { color: var(--cx-pages-secondary); overflow-wrap: anywhere; }
 
 .cx-pages-header a:focus-visible,
 .cx-pages-header button:focus-visible,
