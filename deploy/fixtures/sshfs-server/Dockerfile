@@ -9,4 +9,6 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no
     && chmod 0700 /home/codexia-backup/.ssh \
     && rm -f /etc/ssh/ssh_host_*_key*
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD /usr/bin/pgrep -x sshd >/dev/null || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
