@@ -252,7 +252,7 @@ test('published transitions require an upwards version and matching certified da
   const head = { version: '1.0.101', profile: 'full', apiEpoch: 2, persistenceFormat: 3, migrationFingerprint: 'sha256:' + 'a'.repeat(64) };
   const prior = { ...head, version: '1.0.100' };
   assert.deepEqual(selectLifecycleTransition(head, prior), { from: 'prior', to: 'head', kind: 'published-upgrade' });
-  assert.deepEqual(selectLifecycleTransition(head), { from: 'head', to: 'auth-update', kind: 'test-only-digest' });
+  assert.deepEqual(selectLifecycleTransition(head), { from: 'head', to: 'app-update', kind: 'test-only-digest' });
   for (const mismatch of [{ version: head.version }, { version: '1.0.102' }, { profile: 'core' },
     { apiEpoch: 3 }, { persistenceFormat: 4 }, { migrationFingerprint: 'sha256:' + 'b'.repeat(64) }]) {
     assert.throws(() => selectLifecycleTransition(head, { ...prior, ...mismatch }), /compatible database and API/u);
