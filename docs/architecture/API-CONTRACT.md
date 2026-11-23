@@ -114,5 +114,5 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 1. server.ts、persistence-routes.ts、auth providerの登録済みルート、全module contribution、public reader、/mcpを列挙し、path+methodの全行をこの台帳と照合する。
 2. 全入力/出力のDTO、エラーとheader、version・idempotency・authorizationにSchema定義または等価な型契約を与える。
 3. 仕様→handler・型・DB object・test、handler→要求の双方を [Traceability](../verification/TRACEABILITY-REGISTER.md) に記録する。
-4. OpenAPI 3.1＋lint/互換差分/表示ツール（Redocly、Scalar等）は**候補**。生成方向、正本所有、library-managed OAuthの表現、MCPとの分界、テストで検証可能かを比較した後に採用を決める。
+4. **採用済み目標:** [HTTP platform migration](HTTP-PLATFORM-MIGRATION.md)に従ってTypeSpecをAPIワイヤの編集正本とし、OpenAPI 3.1.0を生成、Redocly/Orval/Hono/Zod/Scalar/oasdiff/Schemathesisで実装・表示・検証する。Better Authのライブラリ管理OAuth endpointは別生成ソースとして検証する。**実導入・全route網羅は未完了**であり、コードに合わせた仕様の追認を禁止する。
 5. 稼働環境のOpenAPI/HTTP検証が未実行ならVERIFIEDとしない。設計書の追加自体ではCIやhandlerの改修を要求しない。
