@@ -513,7 +513,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OAuthConsentListBody'
+                type: object
+                additionalProperties: {}
         '401':
           description: Access is unauthorized.
           content:
@@ -528,6 +529,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - auth-adapter
+      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
       x-codexia-security-deviation: The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.
       x-codexia-principal: OWNER-SESSION; same-origin request
       x-codexia-contract-status: incomplete
@@ -1126,7 +1128,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobListBody'
+                type: object
+                additionalProperties: {}
         '403':
           description: Access is forbidden.
           content:
@@ -1141,6 +1144,8 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - jobs
+      x-codexia-runtime-response-deviation: Runtime serializes the public job collection as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/jobs/events:
     get:
@@ -2329,7 +2334,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectReviewQueueBody'
+                $ref: '#/components/schemas/GlobalReviewQueueBody'
         '503':
           description: Service unavailable.
           content:
@@ -4967,6 +4972,25 @@ components:
         historical:
           type: boolean
       additionalProperties: {}
+    GlobalReviewQueueBody:
+      type: object
+      properties:
+        unresolvedCount:
+          type: integer
+          format: int32
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalReviewQueueItemBody'
+      additionalProperties: {}
+    GlobalReviewQueueItemBody:
+      type: object
+      properties:
+        projectId:
+          type: string
+        proposal:
+          $ref: '#/components/schemas/CoreProposalStatusBody'
+      additionalProperties: {}
     HealthResponse:
       type: object
       required:
@@ -5035,14 +5059,6 @@ components:
       properties:
         item:
           $ref: '#/components/schemas/InboxItemBody'
-      additionalProperties: {}
-    JobListBody:
-      type: object
-      properties:
-        jobs:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicJobBody'
       additionalProperties: {}
     KnowledgeAliasBody:
       type: object
@@ -5335,24 +5351,6 @@ components:
           items:
             $ref: '#/components/schemas/EvidenceAnchorDetailBody'
       additionalProperties: {}
-    OAuthConsentBody:
-      type: object
-      properties:
-        id:
-          type: string
-        clientId:
-          type: string
-        scopes:
-          type: array
-          items:
-            type: string
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      additionalProperties: {}
     OAuthConsentContextBody:
       type: object
       properties:
@@ -5378,14 +5376,6 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
-    OAuthConsentListBody:
-      type: object
-      properties:
-        consents:
-          type: array
-          items:
-            $ref: '#/components/schemas/OAuthConsentBody'
-      additionalProperties: {}
     OwnerSessionBody:
       type: object
       required:
@@ -5577,7 +5567,8 @@ components:
             - type: 'null'
         authorId:
           type: string
-      additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
     PersistenceAnchorUpdateRequest:
       type: object
       properties:
@@ -6508,15 +6499,11 @@ components:
     ProjectStatusBody:
       type: object
       properties:
-        snapshot:
-          type: object
-          properties:
-            projectId:
-              type: string
-            projectVersion:
-              type: integer
-              format: int32
-          additionalProperties: {}
+        projectId:
+          type: string
+        projectVersion:
+          type: integer
+          format: int32
         state:
           type: string
           enum:

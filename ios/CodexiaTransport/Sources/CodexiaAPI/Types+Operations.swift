@@ -2416,31 +2416,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/auth/oauth2/consent-context/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/auth/oauth2/consent-context/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/auth/oauth2/consent-context/POST/responses/200/content/application\/json`.
-                    case json(Operations.auth_consent_context_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.OAuthConsentContextBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.auth_consent_context_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.OAuthConsentContextBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -6322,31 +6304,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/inbox/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/inbox/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/inbox/GET/responses/200/content/application\/json`.
-                    case json(Operations.inbox_list_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.InboxListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.inbox_list_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.InboxListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -6499,31 +6463,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/inbox/read-all/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/inbox/read-all/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/inbox/read-all/POST/responses/200/content/application\/json`.
-                    case json(Operations.inbox_read_all_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.InboxReadAllBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.inbox_read_all_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.InboxReadAllBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -6694,31 +6640,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/inbox/{inboxId}/read/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/inbox/{inboxId}/read/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/inbox/{inboxId}/read/POST/responses/200/content/application\/json`.
-                    case json(Operations.inbox_item_read_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.InboxReadItemBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.inbox_item_read_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.InboxReadItemBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -7403,31 +7331,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/jobs/{jobId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/jobs/{jobId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/jobs/{jobId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.job_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PublicJobBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.job_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PublicJobBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -8289,31 +8199,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectReadBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectReadBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -8484,31 +8376,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_actions_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectActionsBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_actions_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectActionsBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -8662,31 +8536,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/200/content/application\/json`.
-                    case json(Operations.project_action_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ActionResultBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_action_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ActionResultBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -8935,31 +8791,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/200/content/application\/json`.
-                    case json(Operations.project_apply_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProposalApplyReceiptBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_apply_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProposalApplyReceiptBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -9663,31 +9501,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/responses/200/content/application\/json`.
-                    case json(Operations.manuscript_snapshots_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ManuscriptSnapshotListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.manuscript_snapshots_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ManuscriptSnapshotListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -9819,31 +9639,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.manuscript_snapshot_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ManuscriptSnapshotReadBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.manuscript_snapshot_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ManuscriptSnapshotReadBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11018,31 +10820,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/observation/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/observation/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/observation/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_observation_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectObservationBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_observation_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectObservationBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11162,31 +10946,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_proposals_list_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProposalListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_proposals_list_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProposalListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11333,31 +11099,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/POST/responses/201/content/application\/json`.
-                    case json(Operations.project_proposals_create_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.CoreChangeProposalBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_proposals_create_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.CoreChangeProposalBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11586,31 +11334,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/{proposalId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/{proposalId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/proposals/{proposalId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_proposal_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.CoreProposalStatusBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_proposal_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.CoreProposalStatusBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11730,31 +11460,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_recent_activity_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.RecentActivityBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_recent_activity_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.RecentActivityBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -11959,31 +11671,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/PUT/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/PUT/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/recent-activity/PUT/responses/200/content/application\/json`.
-                    case json(Operations.project_recent_activity_put.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.RecentActivityBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_recent_activity_put.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.RecentActivityBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -12205,31 +11899,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/review-queue/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/review-queue/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/review-queue/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_review_queue_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectReviewQueueBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_review_queue_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectReviewQueueBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -12407,31 +12083,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_scene_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectSceneResponse)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_scene_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectSceneResponse {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -12578,31 +12236,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/200/content/application\/json`.
-                    case json(Operations.project_scratch_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ScratchCreateBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_scratch_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ScratchCreateBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -12852,31 +12492,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/search/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/search/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/search/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_search_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectSearchBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_search_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectSearchBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13063,31 +12685,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_snapshot_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectSnapshotResponse)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_snapshot_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectSnapshotResponse {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13207,31 +12811,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/status/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/status/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/status/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_status_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectStatusBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_status_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectStatusBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13351,31 +12937,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_tree_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ProjectTreeResponse)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_tree_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ProjectTreeResponse {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -13511,31 +13079,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/writing-stats/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/writing-stats/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/writing-stats/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_writing_stats_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.WritingStatsResponseBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.project_writing_stats_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.WritingStatsResponseBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -14337,31 +13887,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/review-queue/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/review-queue/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/review-queue/GET/responses/200/content/application\/json`.
-                    case json(Operations.review_queue_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.GlobalReviewQueueBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.review_queue_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.GlobalReviewQueueBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -14514,31 +14046,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/session/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/session/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/session/GET/responses/200/content/application\/json`.
-                    case json(Operations.api_session_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.ApiSessionBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.api_session_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.ApiSessionBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -15858,31 +15372,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/archive/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/archive/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/archive/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_project_archive_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.WorkArchive)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_project_archive_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.WorkArchive {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -16076,31 +15572,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_assertion_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.AssertionResponseBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_assertion_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.AssertionResponseBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -16589,31 +16067,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_assertion_evidence_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.AssertionEvidenceListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_assertion_evidence_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.AssertionEvidenceListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -17095,31 +16555,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_changesets_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changesets_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -17306,31 +16748,13 @@ public enum Operations {
             public struct Created: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/POST/responses/201/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/POST/responses/201/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/POST/responses/201/content/application\/json`.
-                    case json(Operations.persistence_changesets_post.Output.Created.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetResultBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changesets_post.Output.Created.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetResultBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -17559,31 +16983,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_changeset_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetResponseBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changeset_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetResponseBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -17770,31 +17176,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply/POST/responses/200/content/application\/json`.
-                    case json(Operations.persistence_changeset_apply_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetApplicationBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changeset_apply_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetApplicationBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -18083,31 +17471,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve/POST/responses/200/content/application\/json`.
-                    case json(Operations.persistence_changeset_approve_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetApprovalBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changeset_approve_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetApprovalBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -18396,31 +17766,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject/POST/responses/200/content/application\/json`.
-                    case json(Operations.persistence_changeset_reject_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceChangeSetApprovalBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_changeset_reject_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceChangeSetApprovalBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -19986,31 +19338,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_document_anchors_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.DocumentEvidenceListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_document_anchors_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.DocumentEvidenceListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -22325,31 +21659,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_nodes_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceNodeListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_nodes_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceNodeListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -22594,31 +21910,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_node_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceNodeBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceNodeBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -23358,31 +22656,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_node_evidence_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.NodeEvidenceListBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_evidence_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.NodeEvidenceListBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -23569,31 +22849,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge/POST/responses/200/content/application\/json`.
-                    case json(Operations.persistence_node_merge_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.KnowledgeMergeResultBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_merge_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.KnowledgeMergeResultBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -23882,31 +23144,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview/POST/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview/POST/responses/200/content/application\/json`.
-                    case json(Operations.persistence_node_merge_preview_post.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.KnowledgeMergePreviewBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_node_merge_preview_post.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.KnowledgeMergePreviewBody {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -24439,31 +23683,13 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/review-feed/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/review-feed/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/review-feed/GET/responses/200/content/application\/json`.
-                    case json(Operations.persistence_review_feed_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.PersistenceReviewFeedBody)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.persistence_review_feed_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.PersistenceReviewFeedBody {
                         get throws {
                             switch self {
                             case let .json(body):

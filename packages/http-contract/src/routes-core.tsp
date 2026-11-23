@@ -76,7 +76,9 @@ op getJobEvents(): EventStream | { @statusCode _: 403; @body body: ApiError; } |
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs") @get @operationId("jobs_list_get")
-op listJobs(): JobListBody | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "Runtime serializes the public job collection as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
+op listJobs(): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs/{jobId}") @get @operationId("job_get")
@@ -104,7 +106,7 @@ op createProject(@body body: CoreProjectCreateRequest): { @statusCode _: 201; @b
 
 @tag("reviews") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/review-queue") @get @operationId("review_queue_get")
-op getReviewQueue(): ProjectReviewQueueBody | { @statusCode _: 503; @body body: ApiError; };
+op getReviewQueue(): GlobalReviewQueueBody | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}") @get @operationId("project_get")

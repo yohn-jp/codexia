@@ -138,20 +138,6 @@ model OAuthConsentContextBody {
   ...Record<unknown>;
 }
 
-model OAuthConsentBody {
-  id?: string;
-  clientId?: string;
-  scopes?: string[];
-  createdAt?: utcDateTime;
-  updatedAt?: utcDateTime;
-  ...Record<unknown>;
-}
-
-model OAuthConsentListBody {
-  consents?: OAuthConsentBody[];
-  ...Record<unknown>;
-}
-
 model ApiSessionBody {
   authenticated?: boolean;
   authorScope?: string;
@@ -170,11 +156,6 @@ model PublicJobBody {
   createdAt?: utcDateTime;
   updatedAt?: utcDateTime;
   finishedAt?: utcDateTime | null;
-  ...Record<unknown>;
-}
-
-model JobListBody {
-  jobs?: PublicJobBody[];
   ...Record<unknown>;
 }
 
@@ -291,7 +272,8 @@ model ProjectSnapshotResponse {
 }
 
 model ProjectStatusBody {
-  snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
+  projectId?: string;
+  projectVersion?: int32;
   state?: "durable";
   ...Record<unknown>;
 }
@@ -490,6 +472,18 @@ model ProposalListBody {
 model ProjectReviewQueueBody {
   snapshot?: JsonObject;
   proposals?: CoreProposalStatusBody[];
+  ...Record<unknown>;
+}
+
+model GlobalReviewQueueItemBody {
+  projectId?: string;
+  proposal?: CoreProposalStatusBody;
+  ...Record<unknown>;
+}
+
+model GlobalReviewQueueBody {
+  unresolvedCount?: int32;
+  items?: GlobalReviewQueueItemBody[];
   ...Record<unknown>;
 }
 
@@ -1187,7 +1181,7 @@ model PersistenceAnchorCreatedResponse {
   quote: string;
   nodeId: string | null;
   authorId: string;
-  ...Record<unknown>;
+  ...Record<never>;
 }
 
 model DocumentRevisionPageResponse {
