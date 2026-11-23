@@ -245,9 +245,11 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         }
         continue;
       }
-      // An unknown root/source owner has no proven model input boundary: fail closed.
-      // Known core/API workspace tests retain their independently tested model exclusions.
-      if (!owner && event === 'pull_request') fullModelOci = true;
+      // The declared workspace root test/ and tests/ directories are outside
+      // the runtime package source tree. Unknown owners remain fail-closed.
+      const knownWorkspaceFixture = WORKSPACES.some(item =>
+        file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
+      if (!owner && !knownWorkspaceFixture && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }
