@@ -12,6 +12,15 @@ on:
       - packages/**
       - modules/**
       - '!modules/story/src/browser.tsx'
+      # Test-only files are not source-bound runtime or host-lifecycle inputs.
+      - '!modules/**/test/**'
+      - '!modules/**/tests/**'
+      - '!modules/**/*.test.*'
+      - '!modules/**/*.spec.*'
+      - '!packages/**/test/**'
+      - '!packages/**/tests/**'
+      - '!packages/**/*.test.*'
+      - '!packages/**/*.spec.*'
       - profiles/**
       - scripts/build/packaging/profile-build.mjs
       - scripts/shared/read-regular-file.mjs
