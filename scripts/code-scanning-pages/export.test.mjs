@@ -61,7 +61,7 @@ test('CSV escapes spreadsheet formula injection and preserves unicode, quotes, C
     },
   })]);
   assert.ok(csv.startsWith('\uFEFFnumber,state,severity'));
-  assert.ok(csv.includes('"\\'=HYPERLINK(""https://evil.invalid"",""危険"")"'.replace('\\', '')));
-  assert.ok(csv.includes('"\\'-injection.ts"'.replace('\\', '')));
+  assert.ok(csv.includes('"' + String.fromCharCode(39) + '=HYPERLINK'));
+  assert.ok(csv.includes('"' + String.fromCharCode(39) + '-injection.ts'));
   assert.ok(csv.endsWith('\r\n'));
 });

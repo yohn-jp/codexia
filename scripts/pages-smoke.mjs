@@ -10,7 +10,7 @@ assert.ok(site && playwright && chromiumPath, 'Usage: pages-smoke.mjs SITE PLAYW
 
 const root = resolve(site);
 const prefix = '/codexia/';
-const destinations = ['architecture/', 'graph/', 'ci/', 'audit/'];
+const destinations = ['architecture/', 'graph/', 'ci/', 'security/', 'audit/'];
 const viewports = [
   { width: 1440, height: 900 },
   { width: 768, height: 1024 },
@@ -102,9 +102,21 @@ try {
     });
     let apiStatus = 429;
     let apiRequests = 0;
+    let scanningStatus = 401;
+    let scanningRequests = 0;
+    const findings = [{
+      number: 12, state: 'open', tool: { name: 'CodeQL' },
+      rule: { id: 'js/example', security_severity_level: 'high' },
+      most_recent_instance: { location: { path: '-unsafe.ts', start_line: 5 }, message: { text: '=FORMULA(1)' } },
+    }];
     await page.route('https://api.github.com/**', route => {
+      if (route.request().url().includes('/code-scanning/alerts')) {
+        scanningRequests++;
+        assert.equal(route.request().headers().authorization, 'Bearer test-read-only-token');
+        return route.fulfill(scanningStatus === 200 ? { status: 200, json: findings } : { status: scanningStatus, json: { message: 'invalid' } });
+      }
       apiRequests++;
-      return route.fulfill({ status: apiStatus, json: { message: `API fixture (${apiStatus})` } });
+      return route.fulfill({ status: apiStatus, json: { message: 'API fixture (' + apiStatus + ')' } });
     });
     const home = await page.goto(base);
     assert.equal(home.status(), 200);
@@ -152,6 +164,38 @@ try {
         assert.ok(apiRequests > requestsBeforeRetry, 'CI retry must make another API request');
         assert.ok(await page.locator('#copy-diagnostics').isDisabled());
         apiStatus = 429;
+      } else if (destination === 'security/') {
+        assert.equal(scanningRequests, 0, 'Security page must not request protected alerts before authorization');
+        const token = page.locator('#access-token');
+        await token.fill('test-read-only-token');
+        await page.getByRole('button', { name: 'アラートを取得' }).press('Enter');
+        await page.locator('#status').filter({ hasText: /HTTP 401/u }).waitFor();
+        assert.ok(await page.locator('#download-json').isDisabled(), 'Failed request must not enable download');
+        assert.equal(await token.inputValue(), '', 'Credential must be cleared after request');
+        scanningStatus = 200;
+        await token.fill('test-read-only-token');
+        await page.getByRole('button', { name: 'アラートを取得' }).press('Enter');
+        await page.locator('#status').filter({ hasText: /取得に成功/u }).waitFor();
+        assert.equal(await page.locator('#alerts tr').count(), 1);
+        const [jsonDownload] = await Promise.all([
+          page.waitForEvent('download'), page.locator('#download-json').click(),
+        ]);
+        const report = JSON.parse(await readFile(await jsonDownload.path(), 'utf8'));
+        assert.equal(report.schemaVersion, 'codexia-code-scanning-alerts/v1');
+        assert.equal(report.alertCount, 1);
+        assert.equal(report.alerts[0].number, 12);
+        const [csvDownload] = await Promise.all([
+          page.waitForEvent('download'), page.locator('#download-csv').click(),
+        ]);
+        const csv = await readFile(await csvDownload.path(), 'utf8');
+        assert.ok(csv.includes('"' + String.fromCharCode(39) + '=FORMULA(1)'));
+        assert.ok(csv.includes('"' + String.fromCharCode(39) + '-unsafe.ts'));
+        assert.ok(!csv.includes('test-read-only-token'));
+        await capture('security-export');
+        await page.reload();
+        assert.equal(await page.locator('#access-token').inputValue(), '');
+        assert.ok(await page.locator('#download-json').isDisabled(), 'Reload must discard in-memory findings');
+        scanningStatus = 401;
       } else if (destination === 'audit/') {
         await capture('audit');
       }
