@@ -8,6 +8,17 @@ An independent `restore-drill` stage decrypts a **v2** artifact on an isolated r
 
 Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
 
-The deployment backup is a pre-rollout recovery point for the database and history resources; it does not roll back a schema migration, PostgreSQL role, or Podman secret. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. Those changes remain unsupported until an independently reviewed operation defines its approval, encrypted pre-change backup, migration verification, and tested restore procedure. The isolated restore drill does not satisfy that migration procedure by itself.
+The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.
+
+## Rehearse a reviewed Full candidate
+
+Load the locally reviewed, publication-certified Full backend image by its immutable `ghcr.io/yohn-jp/codexia-backend@sha256:<digest>` reference on the isolated recovery host. Set `codexia_restore_candidate_full_image` to that reference in the approved `restore-drill` inputs. The standalone equivalent on that host is:
+
+```sh
+bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
+  --candidate-full-image "$certified_full_image"
+```
+
+After the restored PostgreSQL and history fingerprints match the backup, the candidate runs its packaged maintenance `--check`, `--apply`, and `--check` against the scratch database. It uses a dedicated read-only role for checks and a separate writer for apply. The image uses only the scratch database's loopback network namespace. Preserve the successful drill output with the exact digest and checksum-manifest SHA-256. The regular backup receipt still records the restored ciphertext identity. Paired activation and production recovery require their own approved procedure.
 
 [Push deployment procedure](PUSH-DEPLOYMENT.md)
