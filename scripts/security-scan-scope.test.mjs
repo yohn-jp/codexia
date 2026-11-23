@@ -60,7 +60,7 @@ test('Gitleaks PR scope includes renamed and prior committed secret additions; m
     assert.match(git('log', '-p', `${base}..${head}`), /synthetic-scope-marker/u);
     const main = invoke('push', '', '');
     assert.equal(main.result.status, 0, main.result.stderr);
-    assert.equal(main.line, 'log_opts=--all');
+    assert.equal(main.line, 'log_opts=HEAD');
     assert.notEqual(invoke('pull_request', base, 'badsha').result.status, 0);
     assert.notEqual(invoke('pull_request', 'f'.repeat(40), head).result.status, 0);
     assert.notEqual(invoke('pull_request', base, base).result.status, 0);
