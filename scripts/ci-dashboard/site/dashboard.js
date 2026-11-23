@@ -1,4 +1,4 @@
-import { collect } from './collection.mjs';
+import { collectInventoryPage, collectRevision, selectRuns, identity } from './collection.mjs';
 import { comparableHistory } from './analysis.mjs';
 import { buildDiagnosticExport } from './diagnostics.mjs';
 
@@ -57,6 +57,11 @@ function quantile(numbers, p) {
   return sorted[Math.ceil(p * sorted.length) - 1];
 }
 let all = [], selected = null, coverage = {}, verifySource = '';
+let inventoryRuns = [], groups = [], inventoryPage = 0, hasMore = true, reportedTotal = null;
+let observed = new Map(), selectionVersion = 0;
+const revisionKey = item => item.number + ':' + item.sha;
+const groupSignature = group => group.runs.map(run => run.id + '/' + run.run_attempt).join(',');
+
 
 async function request(endpoint) {
   const response = await fetch(API + endpoint, {
@@ -272,17 +277,18 @@ function requestedSelection(items) {
   const pr = Number(url.searchParams.get('pr'));
   const sha = url.searchParams.get('sha');
   const index = items.findIndex(item => item.number === pr && item.sha === sha);
-  return index >= 0 ? index : 0;
+  return index;
 }
 function renderHistory(pr) {
   const target = el('history'); clear(target);
-  const sample = comparableHistory(all);
+  const measured = all.filter(item => item.runs.length > 0);
+  const sample = comparableHistory(measured);
   el('history-stat').textContent = '比較可能な初回完了 ' + sample.length + '件 / p50 ' +
     duration(quantile(sample.map(item => item.elapsedSeconds), .5)) +
     ' / p90 ' + duration(quantile(sample.map(item => item.elapsedSeconds), .9));
-  const values = all.map(item => item.elapsedSeconds).filter(x => x !== null);
+  const values = measured.map(item => item.elapsedSeconds).filter(x => x !== null);
   const max = Math.max(1, ...values);
-  for (const item of all) {
+  for (const item of measured) {
     const button = node('button', 'history-button' + (item === pr ? ' selected' : ''));
     button.type = 'button';
     const status = item.sampleTruncated ? '切り詰められた観測。比較対象外'
@@ -302,13 +308,7 @@ function renderHistory(pr) {
     fill.style.width = item.elapsedSeconds === null ? '0%' : Math.max(1, item.elapsedSeconds / max * 100) + '%';
     track.append(fill);
     button.append(track, node('span', 'history-number', duration(item.elapsedSeconds)));
-    button.addEventListener('click', () => {
-      selected = item;
-      el('pr').value = String(all.indexOf(item));
-      el('copy-status').textContent = '';
-      updateSelectionUrl(item);
-      render();
-    });
+    button.addEventListener('click', () => { void chooseRevision(item); });
     target.append(button);
   }
 }
@@ -350,16 +350,146 @@ async function copyDiagnostics() {
   }
 }
 
+function updateCoverage() {
+  const unresolvedRunCount = inventoryRuns.filter(run => identity(run) === null).length;
+  coverage = {
+    scannedRuns: inventoryRuns.length,
+    selectedRuns: [...observed.values()].reduce((sum, item) => sum + item.summary.runs.length, 0),
+    selectedPRs: all.length,
+    scannedPages: inventoryPage,
+    unresolvedRunCount,
+    historyTruncated: hasMore || (reportedTotal !== null && inventoryRuns.length < reportedTotal) ||
+      unresolvedRunCount > 0,
+    note: 'Public pull_request run inventory. Pages are loaded on demand; only selected PR revisions have job/step observations. Unmapped runs and unavailable GitHub history are not represented as complete.',
+    observedAt: new Date().toISOString(),
+  };
+}
+function inventoryStatus() {
+  updateCoverage();
+  const incomplete = hasMore || (reportedTotal !== null && inventoryRuns.length < reportedTotal);
+  const suffix = incomplete ? ' · 履歴は未取得分があります。全件読み込みを選択してください。'
+    : ' · GitHub APIが返した履歴の読み込みが完了しました。';
+  setStatus('Collected ' + formatTime(coverage.observedAt) + ' · ' + inventoryRuns.length +
+    (reportedTotal === null ? '' : ' / ' + reportedTotal) + ' workflow runs · ' + all.length +
+    ' PR revisions · PR対応不明 ' + coverage.unresolvedRunCount + ' runs' + suffix +
+    ' Required Checks全体の証明ではありません。', incomplete ? 'info' : 'success');
+  el('load-all').hidden = !hasMore;
+}
+function refreshInventory() {
+  const previous = selected ? revisionKey(selected) : null;
+  groups = selectRuns(inventoryRuns);
+  all = groups.map(group => {
+    const saved = observed.get(revisionKey(group));
+    if (saved && saved.signature === groupSignature(group)) return saved.summary;
+    return {
+      number: group.number, sha: group.sha, createdAt: group.runs[0]?.created_at ?? null,
+      complete: false, sampleTruncated: false, elapsedSeconds: null,
+      runnerSeconds: null, verifyId: null, runs: [],
+    };
+  });
+  const select = el('pr');
+  clear(select);
+  for (const [index, group] of groups.entries()) {
+    const label = '#' + group.number + ' / ' + group.sha.slice(0, 9) +
+      (group.runs.some(run => run.name === 'Verify Codexia') ? '' : ' · NO VERIFY');
+    const option = node('option', '', label);
+    option.value = String(index);
+    select.append(option);
+  }
+  select.disabled = !all.length;
+  const index = previous ? all.findIndex(item => revisionKey(item) === previous) : requestedSelection(all);
+  selected = all[index < 0 ? 0 : index] ?? null;
+  if (selected) {
+    select.value = String(all.indexOf(selected));
+    if (selected.runs.length) {
+      el('copy-diagnostics').disabled = false;
+      render();
+    } else {
+      el('copy-diagnostics').disabled = true;
+      resetPanels('選択したPRのジョブ詳細はまだ取得していません。');
+    }
+  } else resetPanels('取得した範囲に対応付けられたPRがありません。');
+  inventoryStatus();
+}
+async function appendInventoryPage() {
+  const result = await collectInventoryPage(request, inventoryPage + 1);
+  const seen = new Set(inventoryRuns.map(run => run.id));
+  for (const run of result.runs) {
+    if (!seen.has(run.id)) { inventoryRuns.push(run); seen.add(run.id); }
+  }
+  inventoryPage++;
+  hasMore = result.hasMore;
+  if (result.reportedTotal !== null) reportedTotal = result.reportedTotal;
+  refreshInventory();
+}
+async function chooseRevision(item) {
+  if (!item) return;
+  const version = ++selectionVersion;
+  const key = revisionKey(item);
+  const group = groups.find(group => revisionKey(group) === key);
+  if (!group) return;
+  selected = all.find(candidate => revisionKey(candidate) === key) ?? item;
+  el('pr').value = String(all.indexOf(selected));
+  el('copy-status').textContent = '';
+  updateSelectionUrl(selected);
+  const cached = observed.get(key);
+  if (cached?.signature === groupSignature(group)) {
+    selected = cached.summary;
+    el('copy-diagnostics').disabled = false;
+    render();
+    inventoryStatus();
+    return;
+  }
+  el('copy-diagnostics').disabled = true;
+  resetPanels('PR #' + item.number + ' のジョブ詳細を取得しています。');
+  setStatus('PR #' + item.number + ' / ' + item.sha.slice(0, 9) + ' のジョブ詳細を取得しています。', 'loading');
+  try {
+    const summary = await collectRevision(request, verifySource, group);
+    if (version !== selectionVersion) return;
+    observed.set(key, { signature: groupSignature(group), summary });
+    all = all.map(candidate => revisionKey(candidate) === key ? summary : candidate);
+    selected = summary;
+    el('copy-diagnostics').disabled = false;
+    el('retry').hidden = true;
+    render();
+    inventoryStatus();
+  } catch (error) {
+    if (version !== selectionVersion) return;
+    const detail = error instanceof Error ? error.message : String(error);
+    resetPanels('ジョブ詳細の取得に失敗しました。');
+    setStatus('PR #' + item.number + ' のジョブ詳細を取得できませんでした。' + detail, 'error');
+    el('retry').hidden = false;
+  }
+}
+async function loadAllInventory() {
+  const button = el('load-all');
+  button.disabled = true;
+  try {
+    while (hasMore) {
+      await appendInventoryPage();
+      // Keep the current selection available without downloading every revision's jobs.
+    }
+    if (selected && !selected.runs.length) await chooseRevision(selected);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    setStatus('履歴の追加取得が中断されました。' + inventoryRuns.length +
+      ' runまでは表示可能です。' + detail, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
 async function loadDashboard() {
   const retry = el('retry');
   const select = el('pr');
-  const copyButton = el('copy-diagnostics');
   retry.disabled = true;
   retry.hidden = true;
-  copyButton.disabled = true;
+  el('load-all').hidden = true;
+  el('copy-diagnostics').disabled = true;
   select.disabled = true;
   setStatus('実測データを読み込んでいます。', 'loading');
-  all = []; selected = null;
+  ++selectionVersion;
+  inventoryRuns = []; groups = []; all = []; selected = null;
+  inventoryPage = 0; hasMore = true; reportedTotal = null; observed = new Map();
   resetPanels('データを読み込んでいます。');
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
@@ -368,35 +498,24 @@ async function loadDashboard() {
     });
     if (!workflowResponse.ok) throw new Error('Verify workflow source unavailable (HTTP ' + workflowResponse.status + ')');
     verifySource = await workflowResponse.text();
-    const result = await collect(request, verifySource);
-    if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
-    all = result.prs;
-    coverage = { ...result.coverage, observedAt: result.observedAt };
-    clear(select);
-    for (const [index, pr] of all.entries()) {
-      const option = node('option', '', '#' + pr.number + ' / ' + pr.sha.slice(0, 9));
-      option.value = String(index); select.append(option);
+    await appendInventoryPage();
+    const url = new URL(window.location.href);
+    const requestedPR = Number(url.searchParams.get('pr'));
+    const requestedSHA = url.searchParams.get('sha');
+    if (requestedPR > 0 && /^[a-f0-9]{40}$/iu.test(requestedSHA ?? '')) {
+      while (hasMore && !groups.some(group =>
+        group.number === requestedPR && group.sha === requestedSHA.toLowerCase())) {
+        await appendInventoryPage();
+      }
     }
-    select.disabled = !all.length;
     if (!all.length) {
-      resetPanels('この観測範囲にPRデータがありません。');
-      setStatus((coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
-        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.', 'empty');
+      resetPanels('取得した範囲に対応付けられたPRがありません。');
+      setStatus('Bounded recent pull_request workflow sample: 対応するPRがありません。' +
+        ' Unresolved runs: ' + coverage.unresolvedRunCount + '.', 'empty');
       return;
     }
-    const index = requestedSelection(all);
-    selected = all[index];
-    copyButton.disabled = false;
-    select.disabled = false;
-    select.value = String(index);
-    updateSelectionUrl(selected);
-    setStatus('Collected ' + formatTime(result.observedAt) + ' · ' +
-      (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
-      (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
-      ((coverage.unresolvedRunCount ?? 0) > 0
-        ? ' · ' + coverage.unresolvedRunCount + ' runs excluded: PR/source mapping unresolved' : '') +
-      ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。', 'success');
-    render();
+    const match = requestedSelection(all);
+    await chooseRevision(all[match >= 0 ? match : 0]);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const guidance = /HTTP 429/u.test(detail)
@@ -404,7 +523,7 @@ async function loadDashboard() {
       : /HTTP 403/u.test(detail)
         ? 'GitHub APIへのアクセスが拒否されました。公開リポジトリの状態を確認して再試行してください。'
         : 'データを取得できませんでした。接続状態を確認して再試行してください。';
-    resetPanels(guidance);
+    if (!inventoryRuns.length) resetPanels(guidance);
     setStatus('CIデータを読み込めませんでした。' + guidance + ' (' + detail + ')', 'error');
     retry.hidden = false;
   } finally {
@@ -412,11 +531,12 @@ async function loadDashboard() {
   }
 }
 el('copy-diagnostics').addEventListener('click', copyDiagnostics);
-el('retry').addEventListener('click', loadDashboard);
+el('retry').addEventListener('click', () => {
+  if (selected && inventoryRuns.length) void chooseRevision(selected);
+  else void loadDashboard();
+});
+el('load-all').addEventListener('click', () => { void loadAllInventory(); });
 el('pr').addEventListener('change', () => {
-  selected = all[Number(el('pr').value)];
-  el('copy-status').textContent = '';
-  updateSelectionUrl(selected);
-  render();
+  void chooseRevision(all[Number(el('pr').value)]);
 });
 loadDashboard();
