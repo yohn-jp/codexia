@@ -1101,9 +1101,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }
       if (captured.dirty) {
         publishEditor({ ...latest, recovery: "stored", error: "" });
-        if (!latest.remoteConflict && !sessionBlockedRef.current) {
-          window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
-        }
         return "protected";
       }
 
@@ -1230,7 +1227,19 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     } else if (active.recovery === "pending") {
       saveMachineActor.send({ type: "DRAFT.CHANGED", identity, generation: active.generation, dirty: active.dirty });
     }
-  }, [active?.document.id, active?.document.projectId, active?.generation, active?.dirty, active?.recovery, journal, saveMachineActor]);
+    if (!active.dirty || active.recovery !== "stored" || active.remoteConflict || sessionBlocked) return;
+    const generation = active.generation;
+    const markdown = active.markdown;
+    const timer = window.setTimeout(() => {
+      const latest = activeRef.current;
+      if (!latest || latest.document.projectId !== identity.projectId || latest.document.id !== identity.documentId ||
+          latest.generation !== generation || latest.markdown !== markdown || !latest.dirty || latest.recovery !== "stored" ||
+          latest.remoteConflict || sessionBlockedRef.current) return;
+      void saveDocumentRef.current();
+    }, 900);
+    // Replacing the generation or manuscript cancels its prior autosave deadline.
+    return () => window.clearTimeout(timer);
+  }, [active?.document.id, active?.document.projectId, active?.generation, active?.markdown, active?.dirty, active?.recovery, active?.remoteConflict, journal, saveMachineActor, sessionBlocked]);
 
   const executeSaveOperation = useCallback(async (input: Parameters<PersistenceSaveMachineServices["saveOperation"]>[0], actorSignal: AbortSignal) => {
     const currentJournal = journalRef.current;
@@ -1818,9 +1827,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         generation: imported.generation,
         dirty: imported.dirty,
       });
-      if (imported.dirty && !imported.remoteConflict && !sessionBlockedRef.current) {
-        window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
-      }
       setNotice(imported.dirty ? "旧DraftをIndexedDB回復Journalへ取り込みました。PostgreSQLへ保存します。" : "旧DraftとPostgreSQLの原稿は同じ内容でした。");
     } finally {
       setLegacyImportBusy(false);
