@@ -69,23 +69,41 @@ function makeRoutes(site, sourceSha, origin, audit) {
 function renderPortal(manifest,audit) {
   const snapshotSet=new Set(manifest.routes.filter(x=>x.route.startsWith('/snapshots/')).map(x=>x.sourceSha));
   const reviewSet=new Set(manifest.routes.filter(x=>x.route.startsWith('/reviews/')).map(x=>x.sourceSha));
-  const cards = manifest.routes.filter(x => x.route !== '/' && !x.route.startsWith('/snapshots/') && !x.route.startsWith('/reviews/')).map(item => {
+  const statusBadge=status=>`<span class="cx-pages-badge" data-state="${['ready','partial','blocked','no-diff'].includes(status)?status:'unavailable'}">${esc(status)}</span>`;
+  const labels={
+    'build-snapshot':'Build snapshot',
+    'browser-live':'Live public data',
+    'branch-head-snapshot':'Branch snapshots',
+    'see-manifest':'Coverage in manifest',
+    'see-graph-data':'Coverage in graph data',
+    'live-public-actions-api':'Public Actions API',
+    'branch-head-snapshots':'Observed branch heads',
+  };
+  const label=value=>esc(labels[value]??value);
+  const cards = manifest.routes.filter(x => ['/architecture/','/graph/','/ci/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
-    const detail=item.route==='/audit/'?`<details open><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><ul>${(audit.branches??[]).map(branch=>{
+    const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
       const sha=branch.sha,snapshot=audit.snapshots?.[sha],review=audit.reviews?.[sha];
       const snapLink=snapshotSet.has(sha)?`<a href="snapshots/${sha}/">Snapshot details · ${esc(sha)}</a> · <a href="snapshots/${sha}/repomix.json" download="codexia-${sha}-repomix.json">Download Snapshot JSON</a>`:`Snapshot ${esc(snapshot?.status??'unavailable')} · ${esc(sha)}`;
-      const reviewText=reviewSet.has(sha)?`<a href="reviews/${sha}/index.html">Review ${esc(review.status)}</a>`:`Review ${esc(review?.status??'unavailable')}`;
-      return `<li id="portal-sha-${esc(sha)}"><strong>${esc(branch.branch)}</strong> · ${snapLink} · ${reviewText}</li>`;
-    }).join('')}</ul><p><a href="manifest.json">Open audit branch manifest</a> · <a href="audit/">Open full Source Audit</a></p></details>`:'';
-    return `<article><h2>${esc(item.label)}</h2><p>${esc(item.description)}</p><p><strong>${available?'Available':'Unavailable'}</strong> · ${esc(item.dataKind)} · ${esc(item.coverageStatus)}${item.observedAt?' · Observed '+esc(item.observedAt):''}</p><a href="${esc(target)}">Open ${esc(item.label)}</a>${item.externalDocumentationUrl?` · <a href="${esc(item.externalDocumentationUrl)}">GitHub source</a>`:''}${detail}</article>`;
+      const reviewStatus=review?.status??'unavailable';
+      const reviewText=reviewSet.has(sha)?`<a href="reviews/${sha}/index.html">Review ${esc(review.status)}</a>`:statusBadge(reviewStatus);
+      return `<li id="portal-sha-${esc(sha)}"><div class="cx-pages-branch-main"><strong>${esc(branch.branch)}</strong>${statusBadge(snapshot?.status??'unavailable')}</div><p>${snapLink}</p><p>Review materials · ${reviewText}</p></li>`;
+    }).join('')}</ul><p><a class="cx-pages-action" href="manifest.json">Open audit branch manifest</a> <a class="cx-pages-action" href="audit/">Open full Source Audit</a></p></div></details>`:'';
+    const community=item.route==='/graph/'?`<p><a href="graph/communities.html">Community overview</a></p>`:'';
+    return `<article class="cx-pages-card"><div class="cx-pages-card-heading"><h2>${esc(item.label)}</h2>${statusBadge(available?'ready':'unavailable')}</div><p class="cx-pages-card-description">${esc(item.description)}</p><p class="cx-pages-card-meta">${label(item.dataKind)} · ${label(item.coverageStatus)}</p><div class="cx-pages-card-actions"><a class="cx-pages-action cx-pages-action--primary" href="${esc(target)}">Open ${esc(item.label)}</a></div>${community}${detail}</article>`;
   }).join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title><style>body{font:16px system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#24292f;line-height:1.55}header{border-bottom:1px solid #d0d7de;padding-bottom:1rem}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:1rem;margin:1.5rem 0}article{border:1px solid #d0d7de;border-radius:10px;padding:1rem}h1,h2{line-height:1.2}code,a,li{overflow-wrap:anywhere}a{color:#0969da}footer{border-top:1px solid #d0d7de;padding-top:1rem}small{color:#57606a}summary{cursor:pointer;margin-top:1rem}</style></head><body><header><h1>Codexia Development Portal</h1><p>Explore canonical design documents, static code structure, public CI observations, and branch source snapshots.</p><p>Pages build source SHA: <code>${manifest.sourceSha}</code></p></header><main>${cards}</main><footer><h2>Project links</h2><p><a href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a> · <a href="https://github.com/yohn-jp/codexia">Repository</a> · <a href="https://github.com/yohn-jp/codexia/actions">Actions</a></p><small>Architecture and code maps are build snapshots; CI reads public Actions data in the browser; Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></body></html>\n`;
+  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, code relationships, CI activity, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
+  return overview;
 }
 
 function renderSnapshotLanding(sha, snapshot, branchLabels) {
-  const links=(snapshot.outputs??[]).map(item=>`<li><a href="${esc(item.name)}" download="codexia-${sha}-${esc(item.name)}">Download ${esc(item.name)}</a> · ${item.bytes} bytes · SHA-256 <code>${esc(item.sha256)}</code>${item.scope?` · ${esc(item.scope)}`:''}</li>`).join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Source Snapshot ${sha}</title><style>body{font:16px system-ui,sans-serif;line-height:1.5}code,a{overflow-wrap:anywhere}</style></head><body><main><h1>Source Snapshot</h1><p>Source SHA: <code>${sha}</code></p><p>Observed for: ${branchLabels.map(esc).join(', ')||'branch HEAD'}</p><p>Status: ${esc(snapshot.status)} · ${snapshot.fileCount} files · ${snapshot.excludedCount} excluded</p><p><a href="../../audit/#sha-${sha}">Return to this exact SHA in Source Audit</a></p><h2>Snapshot files</h2><ul><li><a href="manifest.json" download="codexia-${sha}-manifest.json">Download snapshot manifest</a></li>${links}</ul></main></body></html>\n`;
+  const parts=(snapshot.outputs??[]).filter(item=>item.name.startsWith('part-'));
+  const full=(snapshot.outputs??[]).find(item=>item.name==='repomix.json');
+  assert.ok(full,'Snapshot full export is missing');
+  const status=['ready','partial'].includes(snapshot.status)?snapshot.status:'unavailable';
+  const partLinks=parts.map(item=>`<li><div class="cx-pages-file-entry"><a class="cx-pages-action" href="${esc(item.name)}" download="codexia-${sha}-${esc(item.name)}">Download ${esc(item.name)}</a><span>${item.bytes} bytes${item.scope?` · ${esc(item.scope)}`:''}</span></div><span class="cx-pages-output-detail">SHA-256 <code class="cx-pages-code">${esc(item.sha256)}</code></span></li>`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Source Snapshot ${sha}</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Source Snapshot</h1><p class="cx-pages-lede">A source export from an observed branch head.</p><div class="cx-pages-meta"><span class="cx-pages-meta-label">Source SHA</span><code class="cx-pages-code">${sha}</code><span class="cx-pages-meta-label">Observed for</span><span>${branchLabels.map(esc).join(', ')||'branch HEAD'}</span><span class="cx-pages-badge" data-state="${status}">${esc(snapshot.status)}</span><span>${snapshot.fileCount} files included · ${snapshot.excludedCount} excluded</span></div><div class="cx-pages-actions"><a class="cx-pages-action cx-pages-action--primary" href="repomix.json" download="codexia-${sha}-repomix.json">Download full JSON</a><a class="cx-pages-action" href="manifest.json" download="codexia-${sha}-manifest.json">Download manifest</a><a class="cx-pages-action" href="repomix.json">View JSON</a><a class="cx-pages-action" href="../../audit/#sha-${sha}">Return to this exact SHA in Source Audit</a></div><p class="cx-pages-footnote">The manifest records file coverage, exclusions, and SHA-256 digests for each published output.</p></header><section><h2>Snapshot files</h2>${parts.length?`<details class="cx-pages-disclosure"><summary>Download snapshot parts (${parts.length})</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-output-list">${partLinks}</ul></div></details>`:'<p class="cx-pages-footnote">No split snapshot parts are available.</p>'}</section></main></body></html>\n`;
 }
 
 function generateSnapshotPages(site,audit) {
@@ -105,8 +123,8 @@ function generateSnapshotPages(site,audit) {
 
 function renderUnavailable(item,sourceSha) {
   const local=item.route==='/graph/communities.html'?'../':item.route.split('/').filter(Boolean).length>2?'../../':'../';
-  const fallback=item.externalDocumentationUrl?`<p><a href="${esc(item.externalDocumentationUrl)}">Open the related GitHub source</a></p>`:'';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(item.label)} unavailable</title></head><body><main><h1>${esc(item.label)} unavailable</h1><p>This page was not generated for Pages build source SHA <code>${sourceSha}</code>.</p><p><a href="${local}">Return to the Development Portal</a></p>${fallback}</main></body></html>\n`;
+  const fallback=item.externalDocumentationUrl?`<a class="cx-pages-action" href="${esc(item.externalDocumentationUrl)}">Open the related GitHub source</a>`:'';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(item.label)} unavailable</title></head><body><main class="cx-pages-container cx-pages-main"><section class="cx-pages-empty"><h1>${esc(item.label)} unavailable</h1><p>This page was not generated for Pages build source SHA <code class="cx-pages-code">${esc(sourceSha)}</code>.</p><p>Return to the portal to open another project route.</p><div class="cx-pages-actions"><a class="cx-pages-action cx-pages-action--primary" href="${local}">Return to the Development Portal</a>${fallback}</div></section></main></body></html>\n`;
 }
 
 function inventory(site) {

@@ -6,137 +6,237 @@
 <meta name="color-scheme" content="dark">
 <title>Codexia — Code Map · Graphify File Explorer</title>
 <style>
-  :root { color-scheme:dark; --bg:#0b1020; --panel:#121b2c; --panel2:#19263a; --line:#34445a; --fg:#edf2fa; --muted:#a9b7ca; --accent:#9bc4ff; --in:#75d3bb; --out:#ffc47e; --warn:#f2c879; --danger:#ff9d9d; }
-  * { box-sizing:border-box; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif; }
-  a { color:var(--accent); text-decoration-thickness:1px; text-underline-offset:3px; }
-  a:hover { color:#c9ddff; }
-  button,input,select { font:inherit; }
-  button,input,select { color:inherit; }
-  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,svg [role="button"]:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
-  ::selection { background:#365985;color:#fff; }
-  :where(input,select,button) { accent-color:var(--accent); }
-  .skip { position:absolute;left:12px;top:-100px;z-index:5;background:#fff;color:#111;padding:8px 12px;border-radius:6px; }
-  .skip:focus { top:12px; } .skip:hover { color:#111; }
-  .top { padding:21px clamp(16px,3vw,40px) 17px; border-bottom:1px solid var(--line); }
-  .top-row { display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap; }
-  h1 { font-size:22px;letter-spacing:-.025em;margin:0; } h2 { font-size:18px;margin:0 0 8px; } h3 { font-size:14px;margin:0 0 8px; }
-  .top p { margin:5px 0 0;color:var(--muted); }
-  .view-nav { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
-  .view-nav a { display:inline-block;padding:7px 12px;border:1px solid var(--line);border-radius:8px; }
-  .view-nav a[aria-current="page"] { color:#fff;background:#253a56;border-color:#587ca7; }
-  .stats { display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:16px; }
-  .stat { min-width:100px; } .stat strong { display:block;font-size:18px;font-variant-numeric:tabular-nums; } .stat span { font-size:12px;color:var(--muted); }
-  .warning { font-size:12px;color:#d5c18e;padding:9px 16px;border-bottom:1px solid var(--line);background:#171a25; }
-  .layout { display:grid;grid-template-columns:minmax(270px,330px) minmax(0,1fr);min-height:calc(100dvh - 200px); }
-  aside { border-right:1px solid var(--line);padding:16px;min-width:0;background:#0e1625; }
-  label { display:block;color:var(--muted);font-size:12px;margin-bottom:6px; }
-  input[type="search"],select { width:100%;background:var(--panel);border:1px solid var(--line);padding:9px 11px;border-radius:7px; }
-  .filters { display:grid;gap:11px; }
-  .check { display:flex;gap:8px;align-items:center;color:var(--fg);font-size:12px; }
-  .file-count { color:var(--muted);font-size:12px;margin:13px 0 7px; }
-  .file-list { display:grid;gap:3px;max-height:calc(100dvh - 330px);min-height:200px;overflow:auto;overscroll-behavior:contain; }
-  .file-button { text-align:left;background:transparent;border:1px solid transparent;border-radius:7px;padding:8px 9px;cursor:pointer;min-width:0;min-height:52px; }
-  .file-button:hover { background:var(--panel); } .file-button[aria-current="true"] { background:#1e344f;border-color:#527aa6; }
-  .file-button strong { display:block;font-size:12px;overflow-wrap:anywhere;font-weight:600; }
-  .file-button small { display:block;color:var(--muted);margin-top:2px; }
-  main { padding:22px clamp(14px,2.5vw,32px);min-width:0; }
-  #main-content { scroll-margin-top:12px; }
-  .head { display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap; }
-  .head h2 { overflow-wrap:anywhere;font-size:19px;max-width:70ch; }
-  .source-links a[hidden] { display:none; }
-  .source-links a { display:inline-block;border:1px solid var(--line);padding:7px 10px;border-radius:7px; }
-  .pills { display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 14px; }
-  .pill { border:1px solid var(--line);border-radius:7px;padding:3px 9px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums; }
-  .coverage { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0 16px; }
-  .coverage div { background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0; }
-  .coverage strong { display:block;font-variant-numeric:tabular-nums; }
-  .coverage span { color:var(--muted);font-size:11px; }
-  .coverage details { grid-column:1/-1;margin:0; }
-  .coverage details div { margin-top:6px; }
-  .filter-bar { display:grid;grid-template-columns:1fr 1fr minmax(100px,.6fr);gap:10px;align-items:end;margin:15px 0 12px; }
-  .filter-bar label { margin:0; }
-  .canvas-wrap { background:#10192a;border:1px solid var(--line);border-radius:10px;overflow:auto; }
-  .canvas-head { display:flex;gap:14px;flex-wrap:wrap;padding:9px 13px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line); }
-  .legend-in { color:var(--in); } .legend-out { color:var(--out); }
-  svg { display:block;width:100%;min-width:600px;min-height:220px; }
-  .edge { stroke-width:2;fill:none;opacity:.8; } .edge.in { stroke:var(--in); } .edge.out { stroke:var(--out); }
-  .node rect { fill:#20334c;stroke:#657e9c;stroke-width:1.5;rx:7; }
-  .node text { fill:var(--fg);font:12px system-ui,sans-serif;pointer-events:none; }
-  .node.center rect { fill:#31537b;stroke:#aacfff; } .node.in rect { stroke:var(--in); }.node.out rect { stroke:var(--out); }
-  .node.linked { cursor:pointer; }.node.linked:hover rect,.node.linked:focus rect { stroke-width:3; }
-  .columns { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0; }
-  section.card { background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px;min-width:0; }
-  .relations { display:grid;gap:5px;max-height:340px;overflow:auto; }
-  .relation { display:flex;width:100%;text-align:left;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);background:var(--panel2);border-radius:6px;cursor:pointer;min-height:40px; }
-  .relation:hover { border-color:var(--accent); } .relation span { overflow-wrap:anywhere;font-size:12px; } .relation small { color:var(--muted);text-align:right;max-width:50%;overflow-wrap:anywhere;font-size:10px; }
-  .empty { color:var(--muted);font-size:12px;margin:8px 0; }
-  .status { color:var(--muted);font-size:12px;margin:8px 0;min-height:1.5em; }
-  .status[data-kind="warning"] { color:var(--warn); }
-  .status[data-kind="error"] { color:var(--danger); }
-  .expansion { margin:14px 0; }
-  .expansion-head { display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap; }
-  .expansion-list { display:grid;gap:5px;margin:9px 0 0;padding:0;list-style:none; }
-  .expansion-list li { display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#111b2b;min-width:0;overflow-wrap:anywhere; }
-  .relation-row,.relation-evidence,.relation-evidence a,.evidence { min-width:0;overflow-wrap:anywhere;word-break:break-word; }
-  .expansion-list code { color:var(--muted);font:11px/1.4 ui-monospace,monospace; }
-  .expansion-list button { justify-self:start;background:transparent;border:0;color:var(--accent);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere;text-align:left;cursor:pointer;padding:3px; }
-  .expansion-list small { color:var(--muted);font-size:11px;text-align:right; }
-  details { margin-top:14px; } details summary { cursor:pointer;color:var(--accent); } .symbol-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:8px 0 0;list-style:none; }
-  .symbol-button { width:100%;display:flex;align-items:start;justify-content:space-between;gap:8px;text-align:left;overflow-wrap:anywhere;padding:8px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);cursor:pointer; }
-  .symbol-button:hover { border-color:var(--accent); } .symbol-button[aria-current="true"] { background:#253a56;border-color:#6d94bd; }
-  .symbol-button small { flex:0 0 auto;color:var(--muted);font-size:10px; }
-  .source-meta { color:var(--muted);font-size:11px;margin-top:14px;overflow-wrap:anywhere; }
-  .unavailable { color:var(--muted); }
-  @media (max-width:850px) { .layout { grid-template-columns:1fr; }aside { border-right:0;border-bottom:1px solid var(--line); }.file-list { max-height:250px;min-height:100px; } }
-  @media (max-width:560px) { .coverage { grid-template-columns:repeat(2,minmax(0,1fr)); }.symbol-list { grid-template-columns:1fr; }.filter-bar { grid-template-columns:1fr 1fr; }.filter-bar > div:last-child { grid-column:1/-1;max-width:160px; }main { padding-top:16px; }.columns { grid-template-columns:1fr; }.view-nav a { padding:6px 9px; } }
-  @media (max-width:360px) { .top { padding-left:12px;padding-right:12px; } main { padding-left:12px;padding-right:12px; } aside { padding:12px; }.stats { gap:7px 14px; }.stat { min-width:80px; }.expansion-list li { grid-template-columns:34px minmax(0,1fr); }.expansion-list small { grid-column:2;text-align:left; } }
-  @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important;transition-duration:.01ms!important; } }
+  :root {
+    color-scheme: dark;
+    --bg: var(--cx-pages-bg, #0b1020);
+    --panel: var(--cx-pages-surface, #121b2c);
+    --panel-raised: var(--cx-pages-surface-raised, #19263a);
+    --line: var(--cx-pages-boundary, #34445a);
+    --fg: var(--cx-pages-text, #edf2fa);
+    --muted: var(--cx-pages-secondary, #a9b7ca);
+    --accent: var(--cx-pages-accent, #9bc4ff);
+    --accent-strong: var(--cx-pages-accent-strong, #c9ddff);
+    --focus: var(--cx-pages-focus, #9bc4ff);
+    --selected: color-mix(in srgb, var(--cx-pages-selected, #9bc4ff) 14%, var(--panel-raised));
+    --in: var(--cx-pages-positive, #75d3bb);
+    --out: var(--cx-pages-warning, #ffc47e);
+    --warn: var(--cx-pages-warning, #f2c879);
+    --danger: var(--cx-pages-error, #ff9d9d);
+    --content-width: var(--cx-pages-content-width, 88rem);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scrollbar-color: var(--line) var(--bg); }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; overflow-wrap: anywhere; }
+  a:hover { color: var(--accent-strong); }
+  button, input, select { color: inherit; font: inherit; }
+  :where(button, a:any-link, input, select, summary, [role="button"], [tabindex="0"]):focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  :where(input, select, button) { accent-color: var(--accent); }
+  ::selection { background: #365985; color: #fff; }
+  .skip { position: absolute; z-index: 10; inset-block-start: 8px; inset-inline-start: 12px; transform: translateY(-200%); background: var(--panel); color: var(--fg); padding: 10px 14px; border: 1px solid var(--line); border-radius: 7px; }
+  .skip:focus { transform: translateY(0); }
+  .skip:hover { color: var(--fg); }
+  .top { max-width: var(--content-width); margin-inline: auto; padding: 10px clamp(16px, 3vw, 40px); border-bottom: 1px solid var(--line); }
+  .top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .top-row > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: -.02em; text-wrap: balance; }
+  h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.3; text-wrap: balance; }
+  h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.35; text-wrap: balance; }
+  .view-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .view-nav a { display: inline-flex; align-items: center; justify-content: center; min-block-size: 44px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; }
+  .view-nav a[aria-current="page"] { color: var(--fg); background: var(--selected); border-color: var(--cx-pages-selected, #527aa6); font-weight: 650; }
+  .scope-line { color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); max-width: var(--content-width); min-height: calc(100dvh - 200px); margin-inline: auto; }
+  .explorer-pane { min-width: 0; padding: 16px; background: color-mix(in srgb, var(--panel) 45%, var(--bg)); border-inline-end: 1px solid var(--line); }
+  .file-explorer { min-width: 0; }
+  .file-explorer-summary { display: none; }
+  .file-explorer-body { min-width: 0; }
+  .filters { display: grid; gap: 12px; }
+  label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+  input[type="search"], select { width: 100%; min-block-size: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); font-size: 16px; }
+  input[type="search"]::placeholder { color: var(--muted); opacity: .82; }
+  .search-help { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+  .check { display: flex; align-items: center; gap: 9px; min-block-size: 44px; margin: 0; color: var(--fg); font-size: 12px; cursor: pointer; }
+  .check input { flex: 0 0 18px; inline-size: 18px; block-size: 18px; }
+  .reset-filters { justify-self: start; min-block-size: 44px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 7px; background: transparent; cursor: pointer; }
+  .reset-filters:hover { border-color: var(--accent); background: var(--panel); }
+  .file-count { margin: 13px 0 7px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .file-list { display: grid; gap: 3px; max-block-size: calc(100dvh - 360px); min-block-size: 180px; margin: 0; padding: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; list-style: none; }
+  .file-list li { min-width: 0; }
+  .file-button { display: block; width: 100%; min-width: 0; min-height: 52px; padding: 8px 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: start; cursor: pointer; }
+  .file-button:hover:not(:disabled) { background: var(--panel); }
+  .file-button[aria-current="true"] { background: var(--selected); border-color: var(--cx-pages-selected, #527aa6); }
+  .file-button:disabled { color: var(--muted); cursor: default; opacity: .85; }
+  .check:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
+  .file-button strong { display: block; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+  .file-button small { display: block; margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
+  .file-button .file-state { color: var(--warn); }
+  main { min-width: 0; padding: 22px clamp(14px, 2.5vw, 32px); }
+  #main-content { scroll-margin-block-start: 12px; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .head > div:first-child { min-width: 0; }
+  .head h2 { max-width: 70ch; overflow-wrap: anywhere; }
+  .source-links a[hidden] { display: none; }
+  .source-links a { display: inline-flex; align-items: center; justify-content: center; min-block-size: 44px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; }
+  .pills { display: flex; gap: 7px; flex-wrap: wrap; margin: 10px 0 14px; }
+  .pill { padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .symbol-detail { display: grid; justify-items: start; gap: 5px; margin-block: 10px 14px; }
+  .symbol-detail[hidden] { display: none; }
+  .symbol-detail h3 { margin: 0; }
+  .symbol-detail .source-meta { margin: 0; }
+  .symbol-detail > a { display: inline-flex; align-items: center; min-block-size: 44px; }
+  .coverage { margin: 12px 0 14px; }
+  .coverage-panel > summary { display: flex; align-items: center; min-height: 44px; color: var(--accent); font-weight: 650; cursor: pointer; }
+  .coverage-body { padding: 3px 2px 10px; }
+  .coverage-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
+  .coverage-grid > div { min-width: 0; padding: 9px 2px 8px; border-block: 1px solid var(--line); }
+  .coverage-grid dt { color: var(--muted); font-size: 11px; }
+  .coverage-grid dd { margin: 2px 0 0; font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .coverage-explanation { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+  .coverage-notice { margin: 8px 0; padding: 10px 12px; border-inline-start: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); color: var(--muted); font-size: 12px; }
+  .coverage-details { margin: 8px 0 0; }
+  .coverage-details summary { display: flex; align-items: center; min-height: 44px; color: var(--accent); cursor: pointer; overflow-wrap: anywhere; }
+  .coverage-details > div { max-height: 280px; margin-top: 4px; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .coverage-details ul { margin: 0; padding-inline-start: 20px; }
+  .coverage-details li { margin-block: 3px; overflow-wrap: anywhere; }
+  .status { min-height: 1.5em; margin: 8px 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .status[data-kind="warning"] { color: var(--warn); }
+  .status[data-kind="error"] { color: var(--danger); }
+  .source-sha { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+  .filter-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; align-items: end; margin: 15px 0 12px; }
+  .filter-bar label { margin: 0 0 5px; }
+  .canvas-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .canvas-head { display: flex; align-items: center; gap: 7px 14px; flex-wrap: wrap; min-height: 44px; padding: 7px 13px; border-block-end: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  .canvas-head span { overflow-wrap: anywhere; }
+  .legend-in { color: var(--in); }
+  .legend-out { color: var(--out); }
+  .canvas-help { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  svg { display: block; width: 100%; min-width: 760px; min-height: 250px; }
+  .edge { fill: none; stroke-width: 2; opacity: .84; }
+  .edge.in { stroke: var(--in); }
+  .edge.out { stroke: var(--out); }
+  .edge-label { fill: var(--fg); stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; paint-order: stroke; font: 10px system-ui, sans-serif; pointer-events: none; }
+  .node rect { fill: var(--panel-raised); stroke: var(--line); stroke-width: 1.5; rx: 8; }
+  .node .node-label { fill: var(--fg); font: 12px system-ui, sans-serif; pointer-events: none; }
+  .node .node-subtitle { fill: var(--muted); font: 10px system-ui, sans-serif; pointer-events: none; }
+  .node.center rect { fill: color-mix(in srgb, var(--accent) 18%, var(--panel-raised)); stroke: var(--accent); }
+  .node.in rect { stroke: var(--in); }
+  .node.out rect { stroke: var(--out); }
+  .node.linked { cursor: pointer; }
+  .node.linked:hover rect { stroke-width: 3; }
+  .node.linked:focus-visible rect { stroke: var(--focus); stroke-width: 4; }
+  .columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+  section.card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .relations { display: grid; gap: 5px; max-height: 340px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .relation-row { min-width: 0; }
+  .relation { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-raised); text-align: start; cursor: pointer; }
+  .relation:hover { border-color: var(--accent); }
+  .relation span { overflow-wrap: anywhere; font-size: 12px; }
+  .relation small { max-width: 45%; color: var(--muted); font-size: 10px; text-align: end; overflow-wrap: anywhere; }
+  .relation-evidence { display: grid; gap: 3px; margin-block: 3px 6px; }
+  .relation-evidence a { display: flex; align-items: center; min-height: 44px; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px; line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
+  .relation-evidence a:hover { border-color: var(--line); background: var(--panel); }
+  .empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
+  .expansion { margin: 14px 0; }
+  .expansion-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .expansion-list { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
+  .expansion-list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--panel-raised) 70%, var(--bg)); overflow-wrap: anywhere; }
+  .expansion-list code { color: var(--muted); font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .expansion-list button { justify-self: start; min-height: 44px; padding: 4px 3px; border: 0; background: transparent; color: var(--accent); text-align: left; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; cursor: pointer; }
+  .expansion-list small { color: var(--muted); font-size: 11px; text-align: right; }
+  details { margin-top: 8px; }
+  .symbol-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 0; padding: 8px 0 0; list-style: none; }
+  .symbol-list li { min-width: 0; }
+  .symbol-button { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-raised); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+  .symbol-button:hover { border-color: var(--accent); }
+  .symbol-button[aria-current="true"] { background: var(--selected); border-color: var(--accent); }
+  .symbol-button small { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+  .source-meta { margin-top: 14px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+  .unavailable { color: var(--muted); }
+  @media (max-width: 850px) {
+    .layout { grid-template-columns: 1fr; }
+    .explorer-pane { border-inline-end: 0; border-block-end: 1px solid var(--line); }
+    .file-explorer-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; color: var(--accent); cursor: pointer; font-weight: 650; }
+    .file-explorer-summary::marker { color: var(--accent); }
+    .file-explorer-summary span:last-child { min-width: 0; color: var(--muted); font-size: 12px; font-weight: 400; text-align: end; overflow-wrap: anywhere; }
+    .file-explorer-body { padding-top: 12px; }
+    .file-list { max-block-size: 250px; min-block-size: 100px; }
+  }
+  @media (max-width: 560px) {
+    .top { padding: 8px 16px; }
+    .top-row { gap: 8px; align-items: center; }
+    h1 { font-size: 22px; }
+    .top-row > div:first-child { gap: 6px; }
+    .view-nav a { padding-inline: 8px; font-size: 12px; }
+    .top { padding-inline: 12px; }
+    .explorer-pane { padding: 12px; }
+    main { padding: 18px 12px 28px; }
+    .coverage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+    .coverage-grid > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .columns { grid-template-columns: 1fr; }
+    .symbol-list { grid-template-columns: 1fr; }
+    .filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .filter-bar > div { min-width: 0; }
+    .filter-bar > div:last-child { grid-column: auto; }
+    .expansion-list li { grid-template-columns: 44px minmax(0, 1fr); }
+    .expansion-list small { grid-column: 2; text-align: start; }
+  }
+  @media (max-width: 360px) {
+    .top { padding-inline: 12px; }
+    .top-row { gap: 8px; }
+    .filter-bar { grid-template-columns: 1fr; }
+    .filter-bar > div:last-child { grid-column: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  @media (forced-colors: active) {
+    :where(button, a:any-link, input, select, summary, [role="button"], [tabindex="0"]):focus-visible { outline-color: Highlight; }
+    .file-button[aria-current="true"], .symbol-button[aria-current="true"] { border: 2px solid Highlight; }
+  }
 </style>
 </head>
 <body>
 <a class="skip" href="#main-content">本文へ移動</a>
 <header class="top">
   <div class="top-row">
-    <div><h1>Codexia / Code Map</h1><p>Graphify静的解析から生成したファイル・参照関係の探索画面</p></div>
-    <nav class="view-nav" aria-label="Code Map views"><a href="./" class="active" aria-current="page">ファイル探索</a><a href="communities.html">コミュニティ概観</a></nav>
-  </div>
-  <div class="stats" aria-label="解析サマリー">
-    <div class="stat"><strong id="stat-files">—</strong><span>解析されたファイル</span></div>
-    <div class="stat"><strong id="stat-nodes">—</strong><span>Graphifyノード</span></div>
-    <div class="stat"><strong id="stat-links">—</strong><span>全エッジ</span></div>
-    <div class="stat"><strong id="stat-cross">—</strong><span>ファイル間エッジ</span></div>
-    <div class="stat"><strong id="stat-symbol-links">—</strong><span>シンボル関係</span></div>
+    <div><h1>Code Map</h1><span class="scope-line">Graphify静的解析</span></div>
+    <nav class="view-nav" aria-label="Code Map views"><a href="communities.html">コミュニティ</a></nav>
   </div>
 </header>
-<div class="warning">静的解析の観測結果です。参照元がないことは未使用の証明ではありません。実行時ロード、MCP登録、SQL、テストなどは別の根拠で確認してください。</div>
 <div class="layout">
-  <aside aria-label="ファイルを探す">
-    <div class="filters">
-      <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" autocomplete="off" placeholder="例: auth / CoreStore / routes" aria-controls="file-list"></div>
-      <div><label for="area">トップレベルディレクトリ</label><select id="area"><option value="">すべて</option></select></div>
-      <label class="check"><input type="checkbox" id="no-inbound">参照元の観測がないファイルのみ</label>
-    </div>
-    <div class="file-count" id="file-count" aria-live="polite"></div>
-    <div id="file-list" class="file-list"></div>
+  <aside class="explorer-pane" aria-label="ファイル探索">
+    <details id="file-explorer" class="file-explorer" open>
+      <summary class="file-explorer-summary"><span>ファイルを探す</span><span id="mobile-selection-label"></span></summary>
+      <div class="file-explorer-body">
+        <search class="filters" aria-label="ファイル検索と絞り込み">
+          <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" name="q" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="例: auth / CoreStore / routes" aria-controls="file-list" aria-describedby="search-help"><small id="search-help" class="search-help">パスや抽出シンボル名で探せます。</small></div>
+          <div><label for="area">トップレベルディレクトリ</label><select id="area" name="area"><option value="">すべて</option></select></div>
+          <div><label for="index-state">索引の状態</label><select id="index-state" name="state"><option value="indexed">解析済み</option><option value="unavailable">未取得の候補</option><option value="excluded">解析対象外</option><option value="all">すべての記録</option></select></div>
+          <label class="check"><input type="checkbox" id="no-inbound" name="no-inbound">参照元の観測がないファイルのみ</label>
+          <button id="reset-filters" class="reset-filters" type="button">条件をリセット</button>
+        </search>
+        <div class="file-count" id="file-count" aria-live="off"></div>
+        <ul id="file-list" class="file-list" tabindex="0" aria-label="ファイル検索結果"></ul>
+      </div>
+    </details>
   </aside>
   <main id="main-content" tabindex="-1">
-    <div class="head"><div><h2 id="selected-path">ファイルを選択</h2><div id="file-metrics" class="pills"></div><div id="symbol-detail" hidden><h3 id="selected-symbol"></h3><span id="symbol-location" class="source-meta"></span><a id="symbol-source" hidden target="_blank" rel="noopener noreferrer">GitHubでシンボル位置を開く</a></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
-    <section id="coverage" class="coverage" aria-label="解析範囲" hidden></section>
+    <div class="head"><div><h2 id="selected-path" tabindex="-1">ファイルを選択</h2><div id="file-metrics" class="pills"></div><div id="symbol-detail" class="symbol-detail" hidden><h3 id="selected-symbol"></h3><span id="symbol-location" class="source-meta"></span><a id="symbol-source" hidden target="_blank" rel="noopener noreferrer">GitHubでシンボル位置を開く</a></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
     <div id="page-status" class="status" role="status" aria-live="polite"></div>
     <div class="filter-bar" aria-label="参照の絞り込み">
       <div><label for="direction">探索方向</label><select id="direction"><option value="both">参照元と参照先</option><option value="incoming">参照元</option><option value="outgoing">参照先</option></select></div>
       <div><label for="relation">関係種別</label><select id="relation"><option value="">すべての関係</option></select></div>
       <div><label for="depth">探索の深さ</label><select id="depth"><option value="1">1 段</option><option value="2">2 段</option><option value="3">3 段</option></select></div>
+      <div><label for="display-limit">図の表示数（方向ごと）</label><select id="display-limit"><option value="8">8 件</option><option value="16">16 件</option><option value="24">24 件</option></select></div>
     </div>
-    <div class="canvas-wrap">
-      <div class="canvas-head"><span class="legend-in">● 参照元 → 選択ファイル</span><span class="legend-out">● 選択ファイル → 参照先</span><span id="graph-scope">ファイル単位の関係</span><span id="graph-limit">隣接図は各方向8件まで</span></div>
+    <div class="canvas-wrap" tabindex="0" role="region" aria-label="隣接関係図" aria-describedby="graph-scroll-help">
+      <p id="graph-scroll-help" class="canvas-help">図が画面幅より広い場合は、図の領域内を横スクロールできます。Tabキーでこの領域に移動してから矢印キーを使えます。</p>
+      <div class="canvas-head"><span class="legend-in">参照元 → 選択項目</span><span class="legend-out">選択項目 → 参照先</span><span id="graph-scope">ファイル間関係</span><span id="graph-limit-summary"></span></div>
       <svg id="neighbor-graph" role="group" aria-label="選択ファイルと隣接ファイルのグラフ"></svg>
     </div>
+    <section id="coverage" class="coverage" aria-label="解析範囲" hidden><details id="coverage-panel" class="coverage-panel"><summary id="coverage-panel-summary">解析範囲とGraphify統計</summary><div class="coverage-body"><dl id="coverage-summary" class="coverage-grid"></dl><p id="coverage-explanation" class="coverage-explanation"></p><p class="coverage-notice" role="note">静的解析で観測できた関係を表示します。参照元が見つからないことは、未使用や削除可能の証明ではありません。実行時ロード、MCP登録、SQL、テストなどは別の根拠で確認してください。</p><details id="coverage-details" class="coverage-details"><summary></summary><div tabindex="0" role="region" aria-label="解析対象外と未取得候補の一覧"><ul></ul></div></details></div></details></section>
     <div class="columns">
-      <section class="card"><h3 id="incoming-title">参照元</h3><div id="incoming-list" class="relations"></div></section>
-      <section class="card"><h3 id="outgoing-title">参照先</h3><div id="outgoing-list" class="relations"></div></section>
+      <section class="card"><h3 id="incoming-title">参照元</h3><div id="incoming-list" class="relations" tabindex="0" role="region" aria-labelledby="incoming-title"></div></section>
+      <section class="card"><h3 id="outgoing-title">参照先</h3><div id="outgoing-list" class="relations" tabindex="0" role="region" aria-labelledby="outgoing-title"></div></section>
     </div>
     <section class="card expansion" aria-labelledby="expansion-title">
       <div class="expansion-head"><h3 id="expansion-title">多段探索</h3><span id="expansion-summary" class="empty"></span></div>
@@ -163,22 +263,30 @@ import { expandGraph } from './analysis.mjs';
   const firstChoice = files.filter(f => /^(packages|modules|app)\//.test(f.path)).sort((a,b) => fileUsage(b) - fileUsage(a))[0] || files[0];
   const query = new URLSearchParams(location.search);
   const requestedPath = query.get('file');
-  const excludedRequested = requestedPath && Array.isArray(data.coverage?.excludedFiles) && data.coverage.excludedFiles.includes(requestedPath);
-  const unavailableRequested = requestedPath && !byPath.has(requestedPath) ? {path:requestedPath,symbols:[],incoming:[],outgoing:[],unavailable:true,excluded:excludedRequested} : null;
-  let selected = byPath.get(requestedPath) || unavailableRequested || firstChoice;
+  const coverageByPath = new Map();
+  for (const path of Array.isArray(data.coverage?.unavailableFiles) ? data.coverage.unavailableFiles : []) {
+    if (typeof path === 'string' && !byPath.has(path)) coverageByPath.set(path, { path, symbols: [], incoming: [], outgoing: [], unavailable: true, excluded: false, coverageState: 'unavailable' });
+  }
+  for (const path of Array.isArray(data.coverage?.excludedFiles) ? data.coverage.excludedFiles : []) {
+    if (typeof path === 'string' && !byPath.has(path)) coverageByPath.set(path, { path, symbols: [], incoming: [], outgoing: [], unavailable: true, excluded: true, coverageState: 'excluded' });
+  }
+  const unknownRequested = requestedPath && !byPath.has(requestedPath) && !coverageByPath.has(requestedPath)
+    ? { path: requestedPath, symbols: [], incoming: [], outgoing: [], unavailable: true, excluded: false, coverageState: 'unknown' }
+    : null;
+  if(unknownRequested)coverageByPath.set(unknownRequested.path,unknownRequested);
+  let selected = byPath.get(requestedPath) || coverageByPath.get(requestedPath) || unknownRequested || firstChoice;
   const symbolById = new Map(files.flatMap(f => (Array.isArray(f.symbols) ? f.symbols : []).filter(s => s && typeof s === 'object' && s.id != null).map(s => [String(s.id), s])));
   let selectedSymbol = selected ? symbolById.get(query.get('symbol')) : null;
   if (selectedSymbol && selectedSymbol.path !== selected.path) selectedSymbol = null;
   let unavailableSymbolId=query.get('symbol')&&!selectedSymbol?query.get('symbol'):null;
   let shownSourceLink = null;
   const maxResults = 200;
-  const maxGraphEdges = 8;
+  const maxExpandedNodes = 400;
   const relationNames = [...new Set((data.relations || []).concat(files.flatMap(f => [...(f.incoming || []),...(f.outgoing || [])].flatMap(r => r.relations || [])), [...symbolById.values()].flatMap(s => [...(s.incoming || []),...(s.outgoing || [])].map(r => r.relation).filter(Boolean))))].sort();
-  for (const [name, value] of Object.entries({ 'stat-files': data.stats?.files ?? files.length, 'stat-nodes': data.stats?.nodes ?? 0, 'stat-links': data.stats?.links ?? 0, 'stat-cross': data.stats?.crossFileLinks ?? 0, 'stat-symbol-links': data.stats?.symbolEdges ?? 0 })) $(name).textContent = nf.format(value);
   for (const area of [...new Set(files.map(f => f.path.split('/')[0]))].sort()) { const opt=document.createElement('option');opt.value=area;opt.textContent=area;$('area').append(opt); }
   for (const relation of relationNames) { const opt=document.createElement('option');opt.value=relation;opt.textContent=relation;$('relation').append(opt); }
-  const short = path => path.length > 42 ? '…' + path.slice(-41) : path;
-  const matchesRelation = rel => !$('relation').value || rel.relations.includes($('relation').value);
+  const short = path => path.length > 29 ? '…' + path.slice(-28) : path;
+  const matchesRelation = rel => !$('relation').value || (rel.relations || []).includes($('relation').value);
   const relationCount = rel => $('relation').value && rel.relationCounts ? (rel.relationCounts[$('relation').value] || 0) : rel.count;
   function lineEvidenceLink(item) {
     if (!Number.isSafeInteger(item?.line) || item.line < 1) return null;
@@ -198,17 +306,23 @@ import { expandGraph } from './analysis.mjs';
     if ($('direction').value !== 'both') params.set('direction', $('direction').value); else params.delete('direction');
     if ($('relation').value) params.set('relation', $('relation').value); else params.delete('relation');
     if ($('depth').value !== '1') params.set('depth', $('depth').value); else params.delete('depth');
+    if ($('display-limit').value !== '8') params.set('limit', $('display-limit').value); else params.delete('limit');
     const next = location.pathname + '?' + params.toString() + location.hash;
     if (mode === 'replace') history.replaceState(null, '', next); else history.pushState(null, '', next);
   }
   function select(path, mode = 'push') {
-    const next = byPath.get(path);
+    const next = byPath.get(path) || coverageByPath.get(path);
     if (!next) return;
     selected = next;
     selectedSymbol = null;
     unavailableSymbolId=null;
     updateUrl(mode);
     renderFiles(); renderSelected();
+    if (matchMedia('(max-width: 850px)').matches) {
+      $('file-explorer').open = false;
+      $('selected-path').focus({ preventScroll: true });
+      $('selected-path').scrollIntoView({ block: 'start' });
+    }
   }
   function selectSymbol(id, mode = 'push') {
     const next = symbolById.get(String(id));
@@ -218,57 +332,148 @@ import { expandGraph } from './analysis.mjs';
     unavailableSymbolId=null;
     updateUrl(mode);
     renderFiles(); renderSelected();
+    if (matchMedia('(max-width: 850px)').matches) {
+      $('selected-path').focus({ preventScroll: true });
+      $('selected-path').scrollIntoView({ block: 'start' });
+    }
   }
   function renderFiles() {
     const q = $('search').value.toLocaleLowerCase().trim();
     const area = $('area').value;
     const noInbound = $('no-inbound').checked;
-    const filtered = files.filter(f => (!area || f.path.split('/')[0] === area) && (!noInbound || f.incoming.length === 0) && (!q || f.path.toLocaleLowerCase().includes(q) || f.symbols.some(s => (typeof s === 'string' ? s : s.label || '').toLocaleLowerCase().includes(q)))).sort((a,b) => fileUsage(b) - fileUsage(a) || a.path.localeCompare(b.path));
+    const state = $('index-state').value;
+    const stateMatches = item => state === 'all'
+      || (state === 'indexed' && !item.unavailable)
+      || (state === 'unavailable' && item.coverageState === 'unavailable')
+      || (state === 'excluded' && item.coverageState === 'excluded');
+    const matches = item => (!area || item.path.split('/')[0] === area)
+      && stateMatches(item)
+      && (!noInbound || (!item.unavailable && item.incoming.length === 0))
+      && (!q || item.path.toLocaleLowerCase().includes(q) || (item.symbols || []).some(symbol => (typeof symbol === 'string' ? symbol : symbol.label || '').toLocaleLowerCase().includes(q)));
+    const records = state === 'indexed' ? files : state === 'unavailable'
+      ? [...coverageByPath.values()].filter(item => item.coverageState === 'unavailable')
+      : state === 'excluded'
+        ? [...coverageByPath.values()].filter(item => item.coverageState === 'excluded')
+        : [...files, ...coverageByPath.values()];
+    const filtered = records.filter(matches).sort((a,b) => {
+      const aIndexed = !a.unavailable, bIndexed = !b.unavailable;
+      if (aIndexed !== bIndexed) return aIndexed ? -1 : 1;
+      return aIndexed ? fileUsage(b) - fileUsage(a) || a.path.localeCompare(b.path) : a.path.localeCompare(b.path);
+    });
     const visible=filtered.slice(0,maxResults);
-    const pinSelected=selected && !selected.unavailable && filtered.includes(selected) && !visible.includes(selected);
-    if(pinSelected) visible.splice(maxResults-1,1,selected);
-    $('file-count').textContent = nf.format(Math.min(filtered.length,maxResults)) + '件を表示 / ' + nf.format(filtered.length) + '件合致 / ' + nf.format(files.length) + '件全件' + (pinSelected?' · 選択中のファイルを含む':'');
-    const root = $('file-list'); root.replaceChildren();
-    if(selected?.unavailable){const unavailableButton=document.createElement('button');unavailableButton.type='button';unavailableButton.className='file-button unavailable';unavailableButton.setAttribute('aria-current','true');unavailableButton.disabled=true;const title=document.createElement('strong');title.textContent=selected.path;const hint=document.createElement('small');hint.textContent='このファイルは索引にありません';unavailableButton.append(title,hint);root.append(unavailableButton);}
-    for (const f of visible) {
-      const button = document.createElement('button');button.type='button';button.className='file-button';button.setAttribute('aria-current', String(f.path === selected?.path));
-      const title = document.createElement('strong');title.textContent = f.path;
-      const count = document.createElement('small');count.textContent='参照元 ' + f.incoming.length + ' · 参照先 ' + f.outgoing.length + ' · シンボル ' + f.symbols.length;
-      button.append(title, count);button.addEventListener('click', () => select(f.path));root.append(button);
+    let pinSelected = false;
+    if (selected?.unavailable && !visible.some(item => item.path === selected.path)) {
+      visible.push(selected);
+      pinSelected = true;
+    } else if (selected && !selected.unavailable && filtered.includes(selected) && !visible.includes(selected)) {
+      visible.splice(maxResults-1,1,selected);
+      pinSelected = true;
     }
-    if (filtered.length === 0) { const empty=document.createElement('p');empty.className='empty';empty.textContent=files.length ? '条件に一致する解析済みファイルはありません。検索語やフィルターを調整してください。' : 'Graphifyの索引にファイルがありません。除外範囲と解析coverageを確認してください。';root.append(empty); }
+    const viewCount = Math.min(filtered.length, maxResults);
+    const stateLabel = { indexed: '解析済み', unavailable: '未取得候補', excluded: '解析対象外', all: 'すべての記録' }[state];
+    const totalLabel = state === 'indexed' ? `${nf.format(files.length)}件を解析済み` : `${nf.format(records.length)}件の${stateLabel}`;
+    $('file-count').textContent = `${nf.format(viewCount)}件を表示 / ${nf.format(filtered.length)}件が一致 / ${totalLabel}${pinSelected?' · 選択中の項目を含む':''}`;
+    $('mobile-selection-label').textContent = selected ? selected.path : '検索と索引状態を選ぶ';
+    $('no-inbound').disabled = state !== 'indexed';
+    const root = $('file-list'); root.replaceChildren();
+    for (const item of visible) {
+      const listItem = document.createElement('li');
+      const button = document.createElement('button');
+      button.type='button';
+      button.className='file-button' + (item.unavailable?' unavailable':'');
+      button.setAttribute('aria-current', String(item.path === selected?.path));
+      const title=document.createElement('strong');title.textContent=item.path;
+      const meta=document.createElement('small');
+      if (!item.unavailable) meta.textContent=`参照元 ${item.incoming.length} · 参照先 ${item.outgoing.length} · シンボル ${item.symbols.length}`;
+      else {
+        meta.className='file-state';
+        meta.textContent=item.coverageState === 'excluded'
+          ? '解析対象外 · 個別の除外理由は未提供'
+          : item.coverageState === 'unavailable'
+            ? '解析候補 · Graphifyノード未取得 · 原因は未報告'
+            : 'このパスは索引にありません · coverageで確認してください';
+      }
+      button.append(title,meta);
+      button.addEventListener('click',()=>select(item.path));
+      listItem.append(button);
+      root.append(listItem);
+    }
+    if (filtered.length === 0) {
+      const listItem=document.createElement('li');
+      const empty=document.createElement('p');empty.className='empty';
+      empty.textContent=files.length
+        ? '条件に一致する記録はありません。検索語や索引状態のフィルターを調整してください。'
+        : 'Graphifyの索引にファイルがありません。除外範囲とcoverageを確認してください。';
+      listItem.append(empty);root.append(listItem);
+    }
   }
   const NS='http://www.w3.org/2000/svg';
   function svgEl(tag, attrs = {}) { const el=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));return el; }
   function renderGraph(f) {
     const direction=$('direction').value;
-    const incoming=direction === 'outgoing' ? [] : (f.incoming || []).filter(matchesRelation).slice(0,maxGraphEdges);
-    const outgoing=direction === 'incoming' ? [] : (f.outgoing || []).filter(matchesRelation).slice(0,maxGraphEdges);
+    const symbolMode=Boolean(selectedSymbol);
+    const incomingSource=symbolMode ? (selectedSymbol.incoming || []) : (f.incoming || []);
+    const outgoingSource=symbolMode ? (selectedSymbol.outgoing || []) : (f.outgoing || []);
+    const relationMatches=edge=>!$('relation').value || (symbolMode ? edge.relation===$('relation').value : (edge.relations || []).includes($('relation').value));
+    const maxGraphEdges=Number($('display-limit').value)||8;
+    const incoming=direction==='outgoing'?[]:incomingSource.filter(relationMatches).slice(0,maxGraphEdges);
+    const outgoing=direction==='incoming'?[]:outgoingSource.filter(relationMatches).slice(0,maxGraphEdges);
     const rows=Math.max(incoming.length,outgoing.length,1);
-    const height=Math.max(230,rows*48+70), cy=height/2;
-    const svg=$('neighbor-graph');svg.replaceChildren();svg.setAttribute('viewBox',`0 0 900 ${height}`);
+    const height=Math.max(250,rows*58+76), cy=height/2;
+    const svg=$('neighbor-graph');svg.replaceChildren();svg.setAttribute('viewBox',`0 0 1000 ${height}`);
     const defs=svgEl('defs');
-    for(const [id,color] of [['in','#75d3bb'],['out','#ffc47e']]) { const marker=svgEl('marker',{id:'arrow-'+id,viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'5',markerHeight:'5',orient:'auto'});marker.append(svgEl('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:color}));defs.append(marker); }
+    for(const [id,color] of [['in','var(--in)'],['out','var(--out)']]) { const marker=svgEl('marker',{id:'arrow-'+id,viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'6',markerHeight:'6',orient:'auto'});marker.append(svgEl('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:color}));defs.append(marker); }
     svg.append(defs);
-    function node(path,x,y,kind,linked=true) {
+    function node(item,x,y,kind,linked=true) {
+      const path=item.path;
+      const label=symbolMode?(item.label||`Symbol ${item.id}`):path;
+      const subtitle=symbolMode?short(path):'';
+      const visibleLabel=short(label);
       const g=svgEl('g',{class:'node '+kind+(linked?' linked':''),transform:`translate(${x},${y})`});
-      g.append(svgEl('rect',{x:-120,y:-17,width:240,height:34}));
-      const text=svgEl('text',{'text-anchor':'middle',y:4});text.textContent=short(path);g.append(text);
-      const tip=svgEl('title');tip.textContent=path;g.append(tip);
-      if(linked){ g.setAttribute('role','button');g.setAttribute('tabindex','0');g.setAttribute('aria-label','ファイルを選択: '+path);g.addEventListener('click',()=>select(path));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(path);}}); }
+      g.append(svgEl('rect',{x:-110,y:-25,width:220,height:50}));
+      const text=svgEl('text',{class:'node-label','text-anchor':'middle',y:subtitle?-4:4});text.textContent=visibleLabel;g.append(text);
+      if(subtitle){const sub=svgEl('text',{class:'node-subtitle','text-anchor':'middle',y:13});sub.textContent=subtitle;g.append(sub);}
+      const tip=svgEl('title');tip.textContent=symbolMode?`${label} · ${path}`:path;g.append(tip);
+      if(linked){
+        g.setAttribute('role','button');g.setAttribute('tabindex','0');
+        const visibleContent=subtitle?`${visibleLabel} ${subtitle}`:visibleLabel;
+        g.setAttribute('aria-label',`${visibleContent} · ${symbolMode?'シンボル':'ファイル'}を選択: ${path}`);
+        g.addEventListener('click',()=>symbolMode?selectSymbol(item.id):select(path));
+        g.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();symbolMode?selectSymbol(item.id):select(path);}else if(e.key===' '){e.preventDefault();}});
+        g.addEventListener('keyup',e=>{if(e.key===' '){e.preventDefault();symbolMode?selectSymbol(item.id):select(path);}});
+      }
       svg.append(g);
     }
-    const rowY = (i,count) => (height-48*(count-1))/2+48*i;
-    for(const [i,rel] of incoming.entries()) { const y=rowY(i,incoming.length);svg.append(svgEl('path',{class:'edge in',d:`M 305 ${y} L 385 ${cy}`,'marker-end':'url(#arrow-in)'})); }
-    for(const [i,rel] of outgoing.entries()) { const y=rowY(i,outgoing.length);svg.append(svgEl('path',{class:'edge out',d:`M 515 ${cy} L 595 ${y}`,'marker-end':'url(#arrow-out)'})); }
-    for(const [i,rel] of incoming.entries()) node(rel.path,185,rowY(i,incoming.length),'in');
-    for(const [i,rel] of outgoing.entries()) node(rel.path,715,rowY(i,outgoing.length),'out');
-    node(f.path,450,cy,'center',false);
-    $('graph-scope').textContent=selectedSymbol?'ファイル単位の関係 · 選択シンボルの関係は一覧と展開に表示':'ファイル単位の関係';
-    svg.setAttribute('aria-label',selectedSymbol?`選択シンボル ${selectedSymbol.label} を含む ${f.path} のファイル関係グラフ`:'選択ファイルと隣接ファイルのグラフ');
-    if(incoming.length===0 && outgoing.length===0){const t=svgEl('text',{x:450,y:cy+48,'text-anchor':'middle',fill:'#a9b7ca'});t.textContent='この条件では参照関係が観測されません';svg.append(t);}
-    const totalIn=(f.incoming || []).filter(matchesRelation).length, totalOut=(f.outgoing || []).filter(matchesRelation).length;
-    $('graph-limit').textContent = `隣接図: 参照元 ${Math.min(totalIn,maxGraphEdges)}/${totalIn} · 参照先 ${Math.min(totalOut,maxGraphEdges)}/${totalOut}`;
+    const rowY=(i,count)=>(height-58*(count-1))/2+58*i;
+    const typeLabel=edge=>{
+      const names=symbolMode?[edge.relation].filter(Boolean):(edge.relations||[]);
+      const relation=names.slice(0,2).join(' + ')||'関係種別未取得';
+      const more=names.length>2?` +${names.length-2}`:'';
+      const count=symbolMode?(edge.count||1):relationCount(edge);
+      const label=`${relation}${more} · ${nf.format(count)}`;
+      return label.length>23?label.slice(0,20)+'…':label;
+    };
+    const addEdge=(edge,direction,index,count)=>{
+      const y=rowY(index,count);
+      const incomingEdge=direction==='in';
+      const startX=incomingEdge?240:610, endX=incomingEdge?390:760;
+      const d=incomingEdge?`M ${startX} ${y} C 290 ${y}, 340 ${cy}, ${endX} ${cy}`:`M ${startX} ${cy} C 660 ${cy}, 710 ${y}, ${endX} ${y}`;
+      svg.append(svgEl('path',{class:'edge '+direction,d,'marker-end':'url(#arrow-'+direction+')'}));
+      const label=svgEl('text',{class:'edge-label','text-anchor':'middle',x:incomingEdge?315:685,y:(y+cy)/2-5});
+      label.textContent=typeLabel(edge);
+      const title=svgEl('title');title.textContent=(symbolMode?edge.relation:(edge.relations||[]).join(', ')||'関係種別未取得')+` · ${nf.format(symbolMode?(edge.count||1):relationCount(edge))}件`;
+      label.append(title);svg.append(label);
+    };
+    for(const [i,edge] of incoming.entries())addEdge(edge,'in',i,incoming.length);
+    for(const [i,edge] of outgoing.entries())addEdge(edge,'out',i,outgoing.length);
+    for(const [i,edge] of incoming.entries())node(edge,130,rowY(i,incoming.length),'in');
+    for(const [i,edge] of outgoing.entries())node(edge,870,rowY(i,outgoing.length),'out');
+    node(symbolMode?selectedSymbol:f,500,cy,'center',false);
+    $('graph-scope').textContent=symbolMode?'シンボル間関係 · 経路と関係種別を表示':'ファイル間関係 · 経路と関係種別を表示';
+    svg.setAttribute('aria-label',symbolMode?`シンボル ${selectedSymbol.label} の参照元と参照先`:`ファイル ${f.path} の参照元と参照先`);
+    if(incoming.length===0 && outgoing.length===0){const t=svgEl('text',{x:500,y:cy+54,'text-anchor':'middle',fill:'var(--muted)'});t.textContent='この条件では参照関係が観測されません';svg.append(t);}
+    const totalIn=incomingSource.filter(relationMatches).length, totalOut=outgoingSource.filter(relationMatches).length;
+    $('graph-limit-summary').textContent=`図に表示: 参照元 ${Math.min(totalIn,maxGraphEdges)}/${totalIn} · 参照先 ${Math.min(totalOut,maxGraphEdges)}/${totalOut}`;
   }
   function appendEvidence(root, evidence) {
     if(!Array.isArray(evidence) || !evidence.length)return;
@@ -279,101 +484,256 @@ import { expandGraph } from './analysis.mjs';
       const link = lineEvidenceLink(item);
       if (!link) continue;
       link.textContent = `${item.path}:${item.line}`;
-      link.setAttribute('aria-label', `GitHubソースを ${item.line} 行で開く`);
+      link.setAttribute('aria-label', `GitHubソース ${item.path}:${item.line} を開く`);
       group.append(link, document.createTextNode(' '));
     }
     if(group.querySelector('a'))root.append(group);
   }
   function renderRelations(id,rels,symbolMode=false) {
     const root=$(id);root.replaceChildren();
-    if (!rels.length){const p=document.createElement('p');p.className='empty';p.textContent='現在の条件では関係が観測されません。除外ファイルや未取得coverageは上の解析範囲を確認してください。';root.append(p);return;}
-    for(const r of rels){const row=document.createElement('div');row.className='relation-row';const b=document.createElement('button');b.type='button';b.className='relation';
+    if (!rels.length){
+      const p=document.createElement('p');p.className='empty';
+      p.textContent=!selected
+        ? '解析対象ファイルがありません。Graphifyのcoverageを確認してください。'
+        : selected.unavailable
+          ? 'このパスはGraphifyの索引にないため、参照関係は未取得です。'
+          : '現在の方向・関係種別では参照関係が観測されません。解析範囲と未取得一覧も確認してください。';
+      root.append(p);return;
+    }
+    for(const r of rels){
+      const row=document.createElement('div');row.className='relation-row';
+      const b=document.createElement('button');b.type='button';b.className='relation';
       const relationText=symbolMode?r.relation:(r.relations||[]).filter(name => !$('relation').value || name === $('relation').value).join(', ');
-      const label=symbolMode?`${r.label} · ${r.path}`:r.path;
-      b.setAttribute('aria-label',symbolMode?`${label}をシンボル選択。関係: ${relationText}`:`${label}をファイル選択。関係: ${relationText}。${relationCount(r)}件`);
-      const text=document.createElement('span');text.textContent=label;const meta=document.createElement('small');meta.textContent=symbolMode?relationText:`${relationText} · ${nf.format(relationCount(r))} edges`;b.append(text,meta);
-      b.addEventListener('click',()=>symbolMode?selectSymbol(r.id):select(r.path));row.append(b);appendEvidence(row,symbolMode?r.evidence:r.evidence);root.append(row);}
+      const label=symbolMode?(r.label||'Symbol')+' · '+r.path:r.path;
+      b.setAttribute('aria-label',symbolMode?label+'をシンボル選択。関係: '+relationText:label+'をファイル選択。関係: '+relationText+'。'+relationCount(r)+'件');
+      const labelNode=document.createElement('span');labelNode.textContent=label;
+      const meta=document.createElement('small');meta.textContent=symbolMode?relationText:relationText+' · '+nf.format(relationCount(r))+' edges';
+      b.append(labelNode,meta);
+      b.addEventListener('click',()=>symbolMode?selectSymbol(r.id):select(r.path));
+      row.append(b);appendEvidence(row,r.evidence);root.append(row);
+    }
   }
   function renderExpansion(f) {
     const direction=$('direction').value;const maxDepth=Number($('depth').value);
-    const expanded=expandGraph(data,f.path,{direction,relations:$('relation').value?[$('relation').value]:[],maxDepth,maxNodes:400,...(selectedSymbol?{startId:String(selectedSymbol.id)}:{})});
+    const list=$('expansion-list');list.replaceChildren();
+    if(!f || f.unavailable){
+      $('expansion-empty').hidden=false;
+      $('expansion-empty').textContent=f?.coverageState==='excluded'
+        ? '解析対象外のため、多段の関係はありません。個別の除外理由は未提供です。'
+        : f?.unavailable
+          ? 'Graphifyの索引にこのパスがないため、多段の関係は未取得です。'
+          : '解析対象ファイルがありません。';
+      $('expansion-summary').textContent=f?.coverageState==='unavailable'?'候補だが未取得':f?.coverageState==='excluded'?'解析対象外':'';
+      return;
+    }
+    const expanded=expandGraph(data,f.path,{direction,relations:$('relation').value?[$('relation').value]:[],maxDepth,maxNodes:maxExpandedNodes,...(selectedSymbol?{startId:String(selectedSymbol.id)}:{})});
     const nodes=new Map(expanded.nodes.map(node=>[String(node.id ?? node.path),node]));
-    const rootKey=selectedSymbol?String(selectedSymbol.id):f.path;const list=$('expansion-list');list.replaceChildren();
+    const rootKey=selectedSymbol?String(selectedSymbol.id):f.path;
     for(const edge of expanded.edges){
       const from=nodes.get(String(edge.from));const to=nodes.get(String(edge.to));if(!from||!to)continue;
       const depth=Math.max(from.depth,to.depth);const fromKey=String(edge.from),toKey=String(edge.to);const cycle=from.depth===to.depth||((fromKey===rootKey||toKey===rootKey)&&depth>1);
       const target=from.depth>to.depth?from:to;const targetKey=String(target.id ?? target.path);if(targetKey===rootKey)continue;
-      const li=document.createElement('li');const depthLabel=document.createElement('code');depthLabel.textContent=`${depth} 段`;
-      const button=document.createElement('button');button.type='button';button.textContent=target.label?`${target.label} · ${target.path}`:target.path;button.addEventListener('click',()=>target.id!=null?selectSymbol(target.id):select(target.path));
-      const meta=document.createElement('small');const relationText=edge.relation || (edge.relations||[]).join(', ');meta.textContent=`${from.label||from.path} → ${to.label||to.path} · ${relationText} · ${nf.format(edge.count||1)}件${cycle?' · 循環/重複':''}`;li.append(depthLabel,button,meta);appendEvidence(li,edge.evidence);list.append(li);
+      const li=document.createElement('li');const depthLabel=document.createElement('code');depthLabel.textContent=depth+' 段';
+      const button=document.createElement('button');button.type='button';button.textContent=target.label?target.label+' · '+target.path:target.path;button.addEventListener('click',()=>target.id!=null?selectSymbol(target.id):select(target.path));
+      const meta=document.createElement('small');const relationText=edge.relation || (edge.relations||[]).join(', ');meta.textContent=(from.label||from.path)+' → '+(to.label||to.path)+' · '+relationText+' · '+nf.format(edge.count||1)+'件'+(cycle?' · 循環/重複':'');li.append(depthLabel,button,meta);appendEvidence(li,edge.evidence);list.append(li);
     }
     $('expansion-empty').hidden=expanded.edges.length!==0;
-    $('expansion-summary').textContent=expanded.nodes.length?`${expanded.nodes.length-1}件のノード${expanded.truncated?' · 上限により一部省略':''}`:'';
+    $('expansion-empty').textContent='選択した方向と関係種別では、追加の段が観測されません。';
+    $('expansion-summary').textContent=expanded.nodes.length?(expanded.nodes.length-1)+'件のノード'+(expanded.truncated?' · '+maxExpandedNodes+'件の上限で一部省略':''):'';
   }
   function renderCoverage() {
     const coverage=data.coverage; if(!coverage)return;
-    const root=$('coverage');root.hidden=false;root.replaceChildren();
+    const root=$('coverage');root.hidden=false;
+    const grid=$('coverage-summary');grid.replaceChildren();
     const unavailableCount=Array.isArray(coverage.unavailableFiles)?coverage.unavailableFiles.length:null;
-    const values=[['Tracked files',coverage.trackedFiles],['候補',coverage.eligibleFiles ?? coverage.analyzedFiles],['抽出済み',coverage.extractedFiles ?? coverage.analyzedFiles ?? files.length],['未取得',unavailableCount],['他のtracked',coverage.otherTrackedFiles]];
-    for(const [label,value] of values){const cell=document.createElement('div');const strong=document.createElement('strong');strong.textContent=value == null?'未取得':nf.format(value);const span=document.createElement('span');span.textContent=label;cell.append(strong,span);root.append(cell);}
-    const excluded=coverage.excluded || {};const details=document.createElement('details');const summary=document.createElement('summary');const total=Array.isArray(coverage.excludedFiles)?coverage.excludedFiles.length:Object.values(excluded).reduce((n,v)=>n+(Array.isArray(v)?v.length:(Number(v)||0)),0);summary.textContent=`解析対象外 ${nf.format(total)}件 · 除外理由と未取得一覧`;
-    const body=document.createElement('div');const list=document.createElement('ul');
-    for(const [key,value] of Object.entries(excluded)){const item=document.createElement('li');item.textContent=`${key}: ${Array.isArray(value)?nf.format(value.length):nf.format(Number(value)||0)}`;list.append(item);}
-    if(Array.isArray(coverage.excludedFiles) && coverage.excludedFiles.length){const item=document.createElement('li');item.textContent=`除外されたパス: ${coverage.excludedFiles.length}件`;list.append(item);for(const path of coverage.excludedFiles.slice(0,50)){const entry=document.createElement('li');entry.textContent=path;list.append(entry);}if(coverage.excludedFiles.length>50){const more=document.createElement('li');more.textContent=`ほか ${coverage.excludedFiles.length-50}件`;list.append(more);}}
-    if(Array.isArray(coverage.unavailableFiles) && coverage.unavailableFiles.length){const item=document.createElement('li');item.textContent=`未取得の候補ファイル: ${coverage.unavailableFiles.length}件`;list.append(item);for(const path of coverage.unavailableFiles.slice(0,50)){const entry=document.createElement('li');entry.textContent=`抽出されなかった候補: ${path} (原因は未取得)`;list.append(entry);}if(coverage.unavailableFiles.length>50){const more=document.createElement('li');more.textContent=`ほか ${coverage.unavailableFiles.length-50}件`;list.append(more);}}
-    if(!list.children.length){const item=document.createElement('li');item.textContent='除外・未取得の内訳はありません。';list.append(item);}if(coverage.scopeStatus !== 'measured'){const item=document.createElement('li');item.textContent='Graphifyが候補ファイル総数または未抽出ファイル一覧を出力していないため、coverageの分母は未取得です。';list.append(item);}if(coverage.otherTrackedFiles != null){const item=document.createElement('li');item.textContent=`対象候補・明示的除外に含まれないtrackedファイル: ${nf.format(coverage.otherTrackedFiles)}件`;list.append(item);}
-    body.append(list);details.append(summary,body);root.append(details);
+    const excluded=coverage.excluded || {};
+    const totalExcluded=Array.isArray(coverage.excludedFiles)?coverage.excludedFiles.length:Object.values(excluded).reduce((n,v)=>n+(Array.isArray(v)?v.length:(Number(v)||0)),0);
+    const values=[
+      ['解析ファイル',data.stats?.files ?? files.length,'stat-files'],
+      ['Graphifyノード',data.stats?.nodes ?? 0,'stat-nodes'],
+      ['全エッジ',data.stats?.links ?? 0,'stat-links'],
+      ['ファイル間エッジ',data.stats?.crossFileLinks ?? 0,'stat-cross'],
+      ['シンボル関係',data.stats?.symbolEdges ?? 0,'stat-symbol-links'],
+      ['tracked',coverage.trackedFiles,'stat-tracked'],
+      ['候補',coverage.eligibleFiles ?? coverage.analyzedFiles,'stat-candidates'],
+      ['抽出済み',coverage.extractedFiles ?? coverage.analyzedFiles ?? files.length,'stat-extracted'],
+      ['未取得候補',unavailableCount,'stat-unavailable'],
+      ['その他のtracked',coverage.otherTrackedFiles,'stat-other-tracked'],
+    ];
+    for(const [label,value,id] of values){
+      const cell=document.createElement('div');const dt=document.createElement('dt');const dd=document.createElement('dd');
+      dt.textContent=label;dd.id=id;dd.textContent=value==null?'未取得':nf.format(value);cell.append(dt,dd);grid.append(cell);
+    }
+    const summaryParts=['解析範囲'];
+    const candidates=coverage.eligibleFiles ?? coverage.analyzedFiles;
+    const extracted=coverage.extractedFiles ?? coverage.analyzedFiles ?? files.length;
+    if(candidates!=null)summaryParts.push(`${nf.format(extracted)}/${nf.format(candidates)}抽出`);
+    $('coverage-panel-summary').textContent=summaryParts.join(' · ');
+    $('coverage-explanation').textContent=coverage.scopeStatus==='measured'
+      ? `Graphify code-only · ${nf.format(files.length)}件を索引化。対象外と未取得候補は別に扱います。`
+      : '候補ファイル総数または未抽出一覧がGraphifyから提供されていないため、coverageの分母は未取得です。';
+    const details=$('coverage-details');const summary=details.querySelector('summary');const list=details.querySelector('ul');list.replaceChildren();
+    summary.textContent=`解析対象外 ${nf.format(totalExcluded)}件 · 除外内訳と未取得候補`;
+    for(const [key,value] of Object.entries(excluded)){
+      const item=document.createElement('li');item.textContent=`除外区分 ${key}: ${Array.isArray(value)?nf.format(value.length):nf.format(Number(value)||0)}件`;list.append(item);
+    }
+    if(Array.isArray(coverage.excludedFiles) && coverage.excludedFiles.length){
+      const heading=document.createElement('li');heading.textContent=`解析対象外のパス ${nf.format(coverage.excludedFiles.length)}件 · 個別の除外理由は提供されていません`;list.append(heading);
+      for(const path of coverage.excludedFiles.slice(0,50)){const entry=document.createElement('li');entry.textContent=path;list.append(entry);}
+      if(coverage.excludedFiles.length>50){const more=document.createElement('li');more.textContent=`ほか ${coverage.excludedFiles.length-50}件`;list.append(more);}
+    }
+    if(Array.isArray(coverage.unavailableFiles) && coverage.unavailableFiles.length){
+      const heading=document.createElement('li');heading.textContent=`候補にあるが索引にないパス ${nf.format(coverage.unavailableFiles.length)}件 · 抽出されない原因は未報告`;list.append(heading);
+      for(const path of coverage.unavailableFiles.slice(0,50)){const entry=document.createElement('li');entry.textContent=path;list.append(entry);}
+      if(coverage.unavailableFiles.length>50){const more=document.createElement('li');more.textContent=`ほか ${coverage.unavailableFiles.length-50}件`;list.append(more);}
+    }
+    if(!list.children.length){const item=document.createElement('li');item.textContent='対象外・未取得の内訳はありません。';list.append(item);}
+    if(coverage.scopeStatus!=='measured' && !coverage.eligibleFiles && !coverage.analyzedFiles){const item=document.createElement('li');item.textContent='候補ファイル総数と未取得候補の一覧は未取得です。';list.append(item);}
+    if(coverage.otherTrackedFiles!=null){const item=document.createElement('li');item.textContent=`候補・明示的除外に含まれないtrackedファイル: ${nf.format(coverage.otherTrackedFiles)}件`;list.append(item);}
   }
   function renderSelected() {
-    if(!selected){$('selected-path').textContent='解析対象ファイルなし';$('file-metrics').replaceChildren();$('page-status').dataset.kind='warning';$('page-status').textContent='このGraphify索引に選択できるファイルがありません。解析coverageと対象外一覧を確認してください。';$('source-meta').textContent='Source SHA: '+(data.sourceSha||'未取得')+' · '+(data.coverage?.mode||'Graphify static analysis');const incomingEmpty=document.createElement('p');incomingEmpty.className='empty';incomingEmpty.textContent='解析対象がありません';$('incoming-list').replaceChildren(incomingEmpty);const outgoingEmpty=document.createElement('p');outgoingEmpty.className='empty';outgoingEmpty.textContent='解析対象がありません';$('outgoing-list').replaceChildren(outgoingEmpty);$('neighbor-graph').replaceChildren();$('expansion-list').replaceChildren();$('expansion-empty').hidden=false;$('symbols').replaceChildren();return;}
+    const status=$('page-status');
+    if(!selected){
+      $('selected-path').textContent='解析対象ファイルなし';
+      $('file-metrics').replaceChildren();
+      $('symbol-detail').hidden=true;
+      if(shownSourceLink)shownSourceLink.hidden=true;
+      shownSourceLink=null;
+      status.dataset.kind='warning';
+      status.textContent='このGraphify索引に選択できるファイルはありません。解析coverageと対象外一覧を確認してください。';
+      $('source-meta').textContent='Graphify静的解析の索引は空です。source SHA: '+(data.sourceSha||'未取得')+' · '+(data.coverage?.mode||'Graphify static analysis');
+      $('neighbor-graph').replaceChildren();
+      $('graph-limit-summary').textContent='隣接関係は未取得';
+      renderRelations('incoming-list',[]);renderRelations('outgoing-list',[]);
+      renderExpansion(null);
+      $('symbols-title').textContent='シンボル';
+      const symbols=$('symbols');symbols.replaceChildren();
+      const empty=document.createElement('li');empty.className='empty';empty.textContent='解析対象ファイルがありません。';symbols.append(empty);
+      return;
+    }
     const f=selected;
     $('selected-path').textContent=f.path;
     const symbolDetail=$('symbol-detail');symbolDetail.hidden=!selectedSymbol;
-    const symbolSource=$('symbol-source');symbolSource.hidden=true;
-    if (selectedSymbol) {
-      $('selected-symbol').textContent = selectedSymbol.label || `Symbol ${selectedSymbol.id}`;
-      const link = lineEvidenceLink(selectedSymbol);
-      const line = link ? `行 ${selectedSymbol.line}` : '行番号なし';
-      $('symbol-location').textContent = `${selectedSymbol.path} · ${line} · ID ${selectedSymbol.id}`;
-      if (link) {
-        link.id = 'symbol-source';
-        link.textContent = symbolSource.textContent;
-        symbolSource.replaceWith(link);
+    const oldSymbolSource=$('symbol-source');oldSymbolSource.hidden=true;
+    if(selectedSymbol){
+      $('selected-symbol').textContent=selectedSymbol.label||('Symbol '+selectedSymbol.id);
+      const link=lineEvidenceLink(selectedSymbol);
+      const line=link?'行 '+selectedSymbol.line:'行番号なし';
+      $('symbol-location').textContent=selectedSymbol.path+' · '+line+' · ID '+selectedSymbol.id;
+      if(link){
+        link.id='symbol-source';
+        link.textContent='GitHubでシンボル位置を開く';
+        oldSymbolSource.replaceWith(link);
+      }
+    }else{
+      $('selected-symbol').textContent='';
+      $('symbol-location').textContent='';
+    }
+    if(shownSourceLink)shownSourceLink.hidden=true;
+    shownSourceLink=sourceLinkByPath.get(f.path);
+    if(shownSourceLink)shownSourceLink.hidden=false;
+    const pills=$('file-metrics');pills.replaceChildren();
+    if(f.unavailable){
+      const p=document.createElement('span');p.className='pill';
+      p.textContent=f.coverageState==='excluded'?'解析対象外 · 個別の除外理由は未提供':f.coverageState==='unavailable'?'候補だがGraphifyノード未取得 · 原因は未報告':'Graphify索引に未掲載';
+      pills.append(p);
+      const symbolPill=document.createElement('span');symbolPill.className='pill';symbolPill.textContent='シンボル情報 未取得';pills.append(symbolPill);
+    }else{
+      const incomingMetric=selectedSymbol?(selectedSymbol.incoming||[]).length:(f.incoming||[]).length;
+      const outgoingMetric=selectedSymbol?(selectedSymbol.outgoing||[]).length:(f.outgoing||[]).length;
+      for(const item of ['参照元 '+incomingMetric+' '+(selectedSymbol?'シンボル':'ファイル'),'参照先 '+outgoingMetric+' '+(selectedSymbol?'シンボル':'ファイル'),'シンボル '+(f.symbols||[]).length+' 件']){
+        const p=document.createElement('span');p.className='pill';p.textContent=item;pills.append(p);
       }
     }
-    else {$('selected-symbol').textContent='';$('symbol-location').textContent='';}
-    if (shownSourceLink) shownSourceLink.hidden=true;
-    shownSourceLink=sourceLinkByPath.get(f.path);
-    if (shownSourceLink) shownSourceLink.hidden=false;
-    const pills=$('file-metrics');pills.replaceChildren();
-    const incomingMetric=selectedSymbol?selectedSymbol.incoming.length:(f.incoming||[]).length;
-    const outgoingMetric=selectedSymbol?selectedSymbol.outgoing.length:(f.outgoing||[]).length;
-    for(const item of [`参照元 ${incomingMetric} ${selectedSymbol?'シンボル':'ファイル'}`,`参照先 ${outgoingMetric} ${selectedSymbol?'シンボル':'ファイル'}`,`シンボル ${(f.symbols||[]).length} 件`]){const p=document.createElement('span');p.className='pill';p.textContent=item;pills.append(p);}
-    const excluded=Array.isArray(data.coverage?.excludedFiles)?data.coverage.excludedFiles.length:Object.values(data.coverage?.excluded || {}).reduce((n,v)=>n+(Array.isArray(v)?v.length:(Number(v)||0)),0);
-    const unavailable=Array.isArray(data.coverage?.unavailableFiles)?nf.format(data.coverage.unavailableFiles.length)+'件':'未取得';
-    $('page-status').dataset.kind=(f.unavailable || unavailableSymbolId || data.coverage?.unavailableFiles?.length || data.coverage?.eligibleFiles == null || data.coverage?.otherTrackedFiles == null || data.coverage?.otherTrackedFiles > 0)?'warning':'info';
-    const unavailableMessage=f.unavailable?`指定ファイル「${f.path}」はGraphifyの索引にありません。${f.excluded?'明示された解析対象外です。':'coverageと解析範囲から対象外か抽出未取得かを確認してください。'} `:'';
-    const symbolMessage=unavailableSymbolId?`指定シンボル ID「${unavailableSymbolId}」はこの索引にありません。ファイル単位で表示しています。 `:'';
-    $('page-status').textContent=unavailableMessage+symbolMessage+`Source SHA: ${data.sourceSha||'未取得'} · Graphify静的解析 · 解析対象外 ${nf.format(excluded)}件 · 未取得ファイル ${unavailable} · 行根拠は取得できたもののみ表示`;
+    status.dataset.kind=(f.unavailable||unavailableSymbolId||data.coverage?.eligibleFiles==null||data.coverage?.otherTrackedFiles==null)?'warning':'info';
+    let unavailableMessage='';
+    if(f.coverageState==='excluded')unavailableMessage='指定ファイル「'+f.path+'」は解析対象外です。個別の除外理由は提供されていません。 ';
+    else if(f.coverageState==='unavailable')unavailableMessage='指定ファイル「'+f.path+'」は候補台帳にありますが、Graphifyノードは未取得です。原因は報告されていません。 ';
+    else if(f.unavailable)unavailableMessage='指定パス「'+f.path+'」はGraphifyの索引にありません。coverageで対象外・未取得の一覧を確認してください。 ';
+    const symbolMessage=unavailableSymbolId?'指定シンボル ID「'+unavailableSymbolId+'」はこの索引にありません。ファイル単位で表示しています。 ':'';
+    status.textContent=unavailableMessage+symbolMessage+'Graphify静的解析';
     renderGraph(f);
     const direction=$('direction').value;
     const incoming=selectedSymbol?(direction==='outgoing'?[]:selectedSymbolRelations(selectedSymbol,'incoming')):(direction==='outgoing'?[]:(f.incoming||[]).filter(matchesRelation));
     const outgoing=selectedSymbol?(direction==='incoming'?[]:selectedSymbolRelations(selectedSymbol,'outgoing')):(direction==='incoming'?[]:(f.outgoing||[]).filter(matchesRelation));
-    $('incoming-title').textContent=selectedSymbol?`シンボルの参照元 (${incoming.length})`:`参照元 (${(f.incoming||[]).length})`;
-    $('outgoing-title').textContent=selectedSymbol?`シンボルの参照先 (${outgoing.length})`:`参照先 (${(f.outgoing||[]).length})`;
+    $('incoming-title').textContent=selectedSymbol?'シンボルの参照元 ('+incoming.length+')':f.unavailable?'参照元 (未取得)':'参照元 ('+(f.incoming||[]).length+')';
+    $('outgoing-title').textContent=selectedSymbol?'シンボルの参照先 ('+outgoing.length+')':f.unavailable?'参照先 (未取得)':'参照先 ('+(f.outgoing||[]).length+')';
     renderRelations('incoming-list',incoming,Boolean(selectedSymbol));renderRelations('outgoing-list',outgoing,Boolean(selectedSymbol));renderExpansion(f);
-    $('symbols-title').textContent=`このファイルのシンボル (${(f.symbols||[]).length})`;
+    $('symbols-title').textContent=f.unavailable?'シンボル情報 (未取得)':'このファイルのシンボル ('+(f.symbols||[]).length+')';
     const root=$('symbols');root.replaceChildren();
-    if(!f.symbols?.length){const empty=document.createElement('li');empty.className='empty';empty.textContent='Graphifyが抽出したシンボルなし';root.append(empty);}
-    else {for(const symbol of f.symbols){const li=document.createElement('li');if(typeof symbol==='string'){li.textContent=symbol;}else{const button=document.createElement('button');button.type='button';button.className='symbol-button';button.setAttribute('aria-current',String(symbol.id===selectedSymbol?.id));const label=document.createElement('span');label.textContent=symbol.label||`Symbol ${symbol.id}`;const line=document.createElement('small');line.textContent=Number.isInteger(symbol.line)&&symbol.line>0?`L${symbol.line}`:'行なし';button.append(label,line);button.addEventListener('click',()=>selectSymbol(symbol.id));li.append(button);}root.append(li);}}
-    $('source-meta').textContent='Graphify静的解析のファイル/シンボル関係を表示。実行時の到達性や利用状況を示すものではありません。行根拠はGraphifyが実際に提供した場合のみ表示します。';
+    if(f.unavailable||!f.symbols?.length){
+      const empty=document.createElement('li');empty.className='empty';
+      empty.textContent=f.unavailable?'Graphify索引にないためシンボル情報は未取得です。':'Graphifyが抽出したシンボルはありません。';
+      root.append(empty);
+    }else{
+      for(const symbol of f.symbols){
+        const li=document.createElement('li');
+        if(typeof symbol==='string')li.textContent=symbol;
+        else{
+          const button=document.createElement('button');button.type='button';button.className='symbol-button';button.setAttribute('aria-current',String(symbol.id===selectedSymbol?.id));
+          const label=document.createElement('span');label.textContent=symbol.label||('Symbol '+symbol.id);
+          const line=document.createElement('small');line.textContent=Number.isInteger(symbol.line)&&symbol.line>0?'L'+symbol.line:'行なし';
+          button.append(label,line);button.addEventListener('click',()=>selectSymbol(symbol.id));li.append(button);
+        }
+        root.append(li);
+      }
+    }
+    $('source-meta').textContent='Source SHA: '+(data.sourceSha||'未取得')+' · Graphify静的解析のファイル/シンボル関係を表示します。実行時の到達性や利用状況を示すものではありません。行根拠はGraphifyが実際に提供した場合のみ表示します。';
   }
-  $('search').addEventListener('input',renderFiles);
-  $('area').addEventListener('change',renderFiles);
-  $('no-inbound').addEventListener('change',renderFiles);
-  for(const id of ['direction','relation','depth'])$(id).addEventListener('change',()=>{updateUrl('replace');renderSelected();});
-  addEventListener('popstate',()=>{const params=new URLSearchParams(location.search);const path=params.get('file');if(byPath.has(path)){selected=byPath.get(path);}else if(path){selected=unavailableRequested||{path,symbols:[],incoming:[],outgoing:[],unavailable:true,excluded:Array.isArray(data.coverage?.excludedFiles)&&data.coverage.excludedFiles.includes(path)};}selectedSymbol=symbolById.get(params.get('symbol'))||null;if(selectedSymbol&&selectedSymbol.path!==selected?.path)selectedSymbol=null;unavailableSymbolId=params.get('symbol')&&!selectedSymbol?params.get('symbol'):null;$('direction').value=['incoming','outgoing'].includes(params.get('direction'))?params.get('direction'):'both';$('relation').value=relationNames.includes(params.get('relation'))?params.get('relation'):'';$('depth').value=['1','2','3'].includes(params.get('depth'))?params.get('depth'):'1';renderFiles();renderSelected();});
-  $('direction').value=['incoming','outgoing'].includes(query.get('direction'))?query.get('direction'):'both';$('relation').value=relationNames.includes(query.get('relation'))?query.get('relation'):'';$('depth').value=['1','2','3'].includes(query.get('depth'))?query.get('depth'):'1';
+  let resultAnnouncementTimer=null;
+  function announceSearchResults(){
+    clearTimeout(resultAnnouncementTimer);
+    resultAnnouncementTimer=setTimeout(()=>{
+      $('page-status').dataset.kind=$('file-list .empty')?'warning':'info';
+      $('page-status').textContent=$('file-count').textContent;
+    },300);
+  }
+  $('index-state').querySelector('option[value="unavailable"]').disabled=!Array.isArray(data.coverage?.unavailableFiles);
+  $('index-state').querySelector('option[value="excluded"]').disabled=!Array.isArray(data.coverage?.excludedFiles);
+  const allPaths=[...files.map(file=>file.path),...coverageByPath.keys()];
+  for(const area of [...new Set(allPaths.map(path=>path.split('/')[0]))].sort()){
+    if([...$('area').options].some(option=>option.value===area))continue;
+    const option=document.createElement('option');option.value=area;option.textContent=area;$('area').append(option);
+  }
+  $('search').addEventListener('input',()=>{renderFiles();announceSearchResults();});
+  $('area').addEventListener('change',()=>{renderFiles();announceSearchResults();});
+  $('index-state').addEventListener('change',()=>{
+    if($('index-state').value!=='indexed')$('no-inbound').checked=false;
+    renderFiles();announceSearchResults();
+  });
+  $('no-inbound').addEventListener('change',()=>{renderFiles();announceSearchResults();});
+  $('reset-filters').addEventListener('click',()=>{
+    $('search').value='';$('area').value='';$('index-state').value='indexed';$('no-inbound').checked=false;
+    renderFiles();$('search').focus();
+  });
+  for(const id of ['direction','relation','depth','display-limit'])$(id).addEventListener('change',()=>{updateUrl('replace');renderSelected();});
+  const mobileExplorer=matchMedia('(max-width: 850px)');
+  const fileExplorer=$('file-explorer');
+  const syncExplorer=()=>{fileExplorer.open=!mobileExplorer.matches;};
+  syncExplorer();
+  mobileExplorer.addEventListener('change',syncExplorer);
+  addEventListener('popstate',()=>{
+    const params=new URLSearchParams(location.search);const path=params.get('file');
+    if(byPath.has(path))selected=byPath.get(path);
+    else if(path){
+      selected=coverageByPath.get(path)||{path,symbols:[],incoming:[],outgoing:[],unavailable:true,excluded:false,coverageState:'unknown'};
+      if(!coverageByPath.has(path))coverageByPath.set(path,selected);
+    }
+    else selected=firstChoice;
+    selectedSymbol=symbolById.get(params.get('symbol'))||null;
+    if(selectedSymbol&&selectedSymbol.path!==selected?.path)selectedSymbol=null;
+    if(selected?.unavailable)selectedSymbol=null;
+    unavailableSymbolId=params.get('symbol')&&!selectedSymbol?params.get('symbol'):null;
+    $('direction').value=['incoming','outgoing'].includes(params.get('direction'))?params.get('direction'):'both';
+    $('relation').value=relationNames.includes(params.get('relation'))?params.get('relation'):'';
+    $('depth').value=['1','2','3'].includes(params.get('depth'))?params.get('depth'):'1';
+    $('display-limit').value=['8','16','24'].includes(params.get('limit'))?params.get('limit'):'8';
+    renderFiles();renderSelected();
+  });
+  $('direction').value=['incoming','outgoing'].includes(query.get('direction'))?query.get('direction'):'both';
+  $('relation').value=relationNames.includes(query.get('relation'))?query.get('relation'):'';
+  $('depth').value=['1','2','3'].includes(query.get('depth'))?query.get('depth'):'1';
+  $('display-limit').value=['8','16','24'].includes(query.get('limit'))?query.get('limit'):'8';
   renderCoverage();renderFiles();renderSelected();
 })();
 </script>

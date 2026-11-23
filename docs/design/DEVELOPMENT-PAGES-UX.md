@@ -1,6 +1,7 @@
 # GitHub Pages 統合ポータル — サイトマップと画面UX設計
 
-**文書種別: 設計詳細・提案（新しいルート配置・機能拡張は未承認、未実装）。対象: GitHub Pages上のCodexia開発・設計・監査ビューアー。** 現行機能・実装根拠は [Pages機能棚卸し](../verification/PAGES-FUNCTION-INVENTORY.md)。公開・検証の現行正本は [CI/CD](../verification/CI-CD.md)、[Repository Audit](../../.github/workflows/repository-audit.yml)、[Architecture Atlas](../verification/ARCHITECTURE-ATLAS.md)、[CI](../verification/CI-DASHBOARD.md)、[Graphify](../verification/GRAPHIFY-PAGES.md)。本書は**Pagesポータルの目標UX案**を規定し、本番Workerアプリ・`/console`・Codexia原稿APIの画面遷移とは別の系統である。図とURL案は動作実装・公開済みの証拠ではない。
+**文書種別は設計詳細。** Codexia の GitHub Pages が提供する開発ポータルの画面と操作を扱う。
+運用と出典は各機能の資料を参照する。[Pages 機能棚卸し](../verification/PAGES-FUNCTION-INVENTORY.md) ／ [CI/CD](../verification/CI-CD.md) ／ [Architecture Atlas](../verification/ARCHITECTURE-ATLAS.md) ／ [CI Observatory](../verification/CI-DASHBOARD.md) ／ [Graphify](../verification/GRAPHIFY-PAGES.md)
 
 ## 目的、閲覧者、設計原則
 
@@ -12,23 +13,25 @@
 - **図は説明、証拠は別。** Architecture Atlasは採用設計を示す。Graphifyは静的観測を示す。CIは選定した公開ワークフローデータを示す。Auditはソースを配る。図・エッジ・待ち時間だけで利用実績、削除可否、全CI成功、本番受入を宣言しない。
 - **秘密と操作権限を持たない。** 静的PagesにはGitHubトークン、VM情報、環境シークレット、原稿データ、管理操作を配置しない。公開されるソース監査データには別途公開許可と機密検査を要求する。
 
-## 1. 目標サイトマップ（URL採否は実装前に確定）
+## 1. サイトマップ
 
-`/`を**開発ポータルのトップ**へ変更し、現在`/`にいる監査トップを`/audit/`へ移すのが推奨案。現在の`/snapshots/<SHA>/`と`/reviews/<SHA>/`はデータ資産の外部リンクとして使われている可能性があるため、公開範囲・利用状況を確認するまで移動・複製しない。`/docs/`の新しいPagesミラーは設けずGitHub上の[設計書の正本](../README.md)へリンクする。
+`/` は開発ポータルのトップ、`/audit/` は監査の入口とする。
+資料の閲覧には `/snapshots/<SHA>/` と `/reviews/<SHA>/` の既存 URL を使う。
+ポータルの文書リンクから GitHub の正本へ移動する。[設計書の正本](../README.md)
 
-| 新しいURLまたは継続するURL | 表示名 / 画面ID | 責務・ユーザーが得る結果 | 現行との差 |
-| --- | --- | --- | --- |
-| `/` | Portal / PORTAL-01 | 分野別サイトマップ、目的説明、各データ版・生成状況、外部Docs/Repoリンク | **新設**。現行のソース監査トップを置換する案 |
-| `/architecture/` | Architecture Atlas / ARCH-01 | 正本の設計図を分類、選択、原文SHAにjump。設計と実装を区別 | **継続**。関連する画面・実装・受入証拠への案内を追加する目標 |
-| `/graph/` | Code Map / GRAPH-01 | Graphify由来のファイル・シンボル検索と静的参照の観察 | **継続**。解析カバレッジ、多段・関係種別・根拠探索を強化する目標 |
-| `/graph/communities.html` | Community Overview / GRAPH-02 | 上流Graphifyによる集約概観 | **継続**。ファイル探索とのコンテキスト付き往復 |
-| `/ci/` | CI Observatory / CI-01 | PR/実行SHAを軸にジョブ時間・ブロッキング経路・履歴・診断JSON | **継続**。適用対象/未計測/required check範囲を明示 |
-| `/audit/` | Source Audit / AUDIT-01 | ブランチ・snapshot・レビュー入力の索引、除外とpartial状態 | **新しい入口**。監査データ自体は再生成元を維持 |
-| `/reviews/<SHA>/` | Review Materials / AUDIT-02 | OCRレビュー入力・差分・収録の根拠・戻り先 | **継続**。レビュワーがダウンロードを実レビューと誤解しない説明 |
-| `/snapshots/<SHA>/` | Source Snapshot Artifacts / AUDIT-03 | Repomixの全体/分割JSONとmanifest | **継続**。データダウンロードの直接URLは保持 |
-| GitHub Docs / Repository / Actions | External | 正本ドキュメント、ソース、実際のActions runへ移動 | 同じサイトのページであると誤認させない |
+| URL | 表示名 / 画面ID | 責務 |
+| --- | --- | --- |
+| `/` | Portal / PORTAL-01 | 主要4機能への入口、サイトマップ、ビルド SHA、GitHub への導線 |
+| `/architecture/` | Architecture Atlas / ARCH-01 | 正本の設計図を選択し、生成 SVG と SHA 固定の原文を閲覧 |
+| `/graph/` | Code Map / GRAPH-01 | Graphify が抽出したファイルとシンボルの静的参照を探索 |
+| `/graph/communities.html` | Community Overview / GRAPH-02 | Graphify の集約概観を閲覧 |
+| `/ci/` | CI Observatory / CI-01 | PR と実行 SHA を起点とする公開 CI テレメトリ、履歴、診断 JSON |
+| `/audit/` | Source Audit / AUDIT-01 | 観測したブランチ、snapshot、レビュー入力の索引と収録状況 |
+| `/reviews/<SHA>/` | Review Materials / AUDIT-02 | OCR が選定したレビュー入力、差分、収録の根拠 |
+| `/snapshots/<SHA>/` | Source Snapshot Artifacts / AUDIT-03 | Repomix の全体 JSON、分割 JSON、manifest |
+| GitHub Docs / Repository / Actions | External | 正本ドキュメント、ソース、Actions の実行記録 |
 
-[参照: 現行生成パス](../verification/PAGES-FUNCTION-INVENTORY.md#2-現在のルートと生成元)。サイトトップの直接URLは`/`であり、Codexia本番Workersの`/`とは**異なるオリジン**。
+サイト内の `/` は GitHub Pages のプロジェクトパス `/codexia/` を指す。[統合ポータルの生成物](../verification/PAGES-FUNCTION-INVENTORY.md#統合ポータルの生成物)
 
 ### 図1: サイトマップ（ページ/生成物の区別）
 
@@ -38,7 +41,7 @@ flowchart TB
     HOME --> ARCH["/architecture/<br/>設計図を探す"]
     HOME --> GRAPH["/graph/<br/>コードの参照を探す"]
     HOME --> CI["/ci/<br/>CI観測を調べる"]
-    HOME --> AUDIT["/audit/ — 提案<br/>ソース監査資料"]
+    HOME --> AUDIT["/audit/<br/>ソース監査資料"]
     HOME --> DOC["GitHub Docs<br/>設計正本・外部リンク"]
     ARCH --> DIAGRAM["図ID #group-n<br/>SVG・SHA固定原文"]
     GRAPH --> FILE["?file=path<br/>1ファイルの参照元/先"]
@@ -61,6 +64,11 @@ flowchart TB
 **Mobile（幅320pxから）:** ヘッダー・ナビを折畳可能にし、カードは1列、サイトマップは読みやすい入れ子リストへ。モーダルでナビを占有しない。長いファイル名/SHAは改行できる一方、全文をコピーできる。キーボード、focus-visible、スクリーンリーダーの見出し階層、reduce-motionに対応する。
 
 **共通ルール:** カードは単なる大きなリンクにせず、説明・対象SHA・閲覧入口を分離。サイトのリンクはサイトルート相対/相対URLを使い`/codexia/`というGitHub Pagesのproject pathを壊さない。状態表示は`loading`・`ready`・`empty`・`unavailable`・`truncated`・`stale`を区別し、HTTPエラーやAPI制限を空データと混同しない。
+
+共通ナビゲーションは、リンクの順序と現在位置を画面幅によらず揃える。
+キーボードで本文に移動できるようにし、フォーカスを明示する。
+主なモバイル操作には 44 CSS px を目安とする操作領域を確保し、長いパスや SHA は折り返す。
+図や表の横スクロールは各表示領域に収める。
 
 ### 図2: トップから各機能に進む画面遷移
 
@@ -89,12 +97,16 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | PORTAL-01 | 全ツール、何を調べられるか、公開の版 | カテゴリを選択、Docsへ移動 | 一部生成なし→個別の利用不可。全体を空白にしない | トップから戻った際に開いていた区画 |
 | ARCH-01 | 設計上の対象/図名/正本SHA | カテゴリ、図選択、ズーム、原文/単体SVG | 描画失敗→原文リンク。図が実装済みとは書かない | 図のハッシュ、倍率は選択後初期化 |
-| GRAPH-01 | 対象SHA、解析対象・除外範囲、選択ファイル | 検索・filter・ファイル選択、多段追跡（目標） | indexed 0・未解析・関係0を区別、relation missingを推定しない | `?file=`と選択方向/絞込条件 |
+| GRAPH-01 | 対象SHA、解析対象・除外範囲、選択ファイル | 検索、ファイルとシンボルの選択、方向と関係種別を絞った多段探索 | indexed 0・未解析・関係0を区別、relation missingを推定しない | `?file=`と選択方向/絞込条件 |
 | GRAPH-02 | コミュニティ概要は集約ノードである | native graphを閲覧し、ファイル探索へ戻る | community 0 ≠ ソース未使用 | 概観から元の選択ファイルへ戻れる導線（目標） |
-| CI-01 | 選択PR/実行SHA、observed time、取得上限 | PR選択、Job/step分析、コピー、GitHubへ | API制限・不完全・失敗/skipを分ける | 選択PR/ソースを戻して比較可能（目標） |
+| CI-01 | 選択 PR と実行 SHA、Verify の結果、観測したボトルネック | PR 選択、job と step の分析、診断 JSON のコピー、GitHub への移動 | API 制限、取得失敗、未計測、切詰め、skip を区別 | PR と実行 SHA を選び直して履歴を比較 |
 | AUDIT-01 | remote branch HEADとパッケージ状態 | branch選択、SHA manifest、レビュー入力 | blocked/partial/除外を明示、完了と扱わない | 同じbranch/SHAに戻れる |
 | AUDIT-02 | OCRによる**レビュー入力**でAIレビュー結果ではない | 差分・完全版ダウンロード、coverage確認 | 生成不可なら除外理由/元SHAへ | AUDIT-01のSHAへ戻す |
 | AUDIT-03 | SOURCE SHA、分割範囲、manifest整合 | JSON閲覧・取得 | 不足/partialは理由を明示 | SHA/branchの元索引 |
+
+狭い画面の Atlas は図の操作領域を優先し、図の検索と設計根拠を必要なときに展開できるようにする。
+Code Map は検索から選択したファイルのグラフへ進み、参照関係の詳細と解析範囲を画面内で確認する。
+Source Audit はブランチごとに詳細を展開し、SHA による直リンクで該当するブランチを表示する。
 
 ## 4. Graphifyの分析UX（重点改善案）
 
@@ -192,9 +204,10 @@ flowchart LR
 
 ## 7. データ、ナビゲーション、公開責務
 
-### サイト一覧の生成契約（目標）
+### サイト一覧の生成契約
 
-単一のPages公開ジョブが生成済みの`index.html`やmanifestを確認し、**同じサイトartifactを参照するサイト登録台帳**をビルド時に作成する案を採用候補とする。例: `site-manifest.json`（**現状は存在しない**）。これは別API/DB/サービスでなく、検証用の公開ファイルである。
+単一の Pages ワークフローが `site-manifest.json` を生成する。
+台帳は同じサイト artifact の経路と出典を記録し、公開前の整合性検査にも使う。[Repository Audit Pages](../../.github/workflows/repository-audit.yml)
 
 推奨属性: `route`、`label`、`description`、`category`、`sourceSha`（対象ごと）、`generatedAt`または`observedAt`（実在する時だけ）、`generationStatus`、`coverageStatus`、`dataKind`（`build-snapshot`/`branch-head-snapshot`/`browser-live`）、`externalDocumentationUrl`、`internalLinks`。`runId`はGitHub Actionsが保証する値がある場合に限る。**秘密・ユーザー情報・CIの任意artifactをmanifestへ転記しない。**
 
@@ -216,11 +229,11 @@ flowchart LR
 
 **最低限の受入シナリオ:**
 
-1. Desktopと320px幅Mobileでトップから**すべての主要機能**へ2操作以内に到達でき、深いURLから戻れる。直接訪問・再読込・失敗表示・キーボード操作が成立する。
+1. 1440×900、768×1024、390×844、320×800 で、トップから全主要機能へ2操作以内で到達できる。直接訪問、再読込、キーボードでの移動、エラーからの回復を確認する。
 2. Graphで既存の`?file=`リンクを保持し、解析されないファイル/孤立ノード/循環/シンボル名重複/エッジなしを区別する。上限で図に出ない隣接が一覧から消えない。
 3. Architectureの図は原文のGit SHAと行に結びつき、提案/未実装機能を実装完了と表示しない。元の`#admin-5`等の図ディープリンクは変えない。
 4. CIでHTTP 403/429、欠損step、履歴の切詰め、失敗/skipを成功と誤記しない。コピー操作は実際のブラウザー結果に従う。
 5. Auditでsecret/非公開branchへの曝露を防ぐ公開判定が行われ、`partial`/`blocked`の資料を完成版と偽らない。
 6. 生成した公開siteのサイトマップ、ナビリンク、asset、manifestの**存在と相互一致**を機械検査する。PR previewのブラウザースモークとmainのPages配信実測は別の証拠にする。
 
-**承認待ちの意思決定:** `/audit/`への監査トップ移動、複数版Graphの保持量、詳細なsite-manifest schema、共通UIの具体デザイン、ソース位置索引のデータモデル、CI task-level telemetryの外部公開要件。これらを**ユーザー承認前に稼働済みの仕様として扱わない**。
+複数版 Graph の保持、追加のソース位置索引、タスク単位の CI テレメトリ公開は将来の設計候補とする。

@@ -93,21 +93,31 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   await page.goto((await serveFixture(fixture, t))+'?file=packages/a.ts', { waitUntil: 'domcontentloaded' });
   assert.equal(await page.locator('#selected-path').textContent(), 'packages/a.ts');
   assert.equal(await page.locator('#stat-symbol-links').textContent(), '6');
-  assert.match(await page.locator('#coverage').innerText(), /未取得/);
-  await page.locator('#coverage summary').click();
-  assert.match(await page.locator('#coverage').innerText(), /除外されたパス: 3件/);
+  assert.match(await page.locator('#coverage').innerText(), /解析範囲/);
+  await page.locator('#coverage-panel > summary').click();
+  assert.match(await page.locator('#coverage').innerText(), /未取得候補/);
+  await page.locator('#coverage-details > summary').click();
+  assert.match(await page.locator('#coverage').innerText(), /解析対象外のパス 3件/);
   assert.match(await page.locator('#coverage').innerText(), /packages\/lost.ts/);
   assert.match(await page.locator('#coverage').innerText(), /候補/);
-  assert.match(await page.locator('#coverage').innerText(), /他のtracked/);
-  assert.equal(await page.locator('#coverage > div').nth(1).locator('strong').innerText(), '5');
-  assert.equal(await page.locator('#coverage > div').nth(4).locator('strong').innerText(), '0');
+  assert.match(await page.locator('#coverage').innerText(), /その他のtracked/);
+  assert.equal(await page.locator('#stat-candidates').innerText(), '5');
+  assert.equal(await page.locator('#stat-other-tracked').innerText(), '0');
   const alphaButton=page.locator('#symbols .symbol-button').filter({ hasText: 'alpha' });
   await alphaButton.focus();
   await page.keyboard.press('Enter');
   assert.equal(new URL(page.url()).searchParams.get('symbol'), 'a-symbol');
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
   assert.equal(await page.locator('#outgoing-list .relation').count(), 1);
+  assert.match(await page.locator('#graph-scope').innerText(), /シンボル間関係/);
+  assert.equal(await page.locator('#neighbor-graph .edge-label').count(), 2);
+  const symbolNodeLabels = await page.locator('#neighbor-graph .node.linked').evaluateAll(nodes => nodes.map(node => ({
+    visible: [...node.querySelectorAll('.node-label, .node-subtitle')].map(label => label.textContent).join(' '),
+    name: node.getAttribute('aria-label'),
+  })));
+  assert.ok(symbolNodeLabels.every(node => node.name.includes(node.visible)), 'symbol button names include their visible labels and path subtitles');
   assert.equal(await page.locator('#symbol-source').isVisible(), true);
+  assert.ok(await page.locator('#symbol-source').evaluate(element => element.getBoundingClientRect().height >= 44));
   assert.equal(await page.locator('#symbol-source').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L4`);
   assert.equal(await page.locator('#outgoing-list .relation-evidence a').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L7`);
   await page.locator('#depth').selectOption('3');
@@ -142,8 +152,45 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.match(await page.locator('#expansion-list').innerText(), /beta/);
   await page.setViewportSize({ width: 320, height: 800 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'long source evidence should wrap within 320px shell');
+  assert.equal(await page.locator('#file-explorer').evaluate(element => element.open), false, 'mobile file explorer starts collapsed so the selected graph remains primary');
+  await page.locator('.file-explorer-summary').click();
   assert.equal(await page.locator('#search').isVisible(), true);
   assert.equal(await page.locator('#neighbor-graph').isVisible(), true);
+  for (const link of await page.locator('.relation-evidence a').all()) {
+    assert.ok((await link.evaluate(element => element.getBoundingClientRect().height)) >= 44, 'source evidence links meet the minimum touch target');
+  }
+});
+
+test('Graphify neighbor graph caps dense directions and preserves the chosen limit in the URL', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR, timeout: 30_000 }, async t => {
+  const require = createRequire(join(process.env.CODEXIA_AUDIT_TOOL_DIR, 'package.json'));
+  const { chromium } = require('playwright-core');
+  const browser = await chromium.launch(process.env.CODEXIA_E2E_CHROMIUM
+    ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM, headless: true }
+    : { channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const rootPath = 'packages/root.ts';
+  const longPath = (direction, index) => `packages/long-folder-${index}/another-deep-folder/very-long-${direction}-destination-${index}.ts`;
+  const incoming = Array.from({ length: 12 }, (_, index) => ({ path: longPath('incoming', index), count: index + 1, relations: ['imports'], relationCounts: { imports: index + 1 }, evidence: [] }));
+  const outgoing = Array.from({ length: 4 }, (_, index) => ({ path: longPath('outgoing', index), count: 1, relations: ['calls'], relationCounts: { calls: 1 }, evidence: [] }));
+  const files = [
+    { path: rootPath, symbols: [], incoming, outgoing },
+    ...incoming.map(edge => ({ path: edge.path, symbols: [], incoming: [], outgoing: [{ path: rootPath, count: edge.count, relations: ['imports'], relationCounts: { imports: edge.count }, evidence: [] }] })),
+    ...outgoing.map(edge => ({ path: edge.path, symbols: [], incoming: [{ path: rootPath, count: 1, relations: ['calls'], relationCounts: { calls: 1 }, evidence: [] }], outgoing: [] })),
+  ];
+  const graphFixture = { ...fixture, stats: { files: files.length, nodes: files.length, links: 16, crossFileLinks: 16 }, coverage: { ...fixture.coverage, eligibleFiles: files.length, extractedFiles: files.length }, files };
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.goto((await serveFixture(graphFixture, t)) + '?file=' + encodeURIComponent(rootPath), { waitUntil: 'domcontentloaded' });
+  assert.equal(await page.locator('#neighbor-graph .node.in').count(), 8);
+  assert.equal(await page.locator('#neighbor-graph .node.out').count(), 4);
+  assert.match(await page.locator('#graph-limit-summary').innerText(), /参照元 8\/12/);
+  const fileNodeLabels = await page.locator('#neighbor-graph .node.linked').evaluateAll(nodes => nodes.map(node => ({
+    visible: [...node.querySelectorAll('.node-label, .node-subtitle')].map(label => label.textContent).join(' '),
+    name: node.getAttribute('aria-label'),
+  })));
+  assert.ok(fileNodeLabels.every(node => node.name.includes(node.visible)), 'truncated file button names include their exact visible labels');
+  await page.locator('#display-limit').selectOption('16');
+  assert.equal(await page.locator('#neighbor-graph .node.in').count(), 12);
+  assert.equal(new URL(page.url()).searchParams.get('limit'), '16');
 });
 
 test('Graphify explorer explains an empty index', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR, timeout: 30_000 }, async t => {
@@ -156,10 +203,12 @@ test('Graphify explorer explains an empty index', { skip: !process.env.CODEXIA_A
   const page = await browser.newPage({ viewport: { width: 320, height: 800 } });
   await page.goto(await serveFixture(emptyFixture, t), { waitUntil: 'domcontentloaded' });
   assert.equal(await page.locator('#selected-path').textContent(), '解析対象ファイルなし');
-  assert.match(await page.locator('#page-status').innerText(), /ファイルがありません/);
-  assert.match(await page.locator('#coverage').innerText(), /未取得\n候補/);
-  await page.locator('#coverage summary').click();
+  assert.match(await page.locator('#page-status').innerText(), /ファイルはありません/);
+  await page.locator('#coverage-panel > summary').click();
+  assert.match(await page.locator('#coverage').innerText(), /未取得/);
+  await page.locator('#coverage-details > summary').click();
   assert.match(await page.locator('#coverage').innerText(), /coverageの分母は未取得/);
+  await page.locator('.file-explorer-summary').click();
   assert.match(await page.locator('#file-list').innerText(), /coverage/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
 });
@@ -186,11 +235,12 @@ test('Graphify explorer pins selected files beyond the result cap and explains u
   assert.equal(await page.locator('#selected-path').textContent(), requested.path);
   assert.equal(await page.locator('#file-list .file-button[aria-current="true"]').count(), 1);
   assert.equal(await page.locator('#file-list .file-button:not(.unavailable)').count(), 200);
-  assert.match(await page.locator('#file-count').innerText(), /選択中のファイルを含む/);
+  assert.match(await page.locator('#file-count').innerText(), /選択中の項目を含む/);
 
   await page.goto((await serveFixture(fixture, t)) + '?file=' + encodeURIComponent('.github/dependabot.yml'));
   assert.equal(await page.locator('#selected-path').textContent(), '.github/dependabot.yml');
-  assert.equal(await page.locator('#file-list .file-button[aria-current="true"]').isDisabled(), true);
+  assert.equal(await page.locator('#file-list .file-button[aria-current="true"]').isDisabled(), false);
+  assert.match(await page.locator('#file-list .file-button[aria-current="true"]').innerText(), /索引にありません/);
   assert.match(await page.locator('#page-status').innerText(), /Graphifyの索引にありません/);
   await page.reload();
   assert.equal(await page.locator('#selected-path').textContent(), '.github/dependabot.yml');
