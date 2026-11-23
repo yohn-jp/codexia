@@ -445,7 +445,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.reload();
   await page.getByRole('status').filter({ hasText: '公開Actions APIの取得範囲に対応するPRがありません。' }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
-  assert.equal(await timeline.getByText('この観測範囲にPRデータがありません。').count(), 1);
+  assert.equal(await timeline.getByText('取得した範囲に対応付けられたPRがありません。').count(), 1);
   mode = 'incomplete';
   await page.reload();
   await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
