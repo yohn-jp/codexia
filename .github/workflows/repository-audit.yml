@@ -7,6 +7,7 @@ on:
       - 'scripts/graphify-pages/**'
       - 'scripts/architecture-diagrams/**'
       - 'scripts/pages-ui/**'
+      - 'scripts/code-scanning-pages/**'
       - 'scripts/pages-smoke.mjs'
       - 'docs/architecture/SYSTEM-DESIGN.md'
       - 'docs/architecture/DATA-MODEL.md'
@@ -78,10 +79,17 @@ jobs:
           test -x "$CHROME"
           echo "CODEXIA_E2E_CHROMIUM=$CHROME" >> "$GITHUB_ENV"
           echo "PUPPETEER_EXECUTABLE_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Install Japanese fonts for faithful Pages browser QA
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+          fc-list :lang=ja family | grep -q 'Noto Sans CJK'
       - name: Test Pages generators, analysis and component interactions
         run: |
           node --test scripts/audit/*.test.mjs scripts/ci-dashboard/*.test.mjs \
-            scripts/graphify-pages/*.test.mjs scripts/architecture-diagrams/*.test.mjs scripts/pages-ui/*.test.mjs
+            scripts/graphify-pages/*.test.mjs scripts/architecture-diagrams/*.test.mjs scripts/pages-ui/*.test.mjs \
+            scripts/code-scanning-pages/*.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6.1.0
@@ -141,6 +149,8 @@ jobs:
       - name: Require usable main snapshot in PR preview
         if: github.event_name == 'pull_request'
         run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
+      - name: Bundle authenticated Code scanning export (no alert data)
+        run: node scripts/code-scanning-pages/pack.mjs "$RUNNER_TEMP/audit-site"
       - name: Assemble the integrated Pages artifact
         run: |
           SITE="$RUNNER_TEMP/audit-site"

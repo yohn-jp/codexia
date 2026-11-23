@@ -69,15 +69,17 @@ function isClosedSchemaMarker(value) {
   return value === false || (isRecord(value) && isRecord(value.not) && Object.keys(value.not).length === 0);
 }
 
-function mapSchema(value, location) {
+function mapSchema(value, location, componentNames) {
   if (typeof value === "boolean") return value;
   if (!isRecord(value)) fail(`invalid JSON Schema at ${location}`);
   if (typeof value.$ref === "string") {
     const match = /^#\/components\/schemas\/([^/]+)$/u.exec(value.$ref);
     if (!match) fail(`unsupported OpenAPI reference ${value.$ref} at ${location}`);
+    const name = decodeURIComponent(match[1]);
+    if (!componentNames.has(name)) fail(`unresolved OpenAPI schema reference ${value.$ref} at ${location}`);
     const remainder = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$ref"));
     if (Object.keys(remainder).length) fail(`OpenAPI reference siblings are not supported at ${location}`);
-    return { $ref: componentRef(decodeURIComponent(match[1])) };
+    return { $ref: componentRef(name) };
   }
   if ("discriminator" in value) fail(`OpenAPI discriminator cannot be translated to Fastify/Ajv without changing schema semantics at ${location}`);
   if ("unevaluatedProperties" in value) {
@@ -88,8 +90,8 @@ function mapSchema(value, location) {
   }
   if ("nullable" in value && typeof value.nullable === "boolean") {
     const { nullable, ...schema } = value;
-    if (!nullable) return mapSchema(schema, location);
-    return { anyOf: [mapSchema(schema, location), { type: "null" }] };
+    if (!nullable) return mapSchema(schema, location, componentNames);
+    return { anyOf: [mapSchema(schema, location, componentNames), { type: "null" }] };
   }
 
   const output = {};
@@ -103,13 +105,13 @@ function mapSchema(value, location) {
       // Fastify/Ajv uses its registered draft-07 schema dialect.
     } else if (["properties", "patternProperties", "$defs", "definitions"].includes(key)) {
       const mapped = {};
-      for (const [childKey, child] of Object.entries(item ?? {})) mapped[childKey] = mapSchema(child, `${location}.${key}.${childKey}`);
+      for (const [childKey, child] of Object.entries(item ?? {})) mapped[childKey] = mapSchema(child, `${location}.${key}.${childKey}`, componentNames);
       output[key === "$defs" ? "definitions" : key] = mapped;
     } else if (key === "items" || key === "additionalProperties" || key === "not") {
-      output[key] = mapSchema(item, `${location}.${key}`);
+      output[key] = mapSchema(item, `${location}.${key}`, componentNames);
     } else if (["allOf", "anyOf", "oneOf"].includes(key)) {
       if (!Array.isArray(item)) fail(`invalid ${key} at ${location}`);
-      output[key] = item.map((child, index) => mapSchema(child, `${location}.${key}[${index}]`));
+      output[key] = item.map((child, index) => mapSchema(child, `${location}.${key}[${index}]`, componentNames));
     } else if (key === "nullable") {
       // Handled above.
     } else if (key === "contentMediaType" || key === "contentEncoding") {
@@ -123,12 +125,12 @@ function mapSchema(value, location) {
   return output;
 }
 
-function objectParameters(parameters, location) {
+function objectParameters(parameters, location, componentNames) {
   const properties = {};
   const required = [];
   for (const parameter of parameters) {
     const name = location.endsWith(".headers") ? parameter.name.toLowerCase() : parameter.name;
-    properties[name] = mapSchema(parameter.schema ?? {}, `${location}.${parameter.name}`);
+    properties[name] = mapSchema(parameter.schema ?? {}, `${location}.${parameter.name}`, componentNames);
     if (parameter.required) required.push(name);
   }
   return {
@@ -139,11 +141,11 @@ function objectParameters(parameters, location) {
   };
 }
 
-function contentSchemas(contents, location) {
+function contentSchemas(contents, location, componentNames) {
   const schemas = {};
   for (const [contentType, entry] of Object.entries(contents ?? {})) {
     if (!isRecord(entry) || !("schema" in entry)) continue;
-    schemas[contentType] = mapSchema(entry.schema, `${location}.${contentType}`);
+    schemas[contentType] = mapSchema(entry.schema, `${location}.${contentType}`, componentNames);
   }
   return schemas;
 }
@@ -152,9 +154,10 @@ function contentSchemas(contents, location) {
 export function toFastifyRoutes(openapi, options = {}) {
   const operations = assertOpenApiContract(openapi, options);
   const components = openapi.components?.schemas ?? {};
+  const componentNames = new Set(Object.keys(components));
   const schemas = Object.entries(components).map(([name, schema]) => ({
     $id: componentRef(name),
-    ...mapSchema(schema, `components.schemas.${name}`),
+    ...mapSchema(schema, `components.schemas.${name}`, componentNames),
   }));
   const routeKeys = new Map();
   const routes = operations.map(({ method, path, operation }) => {
@@ -169,12 +172,12 @@ export function toFastifyRoutes(openapi, options = {}) {
     const pathParameters = parameters.filter(({ in: location }) => location === "path");
     const queryParameters = parameters.filter(({ in: location }) => location === "query");
     const headerParameters = parameters.filter(({ in: location }) => location === "header");
-    if (pathParameters.length) schema.params = objectParameters(pathParameters, `${method} ${path}.params`);
-    if (queryParameters.length) schema.querystring = objectParameters(queryParameters, `${method} ${path}.query`);
-    if (headerParameters.length) schema.headers = objectParameters(headerParameters, `${method} ${path}.headers`);
+    if (pathParameters.length) schema.params = objectParameters(pathParameters, `${method} ${path}.params`, componentNames);
+    if (queryParameters.length) schema.querystring = objectParameters(queryParameters, `${method} ${path}.query`, componentNames);
+    if (headerParameters.length) schema.headers = objectParameters(headerParameters, `${method} ${path}.headers`, componentNames);
 
     const requestContentTypes = Object.keys(operation.requestBody?.content ?? {});
-    const requestBodySchemas = contentSchemas(operation.requestBody?.content, `${method} ${path}.requestBody`);
+    const requestBodySchemas = contentSchemas(operation.requestBody?.content, `${method} ${path}.requestBody`, componentNames);
     const requestSchemaEntries = Object.values(requestBodySchemas);
     if (requestSchemaEntries.length === 1) schema.body = requestSchemaEntries[0];
     else if (requestSchemaEntries.length > 1) schema.body = { oneOf: requestSchemaEntries };
@@ -189,10 +192,10 @@ export function toFastifyRoutes(openapi, options = {}) {
         responseHeaders[status] = Object.fromEntries(Object.entries(response?.headers ?? {}).map(([name, header]) => [
           name.toLowerCase(), {
             required: Boolean(header.required),
-            schema: mapSchema(header.schema ?? {}, `${method} ${path}.responses.${status}.headers.${name}`),
+            schema: mapSchema(header.schema ?? {}, `${method} ${path}.responses.${status}.headers.${name}`, componentNames),
           },
         ]));
-        const responseSchemas = contentSchemas(response?.content, `${method} ${path}.responses.${status}`);
+        const responseSchemas = contentSchemas(response?.content, `${method} ${path}.responses.${status}`, componentNames);
         const entries = Object.values(responseSchemas);
         if (entries.length === 1) schema.response[status] = entries[0];
         else if (entries.length > 1) schema.response[status] = { oneOf: entries };
