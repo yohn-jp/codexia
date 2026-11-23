@@ -268,7 +268,8 @@ async function api(path, options = {}) {
     headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
   }
-  const response = await fetch(API_ORIGIN + path, init);
+  // Fixture and project data must never be transmitted to the externally configured public origin.
+  const response = await fetch(LOCAL_API_ORIGIN + path, init);
   const text = await response.text();
   let value;
   try { value = text ? JSON.parse(text) : null; }
