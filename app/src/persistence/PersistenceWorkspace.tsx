@@ -10,6 +10,7 @@ import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } 
 import { availableModulePanels } from "../application/AvailableModulePanels";
 import { PersistenceSaveConflictJournalError, runPersistenceSaveProtocol, type PersistenceSaveRequest } from "../application/persistence-save-protocol";
 import { createPersistenceSaveMachine, type PersistenceSaveMachineServices } from "../application/persistence-save-machine";
+import { shouldProtectBeforeUnload } from "../application/unload-protection";
 import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, resolvePersistenceSaveSuccess, type ActiveDocument as PersistenceActiveDocument } from "../application/persistence-save-state";
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
@@ -623,7 +624,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const owned = ownedDraftsRef.current.get(key);
       const unsafeUndo = Boolean(!current.dirty && current.markdown === current.baseMarkdown &&
         ((owned && current.generation > owned.generation) || draftChainsRef.current.has(key)));
-      if ((current.dirty && current.recovery !== "stored") || unsafeUndo) {
+      if (shouldProtectBeforeUnload({
+        isComposing: editorRef.current?.isComposing() ?? false,
+        dirty: current.dirty,
+        recovery: current.recovery,
+        unsafeUndo,
+      })) {
         event.preventDefault();
         event.returnValue = "";
       }
