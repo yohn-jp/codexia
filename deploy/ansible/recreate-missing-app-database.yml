@@ -1,0 +1,146 @@
+---
+# Only the explicitly approved missing logical codexia database may be recreated.
+# The PostgreSQL cluster, Podman volumes, other databases and authentication roles remain intact.
+- name: Require independent approval for logical Codexia database recreation
+  ansible.builtin.assert:
+    that:
+      - codexia_stage == 'bootstrap'
+      - codexia_recreate_missing_app_database_approved | default(false) | bool
+      - codexia_database_initialization_approved | default(false) | bool
+      - codexia_auth_runtime_approved | default(false) | bool
+      - not ansible_check_mode
+    fail_msg: Recreating a missing Codexia database requires the separate bootstrap, auth-runtime and database approvals.
+
+- name: Verify the existing PostgreSQL container and protected credentials
+  ansible.builtin.include_tasks: verify-base-db-container.yml
+
+- name: Refuse recreation while an API container exists
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-api]
+  register: recreate_app_api_container
+  changed_when: false
+  failed_when: recreate_app_api_container.rc not in [0, 1]
+
+- name: Refuse recreation while the API service is active
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-api.service]
+  register: recreate_app_api_service
+  changed_when: false
+  failed_when: false
+
+- name: Inspect the existing API Quadlet without following links
+  ansible.builtin.stat:
+    path: "{{ home }}/.config/containers/systemd/codexia-api.container"
+    follow: false
+  register: recreate_app_api_quadlet
+
+- name: Require an absent API deployment before application database recreation
+  ansible.builtin.assert:
+    that:
+      - recreate_app_api_container.rc == 1
+      - recreate_app_api_service.rc != 0
+      - not recreate_app_api_quadlet.stat.exists
+    fail_msg: Stop and remove only the old API deployment state before recreating the dedicated database.
+
+- name: Observe the dedicated application database owner from the existing PostgreSQL cluster
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - codexia-db
+      - psql
+      - -X
+      - -qAt
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - codexia_admin
+      - -d
+      - postgres
+      - -c
+      - "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'codexia'"
+  register: recreate_app_database_owner
+  changed_when: false
+
+- name: Require the exact application role in the existing cluster
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - codexia-db
+      - psql
+      - -X
+      - -qAt
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - codexia_admin
+      - -d
+      - postgres
+      - -c
+      - >-
+        SELECT count(*) FROM pg_roles
+        WHERE rolname = 'codexia' AND rolcanlogin
+          AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
+          AND NOT rolreplication AND NOT rolbypassrls
+  register: recreate_app_role_count
+  changed_when: false
+
+- name: Refuse unexpected database ownership or missing service role
+  ansible.builtin.assert:
+    that:
+      - recreate_app_database_owner.stdout in ['', 'codexia']
+      - recreate_app_role_count.stdout == '1'
+    fail_msg: The existing PostgreSQL cluster does not contain the expected dedicated application role or database ownership.
+
+- name: Ensure the existing deployment lock parent is private
+  ansible.builtin.file:
+    path: "{{ home }}/.local/state/codexia-deploy"
+    state: directory
+    mode: '0700'
+  when: recreate_app_database_owner.stdout == ''
+
+- name: Recreate only the absent codexia database under the shared host lock
+  ansible.builtin.command:
+    argv:
+      - flock
+      - --exclusive
+      - --nonblock
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - podman
+      - exec
+      - codexia-db
+      - psql
+      - -X
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - codexia_admin
+      - -d
+      - postgres
+      - -c
+      - CREATE DATABASE codexia OWNER codexia
+    expand_argument_vars: false
+  changed_when: true
+  when: recreate_app_database_owner.stdout == ''
+
+- name: Verify the dedicated database owner after approved recreation or reapplication
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - codexia-db
+      - psql
+      - -X
+      - -qAt
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - codexia_admin
+      - -d
+      - postgres
+      - -c
+      - "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'codexia'"
+  register: recreate_app_verified_owner
+  changed_when: false
+  failed_when: recreate_app_verified_owner.rc != 0 or recreate_app_verified_owner.stdout != 'codexia'
