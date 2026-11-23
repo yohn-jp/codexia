@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { parse } from 'yaml';
+import { createRequire } from 'node:module';
+const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
+const { parse } = require('yaml');
 import { selectScanAdmission, exactPullRequestFiles } from './security-admission.mjs';
 
 test('CodeQL and Trivy accept only owned analyzable inputs on exact PR deltas', () => {
@@ -18,7 +20,7 @@ test('CodeQL and Trivy accept only owned analyzable inputs on exact PR deltas', 
     [['pnpm-lock.yaml'], true, true],
     [['packages/api/package.json'], true, true],
     [['deploy/cloudflare/terraform/main.tf'], false, true],
-    [['Dockerfile.backend'], true, true],
+    [['Dockerfile.backend'], false, true],
     [['.github/workflows/codeql.yml'], true, true],
     [['scripts/ci/impact/security-admission.mjs'], true, false],
     [['unknown-domain/new-policy'], true, true],

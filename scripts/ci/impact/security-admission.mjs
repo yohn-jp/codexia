@@ -18,6 +18,7 @@ const codeSource = /\.(?:mjs|cjs|js|jsx|mts|cts|ts|tsx|swift|css|scss|html|svg)$
 
 export function codeqlInput(file) {
   if (compiledCode.test(file) || dependency.test(file) || codeqlConfiguration.test(file)) return true;
+  if (/^(?:Dockerfile|Containerfile)[^/]*$/iu.test(file) || /(?:^|\/)(?:Dockerfile|Containerfile)[^/]*$/iu.test(file)) return false;
   if (ignoredText.test(file) || knownNotCodeql.test(file) || file === '.gitignore') return false;
   // Unknown file kinds may be analyzer inputs or change the extraction policy.
   return true;
