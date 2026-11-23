@@ -249,7 +249,9 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       // the runtime package source tree. Unknown owners remain fail-closed.
       const knownWorkspaceFixture = WORKSPACES.some(item =>
         file.startsWith(`${item.path}/test/`) || file.startsWith(`${item.path}/tests/`));
-      if (!owner && !knownWorkspaceFixture && event === 'pull_request') fullModelOci = true;
+      // The Swift native client is built by its independent iOS lifecycle, not model OCI.
+      const knownNativeClientSource = file.startsWith('ios/CodexiaTransport/Sources/') && file.endsWith('.swift');
+      if (!owner && !knownWorkspaceFixture && !knownNativeClientSource && event === 'pull_request') fullModelOci = true;
       full = true;
       continue;
     }

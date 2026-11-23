@@ -209,6 +209,10 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
   assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
+  const unreviewedNativeCode = ['ios/CodexiaTransport/Sources/CodexiaAPI/unreviewed.mjs'];
+  assert.equal(matchesWorkflowPaths(pushPaths, unreviewedNativeCode), false);
+  assert.equal((await plan(unreviewedNativeCode)).full_model_oci, true,
+    'Only the explicitly native Swift source extension can bypass supplemental model admission');
   // An undeclared nested fixture is not a standalone main-push model input,
   // but an unclassified PR path cannot prove the real-model test is irrelevant.
   const unknownNestedFixture = ['app/unknown/test/new-fixture.mjs'];
