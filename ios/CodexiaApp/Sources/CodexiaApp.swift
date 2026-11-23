@@ -48,6 +48,7 @@ private struct FixtureListView: View {
                 Button("\(count.formatted()) 文字のサンプル") {
                     editor = EditorState(documentID: "fixture-\(count)", text: manuscriptFixture(characterCount: count))
                 }
+                .accessibilityIdentifier("fixture.\(count)")
             }
         }
         .accessibilityIdentifier("screen.outline")

@@ -51,3 +51,7 @@ jobs:
         run: |
           xcodebuild -list
           xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
+      - name: Test app navigation and scene on Simulator
+        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
+        timeout-minutes: 15
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test

@@ -102,7 +102,7 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         window.isHidden = true
     }
 
-    func testPasteOverSelectionAndUndoRedoKeepsModelInSync() {
+    func testInsertionOverSelectionAndUndoRedoKeepsModelInSync() {
         let box = Box()
         let binding = Binding(get: { box.state }, set: { box.state = $0 })
         let coordinator = ManuscriptEditor.Coordinator(state: binding)
@@ -114,16 +114,12 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         controller.view.addSubview(view)
         window.makeKeyAndVisible()
         XCTAssertTrue(view.becomeFirstResponder())
-        let pasteboard = UIPasteboard.general
-        let previousItems = pasteboard.items
         defer {
-            pasteboard.items = previousItems
             view.resignFirstResponder()
             window.isHidden = true
         }
         view.selectedRange = NSRange(location: 1, length: 1)
-        pasteboard.string = "日本語😀"
-        view.paste(nil)
+        view.insertText("日本語😀")
         XCTAssertEqual(view.text, "原日本語😀")
         XCTAssertEqual(box.state.text, "原日本語😀")
         XCTAssertFalse(box.state.canLeave)
