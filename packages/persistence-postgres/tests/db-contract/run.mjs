@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -361,9 +361,12 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   // usually has a different UID, so encode the API identity explicitly in the
   // synthetic archive rather than accidentally testing the host runner's owner.
   const historyArchive = path.join(tempDirectory, 'history.tar');
+  await writeFile(historyArchive, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
   invoke('tar', ['--owner=1000', '--group=1000', '-C', historyDirectory, '-cf', historyArchive, '.']);
+  assert.equal((await stat(historyArchive)).mode & 0o777, 0o600, 'temporary cleartext history archive must stay private');
   const archiveListing = output('tar', ['--numeric-owner', '-tvf', historyArchive]);
-  assert.match(archiveListing, /-rw-------\s+1000\/1000\s+.*jobs\/synthetic-owner-history\.json$/mu,
+  const historyEntry = archiveListing.match(/^(-rw-------)\s+(1000\/1000)\s+.*jobs\/synthetic-owner-history\.json$/mu);
+  assert.ok(historyEntry,
     'synthetic history must retain private mode 0600 and API UID/GID 1000');
   await encryptStream('cat', [historyArchive], agePath, recipient,
     path.join(backup, 'history.tar.age'), 'history archive');
@@ -398,7 +401,14 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   await mkdir(negativeJobs, { recursive: true });
   await writeFile(path.join(negativeJobs, 'synthetic-owner-history.json'), `${historyJson.trimEnd()} tampered\n`, { mode: 0o600 });
   const negativeHistoryArchive = path.join(tempDirectory, 'tampered-history.tar');
+  await writeFile(negativeHistoryArchive, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
   invoke('tar', ['--owner=1000', '--group=1000', '-C', negativeHistoryDirectory, '-cf', negativeHistoryArchive, '.']);
+  assert.equal((await stat(negativeHistoryArchive)).mode & 0o777, 0o600,
+    'temporary tampered cleartext history archive must stay private');
+  const negativeHistoryEntry = output('tar', ['--numeric-owner', '-tvf', negativeHistoryArchive])
+    .match(/^(-rw-------)\s+(1000\/1000)\s+.*jobs\/synthetic-owner-history\.json$/mu);
+  assert.ok(negativeHistoryEntry, 'tampered negative must use the same private API UID/GID as the positive fixture');
+  assert.deepEqual(negativeHistoryEntry.slice(1), historyEntry.slice(1));
   await encryptStream('cat', [negativeHistoryArchive], agePath, recipient,
     path.join(negativeBackup, 'history.tar.age'), 'tampered history archive');
   await rm(negativeHistoryArchive);
@@ -475,6 +485,8 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const tamperedHistoryRejection = await readFile(path.join(proof, 'tampered-history-rejection.txt'), 'utf8');
   assert.match(tamperedHistoryRejection, /Restored history fingerprint mismatch/u,
     'the canonical restore drill must reject altered history with a valid ciphertext checksum list');
+  assert.doesNotMatch(tamperedHistoryRejection, /Permission denied|sha256sum:/iu,
+    'tampered history rejection must come from its digest mismatch, not a reader permission failure');
   return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint, tamperedHistoryRejected: true };
 }
 
