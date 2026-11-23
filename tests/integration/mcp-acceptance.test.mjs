@@ -9,11 +9,9 @@ import { createServer as createNodeServer } from "node:http";
 import test from "node:test";
 
 import { CoreStore } from "../../packages/core/dist/index.js";
-import { MODEL_USAGE_CAPABILITY } from "../../packages/contracts/dist/index.js";
 import { createPostgresPersistence, migratePostgresDatabase } from "../../packages/persistence-postgres/dist/index.js";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 import { createServer } from "../../packages/api/dist/server.js";
-import { HistoricalModelUsageStore } from "../../packages/api/dist/historical-store.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const moduleRequire = createRequire(resolve(root, "modules/mcp/package.json"));
@@ -99,10 +97,6 @@ async function runtimeOptions(cacheDirectory, usageDirectory) {
     loaders,
     moduleDirectories,
     workerEntries,
-    hostCapabilities: [MODEL_USAGE_CAPABILITY],
-    capabilityProviders: {
-      [MODEL_USAGE_CAPABILITY]: { create: () => new HistoricalModelUsageStore(usageDirectory) },
-    },
     cacheDirectory,
   });
 }
@@ -889,6 +883,4 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
   assert.equal(proposal.data.changeSet.provenance.details.origin, "external-agent");
   assert.deepEqual(proposal.data.changeSet.operations.map(({ type }) => type), ["document.create"]);
   assert.equal(providerProbe.callCount(), 0, "MCP dispatch and direct bearer paths must not call the configured model provider");
-  const usage = await ownerAction(host, projectId, "assistant.usage.read", { limit: 200 });
-  assert.deepEqual(usage.data.events, [], "denied Assistant requests must not create provider usage records");
 });

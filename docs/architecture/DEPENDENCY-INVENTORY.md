@@ -70,12 +70,10 @@
 
 ### Optional modules・ファイル形式
 
+生成系の `@ai-sdk/anthropic`、`@ai-sdk/openai-compatible`、`ai`、`jsonrepair` は内部LLM API廃止の設計により直接依存として採用しない。既存の生成結果、作品の設定・原稿、利用履歴の保存形式は別の責務であり、依存ライブラリの削除を理由としてデータを削除しない。
+
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `@ai-sdk/anthropic` | `4.0.106` | Assistant・生成provider | **整理対象**: [MCP-first](MCP-FIRST.md)で内部LLM API拡張は凍結。残す理由・データ保全を先に確認 |
-| `@ai-sdk/openai-compatible` | `2.0.93` | Assistant・生成provider | **整理対象**: 3.0.93へのPRあり。provider v3→v4変更。内部生成の凍結契約に照らし、更新以前に削除・隔離を評価 |
-| `ai` | `7.0.176` | Assistant・AI SDK | **整理対象＋更新対象**: 7.0.177へのPRあり。生成providerの要否判定が先 |
-| `jsonrepair` | `3.15.0` | Assistant・生成JSON回復 | **整理対象**: 内部生成の凍結範囲で利用継続が妥当か確認 |
 | `yaml` | `^2.9.1` | Core・Contracts・modules等 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
 | `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |

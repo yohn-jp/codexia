@@ -21,33 +21,6 @@ export interface SnapshotId {
   projectId: string;
   projectVersion: number;
 }
-/** Optional host-owned historical records; never a project mutation or disposable model cache. */
-export const MODEL_USAGE_CAPABILITY = "host.model-usage";
-export interface ModelUsageEvent {
-  id: string;
-  projectId: string;
-  feature: string;
-  provider: string;
-  model: string;
-  startedAt: string;
-  completedAt: string;
-  state: "completed" | "aborted" | "failed";
-  inputTokens?: number;
-  outputTokens?: number;
-  cost?: number;
-  cacheHit?: boolean;
-  promptVersion?: string;
-  durationMs?: number;
-  queueWaitMs?: number;
-  errorCode?: string;
-}
-export interface ModelUsageStore {
-  append(event: ModelUsageEvent): Promise<void>;
-  list(projectId: string, query?: { from?: string; to?: string; limit?: number; cursor?: string }): Promise<{
-    events: ModelUsageEvent[];
-    nextCursor?: string;
-  }>;
-}
 export interface FileRevision { path: string; revision: string | null }
 export const PRIVATE_PUBLISHING_PATHS = Object.freeze([
   "meta/scriptorium/modules/publishing/episodes.yaml",
