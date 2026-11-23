@@ -151,7 +151,7 @@ test('OAuth callback accepts an unexpired transaction created before the library
           access_token: 'codexia-api-access-token',
           token_type: 'Bearer',
           expires_in: 300,
-          scope: 'codexia:api openid',
+          scope: 'codexia:api',
         });
       }),
       { accessToken: 'codexia-api-access-token', returnPath: '/desktop' },

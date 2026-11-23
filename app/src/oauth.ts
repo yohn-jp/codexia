@@ -53,6 +53,7 @@ interface OAuthTransaction {
 }
 const TRANSACTION_KEY = 'codexia.oauth.pkce.v1';
 const TRANSACTION_MAX_AGE_MS = 10 * 60 * 1000;
+const API_SCOPE = 'codexia:api';
 
 function trustedHttpsUrl(value: unknown, name: string): URL {
   let url: URL;
@@ -79,8 +80,8 @@ function validateConfig(config: OAuthWebConfig): URL {
   if (issuer.origin !== redirect.origin) throw new Error("OAuth login must use the Web application's exact origin.");
   if (!config.clientId.trim() || !config.apiAudience.trim()) throw new Error('OAuth client ID and API audience are required.');
   trustedHttpsUrl(config.apiAudience, 'API audience');
-  if (!config.scopes.length || config.scopes.some(scope => !/^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope))) {
-    throw new Error('At least one valid OAuth scope is required.');
+  if (!config.scopes.includes(API_SCOPE) || config.scopes.some(scope => !/^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope))) {
+    throw new Error('OAuth scopes must be valid and include the Codexia API scope.');
   }
   return issuer;
 }
@@ -280,13 +281,10 @@ export async function completeOAuthAuthorization(
     throw new Error('The provider did not return a usable API bearer access token.');
   }
 
+  // Better Auth projects the grant onto the requested resource and may omit identity scopes.
   if (token.scope !== undefined) {
     const granted = token.scope.split(' ');
-    if (
-      granted.length !== config.scopes.length ||
-      new Set(granted).size !== granted.length ||
-      !config.scopes.every(scope => granted.includes(scope))
-    ) {
+    if (!granted.includes(API_SCOPE) || new Set(granted).size !== granted.length || granted.some(scope => !config.scopes.includes(scope))) {
       throw new Error('The provider did not grant the requested API scopes.');
     }
   }
