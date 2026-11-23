@@ -1,5 +1,7 @@
 # Better Auth runtime provisioning
 
+> **現行実装の運用手順。** 以下の初回登録は、SSHポートフォワードと一時登録コンテナーを使用する**移行前の実装**である。採用済みの目標では、Ansibleから安全に発行される256-bit一回限りのキーを本人がCloudflare Workersの`/console/setup`に入力し、VM上のsetup-only Fastify/Better Auth APIでPasskey登録する。SSHから一時登録サーバーを手動起動する操作は目標UXに含まない。新しい仕組みが実装・受入済みになるまで、この文書の実行コマンドを新しい仕様の実装証拠と見なさない。設計の正本は[初期導入遷移](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md)と[管理画面遷移](../../docs/design/ADMIN-SCREEN-FLOW.md)。
+
 The [owner security screen flow](../../docs/design/ADMIN-SCREEN-FLOW.md) defines owner-visible credential and session management; the [initial deployment flow](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) owns staged enrollment and its approval gates.
 
 `codexia_stage=auth-runtime` is an explicitly approved stage before standalone API activation. Set `codexia_auth_runtime_approved: true` after reviewing the private control-node inputs. The stage verifies the canonical PostgreSQL container. On a pristine database, set `codexia_database_initialization_approved: true` and `codexia_auth_bootstrap_image` to the reviewed immutable Full digest. Rootless Podman pulls this exact digest if it is missing. The canonical initializer applies the application schema first under the shared host lock. The stage then provisions the restricted `codexia_auth_runtime` role, the separate `codexia_auth` schema and protected secrets. The isolated enrollment launcher applies the Better Auth migrations. The public API remains stopped until protected deployment.
