@@ -42,6 +42,7 @@
     {"kind":"route","id":"HEAD /health/live","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
     {"kind":"route","id":"HEAD /health/ready","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
     {"kind":"route","id":"HEAD /health/startup","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
+    {"kind":"route","id":"POST /api/auth/codexia/owner-session","classification":"candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"},
     {"kind":"route","id":"POST /api/auth/oauth2/consent-context","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
     {"kind":"route","id":"POST /api/inbox/read-all","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
     {"kind":"route","id":"POST /api/v1/persistence/projects","classification":"UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"},
