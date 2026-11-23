@@ -31,7 +31,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
         // Never replace a live input session. The model rejects stale responses,
         // and the text view remains the owner of IME and selection while focused.
         guard view.markedTextRange == nil, !view.isFirstResponder,
-              view.text != state.text else { return }
+              !view.text.utf8.elementsEqual(state.text.utf8) else { return }
         Self.applyText(state.text, to: view)
     }
 
@@ -76,7 +76,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
             var current = state.wrappedValue
             current.setFocused(false)
             // Install a deferred response before focus can return to this view.
-            if textView.markedTextRange == nil, textView.text != current.text {
+            if textView.markedTextRange == nil, !textView.text.utf8.elementsEqual(current.text.utf8) {
                 ManuscriptEditor.applyText(current.text, to: textView)
             }
             state.wrappedValue = current

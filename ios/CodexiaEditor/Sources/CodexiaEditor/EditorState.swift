@@ -32,7 +32,7 @@ public struct EditorState {
     public var canLeave: Bool { version == protectedVersion && !isComposing }
 
     public mutating func edit(_ text: String) {
-        guard self.text != text else { return }
+        guard !self.text.utf8.elementsEqual(text.utf8) else { return }
         self.text = text
         version += 1
         pendingRemote = nil

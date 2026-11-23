@@ -2,6 +2,13 @@ import XCTest
 @testable import CodexiaEditor
 
 final class EditorStateTests: XCTestCase {
+    func testCanonicallyEquivalentEditPreservesRawSourceAndIsDirty() {
+        var state = EditorState(documentID: "a", text: "が")
+        state.edit("か\u{3099}")
+        XCTAssertEqual(Array(state.text.utf8), Array("か\u{3099}".utf8))
+        XCTAssertFalse(state.canLeave)
+    }
+
     func testResponseCannotOverwriteNewerInput() {
         var state = EditorState(documentID: "a", text: "initial")
         let request = state.beginRemoteRequest()
