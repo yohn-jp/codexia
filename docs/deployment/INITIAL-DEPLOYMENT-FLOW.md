@@ -53,7 +53,7 @@ flowchart TD
 | `base` | network/volume/PG/Tunnel の所望状態 | 固定 volume、Podman、PostgreSQL 17 の同一性 | 既存 DB・container drift を拒否 |
 | `auth-runtime` | 審査済み Full digest、DB・認証初期化承認 | 原稿 migration ledger、別 auth role/schema、秘密設定 | API は非公開のまま停止 |
 | 初回キー発行 | Ansibleの承認済み新規構築、空の正本DB、CSPRNG | 256-bit一回限りキーのハッシュ保存、期限と配送先の明示、setup-only入口の検証 | 既存owner・復旧中なら発行禁止。ログ/CI artifactに平文キーを出さない |
-| owner・client 登録（設計目標） | Workersの`/console/setup`、有効な初期キー、本人のWebAuthn | Better Authの永続owner、Passkey、Web/iOS/内省client照合。キー即時失効 | 中断・再送・競合でもowner一人。未完成時は業務APIを有効化しない |
+| owner・client 登録 | Workersの`/console/setup`、有効な初期キー、本人のWebAuthn | Better Authの永続owner、Passkey、Web/iOS/内省client照合。キー即時失効 | 中断・再送・競合でもowner一人。未完成時は業務APIを有効化しない |
 | `deploy` | protected GitHub Environment と証明済み Full digest | migration・auth・origin・API ready | durable transaction record に従い復旧 |
 | 公開受入 | 実 VM、Cloudflare、実ブラウザー、独立復元ホスト | API・OAuth・reboot・バックアップの観測 | fixture 成功だけで受入扱いしない |
 
