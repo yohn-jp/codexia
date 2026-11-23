@@ -187,13 +187,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ matrix.group == 'tests' && '0' || '1' }}
+          fetch-depth: ${{ matrix.group == 'trace' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
       - uses: actions/setup-python@v6.1.0
         # Use the canonical per-task plan; coverage/test-type checks do not need StrictDoc or Chromium.
-        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
+        if: matrix.group == 'trace'
         with:
           python-version: '3.12'
       - name: Prepare exact pnpm toolchain
@@ -211,7 +211,7 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Install pinned StrictDoc and Chromium
-        if: matrix.group == 'tests' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'requirements-trace')
+        if: matrix.group == 'trace'
         run: |
           python -m venv "$RUNNER_TEMP/strictdoc"
           "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
