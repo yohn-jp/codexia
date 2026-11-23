@@ -435,7 +435,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   }
   mode = 'empty';
   await page.reload();
-  await page.getByRole('status').filter({ hasText: 'Bounded recent pull_request workflow sample' }).waitFor();
+  await page.getByRole('status').filter({ hasText: '公開Actions APIの取得範囲に対応するPRがありません。' }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
   assert.equal(await timeline.getByText('この観測範囲にPRデータがありません。').count(), 1);
   mode = 'incomplete';
