@@ -58,6 +58,18 @@ value.updatedAt=new Date().toISOString();
 fs.writeFileSync(path,JSON.stringify(value,null,2)+'\n',{mode:0o600});
 NODE
 }
+record_phase_timing() {
+  local key=$1 started=$2 duration
+  duration=$(( $(date +%s%3N) - started ))
+  node - "$report" "$key" "$duration" <<'PHASE'
+const fs=require('node:fs');const [p,key,ms]=process.argv.slice(2);
+const r=JSON.parse(fs.readFileSync(p,'utf8'));
+r.timings ||= {};r.timings.phases ||= {};
+r.timings.phases[key]={durationMs:Number(ms)};
+fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+PHASE
+  echo "LIFECYCLE_TIMING ${key}=${duration}ms"
+}
 redact_log() {
   local source=$1 target=$2
   sed -E \
@@ -328,6 +340,7 @@ const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);c
 NODE
 trap 'record_failure "$?" "${BASH_LINENO[0]:-0}" "$BASH_COMMAND"' ERR
 set_state first_activation NOT_CHECKED 'runtime fixture not started'
+bootstrap_started=$(date +%s%3N)
 if [[ "${GITHUB_ACTIONS:-}" != true ]]; then
   mark_fixture_unavailable 'execution is not on an isolated GitHub Actions runner'
   exit 78
@@ -464,6 +477,8 @@ node - "$report" "$podman_version" "$podman_rootless" "$systemd_version" "$postg
 const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 CAPABILITIES
 
+record_phase_timing host_bootstrap "$bootstrap_started"
+sshfs_started=$(date +%s%3N)
 # Use a dedicated rootless SSHFS server container. Its IP is distinct from host
 # interfaces; backup.sh retains its normal remote-filesystem and same-host checks.
 rootless_podman network create codexia-lifecycle-backup >/dev/null
@@ -524,13 +539,17 @@ fi
 backup_mounted=true
 rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount"
 set_state backup_remote_filesystem IN_PROGRESS 'isolated SSHFS container mounted; waiting for the canonical deployment backup'
+record_phase_timing sshfs_fixture "$sshfs_started"
 age-keygen -o "$tmp/age-identity" >/dev/null
 backup_recipient=$(sed -n 's/^# public key: //p' "$tmp/age-identity")
 test "$backup_recipient" != ''
 
 # Resolve and verify published images before installing the disposable registry map.
 # This keeps public GHCR pulls pointed at GHCR, never at the empty test registry.
+candidate_started=$(date +%s%3N)
 node "$repo_root/scripts/push-app-lifecycle.mjs" prepare
+record_phase_timing backend_candidate "$candidate_started"
+registry_started=$(date +%s%3N)
 
 # The service user's OCI registry map points the production image name at a
 # disposable local registry. No image or package is published to GHCR.
@@ -556,6 +575,7 @@ for _ in $(seq 1 30); do
 done
 curl --fail --silent http://127.0.0.1:5000/v2/ >/dev/null
 node "$repo_root/scripts/push-app-lifecycle.mjs" mirror
+record_phase_timing registry_mirror "$registry_started"
 database_image_name=$(rootless_podman inspect --format '{{.ImageName}}' codexia-db)
 database_image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-db)
 database_repo_digests=$(rootless_podman image inspect --format '{{json .RepoDigests}}' "$database_image_name")
@@ -677,6 +697,7 @@ rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
 }
+scenario_started=$(date +%s%3N)
 case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
   app)
     run_application_lifecycle
@@ -690,6 +711,7 @@ case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
     exit 1
     ;;
 esac
+record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$scenario_started"
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE
