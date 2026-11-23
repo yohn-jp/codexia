@@ -1,6 +1,6 @@
 // Canonical verification inventory: workflow matrices, coverage and release eligibility share these names.
 export const WORKSPACES = [
-  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api'].map(id => ({ id, path: `packages/${id}` })),
+  ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract'].map(id => ({ id, path: `packages/${id}` })),
   { id: 'app', path: 'app' },
   ...['story', 'nlp', 'diagnostics', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'].map(id => ({ id, path: `modules/${id}` })),
 ];
@@ -8,6 +8,7 @@ export const UNIT_TARGETS = [...WORKSPACES, { id: 'root', path: '.' }];
 export const TYPECHECK_TARGETS = [
   { id: 'foundations', workspaces: ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime'] },
   { id: 'core-api', workspaces: ['core', 'api'] },
+  { id: 'http-contract', workspaces: ['http-contract'] },
   { id: 'app', workspaces: ['app'] },
   { id: 'modules-a', workspaces: ['story', 'nlp', 'diagnostics', 'semantic', 'speaker'] },
   { id: 'modules-b', workspaces: ['assistant', 'publishing', 'mcp', 'search'] },
@@ -23,21 +24,23 @@ export const BROWSER_SHARDS = [
 ];
 export const VERIFICATION_TASKS = [
   ...UNIT_TARGETS.map(({ id }) => `unit-${id}`),
+  'db-contract',
   ...TYPECHECK_TARGETS.map(({ id }) => `typecheck-${id}`),
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
-  'coverage',
+  'coverage', 'architecture-g5', 'requirements-trace',
 ];
 // Execution groups batch work without removing any validation obligation.
 // Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
-  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'root'].map(id => `unit-${id}`),
+  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`).concat('db-contract'),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
+  'unit-architecture': ['architecture-g5'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
-  'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
+  'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage', 'requirements-trace'],
   'build-core': ['build-core', 'audit-core'],
   'build-full': ['build-full'],
   'oci-core': ['oci-core'],
@@ -59,3 +62,9 @@ export function requiredBuildProfile(group) {
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
 export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'unit', 'types', 'build', 'oci', 'browser']);
+
+/** @param {string[]} tasks */
+export function requiresWorkspacePreparation(tasks) {
+  return tasks.some(task => task.startsWith('unit-') || task.startsWith('typecheck-') ||
+    task.startsWith('test-types-') || task === 'safety');
+}

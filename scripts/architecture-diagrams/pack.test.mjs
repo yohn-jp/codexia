@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createManifest, DIAGRAM_DOCUMENTS, parseMermaidDiagrams, SCREEN_IMPLEMENTATION_PATHS } from './pack.mjs';
+import {
+  createManifest,
+  DIAGRAM_DOCUMENTS,
+  LIKEC4_DERIVATIVE_PATH,
+  parseGeneratedSystemDiagram,
+  parseMermaidDiagrams,
+  SCREEN_IMPLEMENTATION_PATHS,
+  SYSTEM_DESIGN_PATH,
+} from './pack.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = 'a'.repeat(40);
@@ -14,19 +22,31 @@ test('all canonical system, UI, administration and delivery diagrams have stable
     markdown: readFileSync(join(root, section.path), 'utf8'),
   }));
   const catalog = readFileSync(join(root, 'docs/design/SCREEN-CONTROL-CATALOG.md'), 'utf8');
-  const manifest = createManifest(sha, sources, catalog);
+  const modelSource = readFileSync(join(root, 'docs/architecture/likec4/model.likec4'), 'utf8');
+  const derivative = readFileSync(join(root, LIKEC4_DERIVATIVE_PATH), 'utf8');
+  const systemDesign = readFileSync(join(root, SYSTEM_DESIGN_PATH), 'utf8');
+  const generatedSystemDiagram = parseGeneratedSystemDiagram(modelSource, derivative, systemDesign);
+  const manifest = createManifest(sha, sources, catalog, generatedSystemDiagram);
   assert.equal(manifest.format, 'codexia-architecture-atlas/v1');
   assert.equal(manifest.sourceSha, sha);
   const sourceCount = sources.reduce((total, item) =>
     total + item.markdown.split('\n').filter(line => line.trim() === '```mermaid').length, 0);
   assert.ok(sourceCount >= 40, 'The full screen catalog must be rendered');
-  assert.equal(manifest.diagrams.length, sourceCount);
-  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount);
+  assert.equal(manifest.diagrams.length, sourceCount + 1);
+  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount + 1);
   assert.deepEqual([...new Set(manifest.diagrams.map(d => d.group))],
     ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']);
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-4' && d.title.includes('管理コンソール')));
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-5' && d.title.includes('初回所有者登録')));
   assert.ok(manifest.diagrams.some(d => d.id === 'first-3' && d.title.includes('VMの再構築')));
+  const systemOverview = manifest.diagrams.find(d => d.id === 'system-1');
+  assert.equal(systemOverview.title, 'Codexia system context, containers, and trust boundaries');
+  assert.equal(systemOverview.markdown, SYSTEM_DESIGN_PATH);
+  assert.equal(systemOverview.sourceModel, 'docs/architecture/likec4/model.likec4');
+  assert.equal(systemOverview.sourceModelSha256, generatedSystemDiagram.sourceModelSha256);
+  assert.equal(systemOverview.line, generatedSystemDiagram.line);
+  assert.ok(manifest.diagrams.some(d => d.id === 'system-2' && d.title === '運用プレーンと更新'),
+    'The original system-1 locator remains stable and the operations diagram is retained');
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
   const screenSection = DIAGRAM_DOCUMENTS.find(section => section.id === 'screen');

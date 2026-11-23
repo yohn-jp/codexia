@@ -6,9 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS, requiresWorkspacePreparation } from './ci-contract.mjs';
 import { browserRuntimeRequirements, PLAYWRIGHT_IMAGE_DIGESTS } from './ci-browser-image-digests.mjs';
-import { createVerificationPlan } from './ci-impact.mjs';
+import { createVerificationPlan, matchesFullModelOciPath } from './ci-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
@@ -19,6 +19,14 @@ test('the certified graph covers every declared obligation within the twenty-job
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
+  assert.ok(VERIFICATION_GROUPS['unit-core'].includes('db-contract'));
+  assert.ok(VERIFICATION_TASKS.includes('db-contract'));
+  assert.match(readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5']);
+  assert.equal(requiresWorkspacePreparation(['architecture-g5']), false);
+  assert.equal(requiresWorkspacePreparation(['unit-root']), true);
+  const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
+  assert.match(runner, /CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path\.join\(reportDirectory, 'architecture'\)/u);
   assert.deepEqual(REQUIRED_VERIFICATION_JOBS, ['plan', ...Object.keys(VERIFICATION_GROUPS), 'certification']);
   for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile']]) {
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');
@@ -32,6 +40,21 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.equal(modelJob['continue-on-error'], undefined);
   assert.equal(REQUIRED_VERIFICATION_JOBS.includes(modelJob.name), false);
   assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
+  assert.ok(VERIFICATION_GROUPS['types-tests'].includes('requirements-trace'));
+  assert.equal(VERIFICATION_TASKS.filter(task => task === 'requirements-trace').length, 1);
+  const strictdocSetup = workflow.jobs.types.steps.find(step => step.name === 'Install pinned StrictDoc and Chromium');
+  assert.equal(strictdocSetup.if, "matrix.group == 'tests'");
+  assert.match(strictdocSetup.run, /requirements\.lock\.txt/u);
+  assert.match(strictdocSetup.run, /playwright install --with-deps chromium/u);
+  const python = workflow.jobs.types.steps.find(step => step.uses === 'actions/setup-python@v6.1.0');
+  assert.equal(python.if, "matrix.group == 'tests'");
+  assert.equal(python.with['python-version'], '3.12');
+  const typesCheckout = workflow.jobs.types.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
+  assert.equal(typesCheckout.with['fetch-depth'], "${{ matrix.group == 'tests' && '0' || '1' }}");
+  const groupRunner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
+  assert.match(groupRunner, /CODEXIA_CI_SOURCE_SHA:\s*sha/u);
+  assert.match(groupRunner, /CODEXIA_CI_TASK:\s*task/u);
+  assert.match(groupRunner, /CODEXIA_CI_REPORT_DIR:\s*path\.join\(reportDirectory, task\)/u);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'workflow_call'), true);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'pull_request'), false);
   const apiUnitJob = workflow.jobs.unit;
@@ -62,6 +85,24 @@ test('the certified graph covers every declared obligation within the twenty-job
   assert.equal(save.with.key, restore.with.key);
   assert.match(modelJobConfig.steps.find(item => item.name === 'Fail on missing or altered model cache files').run, /sha256sum --check --strict/u);
   assert.equal(modelJobConfig.steps.find(item => item.uses?.startsWith('actions/checkout@')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
+});
+test('HTTP contract sources select the dedicated unit and typecheck tasks', () => {
+  const plan = createVerificationPlan({
+    files: ['packages/http-contract/src/main.tsp'],
+    event: 'pull_request',
+    sha: 'a'.repeat(40),
+    base: 'b'.repeat(40),
+  });
+  assert.equal(plan.mode, 'affected');
+  assert.equal(plan.full_model_oci, true);
+  assert.ok(plan.tasks.includes('unit-http-contract'));
+  assert.ok(plan.tasks.includes('typecheck-http-contract'));
+  assert.ok(plan.tasks.includes('test-types-packages'));
+  assert.ok(plan.groups.includes('unit-core'));
+  assert.ok(plan.groups.includes('types-sources'));
+  assert.ok(!plan.tasks.includes('oci-full'));
+  assert.ok(matchesFullModelOciPath('packages/api/src/server.ts'));
+  assert.ok(matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {

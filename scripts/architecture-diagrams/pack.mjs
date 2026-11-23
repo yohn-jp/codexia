@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assertNoPublicSecrets,
+  LIKEC4_SOURCE_PATH,
+  parseGeneratedMermaid,
+} from '../architecture/contract.mjs';
 
 export const DIAGRAM_DOCUMENTS = Object.freeze([
   { id: 'system', label: 'システム全体', path: 'docs/architecture/SYSTEM-DESIGN.md' },
@@ -19,6 +25,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ALLOWED = /^(flowchart|stateDiagram-v2|erDiagram)(?:\s|$)/u;
 const MAX_SOURCE_BYTES = 24 * 1024;
 const MAX_SVG_BYTES = 4 * 1024 * 1024;
+export const LIKEC4_DERIVATIVE_PATH = 'docs/architecture/likec4/generated/system-overview.mmd';
+export const SYSTEM_DESIGN_PATH = 'docs/architecture/SYSTEM-DESIGN.md';
 // Curated links to code that directly owns the matching route or screen surface.
 // These are related-source pointers, not proof that the design contract is accepted.
 export const SCREEN_IMPLEMENTATION_PATHS = Object.freeze({
@@ -80,19 +88,65 @@ export function parseMermaidDiagrams(markdown, section) {
   return diagrams;
 }
 
-export function createManifest(sha, sources, screenCatalog = '') {
+/** @param {string} modelSource @param {string} derivative @param {string} systemDesign */
+export function parseGeneratedSystemDiagram(modelSource, derivative, systemDesign) {
+  assert.equal(typeof modelSource, 'string', 'LikeC4 model source must be text');
+  assert.equal(typeof systemDesign, 'string', 'System design must be text');
+  const parsed = parseGeneratedMermaid(derivative);
+  const sourceSha256 = createHash('sha256').update(modelSource, 'utf8').digest('hex');
+  assert.equal(parsed.sourceSha256, sourceSha256,
+    'Atlas LikeC4 derivative is stale for the model source');
+  const lines = systemDesign.split(/\r?\n/u);
+  const pointerLines = lines.flatMap((line, index) =>
+    line.includes(`[LikeC4 system model](./likec4/model.likec4)`) ? [index + 1] : []);
+  assert.equal(pointerLines.length, 1,
+    'System design must contain one canonical pointer to the LikeC4 system model');
+  assertNoPublicSecrets([modelSource, derivative, systemDesign]);
+  return {
+    id: 'system-1',
+    group: 'system',
+    groupLabel: 'システム全体',
+    title: parsed.title,
+    markdown: SYSTEM_DESIGN_PATH,
+    line: pointerLines[0],
+    kind: parsed.source.split(/\s/u, 1)[0],
+    screenIds: [],
+    designStatus: null,
+    implementationPaths: [],
+    image: 'svg/system-1.svg',
+    source: parsed.source,
+    sourceModel: LIKEC4_SOURCE_PATH,
+    sourceModelSha256: sourceSha256,
+  };
+}
+
+export function createManifest(sha, sources, screenCatalog = '', generatedSystemDiagram = null) {
   assert.match(sha, /^[a-f0-9]{40}$/u, 'Expected a source commit SHA');
+  assert.ok(generatedSystemDiagram, 'Incomplete architecture atlas: LikeC4-derived system-1 is required');
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
-  assert.ok(diagrams.length >= 40 && diagrams.length <= 64, 'Incomplete or excessive architecture diagram catalog');
-  assert.ok(diagrams.filter(d => d.group === 'screen').length >= 23,
+  const systemDiagrams = diagrams.filter(d => d.group === 'system');
+  assert.ok(systemDiagrams.length > 0, 'Incomplete architecture atlas: system operations Mermaid must remain registered');
+  let systemIndex = 2;
+  const shiftedDiagrams = diagrams.map(diagram => {
+    if (diagram.group !== 'system') return diagram;
+    const shifted = { ...diagram, id: 'system-' + systemIndex };
+    shifted.image = 'svg/' + shifted.id + '.svg';
+    systemIndex++;
+    return shifted;
+  });
+  const catalog = [generatedSystemDiagram, ...shiftedDiagrams];
+  assert.ok(catalog.length >= 40 && catalog.length <= 64, 'Incomplete or excessive architecture diagram catalog');
+  assert.ok(catalog.filter(d => d.group === 'screen').length >= 23,
     'Accepted logical screens require their individual state diagrams');
   for (const group of ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']) {
-    assert.ok(diagrams.some(d => d.group === group), 'Missing required diagram group: ' + group);
+    assert.ok(catalog.some(d => d.group === group), 'Missing required diagram group: ' + group);
   }
+  if (generatedSystemDiagram) assert.equal(generatedSystemDiagram.id, 'system-1',
+    'The LikeC4-derived C4 diagram owns the stable system-1 locator');
   return {
     format: 'codexia-architecture-atlas/v1',
     sourceSha: sha,
-    diagrams: diagrams.map(({ source, ...published }) => ({
+    diagrams: catalog.map(({ source, ...published }) => ({
       ...published,
       screenContracts: parseScreenContracts(screenCatalog, published.screenIds),
     })),
@@ -104,8 +158,22 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
   const sources = await Promise.all(DIAGRAM_DOCUMENTS.map(async section =>
     ({ section, markdown: await readFile(join(root, section.path), 'utf8') })));
   const screenCatalog = await readFile(join(root, SCREEN_CONTROL_PATH), 'utf8');
-  const manifest = createManifest(sha, sources, screenCatalog);
-  const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
+  const [modelSource, derivative, systemDesign] = await Promise.all([
+    readFile(join(root, LIKEC4_SOURCE_PATH), 'utf8'),
+    readFile(join(root, LIKEC4_DERIVATIVE_PATH), 'utf8'),
+    readFile(join(root, SYSTEM_DESIGN_PATH), 'utf8'),
+  ]);
+  const systemDiagram = parseGeneratedSystemDiagram(modelSource, derivative, systemDesign);
+  const mermaidDiagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
+  let systemIndex = 2;
+  const diagrams = [systemDiagram, ...mermaidDiagrams.map(diagram => {
+    if (diagram.group !== 'system') return diagram;
+    const shifted = { ...diagram, id: 'system-' + systemIndex };
+    shifted.image = 'svg/' + shifted.id + '.svg';
+    systemIndex++;
+    return shifted;
+  })];
+  const manifest = createManifest(sha, sources, screenCatalog, systemDiagram);
   const output = join(resolve(siteDir), 'architecture');
   const stage = await mkdtemp(join(tmpdir(), 'codexia-mermaid-'));
   try {

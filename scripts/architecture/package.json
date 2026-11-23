@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "likec4": "1.61.0"
+  },
+  "private": true,
+  "name": "@codexia/architecture-tools",
+  "description": "Isolated deterministic architecture validation tools",
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

@@ -56,6 +56,8 @@ export interface OAuthConsentContext {
   readonly redirectUri: string;
 }
 
+export type OwnerSessionCheck = { readonly status: 200 } | { readonly status: 401 | 403 };
+
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
 const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
@@ -674,6 +676,17 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         status: 200,
         consents: consents.map(({ id, clientId, scopes, createdAt, updatedAt }) => ({ id, clientId, scopes, createdAt, updatedAt })),
       } as const;
+    },
+    /** Confirms only the configured owner session; never returns account or credential data. */
+    async checkOwnerSession(headers: Headers): Promise<OwnerSessionCheck> {
+      if (headers.get("origin") !== publicOrigin.origin || headers.has("authorization")) {
+        return { status: 403 };
+      }
+      if (!headers.has("cookie")) return { status: 401 };
+      const session = await auth.api.getSession({ headers });
+      if (!session) return { status: 401 };
+      if (!config.ownerSubject || session.user.id !== config.ownerSubject) return { status: 403 };
+      return { status: 200 };
     },
     async getConsentContext(headers: Headers, oauthQuery: string): Promise<OAuthConsentContext> {
       const session = await auth.api.getSession({ headers });

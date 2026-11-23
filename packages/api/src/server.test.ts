@@ -471,6 +471,49 @@ it("starts standalone API only with Better Auth and exposes no static session mu
   assert.equal(retiredLogout.headers.get("set-cookie"), null);
 });
 
+it("confirms only a cookie-backed owner session on the exact same origin", async (t) => {
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-owner-session-route-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const checks: string[] = [];
+  const betterAuth = {
+    issuer: TEST_ISSUER,
+    audience: TEST_AUDIENCE,
+    toHeaders: (input: Record<string, string | string[] | undefined>) => new Headers(input as HeadersInit),
+    async checkOwnerSession(headers: Headers) {
+      checks.push(headers.get("cookie") ?? "");
+      if (headers.has("authorization") || !headers.has("cookie")) return { status: headers.has("authorization") ? 403 : 401 } as const;
+      return { status: headers.get("cookie") === "codexia_session=owner" ? 200 : 403 } as const;
+    },
+  } as unknown as NonNullable<ApiServerOptions["betterAuth"]>;
+  const api = await startCustomApi(makeStore(), staticDir, { betterAuth });
+  t.after(api.close);
+  const endpoint = api.base + "/api/auth/codexia/owner-session";
+  const post = (headers: Record<string, string> = {}, body = "{}") => fetch(endpoint, {
+    method: "POST",
+    headers: { Origin: api.base, "Content-Type": "application/json", ...headers },
+    body,
+  });
+
+  const owner = await post({ Cookie: "codexia_session=owner" });
+  assert.equal(owner.status, 200);
+  assert.equal(owner.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await owner.json(), { authenticated: true });
+  assert.equal(checks.at(-1), "codexia_session=owner");
+
+  assert.equal((await post()).status, 401, "missing session is unauthenticated");
+  assert.equal((await post({ Cookie: "codexia_session=other" })).status, 403, "a valid non-owner session is forbidden");
+  const beforeBearer = checks.length;
+  assert.equal((await post({ Authorization: "Bearer ignored", Cookie: "codexia_session=owner" })).status, 403);
+  assert.equal(checks.length, beforeBearer, "bearer/cookie ambiguity is rejected before Better Auth session lookup");
+  assert.equal((await post({ Cookie: "codexia_session=owner" }, JSON.stringify({ role: "owner" }))).status, 400);
+
+  const missingOrigin = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Cookie: "codexia_session=owner" }, body: "{}" });
+  assert.equal(missingOrigin.status, 403, "Origin is required on the cookie-backed confirmation request");
+  const crossOrigin = await post({ Origin: "https://attacker.example", Cookie: "codexia_session=owner" });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(checks.includes("codexia_session=owner"), true, "the mismatched-origin request did not add a session check");
+});
+
 async function startApi(staticDir: string, trustProxy = false) {
   return startCustomApi(makeStore(), staticDir, { trustProxy });
 }

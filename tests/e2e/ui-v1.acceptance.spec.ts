@@ -111,6 +111,76 @@ test("keyboard select-all replacement saves exactly the intended manuscript", as
   }).toBe(text);
 });
 
+test("a committed save with a lost response stays unconfirmed until the same operation receives a receipt", async ({ page, authorizeAuthor }) => {
+  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop");
+  const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+  expect(databaseUrl, "the browser test must use its disposable PostgreSQL database").toBeTruthy();
+  const client = new Client({ connectionString: databaseUrl! });
+  const documentUrl = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const body = "PostgreSQL committed this text before its browser response was lost.";
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; data: string | null }> = [];
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  const readDatabaseHead = async () => {
+    const result = await client.query(
+      `SELECT document.head_revision_id::text AS revision_id, revision.markdown,
+         (SELECT count(*)::int FROM document_revision AS all_revisions
+          WHERE all_revisions.project_id = document.project_id AND all_revisions.document_id = document.id) AS revision_count
+       FROM document
+       JOIN document_revision AS revision
+         ON revision.project_id = document.project_id AND revision.document_id = document.id AND revision.id = document.head_revision_id
+       WHERE document.project_id = $1 AND document.id = $2`,
+      [project.id, scene.id],
+    ) as { rows: Array<{ revision_id: string; markdown: string; revision_count: number | string }> };
+    expect(result.rows).toHaveLength(1);
+    return { ...result.rows[0]!, revision_count: Number(result.rows[0]!.revision_count) };
+  };
+
+  await client.connect();
+  try {
+    const before = await readDatabaseHead();
+    await page.route(`**${documentUrl}`, async (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      requests.push({
+        idempotencyKey: route.request().headers()["idempotency-key"],
+        clientId: route.request().headers()["x-client-id"],
+        data: route.request().postData(),
+      });
+      if (requests.length === 1) {
+        const committed = await route.fetch();
+        expect(committed.ok()).toBe(true);
+        await route.abort();
+        resolveLost();
+        return;
+      }
+      await route.continue();
+    });
+
+    await editor(page).click();
+    await editor(page).press("ControlOrMeta+a");
+    await page.keyboard.insertText(body);
+    await lost;
+    const committed = await readDatabaseHead();
+    expect(committed.markdown).toBe(body);
+    expect(committed.revision_id).not.toBe(before.revision_id);
+    expect(committed.revision_count).toBe(before.revision_count + 1);
+    await expect(page.locator(".pg-save-state summary")).toHaveText("保存結果を確認できません");
+    await expect.poll(async () => (await readPersistenceDrafts(page) as unknown as Array<{ documentId: string; pendingSave?: { markdown: string } }>).find((draft) => draft.documentId === scene.id)?.pendingSave?.markdown).toBe(body);
+
+    await page.reload();
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    await expectMarkdown(page, body);
+    await expect.poll(() => requests.length).toBe(2);
+    await expectServerSaved(page);
+    expect(requests[1]).toEqual(requests[0]);
+    const reconciled = await readDatabaseHead();
+    expect(reconciled).toEqual(committed);
+    expect((await readPersistenceDrafts(page)).filter((draft) => draft.documentId === scene.id)).toEqual([]);
+  } finally {
+    await client.end();
+  }
+});
+
 test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); const text = "先に確定した本文。";
   // Use the same user-facing replacement path that passes in WebKit. The
