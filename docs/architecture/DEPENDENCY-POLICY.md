@@ -1,0 +1,103 @@
+# 外部ライブラリの選定・更新規約
+
+**種別: 正本・規範的設計（normative）。** 本書はCodexia全体の外部依存の選定、バージョン管理、既存の独自実装の置換、および受入条件を定義する。[システム基本設計](SYSTEM-DESIGN.md)と[設計書の正本](DOCUMENTATION-AUTHORITY.md)に従う。認証・永続化・UI・CIの個別仕様を上書きしない。
+
+## 1. Library-first 原則
+
+1. **安全性が重要な汎用処理は保守された標準API・ライブラリを優先する。** OAuth/OIDC、ZIP・アーカイブ解析、入力スキーマ、GitHub API、暗号プロトコルなどを独自実装しない。独自実装が必要な場合は、既存製品・標準APIで満たせない要件と、その独自部分が守る不変条件を明示する。
+2. **既存の正本・責務を再利用する。** PostgreSQL、Better Auth、`jose`、MCP SDK、IndexedDB回復、Core境界を並列実装で置き換えない。複数ライブラリが同種の目的で必要なときは、対象・実行環境・安全性上の違いを明示する。
+3. **パッケージ数の最小化は目的ではない。** セキュリティ検証や複雑なプロトコル実装を数十行の独自コードで代替するより、実績のあるライブラリを選ぶ。一方、単純なNode.js標準APIのラッピングや無関係な汎用フレームワークは追加しない。
+4. **製品固有のセキュリティ契約は残す。** ライブラリはプロトコル解析・構文検証を担当できるが、本人・project・scope認可、revision precondition、同一トランザクションでの検証、操作の冪等性、回復可能性を代行しない。
+5. **不具合の共通原因を除去する。** CodeQL等の警告に対する広域抑制・正当化コメントの追加より、問題の発生源となる独自実装や危険な操作順序の是正を優先する。ライブラリ導入自体を脆弱性の修正証拠とは扱わない。
+6. **根拠を比較して選定する。** 公式仕様、保守状況、セキュリティ修正、ライセンス、ランタイム・TypeScript互換性、依存閉包、既存機能との重複、導入前後の検証可能な挙動を評価する。単なる人気やコード行数は決定要因ではない。
+
+## 2. バージョンとサプライチェーン
+
+**既存の直接依存・現在の宣言値・固定根拠・最新版追従の分類は、[既存依存ライブラリ台帳](DEPENDENCY-INVENTORY.md)で管理する。** 新しいパッケージを追加する場合は選定台帳と既存依存台帳の両方に、用途・依存境界・更新責務を明記する。実際のインストール版はマニフェストとlockfileで確認する。
+
+- **新規導入・更新はnpm等の`latest` dist-tagが指す最新の安定版を原則とする。** `next`、`beta`、canary、nightlyは標準採用しない。古いメジャーを習慣的に保持しない。パッケージ選定時と実装PR作成時に再確認する。
+- **マニフェストの指定範囲とlockfileの実版を区別する。** `1.2.3`は直接依存の厳密指定、`^1.2.3`・`~1.2.3`はSemVer範囲であり「最新版」の宣言ではない。`pnpm-lock.yaml`・独立npm lockfileで解決版とintegrityを固定する。新しい直接依存は原則**exact**で採用し、範囲指定を使う場合は理由・更新責務を台帳に記録する。`latest`や`*`を実行時に動的解決せず、更新はマニフェスト・lockfile・設計台帳を同じPRで改訂する。
+- 最新安定版が現在のNode.js、ブラウザー、TypeScript、peer依存または既存の設計契約に対応しない場合、**古い版を黙って採用しない**。まず保守された代替製品・標準APIを選ぶ。古い版しか使えない例外は、阻害条件、保持する版・範囲、リスク、解消条件と更新時の検証を設計変更として承認する。
+- バージョン範囲の上限や固定メジャーを、検証済みという理由だけで永続的な互換性例外にしない。破壊的更新は動作変更を評価して別PRで対応する。Dependabotは検知・更新PRの入口であり、CIの省略や無検証マージを許可しない。**自動PRが作られても、それが最新版・互換性保証・採用承認を意味しない。** レジストリの`latest`・変更履歴・PR baseからの差分・現行mainへの追従・最終CIをそれぞれ確認する。
+- 公開元、ライセンス、メンテナンス・セキュリティポリシー、依存関係、インストール時実行、アーカイブ・通信・秘密情報の取扱いを確認する。`pnpm audit`等とCodeQLは相補的であり、依存パッケージのスキャンで実装上の安全性を保証したとみなさない。
+- この文書の具体的な採用基準版は**選定時点の最新安定版を示す初期ベースライン**である。実装時にさらに新しい安定版があればそちらを使用し、選定表を更新する。古い版に戻すための固定上限ではない。
+- **更新の可否は「連動更新」「再現された阻害による一時保留」「更新待ち」「削除・再評価」「制約根拠未確認」に区別する。** 依存している実行環境・peer API・型・生成物を切り離して更新しない。古い版が必要な場合は、再現できる阻害・保持範囲・解除条件を当該PRへ、継続的な採用条件を[台帳](DEPENDENCY-INVENTORY.md)へ記録する。
+- **非JS依存も対象**とする。SwiftPMのexact、Ansibleの`==`、GitHub Actions、OCIイメージdigest、Node/pnpmおよび複数のlockfileの整合を同様に審査する。
+
+## 3. 選定済みライブラリ台帳
+
+次の選定は**設計上の採用決定**であり、コードへの依存追加・置換・CI実行が完了したという意味ではない。具体的な実装・CI適合の状態はPRと検証証拠で判定し、この設計台帳へ時系列の進捗を記載しない。
+
+| 用途 | 選定済みパッケージ／初期基準版 | 適用対象／責務 | バージョン・互換性制約 |
+| --- | --- | --- | --- |
+| ブラウザーOAuthプロトコル | [`oauth4webapi`](https://github.com/panva/oauth4webapi) `3.8.9` | `app/src/oauth.ts`の独自PKCE・Discovery・認可／token応答処理を置換する対象 | v3系の実行環境はWeb Crypto／Fetch APIを要し、Node.js用途では20以上。CodexiaのDesktop/Mobile Webは対応ブラウザーで検証する |
+| 信頼境界を越えるZIP読取 | [`@zip.js/zip.js`](https://gildas-lormeau.github.io/zip.js/) `2.25.0` | `scripts/download-ci-artifacts.mjs`の独自ZIP構文解析を置換する対象 | CIはNode.js 24系。厳格モード、ストリーミング出力・容量上限、パス／リンク検査が必須 |
+| API・MCP・外部データの実行時検証 | [`zod`](https://zod.dev/) `4.6.7` | API、MCP、Assistant等の境界検証の正本。手動検査の統一対象 | Zod 4はTypeScript 5.5以上で検証されている。`strict`設定・Core-only依存閉包を維持 |
+| GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
+| 厳格JSON構文と重複キーの検出 | [`jsonc-parser`](https://github.com/microsoft/node-jsonc-parser) `3.3.1` | `packages/api/src/oauth-mcp.ts`のJSONキー抽出正規表現の置換対象 | JSONCの許容は**禁止**。コメント、末尾カンマ、構文エラー、同一オブジェクト内の重複キーを拒否 |
+| JS/TS品質・フォーマット・import管理 | [`@biomejs/biome`](https://biomejs.dev/) `2.6.8` | リポジトリのLint・Formatter正本、Code ScanningへのSARIF送信 | CLIの安定版。CodeQLと型検査を代替しない。SARIFはLintに限定しFormatterはCIの合否で扱う |
+
+### ブラウザーOAuth：`oauth4webapi`を採用
+
+[API認証・認可の正本](API-AUTHN-AUTHZ.md)のBetter Authは認証・OAuthプロバイダー、`jose`はAPI JWT検証の責務を維持する。ブラウザーのOAuth public clientが担うプロトコル処理だけを`oauth4webapi`へ移す。選定理由は、PKCE、Discovery、認可レスポンス、トークン応答を標準実装へ任せつつ、Codexia固有の制約を監査可能な形で明示できるため。
+
+- 保持する制約: PKCE S256、予測困難な`state`、タブ単位・有効期限付きトランザクション、callbackでの`state`・`iss`（RFC 9207）・redirect照合、`resource`（RFC 8707）・API audience、認可サーバーとendpointの厳密な同一オリジン、tokenのメモリ保持、誤応答時のfail-closed。
+- 比較対象の[`openid-client`](https://github.com/panva/openid-client) `6.9.1`はプロトコル処理を高レベルに抽象化するが、この用途では既存の個別制約を明示して監査することを優先し、**採用しない**。セキュリティ品質が劣るという判断ではない。
+- iOSネイティブのAppAuth-iOSはOSの認証セッションとKeychainを担当するため維持し、WebView内のOAuthライブラリへ統合しない。Better Authのclient helperはAPIアクセストークン取得契約の置換対象として選ばない。
+- 受入: 正常なAuthorization Code + PKCEに加え、state不一致・リプレイ・期限切れ・iss不一致・endpoint変更・不正token type・redirect逸脱・token漏えいが拒否されることをブラウザーで確認する。
+
+### ZIP：`@zip.js/zip.js`を採用
+
+GitHub ArtifactのSHA-256・run ID・source SHA・artifact IDを先に照合する。ZIP解釈はライブラリに移す一方、**アプリケーション側の資源上限とファイル書込み境界は残す**。
+
+- `strictness: "strict"`、`checkOverlappingEntry`、`checkCrc32`、標準のファイル名検証を利用する。エントリ数、圧縮サイズ、各エントリ・全体の展開後実サイズに上限を設け、宣言値を信頼せずストリームで実測する。
+- 絶対パス・`..`・特殊ファイル・symlink・ハードリンク・大文字小文字／Unicode正規化で衝突する名前・不正な親ディレクトリを拒否する。出力パスの書込み権限と既存ファイル非上書きを維持し、攻撃者が変更できるディレクトリを使わない。
+- ライブラリが対応する形式でも、現在拒否しているZIP64、暗号化ZIP等は**明示的な設計変更がない限り受け入れない**。既存の負ケース・サイズ上限を下げずに保つ。
+- EPUB **生成**には既存の`jszip`を維持する。用途・信頼境界が違うため、ZIPパッケージの二重化はこの範囲に限って認める。
+
+### Zod：既存4系を標準として再利用
+
+HTTP body、query、外部API応答、MCP DTO、インポート等の**不信頼データとの境界**では、型アサーションや繰り返しの`typeof`検査よりZodスキーマを優先する。ただし、DB内の整合性、認可、revisionの同時検査、性能上の不変条件をスキーマだけで済ませない。
+
+- スキーマ所有者は対象のAPI・MCP・module境界とする。単一の共有DTOが複数境界で必要なら再利用するが、`packages/contracts`にZodを無条件で入れずCore-only依存閉包を維持する。
+- Zodの検証失敗は既定のAPIエラー契約に投影し、不信頼の入力全文やsecretをログ・レスポンスに出さない。
+
+### Octokit：GitHub RESTの通信に限定採用
+
+`@octokit/rest`はエンドポイント呼出し、型、ページネーションの共通実装として使う。ただし、`scripts/ci-task-proof-reuse.mjs`等の**許可されたAPIパス、正確なrun／attempt／SHA、証明書、artifact digestの検証はCodexiaの責務**である。
+
+GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転送しない。認証付きの制御プレーンRESTと、検証済みURLからの無認証バイナリ取得は明確に分離する。SDK導入で任意URLへの通信、緩いリトライ、証拠省略を追加しない。
+
+### 厳格JSON：`jsonc-parser` + Zodを採用
+
+`JSON.parse`とZodは入力オブジェクトの**元テキスト中の重複メンバー名**を検出できない。`jsonc-parser`のvisitorで各オブジェクトのキーを構文レベルで走査し、エスケープを含む同名キーを同一スコープ内で拒否する。これはライブラリが自動で重複キーを拒否するという意味ではなく、visitorと検証ロジックの組合せを選ぶ決定である。
+
+`disallowComments: true`、`allowTrailingComma: false`、パーサーのエラー件数ゼロを要求し、受理した値をZodで厳格に検証する。JSONCを設定形式として新設しない。クライアントIDとproject配列の一意性・完全性を維持する。
+
+### Biome：品質ゲートの正本
+
+`@biomejs/biome`をJS/TS系のLint・Formatter・import整理の正本とし、同じ責務のESLint／Prettierや独自フォーマット検査を並行運用しない。`biome ci`を非破壊の必須検査とし、LintのみのSARIFをGitHub Code ScanningへCodeQLと**独立したcategory**で送信する。Formatter違反はCIの合否で扱う。CodeQL、TypeScript、契約テスト、アーキテクチャ検査の責務は変更しない。
+
+[CI/CD正本](../verification/CI-CD.md)の必須タスク・証拠・release gateを守り、Lintの成功が欠落・スキップしたセキュリティ検査の代替証拠にならないようにする。
+
+## 4. 追加採用しないもの
+
+- **追加のOAuthフレームワーク／認証基盤**: Better Auth、AppAuth-iOS、`jose`、MCP SDKを維持し、ブラウザーのプロトコル処理だけを選定対象にする。
+- **`fs-extra`、`write-file-atomic`の一括導入**: ライブラリ名だけではTOCTOUは消えない。openした同一ディスクリプタによる検査・利用、ディレクトリの信頼性、権限、fsync・原子的置換の契約を評価する。
+- **ORM／第二のDBアクセス正本**: 既存PostgreSQLのトランザクション、マイグレーション台帳、モデル境界を置き換えない。新しいルーティングフレームワークや状態管理基盤も導入しない。
+- **一括リトライライブラリ**: OAuthやCI証拠の操作に無条件リトライ・リダイレクト・副作用再実行を追加しない。必要な処理だけ、冪等性を証明して選定する。
+
+## 5. ライブラリ導入時の受入契約
+
+- **機能同等性**: 正常系だけでなく不正入力、競合、障害、期限切れ、キャンセル、タイムアウト、再試行で既存の正本契約を満たす。既存の安全性チェックをライブラリへの期待だけで削除しない。
+- **依存境界**: Core-only、サーバー専用、ブラウザー、iOS、CI専用の依存閉包とバンドルを検証する。実装先パッケージにだけ依存を追加し、不要になった独自コードと旧依存を削除する。
+- **セキュリティ**: 認証情報の送信先、パスの安全性、展開量、入力サイズ、構造検証、権限、監査ログ秘匿を検証する。既存のCodeQL警告を単に抑制しない。
+- **検証と更新**: 正本設計・影響範囲に沿って型検査、ユニット／統合／ブラウザー、実際のGitHub Actions、依存スキャン、CodeQLを実行する。バージョン変更の結果をPRで明示し、未実行項目は未検証と記録する。設計書の採用決定と実装完了を混同しない。
+
+## 参照元
+
+- OAuth protocol: [oauth4webapi](https://github.com/panva/oauth4webapi/blob/main/docs/README.md)、比較対象の[openid-client](https://github.com/panva/openid-client)、[API認証契約](API-AUTHN-AUTHZ.md)
+- ZIP: [zip.js untrusted ZIP guidance](https://gildas-lormeau.github.io/zip.js/)、[既存のCI証拠取得](../../scripts/download-ci-artifacts.mjs)
+- Schema: [Zod requirements](https://zod.dev/)、[jsonc-parser visitor/parse options](https://github.com/microsoft/node-jsonc-parser)
+- GitHub: [Octokit REST](https://github.com/octokit/rest.js)、[SARIF upload](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
+- Quality: [Biome CI](https://biomejs.dev/recipes/continuous-integration/)、[Biome SARIF reporter](https://biomejs.dev/reference/reporters/)

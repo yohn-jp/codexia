@@ -13,6 +13,8 @@
 
 矛盾が判明したら、実装側の設計逸脱または設計変更要求として記録する。既存コードへ合わせて設計を黙って書き換えない。詳細な変更規律は [設計書の正本・保守規則](DOCUMENTATION-AUTHORITY.md)。
 
+汎用プロトコル・入力検証・アーカイブ解析・開発ツールの外部依存は、[外部ライブラリ選定規約](DEPENDENCY-POLICY.md)を正本としてライブラリ優先・最新安定版を原則とする。ただし製品固有の認可、PostgreSQLとIndexedDBの正本、CI証拠の不変条件は委譲しない。
+
 ## 製品・システム境界
 
 - 製品は単一作者の小説執筆・知識管理・提案レビューを提供する。作品本文・構成・Revision・Knowledge・Evidence・ChangeSet・module record の永続正本は **PostgreSQL** のみ。

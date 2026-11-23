@@ -19,6 +19,12 @@ This is the normative execution and release architecture. [Test architecture](TE
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
 
+## Static quality and Code Scanning contract
+
+The accepted JS/TS quality-toolchain design uses [Biome](../architecture/DEPENDENCY-POLICY.md) as the single Lint, formatter and import-organizing authority. Run non-mutating `biome ci` as a required PR quality gate and upload **Lint-only** SARIF to GitHub Code Scanning under its own category, separate from CodeQL. Formatting findings fail the CI check, but must not be uploaded as security alerts. TypeScript type checks, CodeQL's security and data-flow analysis, tests and architecture boundaries remain independent obligations; a passing Biome job never satisfies a skipped or failed security check.
+
+This is an accepted **target**; it does not imply Biome is already installed or that a workflow currently emits SARIF. Integrate it through the existing canonical verification task inventory and evidence plan rather than adding competing task ownership. Preserve source/attempt identity, failure propagation, diagnostics and the existing release gate.
+
 ## GitHub-hosted runner and browser image policy
 
 Use explicit `ubuntu-24.04` x64 GitHub-hosted VMs for the certified browser jobs. Each job starts on a fresh VM, so do not assume a persistent Docker layer cache. Keep the content-addressed pnpm store cache and same-profile build artifacts as separate, verified inputs; do not introduce Docker save/load through actions/cache. Public-repository pull requests stay on isolated hosted runners, never a persistent self-hosted runner with long-lived credentials.

@@ -19,6 +19,7 @@
 | 対象 | 設計上の所有先 |
 | --- | --- |
 | システム構成と責務 | [システム基本設計](SYSTEM-DESIGN.md)・[Internal boundaries](INTERNAL-BOUNDARIES.md) |
+| 外部ライブラリの選定・最新版方針・依存境界 | [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)・[既存依存と固定根拠の台帳](DEPENDENCY-INVENTORY.md) |
 | PostgreSQL とドメイン ID | [データモデル](DATA-MODEL.md)・[Core](CORE.md) |
 | URL/HTTP method・principal別のアクセス境界 | [Route authorization contract](ROUTE-AUTHORIZATION-CONTRACT.md)・[API authentication](API-AUTHN-AUTHZ.md) |
 | 画面ID・操作ボタン・状態遷移の全体台帳 | [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md)・[Screen State Atlas](../design/SCREEN-STATE-ATLAS.md) |
