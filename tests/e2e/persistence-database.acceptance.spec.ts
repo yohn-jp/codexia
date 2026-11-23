@@ -331,33 +331,37 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await expect(textAnchorTarget).toHaveValue(ids[2]!);
   await expect(textAnchorTarget.locator(`option[value="${ids[2]}"]`)).toContainText("選択中");
 
-  // An older same-epoch server ignores q/type/status and returns its legacy
-  // `{nodes}` contract. The new UI must accept the payload without claiming
-  // server search or complete coverage.
-  const legacyResponse = await fixture.author.fetch(new URL(`/api/v1/persistence/projects/${fixture.project.id}/nodes?limit=500`, base).toString());
-  const legacyNodes = (await legacyResponse.json() as { nodes: unknown[] }).nodes;
-  expect(legacyNodes).toHaveLength(500);
-  await search.fill("Browse 0001");
-  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
-  const oldServerRoute = async (route: import("@playwright/test").Route) => {
-    const params = new URL(route.request().url()).searchParams;
-    if (params.has("q")) await route.fulfill({ json: { nodes: legacyNodes.slice(0, 50) } });
-    else if (params.get("limit") === "500") await route.fulfill({ json: { nodes: legacyNodes } });
-    else await route.continue();
+  const retryQuery = "Browse 0001";
+  const canonicalPage = await fixture.author.fetch(url(retryQuery));
+  expect(canonicalPage.ok()).toBe(true);
+  const { nodes: unpagedNodes } = await canonicalPage.json() as { nodes: unknown[] };
+  expect(unpagedNodes).toHaveLength(1);
+
+  const browseLimits: Array<string | null> = [];
+  const unpagedResponse = async (route: import("@playwright/test").Route) => {
+    const request = new URL(route.request().url());
+    browseLimits.push(request.searchParams.get("limit"));
+    await route.fulfill({ json: { nodes: unpagedNodes } });
   };
-  await page.route(nodeRoute, oldServerRoute);
-  await search.fill("Browse 0000");
+  await page.route(nodeRoute, unpagedResponse);
+  await search.fill(retryQuery);
+  const browseError = page.locator(".pg-knowledge").getByRole("alert").filter({ hasText: "Knowledge一覧を読み込めませんでした" });
+  await expect(browseError).toBeVisible();
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("Knowledgeの取得に失敗しました");
+  await expect(page.locator(".pg-knowledge-list")).not.toContainText(retryQuery);
+  expect(browseLimits).toEqual(["50"]);
+  await page.unroute(nodeRoute, unpagedResponse);
+
+  const retryResponse = page.waitForResponse((response) => {
+    const request = new URL(response.url());
+    return nodeRoute.test(response.url()) && request.searchParams.get("q") === retryQuery && request.searchParams.get("limit") === "50";
+  });
+  await browseError.getByRole("button", { name: "再試行" }).click();
+  expect((await retryResponse).ok()).toBe(true);
+  await expect(browseError).toHaveCount(0);
   await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
-  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
-  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("500件");
-  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("別名検索と続きの取得は利用できず");
-  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toHaveCount(0);
-  await search.fill("Browse 0499");
-  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
-  await search.fill("Literal%_!Alias");
-  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(0);
-  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
-  await page.unroute(nodeRoute, oldServerRoute);
+  await expect(page.locator(".pg-knowledge-list")).toContainText(retryQuery);
+  await expect(page.getByText("すべての絞り込み結果を取得済み（1件）。", { exact: true })).toBeVisible();
   await search.fill("");
   await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
   await expect(page.getByLabel("種類で絞り込み").locator("option[value='my_custom_type']")).toBeAttached();
