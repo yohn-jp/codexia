@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
-import { createGitHubProofClient, resolveExactMainCoverageProof, resolveExactMainTaskProofs } from './ci-task-proof-reuse.mjs';
+import { createGitHubProofClient, resolveExactMainCoverageProof } from './ci-task-proof-reuse.mjs';
 import { taskInvocation, taskWorkflowJob } from './ci-task-inputs.mjs';
 import { main as planProofReuse } from './reuse-ci-task-input-proof.mjs';
 
@@ -15,7 +15,7 @@ const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execP
   cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' };
 const dimensions = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 
-test('unavailable current workflow identity writes the full plan and preserves the PR diff', async t => {
+test('unavailable proof keeps the impact plan and runs selected coverage', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'codexia-proof-plan-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const planPath = path.join(dir, 'plan.json');
@@ -31,7 +31,7 @@ test('unavailable current workflow identity writes the full plan and preserves t
       t.mock.method(globalThis, 'fetch', fetch);
       await writeFile(planPath, JSON.stringify(selected));
       await planProofReuse();
-      assert.deepEqual(JSON.parse(await readFile(planPath, 'utf8')), createVerificationPlan({ ...selected, forceFull: true }));
+      assert.deepEqual(JSON.parse(await readFile(planPath, 'utf8')), selected);
     });
   }
 });
@@ -190,37 +190,33 @@ test('does not fall back to an older successful main run when the latest exact-b
   }), /Latest exact-base main run failed/);
 });
 
-test('coverage and omitted tasks share one exact-base evidence read per resolution', async t => {
+test('coverage proof resolution never requires proof receipts from NOT_SELECTED tasks', async t => {
   const evidence = mainEvidence();
   const request = t.mock.fn(mockRequest(evidence));
   const readArtifact = t.mock.fn(async (artifact, filename) =>
     filename === 'ci-plan.json' ? evidence.plan : evidence.reports.get(artifact.name));
   const options = {
     plan: createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha }),
-    current: { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request', head_sha: candidateSha, repository: { id: 9 } },
-    repository: 'yohn-jp/codexia', token: 'test-token', tasks: ['unit-contracts', 'typecheck-foundations'], request, readArtifact,
+    current: { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
+      head_sha: candidateSha, repository: { id: 9 } },
+    repository: 'yohn-jp/codexia', token: 'test-token', request, readArtifact,
   };
-  const receipts = await resolveExactMainTaskProofs(options);
-  assert.equal(receipts.coverage.task, 'coverage');
-  assert.equal(receipts['unit-contracts'].task, 'unit-contracts');
-  assert.equal(receipts['unit-contracts'].workflowJob, 'unit');
-  assert.equal(receipts['unit-contracts'].artifactName, 'ci-evidence-unit-core');
-  assert.equal(receipts['typecheck-foundations'].artifactName, 'ci-evidence-types-sources');
+  const receipt = await resolveExactMainCoverageProof(options);
+  assert.equal(receipt.task, 'coverage');
+  assert.equal(receipt.artifactName, 'ci-evidence-types-tests');
   const endpoints = request.mock.calls.map(call => call.arguments[0]);
   assert.equal(new Set(endpoints).size, endpoints.length, 'Each inventory page is requested once');
   assert.deepEqual(readArtifact.mock.calls.map(call => call.arguments[0].id).sort((a, b) => a - b),
     evidence.artifacts.map(artifact => artifact.id).sort((a, b) => a - b));
 
-  const discardProof = (group, task) => {
-    const report = evidence.reports.get('ci-evidence-' + group);
-    delete report.results.find(item => item.task === task).inputProof;
-    delete report.producerInventory.taskInvocations.find(item => item.task === task).inputProof;
-  };
-  discardProof('types-tests', 'coverage');
-  const next = await resolveExactMainTaskProofs(options);
-  assert.equal(next.coverage, undefined, 'Selected coverage executes when its own proof is unavailable');
-  assert.deepEqual(next['unit-contracts'], receipts['unit-contracts']);
+  const unselected = evidence.reports.get('ci-evidence-unit-core');
+  delete unselected.results.find(item => item.task === 'unit-contracts').inputProof;
+  delete unselected.producerInventory.taskInvocations.find(item => item.task === 'unit-contracts').inputProof;
+  assert.deepEqual(await resolveExactMainCoverageProof(options), receipt,
+    'An unrelated task input proof cannot invalidate coverage reuse');
+
+  const selected = evidence.reports.get('ci-evidence-types-tests');
+  delete selected.results.find(item => item.task === 'coverage').inputProof;
+  delete selected.producerInventory.taskInvocations.find(item => item.task === 'coverage').inputProof;
   await assert.rejects(resolveExactMainCoverageProof(options), /proof/i);
-  discardProof('unit-core', 'unit-contracts');
-  await assert.rejects(resolveExactMainTaskProofs(options), /proof/i);
 });
