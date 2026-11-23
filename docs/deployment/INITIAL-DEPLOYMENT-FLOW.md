@@ -85,28 +85,6 @@ flowchart TD
 
 初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。
 
-## VMの再構築と所有者資格の復旧
-
-VMを作り直すだけで初回owner登録を再開してはならない。新規モードへの分岐は**DBが空で、独立バックアップに復旧対象がないことを運用者が確認・承認した場合のみ**許す。空に見えるDBでも、障害復旧中・ボリューム未マウント・Secret不一致であれば新規登録は禁止する。
-
-```mermaid
-flowchart TD
-    REBUILD["VM再構築: Ansible SSH接続可能"] --> INTENT{"運用者の宣言したモード"}
-    INTENT -->|完全新規・データなし承認| EMPTY["DB・認証が空であると検証"]
-    EMPTY -->|確定| NEW["セットアップキーを発行<br/>/console/setupへ"]
-    EMPTY -->|矛盾/旧環境の兆候| HALT["停止・独立バックアップを調査"]
-    INTENT -->|既存環境の復旧| RESTORE["暗号化DB/履歴を独立ホストから復旧<br/>roleとPodman Secretを復元"]
-    RESTORE --> CHECK{"原稿DB・Better Auth・owner ID<br/>Passkey/client・schema整合を確認"}
-    CHECK -->|不正/不足| HALT
-    CHECK -->|合致| LOGIN["既存Passkeyで本人認証<br/>新規キーを発行しない"]
-    LOGIN -->|成功| GO["証明済みdigestを保護されたdeployで有効化"]
-    LOGIN -->|端末喪失| RECOVER["管理権限による本人回復承認<br/>同じowner IDにPasskey追加"]
-    RECOVER --> GO
-    GO --> ACCEPT["公開経路・復旧試験・同一性を実測"]
-```
-
-**復旧の鍵:** PostgreSQL dumpと履歴だけでは完了しない。PostgreSQLのロール、Podman Secret、復号鍵、OIDC設定、OAuth client/署名鍵、ownerの同一性を元の環境から再現する。暗号化バックアップが同じVMにしかない状態を災害復旧可能とは呼ばない。既存owner IDが維持できない場合に、初回登録を代替復旧手段として利用することは禁止する。
-
 ## 復旧状態と受入
 
 ```mermaid
@@ -136,3 +114,25 @@ stateDiagram-v2
 - **バックアップ:** ローカルの暗号化 archive は同一 VM の消失には耐えない。独立保管と `restore-drill` の別ホスト実行を本番の復旧能力の受入に含める。
 
 **受入証拠:** 使い捨て Ubuntu VM で空状態・再適用・既存データの採用/拒否・secret drift・schema 不一致・owner 登録・Full 初回起動を検証する。実 VM では reboot、Cloudflare 公開 routing、Web 認証、独立バックアップ復元を別途観測する。検証未実施を PASS として報告しない。
+
+## VMの再構築と所有者資格の復旧
+
+VMを作り直すだけで初回owner登録を再開してはならない。新規モードへの分岐は**DBが空で、独立バックアップに復旧対象がないことを運用者が確認・承認した場合のみ**許す。空に見えるDBでも、障害復旧中・ボリューム未マウント・Secret不一致であれば新規登録は禁止する。
+
+```mermaid
+flowchart TD
+    REBUILD["VM再構築: Ansible SSH接続可能"] --> INTENT{"運用者の宣言したモード"}
+    INTENT -->|完全新規・データなし承認| EMPTY["DB・認証が空であると検証"]
+    EMPTY -->|確定| NEW["セットアップキーを発行<br/>/console/setupへ"]
+    EMPTY -->|矛盾/旧環境の兆候| HALT["停止・独立バックアップを調査"]
+    INTENT -->|既存環境の復旧| RESTORE["暗号化DB/履歴を独立ホストから復旧<br/>roleとPodman Secretを復元"]
+    RESTORE --> CHECK{"原稿DB・Better Auth・owner ID<br/>Passkey/client・schema整合を確認"}
+    CHECK -->|不正/不足| HALT
+    CHECK -->|合致| LOGIN["既存Passkeyで本人認証<br/>新規キーを発行しない"]
+    LOGIN -->|成功| GO["証明済みdigestを保護されたdeployで有効化"]
+    LOGIN -->|端末喪失| RECOVER["管理権限による本人回復承認<br/>同じowner IDにPasskey追加"]
+    RECOVER --> GO
+    GO --> ACCEPT["公開経路・復旧試験・同一性を実測"]
+```
+
+**復旧の鍵:** PostgreSQL dumpと履歴だけでは完了しない。PostgreSQLのロール、Podman Secret、復号鍵、OIDC設定、OAuth client/署名鍵、ownerの同一性を元の環境から再現する。暗号化バックアップが同じVMにしかない状態を災害復旧可能とは呼ばない。既存owner IDが維持できない場合に、初回登録を代替復旧手段として利用することは禁止する。
