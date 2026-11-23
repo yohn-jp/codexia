@@ -30,9 +30,9 @@
   "dependencies": {
     "@codexia/core": "workspace:*",
     "@codexia/contracts": "workspace:*",
-    "yaml": "^2.9.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "yaml": "catalog:production",
+    "react": "catalog:production",
+    "react-dom": "catalog:production"
   },
   "codexiaModule": {
     "id": "story",
