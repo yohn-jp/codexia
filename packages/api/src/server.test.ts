@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -607,6 +608,48 @@ function rawHostedRequest(urlValue: string, headers: Record<string, string>, bod
     request.end(body);
   });
 }
+
+it("prints a runnable packaged maintenance command when Hosted startup needs migration", async (t) => {
+  const { persistence, store, project } = await nativeProject(t, "Hosted maintenance command");
+  const legacy = await persistence.transaction((tx) => tx.saveModuleRecord({
+    projectId: project.id, moduleId: "core.artifacts", key: "meta/scriptorium/modules/nlp/feature-settings.json",
+    value: { content: '{"externalEnabled":{}}' }, expectedVersion: null,
+  }));
+  const before = await store.observe(project.id);
+  const directory = await mkdtemp(resolve(tmpdir(), "codexia-start-maintenance-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const assignment = resolve(directory, "assignment.json");
+  const profile = resolve(directory, "profile.mjs");
+  await writeFile(assignment, JSON.stringify({ ...HOSTED_ASSIGNMENT, enabledModuleIds: [] }));
+  await writeFile(profile, 'export const profile = "hosted"; export const moduleManifests = [];');
+  const env = {
+    CODEXIA_DATABASE_URL: process.env.CODEXIA_TEST_DATABASE_URL,
+    CODEXIA_HOSTED_MODE: "1", CODEXIA_HOSTED_PROJECT_ID: project.id, CODEXIA_PROFILE: "hosted",
+    CODEXIA_RUNTIME_ASSIGNMENT_PATH: assignment, CODEXIA_MODULE_PROFILE_PATH: profile,
+    CODEXIA_PRODUCER_REVISION: "d".repeat(40), CODEXIA_DATA_DIR: directory, PORT: "0",
+  };
+  const startup = spawnSync(process.execPath, [fileURLToPath(new URL("./server.js", import.meta.url))], {
+    cwd: directory, env, encoding: "utf8", timeout: 10_000,
+  });
+  assert.ifError(startup.error);
+  assert.equal(startup.status, 1, startup.stderr);
+  assert.match(startup.stderr, /SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED/u);
+  const command = startup.stderr.match(/Run node '([^']+)' --check --project ([a-f0-9-]+),/u);
+  assert.ok(command, startup.stderr);
+  const [, cliPath, projectId] = command;
+  assert.equal(cliPath, fileURLToPath(new URL("./maintain-snapshot-projections.js", import.meta.url)));
+  assert.equal(projectId, project.id);
+  const check = spawnSync(process.execPath, [cliPath, "--check", "--project", projectId], {
+    cwd: directory, env, encoding: "utf8", timeout: 10_000,
+  });
+  assert.ifError(check.error);
+  assert.equal(check.status, 2, check.stderr);
+  const report = JSON.parse(check.stdout);
+  assert.equal(report.status, "maintenance_required");
+  assert.deepEqual(report.pendingNlpFeatureSettingsProjectIds, [project.id]);
+  assert.deepEqual(await persistence.read((reader) => reader.getModuleRecord(project.id, legacy.moduleId, legacy.key)), legacy);
+  assert.deepEqual((await store.observe(project.id)).snapshot, before.snapshot);
+});
 
 it("keeps Hosted session mutations at the Instance Access boundary", async (t) => {
   const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-logout-"));

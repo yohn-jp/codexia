@@ -2776,9 +2776,10 @@ async function assertSnapshotProjectionReady(
   const pending = [...new Set([...unprovenSnapshots, ...unmigratedPublishing, ...unmigratedNlpSettings])];
   if (pending.length > 0) {
     const scope = hostedProjectId === undefined ? "" : ` --project ${hostedProjectId}`;
+    const maintenanceScript = fileURLToPath(new URL("./maintain-snapshot-projections.js", import.meta.url)).replaceAll("'", "'\\''");
     throw new Error(
       `SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED: PostgreSQL projects ${pending.join(", ")} require maintenance for snapshot projections, Publishing records, or NLP feature settings. ` +
-      `Run node dist/maintain-snapshot-projections.js --check${scope}, then repeat with --apply using the PostgreSQL writer before starting Codexia.`,
+      `Run node '${maintenanceScript}' --check${scope}, then replace --check with --apply using the PostgreSQL writer before starting Codexia.`,
     );
   }
 }
