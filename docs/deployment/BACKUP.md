@@ -33,7 +33,7 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 **運用設定UIの正本:** [バックアップ管理コンソール設計](../architecture/BACKUP-CONSOLE-CONTRACT.md)。ownerは`/console/backups`からS3の保存先・credential（write-only）・要求する保持期間・検証・有効化・run状態を操作する。通常の保存先指定にSSH/Ansible編集を要求しない。一方、既存の暗号化アーティファクト生成・host lock・writer停止は`backup.sh`が所有し、実本番復元やVM/IAM変更は引き続き保護されたOPERATORの経路で行う。local stagingとage受取公開鍵はoperator-controlledでありWeb変更を禁止する。
 
-**状態: 機能要件・設計採用済み。OPS-01の転送アダプターと隔離fixtureを実装する。** 現行のローカル/独立mount先に加えて、**S3 API互換ストレージをオフVM保管先としてサポートする**。特定のクラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOはまだ確定していない。S3対応はバックアップの保管・取得機能であり、CodexiaのPostgreSQL正本やdeploy管理プレーンを変更しない。転送アダプターは既存v2 artifactだけを扱い、`backup.sh`、Ansible deployment admission、owner consoleにはまだ接続しない。
+ローカル/独立mount先に加えて、独立した転送コマンドで **S3 API互換ストレージをオフVM保管先に使える**。転送アダプターは既存のv2 artifactを扱う。`backup.sh`、Ansible deployment admission、owner consoleからの呼び出しは設計対象である。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
 
 ### 機能・データフロー
 
@@ -73,11 +73,11 @@ bash deploy/backup/backup.sh drill \
   /protected/age-recovery-identity --approved
 ```
 
-`upload` verifies each uploaded object's size and SHA-256 by downloading it again. It publishes a commit marker only after every artifact object passes readback, then writes the independent receipt outside S3. Receipt directories must be private; receipt files are created mode `0600`. Retries use conditional object creation and refuse changed ciphertext under the same backup ID. Multipart upload IDs are held in a private local journal so the helper can abort the exact unfinished upload without `ListBucketMultipartUploads`; a provider lifecycle rule should also abort incomplete uploads left by a host loss before the local upload ID is recorded. The helper does not require object or bucket delete permissions.
+`upload` verifies each uploaded object's size and SHA-256 by downloading it again. It saves the expected commit marker identity in the protected local receipt directory, publishes the marker, and verifies it by readback before writing the final independent receipt. A retry using the same receipt path can verify the original marker even if the bucket capability observations have changed. Receipt directories must be private and receipt files are created mode `0600`. Retries use conditional object creation and refuse changed ciphertext under the same backup ID. Multipart upload IDs are held in a private local journal so the helper can abort the exact unfinished upload without `ListBucketMultipartUploads`. A provider lifecycle rule should also abort incomplete uploads left by a host loss before the local upload ID is recorded. The helper operates with write and readback permissions scoped to the backup prefix.
 
 When the profile requests retention, readback must confirm the requested Object Lock mode and a retain-until date at least as late as requested on each exact object version. This includes reused objects on retry. The adapter verifies the commit marker's retention before issuing the independent receipt.
 
-The writer needs `s3:PutObject`, `s3:GetObject`, and `s3:AbortMultipartUpload` on the fixed object prefix, plus `s3:ListBucket` scoped by `s3:prefix` to return an unambiguous missing-object result for conditional creation. It also reads bucket location, versioning, and Object Lock configuration to report observed capabilities. The writer and recovery reader need `s3:GetObjectVersion` for versioned readback. Explicit retention additionally requires `s3:PutObjectRetention` and `s3:GetObjectRetention` for the writer on that same prefix. The adapter never calls `ListMultipartUploads`, `DeleteObject`, or `DeleteBucket`.
+The writer needs `s3:PutObject`, `s3:GetObject`, and `s3:AbortMultipartUpload` on the fixed object prefix, plus `s3:ListBucket` scoped by `s3:prefix` to return an unambiguous missing-object result for conditional creation. It queries bucket versioning and Object Lock configuration to report observed capabilities. The writer and recovery reader need `s3:GetObjectVersion` for versioned readback. Explicit retention additionally requires `s3:PutObjectRetention` and `s3:GetObjectRetention` for the writer on that same prefix. The adapter never calls `ListMultipartUploads`, `DeleteObject`, or `DeleteBucket`.
 
 Run the separate synthetic-provider fixture with:
 

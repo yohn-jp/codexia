@@ -10,6 +10,7 @@ import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } 
 import { availableModulePanels } from "../application/AvailableModulePanels";
 import { PersistenceSaveConflictJournalError, runPersistenceSaveProtocol, type PersistenceSaveRequest } from "../application/persistence-save-protocol";
 import { createPersistenceSaveMachine, type PersistenceSaveMachineServices } from "../application/persistence-save-machine";
+import { shouldProtectBeforeUnload } from "../application/unload-protection";
 import { resolvePersistenceConflictReadFailure, resolvePersistenceSaveConflict, resolvePersistenceSaveSuccess, type ActiveDocument as PersistenceActiveDocument } from "../application/persistence-save-state";
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
@@ -623,7 +624,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const owned = ownedDraftsRef.current.get(key);
       const unsafeUndo = Boolean(!current.dirty && current.markdown === current.baseMarkdown &&
         ((owned && current.generation > owned.generation) || draftChainsRef.current.has(key)));
-      if ((current.dirty && current.recovery !== "stored") || unsafeUndo) {
+      if (shouldProtectBeforeUnload({
+        isComposing: editorRef.current?.isComposing() ?? false,
+        dirty: current.dirty,
+        recovery: current.recovery,
+        unsafeUndo,
+      })) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -1588,6 +1594,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         try {
           const existing = await api.persistenceDocument(project.id, intent.documentId);
           if (existing.document.title !== intent.title) {
+            // A confirmed ID collision cannot be retried with the same intent.
+            // Keep the intent for unknown outcomes such as timeouts and 404s.
+            if (documentCreationIntentRef.current === intent) documentCreationIntentRef.current = null;
             throw new Error("同じ文書IDに別の文書が存在するため、作成を完了できませんでした。文書名を確認してください。");
           }
           if (!existing.revision) throw new Error("作成済み文書のRevisionを確認できませんでした。");

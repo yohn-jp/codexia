@@ -73,13 +73,15 @@ export function selectVisibleTermSlices(
     .filter((range) => Number.isFinite(range.from) && Number.isFinite(range.to) && range.to > range.from)
     .sort((left, right) => left.from - right.from || left.to - right.to);
   for (const range of validRanges) {
-    const from = Math.max(lastEnd, 0, Math.floor(range.from));
+    let from = Math.max(lastEnd, 0, Math.floor(range.from));
     const to = Math.min(safeDocumentLength, Math.floor(range.to));
-    const length = Math.min(to - from, maxSliceChars, budget);
-    if (length <= 0) continue;
-    selected.push({ from, to: from + length });
-    lastEnd = from + length;
-    budget -= length;
+    while (from < to && maxSliceChars > 0 && budget > 0) {
+      const length = Math.min(to - from, maxSliceChars, budget);
+      selected.push({ from, to: from + length });
+      from += length;
+      lastEnd = from;
+      budget -= length;
+    }
     if (budget <= 0) break;
   }
   return selected;

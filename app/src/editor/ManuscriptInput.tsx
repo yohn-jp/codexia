@@ -22,6 +22,7 @@ import "./terminology.css";
 
 export interface ManuscriptInputHandle {
   focus(): void;
+  isComposing(): boolean;
   flushComposition(): Promise<string>;
   readForNavigation(): string;
   insert(symbol: WritingSymbolId): void;
@@ -147,6 +148,10 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   useImperativeHandle(ref, () => ({
     focus() {
       viewRef.current?.focus();
+    },
+    isComposing() {
+      const view = viewRef.current;
+      return Boolean(view && isViewComposing(view));
     },
     readForNavigation() {
       const view = viewRef.current;
