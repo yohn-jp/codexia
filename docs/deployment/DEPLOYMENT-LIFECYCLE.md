@@ -28,7 +28,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 
 ## 経路選択の優先順位
 
-次の判定を上から順に適用し、最初に一致する経路を選ぶ。選択経路に必要な承認・証明が欠落する場合は無変更で停止する。中間経路の完了後は再観測して判定に戻る。新規installと既存環境の復旧意図は運用者が明示し、空に見える状態だけで選択しない。
+次の判定を上から順に適用し、最初に一致する経路を選ぶ。選択経路に必要な承認・証明が欠落する場合は無変更で停止する。中間経路の完了後は再観測して判定に戻る。新規installと既存環境の復旧意図は運用者が明示し、空に見える状態だけで選択しない。Dの「新規空」は未初期化のpristine状態を指す。schema/ledger初期化が完了したDBは原稿件数が0でも互換DBとして扱い、承認済みinstall intentとA/Tに基づき登録待ちを判定する。
 
 | 経路 | 条件（先行条件は除外済み） | 実行と遷移先 |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | R7 CUTOVER | B通常稼働だが非互換、F未配備、またはF非互換かつ通常Frontend admissionが成立しない | 既存データ/owner保持、必要な移行・協調配備。既に互換な側を無用に再配備しない |
 | R8 UPDATE / VERIFY | B通常稼働・互換、Fが正常で通常admission成立 | 変更のあるcomponentのみ通常互換更新。完全同一ならno-op＋health/identity検証 |
 
-R0の不明は独立した証拠で確定した旧identityや未配備を含まない。R3のmigrationとR7の対切替が同一保守操作に属する場合は一つのfence・保全・transactionで完結させる。途中で通常公開へ戻さない。既存データを新規として扱う経路はない。旧認証からの移行に新しいBetter Auth owner登録が必要なら、旧データ保全・新規認証の明示承認・別のclean targetを用いる保守経路でのみ行う。
+R0の不明は独立した証拠で確定した旧identityや未配備を含まない。R1の再開可能な操作が本人登録・別承認待ちなら待機状態を返し、自動再試行ループや新しい登録キー発行を行わない。R2で基盤のdriftがある場合は安全な明示修復を復元の前提とする。R3のmigrationとR7の対切替が同一保守操作に属する場合は一つのfence・保全・transactionで完結させる。途中で通常公開へ戻さない。既存データを新規として扱う経路はない。旧認証からの移行に新しいBetter Auth owner登録が必要なら、旧データ保全・新規認証の明示承認・別のclean targetを用いる保守経路でのみ行う。
 
 ### 統合Deployment経路
 
@@ -129,10 +129,12 @@ flowchart TD
     PRIOR --> LOCK["共通production slot・保守記録<br/>鮮度再照合・Ingress fence"]
     LOCK --> SETUP{"新規owner登録が必要?"}
     SETUP -->|はい| LIMITED["setup-only UI/API限定公開<br/>owner本人登録・準備完了"]
-    LIMITED --> QUIESCE["writer / setup-only停止<br/>host lock・backup"]
-    SETUP -->|いいえ| QUIESCE
+    LIMITED --> CHANGE{"writerまたはDBの変更が必要?"}
+    SETUP -->|いいえ| CHANGE
+    CHANGE -->|はい| QUIESCE["writer / setup-only停止<br/>host lock・backup"]
+    CHANGE -->|いいえ| BACK
     QUIESCE --> DATA["必要な復元・migration・ledger/Auth検証"]
-    DATA --> BACK["目標Full Backendをfence内で検証"]
+    DATA --> BACK["目標Full Backendを必要時起動<br/>fence内で検証"]
     BACK --> FRONT["pin済みWorkerを必要時のみ昇格"]
     FRONT --> CHECK{"pair・データ・認証・拒否経路正常?"}
     CHECK -->|はい| OPEN["fence解除・外形確認・記録確定"]
@@ -158,7 +160,7 @@ flowchart TD
 
 ## 受入契約
 
-CIは認定済み候補、使い捨てUbuntu/rootless Podman/PostgreSQL 17、Cloudflare限定権限fixture/APIモックで以下を検証する。実VM・実edgeの成功とは区別する。
+CIは認定済み候補、使い捨てUbuntu/rootless Podman/PostgreSQL 17、Cloudflare限定権限fixture/APIモックで以下を検証する。実VM・実edgeの成功とは区別する。経路判定は全状態の直積を網羅的に評価し、各入力に対して選択経路が一意または明示停止となること、各分岐に到達可能な代表ケースがあることを確認する。
 
 | ケース | 必要な検証 |
 | --- | --- |
