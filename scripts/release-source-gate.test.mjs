@@ -90,4 +90,21 @@ test('only a newer change to the same component supersedes an affected source', 
   const merged = git('rev-parse', 'HEAD').trim();
   assert.equal(selectReleaseSource('frontend', merged, merged, git).affected, true);
   assert.throws(() => selectReleaseSource('frontend', side, merged, git), /first-parent/);
+  // A publisher may finish out of order. Run the production entry point with
+  // its certified checkout and the main ref fetched inside the deployment job.
+  const workflowOutput = path.join(cwd, 'deployment-outputs');
+  const summary = path.join(cwd, 'deployment-summary');
+  const checkDeployment = (certified, head) => {
+    git('checkout', '--detach', certified);
+    git('update-ref', 'refs/remotes/origin/main', head);
+    writeFileSync(workflowOutput, '');
+    execFileSync(process.execPath, [fileURLToPath(new URL('./release-source-gate.mjs', import.meta.url)), 'backend-deployment'], {
+      env: { ...process.env, GIT_DIR: path.join(cwd, '.git'), GIT_WORK_TREE: cwd,
+        CODEXIA_VERIFIED_MAIN_SHA: certified, GITHUB_OUTPUT: workflowOutput, GITHUB_STEP_SUMMARY: summary },
+    });
+    return readFileSync(workflowOutput, 'utf8').trim();
+  };
+  assert.equal(checkDeployment(frontend, backend), 'current=false');
+  assert.match(readFileSync(summary, 'utf8'), /newer backend inputs/u);
+  assert.equal(checkDeployment(backend, unrelated), 'current=true');
 });

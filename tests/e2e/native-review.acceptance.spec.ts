@@ -323,7 +323,7 @@ test("project switch fences a late unified-feed response and read-only sessions 
     const response = await route.fetch();
     if (!response.ok()) { await route.fulfill({ response }); return; }
     const body = await response.json() as Record<string, unknown>;
-    await route.fulfill({ response, body: JSON.stringify({ ...body, permissions: ["read"] }) });
+    await route.fulfill({ response, body: JSON.stringify({ ...body, authorScope: "" }) });
   });
   try {
     const missingAuthorControls = readOnlyPage.getByRole("alert").filter({ hasText: "原稿編集権限がありません" });

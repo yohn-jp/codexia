@@ -62,7 +62,7 @@ oidc_secret=()
 if [[ "$runtime_oidc" == true ]]; then
   oidc_secret=(--secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET)
 fi
-podman run --rm --pull=never --timeout=900 \
+podman run --rm --pull=missing --timeout=900 \
   --name codexia-auth-registration --userns=keep-id:uid=1000,gid=1000 --user 1000:1000 \
   --network codexia --network codexia-data --publish 127.0.0.1:8443:8443 \
   --read-only --cap-drop=all --security-opt=no-new-privileges \

@@ -6,7 +6,7 @@ run_better_auth_lifecycle() {
   local auth_dir="$fixture_home/.config/codexia-auth"
   local origin=https://codexia-lifecycle-proxy:4443
   local web=codexia-fixture-web ios=codexia-fixture-ios introspection=codexia-fixture-introspection
-  local base_image primary_image update_image failed_image launcher_pid owner token proof prior database_before
+  local base_image primary_image update_image failed_image launcher_pid owner token proof prior database_before enrollment_file
 
   auth_fixture() {
     rootless_podman exec -i codexia-lifecycle-proxy node /fixture/push-auth-lifecycle-oidc.mjs "$@"
@@ -142,8 +142,17 @@ DOCKERFILE
   printf '%s' 'codexia-fixture-oidc-secret-32-characters' >"$tmp/auth-oidc-secret"
   printf '%s' 'codexia-fixture-introspection-secret-32-characters' >"$tmp/auth-introspection-secret"
   chmod 0600 "$tmp/auth-database-url" "$tmp/auth-secret" "$tmp/auth-oidc-secret" "$tmp/auth-introspection-secret"
+  install -d -m 0700 "$tmp/enrollment"
+  install -m 0600 "$tmp/auth-tls.crt" "$tmp/enrollment/tls.crt"
+  install -m 0600 "$tmp/auth-tls.key" "$tmp/enrollment/tls.key"
+  cat >"$tmp/enrollment/bootstrap.env" <<ENV
+CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://codexia-auth-registration:8443
+CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=codexia-fixture-owner
+CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$origin/desktop,$origin/mobile
+ENV
+  chmod 0600 "$tmp/enrollment/bootstrap.env"
   cat > "$tmp/auth-stage.yml" <<YAML
-codexia_stage: auth-runtime
+codexia_stage: bootstrap
 codexia_service_user: codexia
 codexia_service_group: codexia
 codexia_service_uid: $fixture_uid
@@ -152,6 +161,7 @@ codexia_auth_runtime_approved: true
 codexia_database_initialization_approved: true
 codexia_auth_bootstrap_image: "$primary_image"
 codexia_auth_registration_pending: true
+codexia_auth_enrollment_files_dir: "$tmp/enrollment"
 codexia_auth_database_url_file: "$tmp/auth-database-url"
 codexia_auth_secret_file: "$tmp/auth-secret"
 codexia_oidc_client_secret_file: "$tmp/auth-oidc-secret"
@@ -162,7 +172,7 @@ codexia_oidc_client_id: codexia-fixture-client
 codexia_oauth_introspection_client_id: "$introspection"
 codexia_oauth_owner_client_ids: "$web,$ios"
 YAML
-  sed 's/codexia_database_initialization_approved: true/codexia_database_initialization_approved: false/' \
+  sed -e 's/codexia_database_initialization_approved: true/codexia_database_initialization_approved: false/' -e 's/codexia_stage: bootstrap/codexia_stage: auth-runtime/' \
     "$tmp/auth-stage.yml" > "$tmp/auth-stage-unapproved.yml"
   database_before=$(observe_auth_database)
   [[ "$database_before" == $'no auth role\nno auth schema\nno application relations\nno application ledger' ]]
@@ -175,15 +185,7 @@ YAML
     'Require explicit approval and a reviewed immutable Full image before initializing application storage'
   [[ "$(observe_auth_database)" == "$database_before" ]]
   require_inactive_api
-  run_playbook "$tmp/auth-stage.yml" auth-stage-pending
-  cat >"$tmp/bootstrap.env" <<ENV
-CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://codexia-auth-registration:8443
-CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=codexia-fixture-owner
-CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$origin/desktop,$origin/mobile
-ENV
-  sudo install -o codexia -g codexia -m 0600 "$tmp/bootstrap.env" "$tmp/auth-tls.key" "$tmp/auth-tls.crt" "$auth_dir"
-  rootless mv "$auth_dir/auth-tls.key" "$auth_dir/tls.key"
-  rootless mv "$auth_dir/auth-tls.crt" "$auth_dir/tls.crt"
+  run_playbook "$tmp/auth-stage.yml" auth-stage-pending "$tmp/bootstrap.yml"
   rootless "$fixture_home/.local/bin/codexia-register-auth" --apply "$primary_image" >"$tmp/auth-bootstrap.log" 2>&1 &
   launcher_pid=$!
   for _ in $(seq 1 60); do
@@ -205,10 +207,18 @@ NODE
 )
   rootless_podman stop --time 10 codexia-auth-registration >/dev/null
   wait "$launcher_pid"
-  rootless rm -f "$auth_dir/bootstrap.env" "$auth_dir/tls.crt" "$auth_dir/tls.key"
   sed -i 's/codexia_auth_registration_pending: true/codexia_auth_registration_pending: false/' "$tmp/auth-stage.yml"
   printf 'codexia_oauth_owner_subject: "%s"\n' "$owner" >>"$tmp/auth-stage.yml"
-  run_playbook "$tmp/auth-stage.yml" auth-stage-final
+  sed 's/codexia_stage: bootstrap/codexia_stage: auth-runtime/' "$tmp/auth-stage.yml" > "$tmp/auth-final.yml"
+  run_playbook "$tmp/auth-final.yml" auth-stage-final
+  for enrollment_file in bootstrap.env tls.crt tls.key; do rootless test ! -e "$auth_dir/$enrollment_file"; done
+  local before_reapply
+  before_reapply=$(observe_auth_database)
+  run_playbook "$tmp/auth-stage.yml" bootstrap-reapply "$tmp/bootstrap.yml"
+  grep -Eq 'localhost[[:space:]]*:.*changed=0([[:space:]]|$)' "$tmp/bootstrap-reapply.log"
+  [[ "$(observe_auth_database)" == "$before_reapply" ]]
+  rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
+  disable_fixture_tunnel
 
   database_before=$(observe_auth_database)
   [[ "$database_before" != *'no auth role'* && "$database_before" != *'no auth schema'* && "$database_before" != *'no application ledger'* ]]

@@ -120,8 +120,10 @@ FAILURE
 }
 run_playbook() {
   local vars=$1 name=$2 status=0
+  local -a shared_vars=()
+  if [[ -n ${3:-} ]]; then shared_vars=(--extra-vars "@$3"); fi
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
-    "$repo_root/deploy/ansible/site.yml" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
+    "$repo_root/deploy/ansible/site.yml" "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   return "$status"
 }
@@ -367,25 +369,6 @@ Environment=HOME=$fixture_home
 Environment=XDG_CONFIG_HOME=$fixture_home/.config
 Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
 MANAGER_CONF
-sudo systemctl daemon-reload
-cat > "$tmp/host.yml" <<YAML
-codexia_stage: host
-codexia_host_approved: true
-codexia_create_service_account: true
-YAML
-user_created=true
-if ! run_playbook "$tmp/host.yml" host; then set_state fixture_cleanup NOT_CHECKED 'host stage failed before application fixture creation'; exit 1; fi
-service_uid=$(id -u codexia)
-[[ "$service_uid" == "$fixture_uid" ]]
-for _ in $(seq 1 30); do
-  if rootless_systemctl show --property=Version >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
-  mark_fixture_unavailable 'user systemd manager is unavailable for the configured service identity'
-  exit 78
-fi
-rootless_systemctl import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
 # Quadlet's user generator reads the manager's generated environment, not
 # just this shell's imported values. Reuse the Base Runtime CI fixture contract.
 if [[ ! -d "$environment_generator_dir" ]]; then
@@ -400,6 +383,43 @@ if [ "\$(id -u)" = "$fixture_uid" ]; then
   printf '%s\\n' 'XDG_CONFIG_HOME=$fixture_home/.config' 'XDG_RUNTIME_DIR=/run/user/$fixture_uid'
 fi
 ENV_GENERATOR
+sudo systemctl daemon-reload
+# The service receives synthetic credentials only; all secret-bearing output is suppressed.
+mkdir -p "$tmp/secrets"
+printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
+printf '%064d' 1 > "$tmp/secrets/admin"
+printf '%064d\n' 2 > "$tmp/secrets/app"
+chmod 0600 "$tmp/secrets"/*
+ssh-keygen -q -t ed25519 -N '' -f "$tmp/deploy_key"
+deploy_public_key=$(cut -d' ' -f1,2 "$tmp/deploy_key.pub")
+cat > "$tmp/bootstrap.yml" <<YAML
+codexia_stage: bootstrap
+codexia_host_approved: true
+codexia_create_service_account: true
+codexia_deploy_ssh_public_key: "$deploy_public_key"
+codexia_secrets_approved: true
+codexia_tunnel_token_file: "$tmp/secrets/tunnel"
+codexia_postgres_admin_password_file: "$tmp/secrets/admin"
+codexia_postgres_app_password_file: "$tmp/secrets/app"
+codexia_base_approved: true
+codexia_database_initialization_approved: true
+YAML
+system_config_created=true
+user_created=true
+runtime_ready=true
+run_playbook "$tmp/bootstrap.yml" bootstrap
+rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
+service_uid=$(id -u codexia)
+[[ "$service_uid" == "$fixture_uid" ]]
+for _ in $(seq 1 30); do
+  if rootless_systemctl show --property=Version >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+if ! rootless_systemctl show --property=Version >/dev/null 2>&1; then
+  mark_fixture_unavailable 'user systemd manager is unavailable for the configured service identity'
+  exit 78
+fi
+rootless_systemctl import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
 rootless_systemctl daemon-reload
 for expected in "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
   if ! rootless_systemctl show-environment | grep -Fxq "$expected"; then
@@ -411,39 +431,7 @@ if ! rootless_podman info --format '{{.Host.Security.Rootless}}' | grep -Fxq tru
   mark_fixture_unavailable 'rootless Podman is unavailable for the configured service identity'
   exit 78
 fi
-runtime_ready=true
 
-# The service receives synthetic credentials only; all secret-bearing output is suppressed.
-mkdir -p "$tmp/secrets"
-rootless mkdir -p "$fixture_home/.config/containers" "$fixture_home/.local/state"
-printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
-printf '%064d' 1 > "$tmp/secrets/admin"
-printf '%064d\n' 2 > "$tmp/secrets/app"
-chmod 0600 "$tmp/secrets"/*
-cat > "$tmp/secrets.yml" <<YAML
-codexia_stage: secrets
-codexia_secrets_approved: true
-codexia_tunnel_token_file: "$tmp/secrets/tunnel"
-codexia_postgres_admin_password_file: "$tmp/secrets/admin"
-codexia_postgres_app_password_file: "$tmp/secrets/app"
-YAML
-run_playbook "$tmp/secrets.yml" secrets
-cat > "$tmp/base.yml" <<YAML
-codexia_stage: base
-codexia_base_approved: true
-codexia_database_initialization_approved: true
-YAML
-system_config_created=true
-run_playbook "$tmp/base.yml" base
-# Base installs the canonical Tunnel Quadlet but does not start it. Remove that
-# external-service unit only inside this disposable fixture; the app transaction
-# then exercises the same optional-Tunnel branch without contacting Cloudflare.
-rootless rm -f "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
-rootless_systemctl daemon-reload
-if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
-  echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
-  exit 1
-fi
 podman_version=$(rootless_podman --version | awk '{print $3}')
 podman_rootless=$(rootless_podman info --format '{{.Host.Security.Rootless}}')
 systemd_version=$(rootless_systemctl --version | head -n 1)
@@ -600,6 +588,18 @@ sshfs_context_sha=$(cat "$docker_build_context/Dockerfile" "$docker_build_contex
 node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$debian_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
 const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',builder:'host Docker; archive loaded into rootless Podman',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY
+
+disable_fixture_tunnel() {
+  # Base installs the canonical Tunnel Quadlet but does not start it. Remove that
+  # external-service unit only inside this disposable fixture; the app transaction
+  # then exercises the same optional-Tunnel branch without contacting Cloudflare.
+  rootless rm -f "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
+  rootless_systemctl daemon-reload
+  if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
+    echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
+    exit 1
+  fi
+}
 
 run_application_lifecycle() {
   local failed_image compatible_image compatible_key historical_image historical_status=0

@@ -4,7 +4,6 @@
     that:
       - codexia_base_approved | default(false) | bool
       - not ansible_check_mode
-      - ansible_facts.user_uid | int > 0
       - codexia_service_user is defined
       - codexia_service_user is string and codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
       - codexia_service_uid is integer and codexia_service_uid > 0

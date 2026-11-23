@@ -176,7 +176,7 @@ SQL
     elif [[ $? != 1 ]]; then
       die 'Could not verify that no API container exists'
     fi
-    podman run --rm --pull=never --network codexia-data \
+    podman run --rm --pull=missing --network codexia-data \
       --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
       --entrypoint=node "$image" --input-type=module -e '
         import { readFileSync } from "node:fs";

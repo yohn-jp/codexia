@@ -1,6 +1,6 @@
 # Push deployment
 
-The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job then checks the live UI/API epoch and Access boundary, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
+The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job rechecks the certified backend against current main inside the deployment queue, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for the declared VM, verifies the live UI epoch and Access boundary, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
 The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the service identity, data, secrets, backup destination and rollback path have passed target-host acceptance. The push path is the sole backend activation path.
 
@@ -14,8 +14,9 @@ Configure these names in the `codexia-production` GitHub Environment. Never put 
 | `CODEXIA_PUBLIC_ORIGIN` | Variable | HTTPS origin used by the production job to check the deployed UI/API epoch and Access boundary. |
 | `CODEXIA_ACCESS_CLIENT_ID` | Secret | Existing Cloudflare Access service-token ID used by the read-only live compatibility preflight. |
 | `CODEXIA_ACCESS_CLIENT_SECRET` | Secret | Existing Cloudflare Access service-token secret used by the read-only live compatibility preflight. |
-| `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. Install its public key for the `codexia` account on the VM through the approved host channel. |
-| `CODEXIA_DEPLOY_SSH_KNOWN_HOSTS` | Variable | Independently verified `known_hosts` line for `100.100.1.68`; the runner rejects an unpinned host. |
+| `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. Declare its public key as `codexia_deploy_ssh_public_key` in the private bootstrap inventory. |
+| `CODEXIA_DEPLOY_SSH_KNOWN_HOSTS` | Variable | Independently verified OpenSSH host key pin for the VM. A pin with a single literal address or hostname also declares the destination. |
+| `CODEXIA_DEPLOY_HOST` | Variable | Tailnet address or hostname to select when the pin file is hashed or covers multiple hosts. The selected host must match the pin. |
 | `CODEXIA_BACKUP_DESTINATION` | Variable | Absolute directory for encrypted backups; defaults to `/home/codexia/backups` (created with mode 0700). Remote storage is optional. |
 | `CODEXIA_BACKUP_AGE_RECIPIENT` | Variable | Public age recipient used to encrypt backup artifacts. |
 | `CODEXIA_INITIAL_INSTALL_APPROVED` | Variable | Exact `true` authorizes activation when no API container exists; default is `false`. |
@@ -46,11 +47,15 @@ The backup fixture mounts an SSHFS export served by a separate container on the 
 
 ## First application activation
 
-First activation uses the existing Ansible stages in order; it does not create or move data automatically. From the approved bootstrap account, inspect the host, converge `host`, install reviewed credentials with `secrets`, then converge `base`. For an absent or empty PostgreSQL volume, set both `codexia_base_approved=true` and `codexia_database_initialization_approved=true` for the `base` invocation. For an existing volume, `base` adopts it only after its pinned PostgreSQL identity, volume layout, database owner, and migration ledger pass the existing checks. It never deletes the volume or repairs an unrecognized database.
+Start with an Ubuntu 26.04 x86-64 VM on the tailnet, a pinned SSH connection for a bootstrap administrator with sudo, and an available compatible frontend. Supply the protected credential files, service UID/GID, deployment public key, immutable certified Full image and backup settings in the [private inventory](../../deploy/ansible/inventory.example.yml). The bootstrap administrator and the rootless `codexia` service account can be different users.
 
-Run `auth-runtime` before `deploy`. Provide `codexia_auth_runtime_approved=true` and review its private configuration. For a pristine database, stage the immutable reviewed Full image in rootless Podman and provide its reference as `codexia_auth_bootstrap_image` along with `codexia_database_initialization_approved=true`. Under the host lock, the stage initializes the application schema before creating the separate authentication role and schema. It leaves the public API stopped.
+Run the following command from the prepared control node. The `bootstrap` operation uses the declared host, credential and base approvals and runs `auth-runtime` before `deploy` when `codexia_auth_runtime_approved=true`. On an empty volume, approve database initialization and set `codexia_auth_bootstrap_image` to the reviewed Full digest. Use the pending-registration settings for a new owner. Bootstrap obtains the image, initializes the application ledger, provisions the separate auth role and schema and leaves the public API stopped. Existing volumes are checked against the declared PostgreSQL identity, ownership, layout and migration ledger before adoption.
 
-Follow the [isolated Better Auth registration procedure](../../deploy/ansible/AUTH-RUNTIME.md#initial-owner-and-oauth-client-registration). Register the approved Web, iOS and confidential introspection clients through an authenticated Better Auth session. Finish staging the resulting internal owner ID before calling the protected workflow.
+```sh
+ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=bootstrap
+```
+
+Follow the [isolated Better Auth registration procedure](../../deploy/ansible/AUTH-RUNTIME.md#initial-owner-and-oauth-client-registration). Register the approved Web, iOS and confidential introspection clients through an authenticated Better Auth session. Reapply the inventory with registration complete and the returned internal owner ID. Run the protected deployment with both first-activation approvals. If the handoff for the current certificate already ran while deployment was disabled, rerun its production job with the prepared environment while the certificate is valid.
 
 Ansible verifies the staged private settings and protected Podman secrets, takes the encrypted backup, and verifies the owner, registered clients, API resources and introspection credentials before installing the candidate. The API repeats the client and credential checks on startup.
 
@@ -109,7 +114,7 @@ bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file"
 
 ## Acceptance order
 
-The production job operates on a pre-provisioned host. Before enabling it, the target needs the `codexia` account, rootless Podman and user systemd, canonical database and Tunnel resources, protected Podman secrets, the dedicated SSH key, a pinned host key, and a writable encrypted-backup directory. The approved `auth-runtime` stage initializes an empty application schema during provisioning. The first `deploy` activation, with both explicit approvals, verifies its exact migration ledger. Later `deploy` runs apply compatible image updates. Keep the existing `sophia` storage outside this workflow.
+Run `bootstrap` and complete enrollment before enabling automatic activation. At that point the target has the `codexia` account, rootless Podman and user systemd, canonical database and Tunnel resources, protected Podman secrets, the dedicated SSH key, a pinned host key, and a writable encrypted-backup directory. The approved `auth-runtime` stage initializes an empty application schema during provisioning. The first `deploy` activation, with both explicit approvals, verifies its exact migration ledger. Later `deploy` runs apply compatible image updates. Keep the existing `sophia` storage outside this workflow.
 
 Acceptance must record separate evidence for CI certification and VM behavior. On the target, verify Tailscale SSH, first deployment from a clean `codexia` runtime with preserved or explicitly restored data, same-digest reapplication, a compatible update, a deliberately failing candidate and verified restoration, host-lock contention, service recovery after reboot, encrypted backup and isolated restore, and external application health through Cloudflare Tunnel.
 

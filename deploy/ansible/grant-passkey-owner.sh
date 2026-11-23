@@ -56,7 +56,7 @@ if grep -q '^CODEXIA_OIDC_ISSUER=' "$auth_dir/runtime.env"; then
   oidc_secret=(--secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET)
 fi
 # The one-time grant is emitted once on this operator terminal. It is never added to a URL or persisted by this launcher.
-podman run --rm --pull=never --network codexia-data \
+podman run --rm --pull=missing --network codexia-data \
   --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
   --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
   "${oidc_secret[@]}" \

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
@@ -41,7 +43,7 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.ok(ssh, 'production deployment must prepare its dedicated SSH key and pinned host key');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
-  assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
+  assert.equal(ssh.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
 
   const liveUi = deploy.steps.find(step => step.name === 'Verify deployed frontend epoch and Access boundary for certified backend recovery');
   assert.ok(liveUi, 'the job must admit the deployed frontend against the verified backend epoch before deployment');
@@ -428,10 +430,45 @@ test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without
   assert.equal(job.environment, 'codexia-production');
   const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
   assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');
-  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
-  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
-  assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
-  assert.match(ssh.run, /ssh-keygen -F 100\.100\.1\.68/u);
-  assert.match(ssh.run, /codexia@100\.100\.1\.68/u);
+  const target = job.steps.find(step => step.id === 'target');
+  assert.equal(target.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
+  assert.equal(target.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
+  assert.equal(target.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
+  assert.match(ssh.run, /ssh -F .*codexia-ssh\/config.*codexia-target.*id -un/u);
   assert.doesNotMatch(ssh.run, /ansible-playbook|podman (?:pull|run|rm)|CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
+});
+
+test('the declared VM must resolve to a protected SSH pin in both diagnosis and deployment', t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-ssh-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const key = path.join(directory, 'fixture');
+  assert.equal(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]).status, 0);
+  const publicKey = readFileSync(key + '.pub', 'utf8').trim();
+  const host = 'new-vm.example.test';
+  const pins = host + ' ' + publicKey;
+  const script = new URL('../deploy/ansible/prepare-deploy-ssh.sh', import.meta.url).pathname;
+  function prepare(knownHosts, target) {
+    const runner = mkdtempSync(path.join(directory, 'runner-'));
+    const output = path.join(runner, 'output');
+    const result = spawnSync('bash', [script], { encoding: 'utf8', env: {
+      ...process.env, RUNNER_TEMP: runner, GITHUB_OUTPUT: output, CODEXIA_DEPLOY_HOST: target,
+      CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: knownHosts, CODEXIA_DEPLOY_SSH_PRIVATE_KEY: readFileSync(key, 'utf8'),
+    } });
+    return { result, runner, output };
+  }
+  for (const target of ['', host]) {
+    const { result, runner, output } = prepare(pins, target);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(output, 'utf8'), 'host=' + host + '\n');
+    const config = spawnSync('ssh', ['-G', '-F', path.join(runner, 'codexia-ssh/config'), 'codexia-target'], { encoding: 'utf8' });
+    assert.equal(config.status, 0);
+    for (const line of ['hostname ' + host, 'user codexia', 'stricthostkeychecking true', 'identitiesonly yes',
+      'globalknownhostsfile /dev/null', 'userknownhostsfile ' + path.join(runner, 'codexia-ssh/known_hosts')]) {
+      assert.ok(config.stdout.split('\n').includes(line), line);
+    }
+  }
+  assert.notEqual(prepare(pins, 'different.example.test').result.status, 0);
+  assert.notEqual(prepare(pins, 'invalid\nHost other').result.status, 0);
+  assert.notEqual(prepare(pins + '\nother.example.test ' + publicKey, '').result.status, 0);
+  assert.equal(prepare(pins + '\nother.example.test ' + publicKey, host).result.status, 0);
 });
