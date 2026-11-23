@@ -37,7 +37,7 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 
 1. 既存の唯一のbackup producer `deploy/backup/backup.sh` が、API writerの停止とhost lockのもとで、**現行v2形式のage暗号化PostgreSQL dump・history・manifest・ciphertext checksum**を作る。S3専用の第二dump/別の暗号化形式を作らない。
 2. 検証済みの暗号文一式を、保護されたS3互換bucket/prefixへ**オブジェクトとしてアップロード**する。未完了のmultipart uploadや途中オブジェクトを「利用可能な復旧点」として公開しない。全オブジェクトのサイズ・SHA-256/manifest digestとリモート取得内容を検証し、最後に**commit marker/receipt**を公開する。オブジェクト名はバックアップIDとsource identityで一意にし、既存の復旧点を上書きしない。
-3. **アップロード済みオブジェクトを再取得**し、manifestとchecksumを照合してからオフVM保管成功とする。S3のETagをSHA-256や完全性の唯一の証拠として扱わない。
+3. **アップロード済みオブジェクトを再取得**し、manifestとchecksumを照合してからオフVM保管成功とする。S3のETagをSHA-256や完全性の唯一の証拠として扱わない。また、SHA-256は破損検出であり**作成者の真正性を証明しない**。復元時にはバックアップIDと暗号文digestを、S3オブジェクトとは独立した保護済みの運用receipt（実行主体・時刻・対象sourceを含む）と照合し、改ざんされたS3側manifestだけを信頼しない。
 4. 隔離restore hostは、明示したbackup IDとbucket/prefixから暗号文とmanifestを取得し、ローカルの一時領域で完全性を確認して、**既存の `backup.sh drill` の復号・PostgreSQL/history検証へ引き渡す**。本番DBへ直接復元しない。
 5. 現行バックアップ対象外であるPostgreSQL roles、Podman secrets、age秘密鍵、S3 credentialの復旧責務は別途維持し、これらを同一bucketに平文保管しない。
 
@@ -69,7 +69,7 @@ Preserve the successful drill output with the exact digest and checksum-manifest
 | BACKUP-S3-002 | multipart中断、timeout、再試行、同一backup IDでの冪等性。未完成バックアップは列挙/復旧候補に現れない |
 | BACKUP-S3-003 | 間違ったendpoint/bucket/prefix、期限切れcredential、権限不足、TLS失敗を安全に拒否 |
 | BACKUP-S3-004 | Object Lock/retentionの有効性と未対応providerでの代替保護の区別 |
-| BACKUP-S3-005 | 隔離restore hostでS3取得→既存drill→DB/history/schema fingerprint→API起動の実証 |
+| BACKUP-S3-005 | 隔離restore hostでS3取得→独立保護したreceiptで送信元/digest照合→既存drill→DB/history/schema fingerprint→API起動の実証 |
 | BACKUP-S3-006 | 必須S3保管先の障害時はデプロイ停止。任意保管先の場合も監査可能な失敗を記録 |
 | BACKUP-S3-007 | bucket credential、age秘密鍵、原稿平文がログ・CI artifact・公開Pagesへ出ない |
 
