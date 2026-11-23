@@ -628,10 +628,10 @@ DOCKERFILE
   node "$repo_root/scripts/push-app-lifecycle.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
 }
 run_application_lifecycle() {
-  local initial_key update_key update_image
+  local initial_key update_key update_image failed_image
   if [[ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).transition.kind' "$evidence")" == test-only-digest ]]; then
     prepare_app_update
-  fi failed_image
+  fi
   read -r initial_key update_key update_image < <(node - "$evidence" <<'TRANSITION'
 const fs = require('node:fs');
 const { transition, candidates } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
