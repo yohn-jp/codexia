@@ -51,11 +51,23 @@ function contextRow(label, value) {
   row.append(node('span', '', label), node('strong', '', value));
   return row;
 }
+function jobState(job) {
+  if (job.conclusion === 'success') return { label: 'success', className: 'success' };
+  if (job.conclusion === 'skipped') return { label: 'skipped', className: 'skipped' };
+  if (job.conclusion === 'failure' || job.conclusion === 'timed_out') return { label: 'failed', className: 'failed' };
+  if (job.conclusion === 'action_required') return { label: 'blocked · action required', className: 'blocked' };
+  if (job.conclusion === 'cancelled') return { label: 'cancelled', className: 'cancelled' };
+  if (job.conclusion === 'neutral') return { label: 'neutral', className: 'unknown' };
+  if (job.conclusion === 'stale') return { label: 'unknown · stale', className: 'unknown' };
+  if (job.status === 'in_progress') return { label: 'running', className: 'running' };
+  if (job.status === 'queued') return { label: 'queued · cause unknown', className: 'unknown' };
+  return { label: job.conclusion ? 'unknown · ' + job.conclusion : 'unknown', className: 'unknown' };
+}
 function renderContext(pr) {
   const out = el('context'); clear(out);
   const verify = pr.runs.find(run => run.id === pr.verifyId);
   out.append(
-    contextRow('PR HEAD', pr.sha.slice(0, 12)),
+    contextRow('Executed source SHA', pr.sha),
     contextRow('Workflow数', String(pr.runs.length)),
     contextRow('Verify attempt', verify ? '#' + verify.attempt : '—'),
     contextRow('Verify result', verify?.conclusion ?? '—'),
@@ -83,6 +95,16 @@ function renderContext(pr) {
     a.className = 'context-row';
     out.append(a);
   }
+  const workflows = node('div', 'workflow-runs');
+  workflows.append(node('strong', '', 'Observed workflow runs'));
+  for (const run of pr.runs) {
+    const state = jobState({ status: run.status, conclusion: run.conclusion });
+    const item = node('div', 'workflow-run');
+    item.append(link(run.name + ' · attempt #' + run.attempt, run.url),
+      node('span', 'state ' + state.className, state.label));
+    workflows.append(item);
+  }
+  out.append(workflows);
 }
 function renderChain(pr) {
   const list = el('chain'); clear(list);
@@ -143,7 +165,8 @@ function renderTimeline(pr) {
       const row = node('div', 'timeline-row');
       const left = node('div', 'timeline-label');
       if (job.critical) left.append(node('span', 'flag', '◆ '));
-      left.append(link(job.name, job.url));
+      const state = jobState(job);
+      left.append(link(job.name, job.url), node('span', 'state ' + state.className, state.label));
       left.title = job.name + ' · ' + job.runner;
       const track = node('div', 'timeline-track');
       const created = date(job.createdAt), started = date(job.startedAt), finished = date(job.completedAt);
@@ -152,16 +175,42 @@ function renderTimeline(pr) {
       }
       if (started !== null && finished !== null && finished >= started) {
         track.append(slot(started, finished, job.conclusion === 'success'
-          ? job.critical ? 'critical' : 'exec' : 'failed',
+          ? job.critical ? 'critical' : 'exec' : state.className,
         'Execution: ' + duration(job.durationSeconds)));
       }
       row.append(left, track, node('div', 'timeline-time', duration(job.durationSeconds)));
-      out.append(row);
+      const detailRow = node('details', 'job-steps');
+      const summary = node('summary', '', 'Steps (' + job.steps.length + ') · ' + state.label);
+      detailRow.append(summary);
+      if (job.steps.length) {
+        const list = node('ul', 'job-step-list');
+        for (const step of job.steps) {
+          const stepState = step.conclusion ?? (job.status === 'in_progress' ? 'running' : 'unknown');
+          const item = node('li', 'job-step');
+          item.append(node('span', '', step.name), node('span', 'step-meta', stepState + ' · ' + duration(step.durationSeconds)));
+          list.append(item);
+        }
+        detailRow.append(list);
+      } else detailRow.append(node('p', 'empty', 'Step inventory unavailable.'));
+      out.append(row, detailRow);
     }
   }
   el('timeline-foot').textContent = 'Range: ' + formatTime(new Date(first).toISOString()) +
     ' — ' + formatTime(new Date(last).toISOString()) + ' · ' + jobs.length +
-    ' observed jobs · Skipped / carried jobs are not represented as executed work.';
+    ' observed jobs. Job state labels use the Actions API conclusion; queued cause remains unknown.';
+}
+function updateSelectionUrl(pr) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('pr', String(pr.number));
+  url.searchParams.set('sha', pr.sha);
+  window.history.replaceState(null, '', url);
+}
+function requestedSelection(items) {
+  const url = new URL(window.location.href);
+  const pr = Number(url.searchParams.get('pr'));
+  const sha = url.searchParams.get('sha');
+  const index = items.findIndex(item => item.number === pr && item.sha === sha);
+  return index >= 0 ? index : 0;
 }
 function renderHistory(pr) {
   const target = el('history'); clear(target);
@@ -195,6 +244,7 @@ function renderHistory(pr) {
       selected = item;
       el('pr').value = String(all.indexOf(item));
       el('copy-status').textContent = '';
+      updateSelectionUrl(item);
       render();
     });
     target.append(button);
@@ -237,8 +287,16 @@ async function copyDiagnostics() {
   }
 }
 
-async function main() {
-  el('copy-diagnostics').addEventListener('click', copyDiagnostics);
+async function loadDashboard() {
+  const retry = el('retry');
+  const select = el('pr');
+  const copyButton = el('copy-diagnostics');
+  retry.disabled = true;
+  retry.hidden = true;
+  copyButton.disabled = true;
+  select.disabled = true;
+  el('status').textContent = '実測データを読み込んでいます。';
+  all = []; selected = null;
   try {
     const workflowResponse = await fetch(WORKFLOW_SOURCE, {
       signal: AbortSignal.timeout(20_000),
@@ -250,7 +308,7 @@ async function main() {
     if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
     all = result.prs;
     coverage = { ...result.coverage, observedAt: result.observedAt };
-    const select = el('pr'); clear(select);
+    clear(select);
     for (const [index, pr] of all.entries()) {
       const option = node('option', '', '#' + pr.number + ' / ' + pr.sha.slice(0, 9));
       option.value = String(index); select.append(option);
@@ -262,10 +320,12 @@ async function main() {
       for (const id of ['timeline','history','steps']) el(id).replaceChildren(node('p','empty','データなし'));
       return;
     }
-    selected = all[0];
-    el('copy-diagnostics').disabled = false;
-    select.value = '0';
-    select.addEventListener('change', () => { selected = all[Number(select.value)]; el('copy-status').textContent = ''; render(); });
+    const index = requestedSelection(all);
+    selected = all[index];
+    copyButton.disabled = false;
+    select.disabled = false;
+    select.value = String(index);
+    updateSelectionUrl(selected);
     el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
@@ -275,6 +335,17 @@ async function main() {
     render();
   } catch (error) {
     el('status').textContent = 'CIデータを読み込めませんでした: ' + (error instanceof Error ? error.message : error);
+    retry.hidden = false;
+  } finally {
+    retry.disabled = false;
   }
 }
-main();
+el('copy-diagnostics').addEventListener('click', copyDiagnostics);
+el('retry').addEventListener('click', loadDashboard);
+el('pr').addEventListener('change', () => {
+  selected = all[Number(el('pr').value)];
+  el('copy-status').textContent = '';
+  updateSelectionUrl(selected);
+  render();
+});
+loadDashboard();

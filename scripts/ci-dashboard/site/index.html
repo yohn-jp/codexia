@@ -36,7 +36,7 @@
           <span id="copy-status" role="status" aria-live="polite"></span>
         </div>
       </div>
-      <div class="status" id="status" role="status">実測データを読み込んでいます。</div>
+      <div class="status"><span id="status" role="status">実測データを読み込んでいます。</span><button id="retry" class="retry" type="button" hidden>再試行</button></div>
       <section class="metrics" aria-label="主要指標">
         <div class="metric"><span class="metric-label">OBSERVED PR WINDOW</span><strong id="wall">—</strong><small>観測されたWorkflowの開始〜終了</small></div>
         <div class="metric"><span class="metric-label">VERIFY CERTIFICATION</span><strong id="gate">—</strong><small>最新Verifyの認証完了まで</small></div>
@@ -67,7 +67,7 @@
       <div class="body-grid lower">
         <section class="panel" aria-labelledby="steps-title">
           <div class="panel-head"><div><div class="eyebrow">03 / STEP COST</div><h2 id="steps-title">Longest observed steps</h2></div></div>
-          <p class="panel-note">セットアップやテストなどの実測ステップ時間。Download専用時間を推定していません。</p>
+          <p class="panel-note">上位16件の実測時間を表示。欠損時刻を含む全ステップは、タイムラインの各ジョブを展開して確認できます。</p>
           <div class="table-scroll"><table><thead><tr><th>Step / job</th><th>Phase</th><th class="numeric">Elapsed</th></tr></thead><tbody id="steps"></tbody></table></div>
         </section>
         <section class="panel" aria-labelledby="history-title">
