@@ -8,6 +8,9 @@ on:
       - '.github/workflows/ios-editor.yml'
 permissions:
   contents: read
+concurrency:
+  group: ios-editor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   editor:
     runs-on: xcode-27
