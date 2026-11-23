@@ -86,6 +86,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
+  '.github/workflows/ios-api.yml',
+  '.github/workflows/ios-editor.yml',
   '.github/workflows/ios-unsigned-ipa.yml',
   '.github/workflows/push-backup.yml',
   '.github/workflows/push-host.yml',
@@ -168,6 +170,10 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/ios/', 'app/native/']);
+const IOS_NATIVE_PROJECT_PREFIXES = Object.freeze([
+  'ios/CodexiaApp/', 'ios/CodexiaEditor/', 'ios/CodexiaTransport/',
+]);
+const IOS_NATIVE_PROJECT_INPUT = /(?:\.swift|\.pbxproj|\.xcscheme|\.entitlements|\.ya?ml|\.py|\.sh|\/\.gitignore|\/Package\.(?:swift|resolved))$/u;
 const DB_CONTRACT_SOURCE_PATHS = new Set([
   'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
   'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
@@ -209,7 +215,8 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         file === 'docs/verification/ARCHITECTURE-ATLAS.md' ||
         file.startsWith('scripts/architecture/') || file === 'scripts/architecture-diagrams/pack.mjs' ||
         file === 'scripts/architecture-diagrams/pack.test.mjs') add('architecture-g5');
-    if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
+    if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length) ||
+        (IOS_NATIVE_PROJECT_PREFIXES.some(prefix => file.startsWith(prefix)) && IOS_NATIVE_PROJECT_INPUT.test(file))) {
       add('unit-root');
       continue;
     }

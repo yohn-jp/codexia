@@ -522,6 +522,76 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   assert.equal(unknownMixed.mode, 'full');
 });
 
+test('native iOS workflows and owned projects retain canonical root proof without desktop verification', async () => {
+  const { createVerificationPlan } = await import('./plan.mjs');
+  const sha = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  const nativeOwnedFiles = [
+    ['.github/workflows/ios-api.yml', '.github/workflows/ios-api.yml'],
+    ['ios/CodexiaTransport/Sources/CodexiaTransport/NativeOAuthSession.swift', '.github/workflows/ios-api.yml'],
+    ['ios/CodexiaTransport/Tests/CodexiaTransportTests/OAuthTests.swift', '.github/workflows/ios-api.yml'],
+    ['ios/CodexiaTransport/Package.resolved', '.github/workflows/ios-api.yml'],
+    ['.github/workflows/ios-editor.yml', '.github/workflows/ios-editor.yml'],
+    ['ios/CodexiaApp/CodexiaApp.xcodeproj/project.pbxproj', '.github/workflows/ios-editor.yml'],
+    ['ios/CodexiaApp/UITests/AuthoringFlowUITests.swift', '.github/workflows/ios-editor.yml'],
+    ['ios/CodexiaEditor/Package.swift', '.github/workflows/ios-editor.yml'],
+    ['ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift', '.github/workflows/ios-editor.yml'],
+    ['ios/CodexiaEditor/Tests/CodexiaEditorTests/ManuscriptEditorUIKitTests.swift', '.github/workflows/ios-editor.yml'],
+  ];
+  const apiWorkflow = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
+  const editorWorkflow = parse(readFileSync(new URL('../../../.github/workflows/ios-editor.yml', import.meta.url), 'utf8'));
+  for (const [file, ownerWorkflow] of nativeOwnedFiles) {
+    const workflow = ownerWorkflow.endsWith('ios-api.yml') ? apiWorkflow : editorWorkflow;
+    assert.ok(matchesWorkflowPaths(workflow.on.pull_request.paths, [file]), `${ownerWorkflow} must own ${file}`);
+    const plan = createVerificationPlan({ files: [file], event: 'pull_request', sha, base });
+    assert.deepEqual(plan.tasks, ['unit-root', 'coverage'], file);
+    assert.equal(plan.mode, 'affected', file);
+    assert.equal(plan.full_model_oci, false, file);
+  }
+
+  const sharedOpenApi = createVerificationPlan({ files: [
+    '.github/workflows/ios-api.yml',
+    'ios/CodexiaTransport/Sources/CodexiaTransport/NativeOAuthSession.swift',
+    'packages/http-contract/openapi/codexia.openapi.yaml',
+  ], event: 'pull_request', sha, base });
+  assert.deepEqual(sharedOpenApi.tasks,
+    ['unit-http-contract', 'unit-app', 'unit-root', 'typecheck-http-contract', 'test-types-packages', 'coverage']);
+  assert.equal(sharedOpenApi.mode, 'affected');
+  assert.equal(sharedOpenApi.full_model_oci, true, 'Shared package input retains supplemental model proof');
+
+  for (const file of [
+    '.github/workflows/ios-unsigned-ipa.yml',
+    '.github/workflows/ios-other.yml',
+    'ios/CodexiaTransport/unreviewed.mjs',
+    'ios/Unowned/new-project.swift',
+  ]) {
+    const plan = createVerificationPlan({ files: [file], event: 'pull_request', sha, base });
+    assert.equal(plan.mode, file === '.github/workflows/ios-unsigned-ipa.yml' ? 'affected' : 'full', file);
+    if (file === '.github/workflows/ios-unsigned-ipa.yml') {
+      assert.deepEqual(plan.tasks, ['unit-root', 'coverage'], file);
+      assert.equal(plan.full_model_oci, false, file);
+      continue;
+    }
+    assert.equal(plan.full_model_oci, true, file);
+    assert.ok(plan.tasks.includes('build-core') && plan.tasks.includes('build-full'), file);
+    assert.ok(plan.tasks.some(task => task.startsWith('browser-core-')) &&
+      plan.tasks.some(task => task.startsWith('browser-full-')), file);
+  }
+
+  const mixedUnknown = createVerificationPlan({ files: [
+    'ios/CodexiaTransport/Sources/CodexiaTransport/NativeOAuthSession.swift',
+    'ios/Unowned/new-project.swift',
+  ], event: 'pull_request', sha, base });
+  assert.equal(mixedUnknown.mode, 'full');
+  assert.equal(mixedUnknown.full_model_oci, true);
+
+  const { VERIFICATION_TASKS } = await import('./contract.mjs');
+  const main = createVerificationPlan({ files: ['ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift'],
+    event: 'push', sha, base });
+  assert.equal(main.mode, 'full');
+  assert.deepEqual(main.tasks, VERIFICATION_TASKS, 'Main continues to run the full source certification plan');
+});
+
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8'));
