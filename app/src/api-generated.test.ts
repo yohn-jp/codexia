@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { api, setOAuthAccessToken } from "./api.js";
-import { getPersistenceStatusGetUrl } from "./generated/http/client.js";
+import { getPersistenceDocumentsGetUrl, getPersistenceStatusGetUrl } from "./generated/http/client.js";
 
 test("generated persistence status uses the authenticated transport and preserves response errors", async (t) => {
   const controller = new AbortController();
@@ -32,4 +32,46 @@ test("generated persistence status uses the authenticated transport and preserve
   controller.abort();
   await assert.rejects(api.persistenceStatus(controller.signal), (error) => error === controller.signal.reason);
   assert.equal(fetch.mock.callCount(), 4);
+});
+
+test("the generated document list URL preserves Desktop queries and the response boundary", async (t) => {
+  const projectId = "project/with space?#";
+  const parentId = "volume/with space&";
+  const controller = new AbortController();
+  const document = {
+    id: "document-1", projectId, parentId: null, kind: "scene", title: "A scene",
+    orderKey: "0001", headRevisionId: null, version: 2 ** 31,
+    createdAt: "2026-11-23T00:00:00.000Z", updatedAt: "2026-11-23T00:00:00.000Z",
+    summary: "retained",
+  };
+  const list = { documents: [document], future: true };
+  let respond = () => Response.json(list);
+  const requestedUrls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestedUrls.push(String(input));
+    assert.equal(init?.signal, controller.signal);
+    assert.equal(init?.credentials, "omit");
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer list-token");
+    return respond();
+  });
+  setOAuthAccessToken("list-token");
+  t.after(() => setOAuthAccessToken(null));
+
+  assert.deepEqual(await api.persistenceDocuments(projectId, undefined, controller.signal), list);
+  assert.deepEqual(await api.persistenceDocuments(projectId, null, controller.signal), list);
+  assert.deepEqual(await api.persistenceDocuments(projectId, parentId, controller.signal), list);
+
+  const root = "/api/v1/persistence/projects/project%2Fwith%20space%3F%23/documents?limit=1000";
+  assert.deepEqual(requestedUrls, [
+    root,
+    root + "&parentId=root",
+    root + "&parentId=volume%2Fwith+space%26",
+  ]);
+  assert.equal(getPersistenceDocumentsGetUrl(projectId, { limit: 1000, parentId }), requestedUrls[2]);
+
+  respond = () => Response.json({ documents: [{ ...document, version: -1 }] });
+  await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 502, code: "INVALID_RESPONSE" });
+  respond = () => Response.json({ error: "Invalid query", code: "INVALID_QUERY" }, { status: 400 });
+  await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 400, code: "INVALID_QUERY" });
+  assert.equal(requestedUrls.length, 5);
 });

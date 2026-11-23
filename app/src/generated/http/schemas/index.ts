@@ -6,4 +6,7 @@
  */
 
 export * from './apiError.zod';
+export * from './persistenceDocument.zod';
+export * from './persistenceDocumentListResponse.zod';
+export * from './persistenceDocumentsGetParams.zod';
 export * from './persistenceStatusResponse.zod';
