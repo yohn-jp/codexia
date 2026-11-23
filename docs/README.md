@@ -38,7 +38,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Creative workspace information architecture | [Information architecture](design/INFORMATION-ARCHITECTURE.md) — design proposal |
 | Desktop writing | [Desktop authoring](design/DESKTOP-AUTHORING.md) — design proposal |
 | Knowledge and review | [Knowledge and review](design/KNOWLEDGE-REVIEW.md) — design proposal |
-| Mobile writing | [Mobile authoring](design/MOBILE-AUTHORING.md) — design proposal |
+| iOS native writing | [iOS authoring](design/MOBILE-AUTHORING.md) — SwiftUI/TextKit target, not accepted on device |
 | Visual system history | [Visual system](design/VISUAL-SYSTEM.md) — existing proposals, comparisons and decision history; not the visual source of truth |
 | Interaction and recovery states | [Interaction contract](design/INTERACTION-CONTRACT.md) — design proposal |
 | Trial-reading files and reader links | [Publishing design](design/PUBLISHING.md) |
@@ -53,12 +53,12 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
 | External AI integration and internal LLM freeze | [MCP-first creative architecture](architecture/MCP-FIRST.md) |
 | Optional module ownership and lifecycle | [Modules](architecture/MODULES.md) |
-| Mobile interaction rules | [Mobile interactions](architecture/MOBILE-INTERACTION-UX.md) |
+| Native iOS interaction rules | [Native interactions](architecture/MOBILE-INTERACTION-UX.md) |
 | External plugin design requirements | [Plugin platform proposal](architecture/PLUGIN-PLATFORM.md) |
 | Source ownership and licensing | [Source provenance](architecture/SOURCE-PROVENANCE.md) |
 | Standalone image checks | [OCI verification](verification/OCI.md) |
 | Edge UI, API service and operations | [Deployment](deployment/README.md) |
-| Native iOS client, on-demand unsigned IPA workflow and personal-device acceptance | [iOS client](deployment/IOS-CLIENT.md) — workflow implemented; physical-device acceptance unverified |
+| Native SwiftUI iOS client and device acceptance | [iOS client](deployment/IOS-CLIENT.md) — native target, current Capacitor CI is legacy |
 | Declarative standalone VM configuration | [Infrastructure as code](deployment/IAC.md) |
 | UI visual preview and Impeccable Detector | [UI preview and scanning](verification/UI-PREVIEW.md) — disposable local PostgreSQL, API and authenticated visual baselines |
 | Development and verification commands | [Verification](verification/README.md) |
@@ -80,7 +80,8 @@ These maintained documents supplement the topic owners above. The classification
 | --- | --- | --- |
 | Governance | [Agent governance](../AGENTS.md) · [Security reporting](../SECURITY.md) | Contributing and disclosure policy; not a second architecture |
 | Product brief | [Product purpose](../app/PRODUCT.md) | Product intent and accepted UX context |
-| Native packaging | [Capacitor client notes](../app/native/README.md) | Implementation and build guidance |
+| Native SwiftUI implementation | [iOS SwiftUI architecture](architecture/IOS-SWIFTUI-ARCHITECTURE.md) | Normative target, currently unimplemented |
+| Legacy packaging | [Capacitor client notes](../app/native/README.md) | Existing code, not normative native target |
 | Authentication provisioning | [Better Auth runbook](../deploy/ansible/AUTH-RUNTIME.md) | Operational procedure |
 | Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
 | Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |
