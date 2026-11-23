@@ -150,11 +150,10 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
 
-export function createVerificationPlan({ files, event, sha, base = null, forceFull = false }) {
+export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
-  if (typeof forceFull !== 'boolean') throw new Error('Invalid full verification fallback flag');
   const selected = new Set(['coverage']);
-  let full = forceFull || event !== 'pull_request' || !Array.isArray(files);
+  let full = event !== 'pull_request' || !Array.isArray(files);
   const fullModelOci = event === 'pull_request' && Array.isArray(files) && files.some(matchesFullModelOciPath);
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
@@ -206,7 +205,7 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
-    version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null, forceFull,
+    version: 3, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
     full_model_oci: fullModelOci,
     tasks,
     groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
@@ -216,17 +215,15 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
 
 export function validateVerificationPlan(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Verification plan is invalid');
-  const { taskInputReuse, ...canonical } = plan;
+  const { coverageReuse, ...canonical } = plan;
   if (JSON.stringify(canonical) !== JSON.stringify(createVerificationPlan(canonical))) throw new Error('Verification plan does not match canonical impact rules');
-  if (taskInputReuse !== undefined) assertTaskInputReuse(plan, taskInputReuse);
+  if (coverageReuse !== undefined) assertCoverageReuse(plan, coverageReuse);
   return plan;
 }
 
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
-function assertTaskInputReuse(plan, reuse) {
-  if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
-  if (reuse.format !== 'codexia-ci-task-input-reuse/v2') throw new Error('Unknown task input reuse format');
-  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
+function assertCoverageReuse(plan, receipt) {
+  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Coverage proof reuse is only valid for a selected PR coverage task');
   const assertReceipt = (proof, task, { taskExecution = false } = {}) => {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== task || proof.sourceSha !== plan.base) {
       throw new Error(`Invalid exact-base ${task} proof identity`);
@@ -257,18 +254,11 @@ function assertTaskInputReuse(plan, reuse) {
       if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
     }
   };
-  if (Object.keys(reuse).some(key => !['format', 'coverage', 'omitted'].includes(key))) throw new Error('Unsupported task input proof task');
-  if (reuse.coverage !== undefined) assertReceipt(reuse.coverage, 'coverage');
-  const omitted = VERIFICATION_TASKS.filter(task => !plan.tasks.includes(task) && task !== 'coverage');
-  if (!reuse.omitted || typeof reuse.omitted !== 'object' || Array.isArray(reuse.omitted) ||
-      JSON.stringify(Object.keys(reuse.omitted).sort()) !== JSON.stringify(omitted.sort())) {
-    throw new Error('Task proof inventory does not match omitted validations');
-  }
-  for (const task of omitted) assertReceipt(reuse.omitted[task], task, { taskExecution: true });
+  assertReceipt(receipt, 'coverage');
 }
 
 export function planDigest(plan) {
-  const { taskInputReuse: _taskInputReuse, ...canonical } = validateVerificationPlan(plan);
+  const { coverageReuse: _coverageReuse, ...canonical } = validateVerificationPlan(plan);
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
