@@ -24,7 +24,7 @@ External MCP client
 Cloudflare Tunnel  /mcp[?projectId=assigned-id]
     |
     v
-Hono outer ingress / project selection / identity & CORS
+Fastify outer ingress / project selection / identity & CORS
     |
     v
 Official SDK v2 handler (stateless, per request)
