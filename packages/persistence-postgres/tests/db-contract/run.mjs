@@ -357,7 +357,9 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const historyPath = path.join(historyJobs, 'synthetic-owner-history.json');
   await writeFile(historyPath, historyJson, { mode: 0o600 });
   const historyHash = digest(Buffer.from(`${digest(Buffer.from(historyJson))}  ./jobs/synthetic-owner-history.json\n`));
-  await encryptStream('tar', ['-C', historyDirectory, '-cf', '-', '.'], agePath, recipient,
+  // The production history volume is private to the API's UID/GID 1000.
+  // Record that ownership in the synthetic archive without changing runner-host files.
+  await encryptStream('tar', ['--numeric-owner', '--owner=1000', '--group=1000', '-C', historyDirectory, '-cf', '-', '.'], agePath, recipient,
     path.join(backup, 'history.tar.age'), 'history archive');
 
   const dbOutput = invoke('docker', ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
