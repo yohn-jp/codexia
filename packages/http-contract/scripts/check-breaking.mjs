@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { selectBaseReference } from "./base-reference.mjs";
+import { resolveBaseCommit, selectBaseReference } from "./base-reference.mjs";
 import { resolveOasdiffBinary } from "./oasdiff.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,18 +24,6 @@ function git(args, options = {}) {
   return run("git", args, options);
 }
 
-function isValidCommit(reference) {
-  return git(["rev-parse", "--verify", `${reference}^{commit}`]).status === 0;
-}
-
-function fetchReference(reference) {
-  if (!reference.startsWith("origin/")) return reference;
-  const branch = reference.slice("origin/".length);
-  const result = git(["fetch", "--no-tags", "--depth=1", "origin", branch]);
-  if (result.status !== 0) throw new Error(`unable to fetch oasdiff base ${reference}: ${result.stderr || result.stdout}`);
-  return "FETCH_HEAD";
-}
-
 function candidateEpoch(spec) {
   const epoch = spec["x-codexia-api-epoch"];
   assert.ok(Number.isSafeInteger(epoch) && epoch > 0, "OpenAPI is missing a positive x-codexia-api-epoch");
@@ -50,11 +38,8 @@ try {
   const candidate = parse(readFileSync(candidatePath, "utf8"));
   candidateEpoch(candidate);
 
-  let reference = selectBaseReference();
-  if (!isValidCommit(reference)) reference = fetchReference(reference);
-  const resolvedBase = git(["rev-parse", "--verify", `${reference}^{commit}`]);
-  if (resolvedBase.status !== 0) throw new Error(`unable to resolve oasdiff base commit ${reference}: ${resolvedBase.stderr || resolvedBase.stdout}`);
-  const baseSha = resolvedBase.stdout.trim();
+  const reference = selectBaseReference();
+  const baseSha = resolveBaseCommit(reference, git);
   const baseFile = path.join(tempRoot, "base.openapi.yaml");
   const baseResult = git(["show", `${baseSha}:${packageContractPath}`]);
   if (baseResult.status !== 0) {

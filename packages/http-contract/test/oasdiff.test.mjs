@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { selectBaseReference } from "../scripts/base-reference.mjs";
+import { resolveBaseCommit, selectBaseReference } from "../scripts/base-reference.mjs";
 import { resolveOasdiffBinary } from "../scripts/oasdiff.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +23,49 @@ test("oasdiff uses the immutable approved SHA from a pull request event", (t) =>
     GITHUB_EVENT_PATH: eventPath,
     GITHUB_BASE_REF: "mutable-branch-name",
   }), approvedSha);
+});
+
+test("oasdiff push runs use the immutable before SHA", (t) => {
+  const eventDirectory = mkdtempSync(path.join(os.tmpdir(), "codexia-oasdiff-push-event-"));
+  t.after(() => rmSync(eventDirectory, { recursive: true, force: true }));
+  const eventPath = path.join(eventDirectory, "event.json");
+  const beforeSha = "79e401bea8aab899ca571079711d591ed16907db";
+  writeFileSync(eventPath, JSON.stringify({ before: beforeSha }));
+
+  assert.equal(selectBaseReference({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath }), beforeSha);
+});
+
+test("oasdiff fails closed for a push event without a valid before SHA", (t) => {
+  const eventDirectory = mkdtempSync(path.join(os.tmpdir(), "codexia-oasdiff-push-invalid-"));
+  t.after(() => rmSync(eventDirectory, { recursive: true, force: true }));
+  const eventPath = path.join(eventDirectory, "event.json");
+  writeFileSync(eventPath, JSON.stringify({ before: "0".repeat(40) }));
+
+  assert.throws(() => selectBaseReference({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath }), /invalid push before SHA/u);
+});
+
+test("oasdiff fetches an absent approved SHA in a disposable shallow clone", (t) => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "codexia-oasdiff-shallow-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const source = path.join(temporaryDirectory, "source");
+  const remote = path.join(temporaryDirectory, "remote.git");
+  const shallow = path.join(temporaryDirectory, "shallow");
+  mkdirSync(source);
+
+  const runIn = (cwd) => (args) => spawnSync("git", args, { cwd, encoding: "utf8" });
+  const sourceGit = runIn(source);
+  const mustSucceed = (result) => assert.equal(result.status, 0, result.stderr);
+  mustSucceed(sourceGit(["init", "-b", "main"]));
+  mustSucceed(sourceGit(["-c", "user.name=Contract Test", "-c", "user.email=contract@example.invalid", "commit", "--allow-empty", "-m", "approved base"]));
+  const baseSha = sourceGit(["rev-parse", "HEAD"]).stdout.trim();
+  mustSucceed(sourceGit(["-c", "user.name=Contract Test", "-c", "user.email=contract@example.invalid", "commit", "--allow-empty", "-m", "feature head"]));
+  mustSucceed(spawnSync("git", ["clone", "--bare", source, remote], { encoding: "utf8" }));
+  mustSucceed(spawnSync("git", ["clone", "--depth=1", `file://${remote}`, shallow], { encoding: "utf8" }));
+
+  const shallowGit = runIn(shallow);
+  assert.notEqual(shallowGit(["cat-file", "-e", `${baseSha}^{commit}`]).status, 0, "base should be absent from depth-one checkout");
+  assert.equal(resolveBaseCommit(baseSha, shallowGit), baseSha);
+  assert.equal(shallowGit(["cat-file", "-e", `${baseSha}^{commit}`]).status, 0, "approved base should be fetched");
 });
 
 test("oasdiff manual runs use approved main instead of the previous feature commit", () => {
