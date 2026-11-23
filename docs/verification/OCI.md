@@ -15,4 +15,4 @@ Podman is the default when available. Set `OCI_ENGINE`, `CODEXIA_OCI_IMAGE` and 
 
 The production dependency audit rejects build/test tools in runtime closure. Core auditing additionally rejects optional NLP, model-provider, tokenizer, embedding, reranker and speaker dependencies in packages or compiled imports. The local `pnpm audit:core` command allows development tools installed for source work, so it does not substitute for the image's production audit.
 
-For hosted assignments and PostgreSQL configuration, use [Hosted deployment](../HOSTED-DEPLOYMENT.md). For immutable image publication, use [OCI releases](OCI-RELEASE.md).
+For immutable image publication, use [OCI releases](OCI-RELEASE.md).

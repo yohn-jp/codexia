@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=docker.io/library/node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
-ARG GO_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
 ARG PNPM_VERSION=12.21.0
-ARG POSTGRES_IMAGE=docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
 ARG PROFILE=core
 
 FROM ${NODE_IMAGE} AS pnpm-base
@@ -26,68 +24,6 @@ FROM source AS build
 ARG PROFILE
 ENV CODEXIA_PROFILE=${PROFILE}
 RUN node scripts/profile-package.mjs --profile "${PROFILE}" --out /runtime
-
-FROM ${GO_IMAGE} AS frontend-build
-WORKDIR /src
-COPY buildkit/frontend/go.mod buildkit/frontend/go.sum ./
-COPY buildkit/frontend/main.go ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /codexia-buildkit-frontend .
-
-# PostgreSQL is copied only into a disposable startup-smoke overlay, never a runtime image.
-FROM ${POSTGRES_IMAGE} AS smoke-postgres
-RUN set -eu; \
-    mkdir -p /opt/codexia-smoke-postgres/root; \
-    cp --parents -a /usr/lib/postgresql/17 /usr/share/postgresql/17 /opt/codexia-smoke-postgres/root; \
-    ldd /usr/lib/postgresql/17/bin/postgres > /tmp/codexia-postgres-smoke-deps; \
-    ldd /usr/lib/postgresql/17/bin/initdb >> /tmp/codexia-postgres-smoke-deps; \
-    ldd /usr/lib/postgresql/17/bin/pg_ctl >> /tmp/codexia-postgres-smoke-deps; \
-    if grep -q 'not found' /tmp/codexia-postgres-smoke-deps; then echo 'A PostgreSQL smoke dependency is missing' >&2; exit 1; fi; \
-    awk '/=> \// { print $3 } /^[[:space:]]*\// { print $1 }' /tmp/codexia-postgres-smoke-deps | sort -u \
-      | xargs -r cp --parents -L -t /opt/codexia-smoke-postgres/root; \
-    rm /tmp/codexia-postgres-smoke-deps
-
-FROM source AS buildkit
-ARG CODEXIA_PRODUCER_REVISION
-ARG CODEXIA_DOCKERFILE_SHA256
-ENV CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION} \
-    CODEXIA_DOCKERFILE_SHA256=${CODEXIA_DOCKERFILE_SHA256}
-LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
-RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 \
- && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$' \
- && printf '%s' "${CODEXIA_DOCKERFILE_SHA256}" | grep -Eq '^[a-f0-9]{64}$'
-RUN pnpm build:workspace
-RUN node scripts/profile-package.mjs --modules-json '[]' --prebuilt --prime-deploy-cache --out /tmp/codexia-hosted-artifact/app \
- && rm -rf /tmp/codexia-hosted-artifact
-COPY --from=frontend-build /codexia-buildkit-frontend /usr/local/bin/codexia-buildkit-frontend
-COPY --from=smoke-postgres /opt/codexia-smoke-postgres /opt/codexia-smoke-postgres
-ENTRYPOINT ["/usr/local/bin/codexia-buildkit-frontend"]
-
-FROM ${NODE_IMAGE} AS runtime-base
-ARG CODEXIA_PRODUCER_REVISION
-ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
-    PORT=3000 \
-    CODEXIA_BUILD_PROFILE=hosted \
-    CODEXIA_BUILD_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    CODEXIA_BUILD_DATA_DIR=/data \
-    CODEXIA_BUILD_USAGE_DIR=/history \
-    HOME=/data \
-    CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
-LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git tini \
- && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /app /data /history \
- && chmod 0700 /history \
- && chown node:node /app /data /history
-WORKDIR /app
-USER node
-VOLUME ["/data", "/history"]
-EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health/ready', {signal: AbortSignal.timeout(3000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "launch.mjs"]
 
 FROM ${NODE_IMAGE} AS runtime
 ARG PROFILE
