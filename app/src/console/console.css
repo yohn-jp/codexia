@@ -1,3 +1,12 @@
+/* The desktop bundle also includes Ionic's fixed, non-scrolling body styles. */
+body:has(> #root > .codexia-console) {
+  position: static;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  transform: none;
+}
+
 .codexia-console {
   min-height: 100vh;
   padding: clamp(1rem, 3vw, 2.25rem);

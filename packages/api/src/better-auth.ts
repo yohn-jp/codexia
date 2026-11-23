@@ -20,6 +20,7 @@ import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
 import { consumeOwnerSetupGrant, ownerSetupSchema, ownerSetupTableExists, type SetupRegistration } from "./owner-setup-store.js";
 import { CODEXIA_AUTH_SCHEMA } from "./auth-schema.js";
 import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
+import { ownerSecurity } from "./owner-security.js";
 export { CODEXIA_OWNER_SCOPE };
 
 export const CODEXIA_MCP_SCOPES = MCP_OAUTH_SCOPES;
@@ -334,6 +335,14 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     options: `-c search_path=${CODEXIA_AUTH_SCHEMA}${config.readOnlyDatabase ? " -c default_transaction_read_only=on" : ""}`,
   });
   const approvedBootstrapOidcSubject = bootstrap?.ownerOidcSubject;
+  const ownerPolicy = !bootstrap && !config.passkeyBootstrap && !config.readOnlyDatabase && config.ownerSubject
+    ? ownerSecurity({
+        origin: publicOrigin.origin,
+        ownerId: config.ownerSubject,
+        oauthClientIds: config.ownerClientIds,
+        legacyOidcConfigured: Boolean(oidcIssuer),
+      })
+    : undefined;
   const auth = betterAuth({
     database: pool,
     baseURL: issuer,
@@ -347,6 +356,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     } : {}),
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (ownerPolicy) return;
         const path = ctx.path;
         if (path !== "/passkey/update-passkey" && path !== "/passkey/delete-passkey") return;
         if (config.passkeyBootstrap) return new Response("Passkey management is unavailable during first-owner enrollment", { status: 403 });
@@ -367,6 +377,9 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     },
     plugins: [
       codexiaAuthMethodsPlugin(Boolean(oidcIssuer), Boolean(bootstrap?.ownerSetup || config.installOwnerSetupSchema)),
+      // Publish only the policy for the official Better Auth routes. The app-owned
+      // identity and consent mutation endpoints require their own API contract.
+      ...(ownerPolicy ? [{ id: ownerPolicy.id, hooks: ownerPolicy.hooks }] : []),
       setupProvisioningSessionPlugin(() => bootstrap?.setupProvisioningOwner?.()),
       passkey({
         rpID: passkeyRpId,

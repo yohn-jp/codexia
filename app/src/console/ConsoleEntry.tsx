@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authClient } from "../auth-client";
 import { fetchAuthMethodAvailability, type AuthMethodAvailability } from "../oauth-login";
+import { IdentityManagementPanel } from "../settings/IdentityManagementPanel";
+import { OwnerIdentityPanel } from "../settings/OwnerIdentityPanel";
 import { checkOwnerSession, type OwnerSessionState } from "./console-session";
 import { consumeConsoleReturnLocation, resolveConsoleReturnLocation } from "./console-return";
 import { ConsoleSetup } from "./ConsoleSetup";
@@ -44,13 +46,6 @@ function hasAuthError(result: unknown): boolean {
   return Boolean(result && typeof result === "object" && "error" in result && (result as { error?: unknown }).error);
 }
 
-function sectionDescription(route: ConsoleRoute): string {
-  if (route === "security") return "Passkeyとセッションの管理画面は、後続のセキュリティ実装で提供します。認証状態はサーバーで確認済みです。";
-  if (route === "identity") return "連携IDとアプリのアクセス管理画面は、後続のIdentity実装で提供します。認証状態はサーバーで確認済みです。";
-  if (route === "backups") return "バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。";
-  return "";
-}
-
 /** Keep the validated same-tab handoff while navigating among console pages. */
 function consoleHref(path: string): string {
   try {
@@ -75,21 +70,19 @@ export function ConsoleEntry() {
     setMessage("");
     const result = await checkOwnerSession();
     if (sequence !== requestSequence.current) return result;
+    setMethods(null);
+    setMethodsFailed(false);
     setAccess(result);
-    if (result === "unauthorized") {
+    if (result === "unauthorized" || (result === "owner" && route === "identity")) {
       try {
-        setMethods(await fetchAuthMethodAvailability());
-        setMethodsFailed(false);
+        const availability = await fetchAuthMethodAvailability();
+        if (sequence === requestSequence.current) setMethods(availability);
       } catch {
-        setMethods(null);
-        setMethodsFailed(true);
+        if (sequence === requestSequence.current) setMethodsFailed(true);
       }
-    } else {
-      setMethods(null);
-      setMethodsFailed(false);
     }
     return result;
-  }, []);
+  }, [route]);
 
   useEffect(() => {
     if (route === "setup" || route === "not-found") return;
@@ -229,7 +222,13 @@ export function ConsoleEntry() {
                 <span className="codexia-console__card-title">{section.title}</span><span>{section.description}</span><span className="codexia-console__card-action" aria-hidden="true">開く →</span>
               </a>)}
             </div>
-          </> : <div className="codexia-console__notice"><p role="status">{sectionDescription(route)}</p>
+          </> : route === "security" ? <IdentityManagementPanel placement="console" />
+            : route === "identity" ? <div className="identity-management">
+              {methodsFailed ? <><p role="alert">外部IDプロバイダーの設定を確認できませんでした。</p>
+                <button className="identity-management__secondary" type="button" onClick={() => void inspect()}>再試行</button></>
+                : methods ? <OwnerIdentityPanel oidcConfigured={methods.upstreamOidc} />
+                  : <p>外部IDプロバイダーの設定を確認しています。</p>}
+            </div> : <div className="codexia-console__notice"><p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
             <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
           <div className="codexia-console__auth-actions">
             <button type="button" disabled={busy} onClick={() => void inspect()}>セッションを再確認</button>
