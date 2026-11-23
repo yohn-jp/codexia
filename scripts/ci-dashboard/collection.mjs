@@ -37,7 +37,7 @@ export function selectRuns(runs) {
 export async function collectInventoryPage(request, page = 1, createdBefore = null) {
   if (!Number.isSafeInteger(page) || page < 1 || page > 10) throw new Error('Invalid inventory page');
   if (createdBefore !== null && (typeof createdBefore !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(createdBefore))) {
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(createdBefore))) {
     throw new Error('Invalid inventory cursor');
   }
   const cursor = createdBefore === null ? '' : '&created=' + encodeURIComponent('<=' + createdBefore);
