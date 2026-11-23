@@ -16,6 +16,11 @@ intent="$state_dir/deploy-transaction.json"
 release_state="$state_dir/deployed-release.json"
 lock_file="$state_dir/host.lock"
 
+[[ ! -e "$state_dir/cutover-transaction.json" && ! -L "$state_dir/cutover-transaction.json" ]] || {
+  echo 'Coordinated API epoch maintenance is pending; ordinary deployment is blocked' >&2
+  exit 1
+}
+
 [[ -e "$intent" || -L "$intent" ]] || exit 0
 [[ -f "$lock_file" && ! -L "$lock_file" ]] || {
   echo 'Deployment transaction is missing its regular host lock; recovery state retained' >&2
@@ -25,6 +30,11 @@ exec 9>>"$lock_file"
 flock --exclusive --nonblock 9 || {
   echo 'Another Codexia deployment or backup holds the host lock' >&2
   exit 75
+}
+
+[[ ! -e "$state_dir/cutover-transaction.json" && ! -L "$state_dir/cutover-transaction.json" ]] || {
+  echo 'Coordinated API epoch maintenance is pending; ordinary deployment is blocked' >&2
+  exit 1
 }
 
 [[ -e "$intent" || -L "$intent" ]] || exit 0

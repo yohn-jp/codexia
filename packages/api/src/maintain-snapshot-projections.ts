@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const persistence = createPostgresPersistence(databaseUrl);
   const scope = projectId === undefined ? {} : { projectId };
   try {
-    const databaseMode = await persistence.snapshotStartupMode();
+    const databaseMode = await persistence.snapshotStartupMode({ allowReadOnly: mode === "--check" });
     if (projectId && !await persistence.read(reader => reader.getProject(projectId))) {
       throw new Error("Snapshot projection maintenance project was not found");
     }

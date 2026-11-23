@@ -104,6 +104,8 @@ On the [isolated recovery host](BACKUP.md#rehearse-a-reviewed-full-candidate), v
 
 ## Coordinated API epoch cutover
 
+Use the [protected epoch maintenance workflow](EPOCH-CUTOVER.md) for the supported in-place 1 → 2 transition when the installed release already has a verified Better Auth owner.
+
 The standalone OAuth cutover pairs the epoch 2 Full backend with the epoch 2 static frontend and moves installations on persistence format 1 to format 2. The normal frontend workflow requires an already compatible live backend. The backend workflow requires an already compatible live UI and refuses an epoch, persistence-format or migration-fingerprint change to an installed API. Neither workflow implements the public ingress fence, paired activation or cross-component recovery. Keep the ordinary gates in place and use a separately reviewed, explicitly approved maintenance plan for these operations. First-install approvals apply only to an absent API and must never be used to replace an existing installation.
 
 If the old installation requires first-owner registration for the new epoch, provision a separate clean target and complete [owner enrollment](../../deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser) there before its first API activation. Cover the transfer and verification of the old manuscript database and history in the maintenance plan. Preserve the enrolled owner, OAuth clients and auth secrets on the target when transferring application data. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).

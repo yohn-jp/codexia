@@ -1,0 +1,179 @@
+---
+- name: Apply an approved API epoch maintenance phase
+  hosts: codexia
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    home: "{{ ansible_facts.user_dir }}"
+    state_dir: "{{ home }}/.local/state/codexia-deploy"
+    quadlet_dir: "{{ home }}/.config/containers/systemd"
+    helpers_dir: "{{ state_dir }}/cutover-tools"
+    candidate_unit: "{{ state_dir }}/candidate-cutover-{{ cutover_request.candidateImage.split('@sha256:')[-1] }}.container"
+    auth_settings: "{{ home }}/.config/codexia-auth/runtime-{{ cutover_request.settingsSha256 }}.env"
+    runtime_environment:
+      HOME: "{{ home }}"
+      XDG_CONFIG_HOME: "{{ home }}/.config"
+      XDG_DATA_HOME: "{{ home }}/.local/share"
+      XDG_STATE_HOME: "{{ home }}/.local/state"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.user_uid }}/bus"
+      CODEXIA_PUSH_STATE_DIR: "{{ state_dir }}"
+      CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
+      CODEXIA_BACKUP_PROGRAM: "{{ helpers_dir }}/backup.sh"
+      CODEXIA_BACKUP_DESTINATION: "{{ lookup('ansible.builtin.env', 'CODEXIA_BACKUP_DESTINATION') }}"
+      CODEXIA_BACKUP_RECIPIENT: "{{ lookup('ansible.builtin.env', 'CODEXIA_BACKUP_AGE_RECIPIENT') }}"
+  tasks:
+    - name: Require one protected controller request and one target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - cutover_request is mapping
+          - cutover_output_file is match('^/[^\r\n]+$')
+          - cutover_operation in ['stage', 'observe', 'checkpoint', 'apply', 'open-tunnel', 'recover-quiesce', 'recover', 'finish']
+          - cutover_request.candidateImage is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - cutover_request.settingsSha256 is match('^[a-f0-9]{64}$')
+          - not ansible_check_mode
+
+    - name: Read the service account facts
+      ansible.builtin.setup:
+        gather_subset: ['!all', '!min', 'user']
+
+    - name: Confirm connection uses the canonical non-root account
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.user_id == 'codexia'
+          - ansible_facts.user_uid | int > 0
+          - ansible_facts.user_dir == (codexia_service_home | default(ansible_facts.user_dir))
+
+    - name: Use canonical rootless runtime and private transaction inputs
+      environment: "{{ runtime_environment }}"
+      block:
+        - name: Require existing private settings for the same Better Auth owner
+          ansible.builtin.stat:
+            path: "{{ auth_settings }}"
+            follow: false
+            checksum_algorithm: sha256
+          register: settings
+
+        - name: Confirm authentication settings are immutable and private
+          ansible.builtin.assert:
+            that:
+              - settings.stat.isreg | default(false)
+              - settings.stat.mode == '0600'
+              - settings.stat.uid == ansible_facts.user_uid
+              - settings.stat.checksum == cutover_request.settingsSha256
+
+        - name: Prepare the exact Full candidate without modifying the API unit
+          when: cutover_operation == 'stage'
+          block:
+            - name: Pull the certified immutable image
+              ansible.builtin.command:
+                argv: [podman, pull, "{{ cutover_request.candidateImage }}"]
+              changed_when: true
+
+            - name: Verify the exact image repository digest on the host
+              ansible.builtin.command:
+                argv: [podman, image, inspect, --format, "{{ '{{' }}json .RepoDigests{{ '}}' }}", "{{ cutover_request.candidateImage }}"]
+              changed_when: false
+              register: candidate_digests
+              failed_when: candidate_digests.rc != 0 or cutover_request.candidateImage not in (candidate_digests.stdout | from_json)
+
+            - name: Observe the certified image identity without starting its API
+              ansible.builtin.command:
+                argv: [podman, run, --rm, --pull=never, --network=none, --read-only, --cap-drop=all, --security-opt=no-new-privileges, --entrypoint=/bin/cat, "{{ cutover_request.candidateImage }}", /app/update-identity.json]
+              changed_when: false
+              register: candidate_identity
+              failed_when: candidate_identity.rc != 0 or (candidate_identity.stdout | from_json) != cutover_request.candidateIdentity
+
+            - name: Read private settings only to detect the configured OIDC client
+              ansible.builtin.slurp:
+                src: "{{ auth_settings }}"
+              register: auth_runtime
+              no_log: true
+
+            - name: Render the canonical Full Quadlet outside the active path
+              ansible.builtin.copy:
+                content: >-
+                  {{ lookup('ansible.builtin.file', playbook_dir + '/../quadlet/codexia-api.container')
+                  | replace('CODEXIA_BACKEND_IMAGE', cutover_request.candidateImage)
+                  | replace('CODEXIA_BACKEND_PROFILE', 'full')
+                  | replace('/home/codexia/.config/codexia-auth/runtime-', home + '/.config/codexia-auth/runtime-')
+                  | replace('AUTH_SETTINGS_DIGEST_PLACEHOLDER', cutover_request.settingsSha256)
+                  | replace('Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET\n',
+                    '' if not ((auth_runtime.content | b64decode) is search('(?m)^CODEXIA_OIDC_ISSUER=')) else 'Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET\n') }}
+                dest: "{{ candidate_unit }}"
+                mode: '0600'
+              no_log: true
+
+        - name: Read the staged candidate Quadlet digest
+          ansible.builtin.stat:
+            path: "{{ candidate_unit }}"
+            follow: false
+            checksum_algorithm: sha256
+          register: staged
+          when: cutover_operation in ['stage', 'checkpoint', 'apply']
+
+        - name: Require the staged candidate Quadlet to match the reviewed hash
+          ansible.builtin.assert:
+            that:
+              - staged.stat.isreg | default(false)
+              - staged.stat.mode == '0600'
+              - staged.stat.uid == ansible_facts.user_uid
+              - cutover_operation == 'stage' or staged.stat.checksum == cutover_request.candidateUnitSha256
+          when: cutover_operation in ['stage', 'checkpoint', 'apply']
+
+        - name: Prepare private cutover helpers
+          ansible.builtin.file:
+            path: "{{ helpers_dir }}"
+            state: directory
+            mode: '0700'
+          when: cutover_operation != 'stage'
+
+        - name: Stage the canonical backup and host phase scripts
+          ansible.builtin.copy:
+            src: "{{ item.source }}"
+            dest: "{{ helpers_dir }}/{{ item.name }}"
+            mode: '0700'
+          loop:
+            - {source: cutover-host.sh, name: cutover-host.sh}
+            - {source: ../backup/backup.sh, name: backup.sh}
+          when: cutover_operation != 'stage'
+
+        - name: Create a private per-invocation host request
+          ansible.builtin.tempfile:
+            state: file
+            path: "{{ helpers_dir }}"
+          register: host_request
+          when: cutover_operation not in ['stage', 'observe']
+
+        - name: Run the host phase and clean its invocation file
+          when: cutover_operation != 'stage'
+          block:
+            - name: Bind the private host request to the staged Quadlet path
+              ansible.builtin.copy:
+                content: "{{ cutover_request | combine({'candidateUnit': candidate_unit}) | to_json }}"
+                dest: "{{ host_request.path }}"
+                mode: '0600'
+              no_log: true
+              when: cutover_operation != 'observe'
+
+            - name: Apply the host phase under the canonical host lock
+              ansible.builtin.command:
+                argv: "{{ [helpers_dir + '/cutover-host.sh', cutover_operation] + ([host_request.path] if cutover_operation != 'observe' else []) }}"
+              register: host_result
+              no_log: true
+              changed_when: cutover_operation != 'observe'
+          always:
+            - name: Remove the private invocation file
+              ansible.builtin.file:
+                path: "{{ host_request.path }}"
+                state: absent
+              when: host_request.path is defined
+
+        - name: Write the allowlisted result on the protected controller
+          ansible.builtin.copy:
+            content: "{{ ({'candidateUnitSha256': staged.stat.checksum} if cutover_operation == 'stage' else (host_result.stdout | from_json)) | to_json }}\n"
+            dest: "{{ cutover_output_file }}"
+            mode: '0600'
+          delegate_to: localhost
+          no_log: true

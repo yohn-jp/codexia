@@ -231,6 +231,23 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
   }
 }
 
+/** Verify a selected completed production publisher in a separately approved maintenance run. */
+export async function verifyCutoverBackendPublication(publisherRunId, { env = process.env, fetchImpl = fetch } = {}) {
+  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY, 'Cutover backend repository mismatch');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover backend verification requires main');
+  assert.ok(positive(publisherRunId), 'Cutover backend publisher run ID is invalid');
+  const token = env.GH_TOKEN;
+  assert.ok(token, 'Actions read token is required');
+  const selected = await githubJson('actions/runs/' + publisherRunId, token, fetchImpl);
+  const run = assertTrustedBackendPublicationRun(selected, {
+    id: publisherRunId, attempt: selected.run_attempt, runNumber: selected.run_number, headSha: selected.head_sha,
+  });
+  execFileSync('git', ['merge-base', '--is-ancestor', run.head_sha, 'HEAD'], { stdio: 'ignore' });
+  const result = await verifyArtifactAndRelease({ env, payload: { workflow_run: run }, run, token, fetchImpl });
+  assert.equal(result.skipped, undefined, 'Selected backend publisher did not publish certified images');
+  return result;
+}
+
 export async function verifyBackendPushHandoff(options = {}) {
   const env = options.env || process.env;
   const payload = options.payload || JSON.parse(await readFile(env.GITHUB_EVENT_PATH, 'utf8'));

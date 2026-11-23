@@ -83,8 +83,13 @@ jobs:
         shell: bash
         env:
           CODEXIA_PUSH_DEPLOYMENT_ENABLED: ${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}
+          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
         run: |
           set -euo pipefail
+          if [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" == true ]]; then
+            echo "Ordinary deployment is paused for coordinated API epoch maintenance." >&2
+            exit 1
+          fi
           if [[ "${CODEXIA_PUSH_DEPLOYMENT_ENABLED:-}" == 'true' ]]; then
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
             echo 'Protected backend push deployment is enabled.'

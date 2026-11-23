@@ -77,6 +77,11 @@ case "$operation" in
       die 'Push backup requires explicit approval and an inherited host lock'
     verify_lock_descriptor "$6" "$8"
     ;;
+  fingerprint-locked)
+    [[ $# == 6 && "$2" == --approved && "$3" == --lock-file && "$4" == "$lock_file" && "$5" == --lock-fd ]] ||
+      die 'Fingerprinting requires explicit approval and the inherited canonical host lock'
+    verify_lock_descriptor "$4" "$6"
+    ;;
   drill)
     mkdir -p "$STATE_DIR"
     exec 9>"$lock_file"
@@ -220,6 +225,14 @@ case "${1:-}" in
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
     backup_artifact "$2" "$3"
     ;;
+  fingerprint-locked)
+    require_quiesced
+    podman volume exists codexia-history || die 'History volume absent'
+    database_hash="$(db_fingerprint codexia-db codexia_admin)"
+    history_hash="$(history_fingerprint codexia-history)"
+    require_quiesced
+    printf '{"databaseFingerprint":"%s","historyFingerprint":"%s"}\n' "$database_hash" "$history_hash"
+    ;;
   drill)
     [[ ( $# == 4 || $# == 6 ) && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved [--candidate-full-image IMAGE@sha256:DIGEST]'
     candidate=
@@ -330,6 +343,8 @@ case "${1:-}" in
     [[ "$(validate_artifact "$dir")" == "$artifact_hash" ]] || die 'Backup artifact changed during the restore drill'
     printf 'Isolated restore verified: database and history fingerprints match\n'
     printf 'Verified checksum manifest sha256: %s\n' "$artifact_hash"
+    printf 'Verified database logical sha256: %s\n' "${fields[1]}"
+    printf 'Verified history logical sha256: %s\n' "${fields[2]}"
     if [[ -n "$candidate" ]]; then printf 'Isolated maintenance rehearsal verified: %s\n' "$candidate"; fi
     ;;
   *) die 'Use backup-locked or the explicitly approved drill';;

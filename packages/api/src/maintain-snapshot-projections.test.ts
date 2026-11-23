@@ -22,10 +22,10 @@ test("snapshot maintenance checks the format and PostgreSQL text representation 
       await tx.saveModuleRecord({ projectId: project.id, moduleId: "core.artifacts", key: episodesPath,
         value: { content: "episodes: []\n" }, expectedVersion: null });
     });
-    const run = (mode: "--check" | "--apply") =>
+    const run = (mode: "--check" | "--apply", databaseUrl = connectionString) =>
       execute(process.execPath, [
         fileURLToPath(new URL("./maintain-snapshot-projections.js", import.meta.url)), mode, "--project", project.id,
-      ], { env: { ...process.env, CODEXIA_DATABASE_URL: connectionString } });
+      ], { env: { ...process.env, CODEXIA_DATABASE_URL: databaseUrl } });
 
     let sourceVersion: number | null = null;
     const invalidSettings = [
@@ -59,7 +59,10 @@ test("snapshot maintenance checks the format and PostgreSQL text representation 
       projectId: project.id, moduleId: "core.artifacts", key: NLP_LEGACY_FEATURE_SETTINGS_PATH,
       value: { content: JSON.stringify(validSettings) }, expectedVersion: sourceVersion,
     }));
-    await assert.rejects(run("--check"), { code: 2 });
+    const readOnlyConnection = new URL(connectionString);
+    readOnlyConnection.searchParams.set("options", "-c default_transaction_read_only=on");
+    await assert.rejects(run("--check", readOnlyConnection.href), { code: 2 });
+    await assert.rejects(run("--apply", readOnlyConnection.href), { code: 1 });
     assert.equal(JSON.parse((await run("--apply")).stdout).status, "ready");
     await persistence.read(async reader => {
       assert.deepEqual((await reader.getModuleRecord(project.id, "publishing", PUBLISHING_EPISODES_KEY))?.value,
@@ -67,7 +70,7 @@ test("snapshot maintenance checks the format and PostgreSQL text representation 
       assert.deepEqual((await reader.getModuleRecord(project.id, "nlp", NLP_FEATURE_SETTINGS_KEY))?.value,
         validSettings);
     });
-    assert.equal(JSON.parse((await run("--check")).stdout).status, "ready");
+    assert.equal(JSON.parse((await run("--check", readOnlyConnection.href)).stdout).status, "ready");
   } finally {
     await persistence.close();
   }

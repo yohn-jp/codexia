@@ -1,0 +1,99 @@
+name: Verify coordinated API epoch cutover
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/epoch-cutover-fixture.yml
+      - .github/workflows/production-epoch-cutover.yml
+      - docs/deployment/PUSH-DEPLOYMENT.md
+      - docs/deployment/BACKUP.md
+      - docs/deployment/UPDATE-FLOW.md
+      - docs/deployment/IAC.md
+      - deploy/ansible/**
+      - deploy/backup/**
+      - deploy/backend/**
+      - deploy/quadlet/**
+      - deploy/postgres/**
+      - deploy/*compatibility.json
+      - Dockerfile.backend
+      - .dockerignore
+      - profiles/**
+      - packages/**
+      - modules/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - scripts/build/packaging/**
+      - scripts/deployment/**
+      - scripts/release/backend/update-identity*.mjs
+      - scripts/release/cutover/**
+      - scripts/verification/runtime/better-auth-fixture.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: epoch-cutover-fixture-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  cutover-contract:
+    name: Verify cutover authorization, coordinator, Cloudflare mock and host recovery contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Run mock and host contract tests
+        run: |
+          node --test scripts/deployment/cutover/*.test.mjs scripts/release/cutover/*.test.mjs scripts/deployment/recovery/epoch-cutover.test.mjs
+          bash deploy/ansible/test-cutover-observe.sh
+          python3 -B deploy/ansible/test_cutover_host.py
+          bash -n deploy/ansible/test-epoch-cutover-fixture.sh
+          bash -n deploy/ansible/epoch-cutover-rootless-fixture.sh
+
+  rootless-postgres:
+    name: Verify epoch 1 → 2 and recovery on disposable rootless PostgreSQL 17
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Initialize run-bound fixture outcome
+        env:
+          EPOCH_FIXTURE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          evidence="$RUNNER_TEMP/codexia-epoch-cutover-evidence"
+          mkdir -p "$evidence"
+          jq -n --arg sourceSha "$EPOCH_FIXTURE_SOURCE_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            '{sourceSha:$sourceSha,runId:$runId,runAttempt:$runAttempt,status:"NOT_CHECKED"}' > "$evidence/outcome.json"
+      - name: Install disposable host capabilities
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            age podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session jq
+      - name: Build exact Full images and exercise the host cutover
+        env:
+          EPOCH_FIXTURE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash deploy/ansible/test-epoch-cutover-fixture.sh
+      - name: Upload source- and run-bound fixture observations
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: epoch-cutover-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-epoch-cutover-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14

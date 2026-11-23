@@ -290,8 +290,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
-      group: codexia-frontend-${{ github.ref }}
+      group: codexia-production
       cancel-in-progress: false
+      queue: max
     environment: codexia-production
     permissions:
       contents: write
@@ -323,6 +324,10 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Require ordinary production deployment to be available
+        env:
+          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
+        run: test "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true
       - name: Recheck component source after acquiring the deployment slot
         id: freshness
         env:
