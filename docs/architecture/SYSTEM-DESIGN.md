@@ -15,6 +15,10 @@
 
 汎用プロトコル・入力検証・アーカイブ解析・開発ツールの外部依存は、[外部ライブラリ選定規約](DEPENDENCY-POLICY.md)を正本としてライブラリ優先・最新安定版を原則とする。ただし製品固有の認可、PostgreSQLとIndexedDBの正本、CI証拠の不変条件は委譲しない。
 
+## 採用済みツール移行目標と現行実装の区別
+
+[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Fastifyの明示的ルート/JSON SchemaとOrval生成クライアントへ接続すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡**を採用目標とする。**Fastifyは継続採用**し、下記の図と本文に記されたFastifyは現行と目標の両方に該当する。現在の手動catch-allからSchema-firstの明示ルートへの移行は未実装であり、同じAPI/OAuth/MCP権限とPostgreSQL単一正本を維持する。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
+
 ## 製品・システム境界
 
 - 製品は単一作者の小説執筆・知識管理・提案レビューを提供する。作品本文・構成・Revision・Knowledge・Evidence・ChangeSet・module record の永続正本は **PostgreSQL** のみ。

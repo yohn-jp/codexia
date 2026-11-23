@@ -7,6 +7,17 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
 | External dependencies, current-version policy and selected libraries | [Library selection policy](architecture/DEPENDENCY-POLICY.md) — normative library-first choices, compatibility boundaries and adoption criteria |
 | Existing dependencies, declared versions and update constraints | [Dependency inventory](architecture/DEPENDENCY-INVENTORY.md) — direct dependencies, version constraints, update lag and coordinated upgrades |
+| Approved specification toolchain and alternative decisions | [Toolchain architecture](architecture/SPECIFICATION-TOOLCHAIN.md) — selected targets, implementation not yet certified |
+| Requirements tool migration | [StrictDoc traceability](requirements/STRICTDOC-TRACEABILITY.md) — Markdown-to-requirements conversion and code/test/evidence gates |
+| HTTP/API schema-first target | [TypeSpec → Fastify/Orval](architecture/HTTP-PLATFORM-MIGRATION.md) — schema-first Fastify routes, generated client and acceptance gates |
+| PostgreSQL schema verification target | [PostgreSQL verification](architecture/POSTGRES-CONTRACT-VERIFICATION.md) — SQL/pgTAP/catalog/tbls and isolated restore |
+| MCP protocol modernization | [MCP SDK v2 migration](architecture/MCP-V2-MIGRATION.md) — 2026-era stateless transport, OAuth and conformance |
+| Specification verification and public documentation | [Tooling acceptance](verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) — CI gates, LikeC4, Threagile, k6, Scalar, single Pages publisher |
+| Product requirements and stable requirement IDs | [Requirements governance](requirements/README.md) · [Requirement register](requirements/REQUIREMENT-REGISTER.md) — initial adopted requirement baseline and explicit gaps; not a proof of complete coverage |
+| Requirement → design → code → test → evidence mapping | [Bidirectional traceability](verification/TRACEABILITY-REGISTER.md) — initial path/symbol/test index; statuses are not CI certification |
+| HTTP API request/response/error contracts | [API contract](architecture/API-CONTRACT.md) — operation inventory, partial verified source shape and remaining DTO coverage |
+| PostgreSQL physical objects and migrations | [DB detail contract](architecture/DATABASE-DETAIL-CONTRACT.md) — tables, constraints, indexes, schema identity |
+| External service and protocol interfaces | [External interfaces](architecture/EXTERNAL-INTERFACES.md) — trust, credential, failure/recovery and implementation mapping |
 | Principal/URL/HTTP authorization contract | [Route authorization](architecture/ROUTE-AUTHORIZATION-CONTRACT.md) — API privileges by URL, principal, method and setup/owner state |
 | Complete screen, control and user journey catalog | [Screen control catalog](design/SCREEN-CONTROL-CATALOG.md) — route/CTA/error/authorization traceability |
 | Individual screen state diagrams | [Screen State Atlas](design/SCREEN-STATE-ATLAS.md) — all logical screen transitions and recovery paths |
@@ -71,7 +82,7 @@ These maintained documents supplement the topic owners above. The classification
 | Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
 | Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |
 | Release and handoff | [Push deployment runbook](deployment/PUSH-DEPLOYMENT.md) · [Handoff revalidation](deployment/BACKEND-HANDOFF-REVALIDATION.md) | Operational procedures, subordinate to update design |
-| Recovery | [Encrypted backup and restore](deployment/BACKUP.md) · [Disposable host acceptance](deployment/PUSH-HOST-CI.md) | Operational / verification procedures |
+| Recovery | [Encrypted backup and restore / S3-compatible storage target](deployment/BACKUP.md) · [Disposable host acceptance](deployment/PUSH-HOST-CI.md) | Operational / verification procedures; S3 target is approved but not implemented |
 | Architecture decisions | [Optimization boundaries](architecture/decisions/OPTIMIZATION-BOUNDARIES.md) | Adopted bounded decisions; no legacy runtime authority |
 | Feature expansion | [Development inventory](architecture/NEXT-DEVELOPMENT-INVENTORY.md) · [Headless Tree outline](design/HEADLESS-TREE-OUTLINE.md) | Proposal and acceptance targets |
 | CI observability | [CI dashboard](verification/CI-DASHBOARD.md) · [Graphify Pages](verification/GRAPHIFY-PAGES.md) | Verification / visualization guidance, not runtime authority |

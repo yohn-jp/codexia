@@ -4,6 +4,8 @@ The [system design](../architecture/SYSTEM-DESIGN.md) owns deployment boundaries
 
 This is the normative execution and release architecture. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement and test design; [Verification](README.md) owns local commands; [Deployment](../deployment/README.md), [OCI releases](OCI-RELEASE.md), [Infrastructure as code](../deployment/IAC.md) and [Push deployment](../deployment/PUSH-DEPLOYMENT.md) own artifact formats, operator procedures and compatibility policy. This contract describes required behavior, including requirements not yet implemented; a green run is evidence only for the checks actually performed.
 
+**仕様ツール導入の採用済み目標:** [Specification tooling acceptance](SPECIFICATION-TOOLING-ACCEPTANCE.md) はTypeSpec/StrictDoc/MCP v2/pgTAP/LikeC4/Threagile/k6の検証義務を定義する。これは既存verification task/impact selectionの置換や新CIタスクの実行完了を意味しない。実装PRが既存のsingle machine authorityへ登録し、exact-source/selected task証明を満たした場合にのみgateとして有効化する。
+
 ## Single machine authority
 
 | Responsibility | Canonical implementation |
