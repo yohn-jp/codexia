@@ -6,12 +6,14 @@
     "mcpContribution": "modules/mcp/src/http.ts",
     "publicPublishingContribution": "modules/publishing/src/http.ts",
     "betterAuthExternalBoundary": "packages/api/src/better-auth.ts",
-    "backupConsoleTargets": "docs/architecture/BACKUP-CONSOLE-CONTRACT.md"
+    "backupConsoleTargets": "docs/architecture/BACKUP-CONSOLE-CONTRACT.md",
+    "ownerSetupDispatcher": "packages/api/src/owner-setup.ts"
   },
   "current": [
     "DELETE /api/projects/{projectId}/modules/mcp/streamable",
     "DELETE /api/v1/persistence/projects/{projectId}/documents/{documentId}",
     "DELETE /mcp",
+    "GET /api/auth/codexia/auth-methods",
     "GET /api/auth/codexia/setup/status",
     "GET /api/auth/oauth2/get-consents",
     "GET /api/browser/version",
@@ -78,6 +80,7 @@
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}",
     "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata",
+    "POST /api/auth/codexia/owner-session",
     "POST /api/auth/codexia/setup/authorize",
     "POST /api/auth/codexia/setup/complete",
     "POST /api/auth/codexia/setup/profile",
@@ -128,6 +131,8 @@
   "betterAuthAdapters": [
     "POST /api/auth/oauth2/consent-context",
     "GET /api/auth/oauth2/get-consents",
+    "POST /api/auth/codexia/owner-session",
+    "GET /api/auth/codexia/auth-methods",
     "GET /api/auth/codexia/setup/status",
     "POST /api/auth/codexia/setup/authorize",
     "POST /api/auth/codexia/setup/profile",
@@ -143,6 +148,10 @@
       "POST /api/auth/sign-in/email",
       "POST /api/auth/sign-in/social",
       "GET /api/auth/get-session"
+    ],
+    "excludedApplicationWrappers": [
+      "GET /api/auth/passkey/generate-register-options",
+      "POST /api/auth/passkey/verify-registration"
     ]
   }
 }

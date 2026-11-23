@@ -1,8 +1,6 @@
 # 仕様駆動開発ツールチェーン採用設計
 
-**種別: 採用済み技術方針・段階移行の規範的設計。** 要求・意味的な仕様の正本は [Documentation authority](DOCUMENTATION-AUTHORITY.md)、[Requirements](../requirements/README.md)、[System design](SYSTEM-DESIGN.md) などの領域正本が所有する。本書は**その仕様を型・コード・検証へ落とし込む方式と導入判定**を所有する。2026-11-23に合意した**目標選定**であり、現行コードがこの構成で動いていること、各候補の全機能が実証済みであることを意味しない。
-
-観測ソース: `main@e02933aead466b14cbcd336905b9c2a2a2b39f06`、設計PR #648。実装変更は本PRに含めない。実装時は最新mainとツール実リリースを再照合する。
+**種別: 採用済み技術方針・段階移行の規範的設計。** 要求・意味的な仕様の正本は [Documentation authority](DOCUMENTATION-AUTHORITY.md)、[Requirements](../requirements/README.md)、[System design](SYSTEM-DESIGN.md) などの領域正本が所有する。本書は**その仕様を型・コード・検証へ落とし込む方式と導入判定**を所有する。領域ごとの導入と適合は [受入契約](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) が規定する。
 
 ## 目的と権威
 
@@ -41,7 +39,25 @@
 
 **不採用:** ts-restは保守終了の公式案内があり、今回の新しい中核依存にしない。Atlas無償機能だけではtrigger/functionまで完全に検証できないためDBの正本・完全性ゲートには採用しない。Honoへの全面置換は行わない。Fastifyの現行catch-allは契約に基づく明示的なrouteへ改修し、既存のHTTP admission・権限・streamingを保持する。
 
-## 実装と仕様の現状差（設計承認≠実装済み）
+## OpenAPIの採用バージョン
+
+TypeSpec 1.18.0 で直接生成する形式を **OpenAPI 3.1.0** とする。
+OpenAPIの安定版3.2.1と3.1系の3.1.2は、当該emitterの `openapi-versions` が受理する列挙値に含まれない。
+3.2.0は生成でき、Redocly 2.82.0、oasdiff 1.39.0、Orval 8.49.0でCodexiaの操作を処理できる。
+Swift OpenAPI Generator 1.14.4は3.2.1を拒否する。
+3.2.0の予備対応では、TypeSpecがストリームに出力する `itemSchema` がSwiftのoperation応答型に反映されず、未型付けの `HTTPBody` になる。
+採用中のFastify変換器も3.1.0を入力とする。
+
+OpenAPIのpatch番号は明確化や訂正に使用され、同じminor系列の機能集合を共有する。
+3.1系列の仕様本文は [OpenAPI 3.1.2](https://github.com/OAI/OpenAPI-Specification/releases/tag/3.1.2) を参照し、生成物のヘッダーにはemitterが出力した `3.1.0` を保持する。
+3.2系への移行では、TypeSpecでの直接生成、Scalar、Redocly、oasdiff、Fastifyのスキーマ変換、Orval、Swiftの再生成と実行を同じ契約で検証する。
+複数形式を併用する案には、変換で失われるスキーマ制約、HTTP操作、ストリーミング情報の検出と保守が必要になる。
+各利用側が3.2系を受理し、既存契約と同等の検証を実行できる段階で採用形式を更新する。
+
+比較時の正本は [OpenAPI 3.2.1](https://github.com/OAI/OpenAPI-Specification/releases/tag/3.2.1) と [TypeSpec emitter設定](https://typespec.io/docs/emitters/openapi3/reference/emitter/) を参照する。
+実行ツールの固定版は [依存台帳](DEPENDENCY-INVENTORY.md) で管理する。
+
+## 実装と移行の境界
 
 | 現行コード/仕様の実情 | 変更後の目標 | 必須の変更と不変条件 |
 | --- | --- | --- |
@@ -58,7 +74,7 @@
 ## 導入判定ステータス
 
 - **ARCHITECTURE_SELECTED:** 上表は合意済み技術選定。各候補がCodexiaの全契約に合うことを証明した状態ではない。
-- **INTEGRATION_UNVERIFIED:** API生成/StrictDoc/MCP 2.0/DB検証/Pages統合はまだ実際の依存追加・PoC・CI計測を行っていない。
+- **INTEGRATION_UNVERIFIED:** 領域ごとの実装やツールが存在する場合でも、対象となる受入義務の実行証拠が揃うまでは未検証とする。
 - **MIGRATION_ALLOWED:** 領域ごとの [採用ゲート](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) を満たしたときに限り移行変更のPRを合格判定できる。
 - **RETIRED:** 新旧二重ルーティングや旧MCP sessionを残すことを設計として採用しない。移行途中に必要な比較用実装は期間/削除条件を明示し、完了後に除去する。
 

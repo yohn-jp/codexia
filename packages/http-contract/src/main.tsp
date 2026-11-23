@@ -38,11 +38,18 @@ using TypeSpec.OpenAPI;
     applicationAdaptersHere: #[
       "POST /api/auth/oauth2/consent-context",
       "GET /api/auth/oauth2/get-consents",
+      "POST /api/auth/codexia/owner-session",
+      "GET /api/auth/codexia/auth-methods",
       "GET /api/auth/codexia/setup/status",
       "POST /api/auth/codexia/setup/authorize",
       "POST /api/auth/codexia/setup/profile",
       "POST /api/auth/codexia/setup/complete"
-    ]
+    ],
+    setupOnlyOfficialLibraryPaths: #[
+      "GET /api/auth/passkey/generate-register-options",
+      "POST /api/auth/passkey/verify-registration"
+    ],
+    setupOnlyOverlay: "packages/api/src/owner-setup.ts forwards these two requests to the official Better Auth passkey handler only after setup transaction, same-origin, secure transport, and pending-grant checks; their protocol schemas remain owned by Better Auth."
   },
   betterAuthMetadataPaths: #["/.well-known/oauth-authorization-server/api/auth", "/.well-known/openid-configuration/api/auth"],
   reason: "Library-managed authentication operations and discovery metadata come from the official Better Auth generator; only Codexia-owned adapters are defined here."
