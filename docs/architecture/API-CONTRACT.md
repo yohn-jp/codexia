@@ -39,6 +39,7 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 | API-HEALTH-002 | GET /api/ready、GET /health/{live,ready,startup} | ANONの最小観測 | packages/api/src/server.ts | INCOMPLETE |
 | API-VERSION-001 | GET /api/version、GET /api/browser/version | ANON | packages/api/src/server.ts、deploy/*compatibility.json | INCOMPLETE |
 | API-OWNER-001 | GET /api/session | OWNER-API | packages/api/src/server.ts | INCOMPLETE |
+| API-OWNER-SESSION-001 | POST /api/auth/codexia/owner-session | OWNER-SESSION cookie only | packages/api/src/server.ts, packages/api/src/better-auth.ts | partial; read-only owner confirmation |
 | API-CORE-001 | GET/POST /api/projects | OWNER-API（MCPのGETは条件付き） | packages/api/src/server.ts | INCOMPLETE |
 | API-CORE-002 | GET /api/projects/:p、/{tree,history,status,observation,snapshot,scenes/:d} | OWNER-API / project割当済みMCP-read | packages/api/src/server.ts | INCOMPLETE（path別IDを展開） |
 | API-CORE-003 | GET /api/projects/:p/{actions,modules,contributions,search,writing-stats} | effectによる | packages/api/src/server.ts、module runtime | INCOMPLETE（path別IDを展開） |
@@ -65,6 +66,15 @@ Operation IDは安定の設計用識別子であり、URLの改名や実装完�
 **展開必須:** 集約表の波括弧表記・wildcardは設計概要でしかない。最終版では全メソッド＋実pathに対してID、schema、権限、code symbol、testを独立に記録する。現在の family IDで全ルートをカバーしたと報告しない。既存の [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) には全般の個別認可表があり、それを漏れ検査の入力にする。
 
 ## 実ソースから確認した詳細契約
+
+### API-OWNER-SESSION-001 — 管理コンソールの所有者セッション確認
+
+- POST `/api/auth/codexia/owner-session`。JSON bodyは空object `{}`、cookie credentialだけを受け付ける。要求には公開originと完全一致する`Origin`が必要。missing/mismatched `Origin`、`Authorization` header、cookieとbearerの併用を拒否する。
+- Better Authが署名・期限を検証したセッションのuser IDが、server設定のowner subjectと一致する場合だけHTTP 200、bodyは`{"authenticated":true}`。user/session ID、email、consent、credentialを返さない。
+- 有効sessionがない場合は401 `AUTHENTICATION_REQUIRED`。owner以外、bearer credential、cross-originは403。JSON bodyが空object以外または型が違う場合は400 `OWNER_SESSION_REQUEST_INVALID`。
+- `Cache-Control: no-store`はserver共通security headerで適用。cookieをOWNER-API bearerやAPI project/sessionに変換しない。実装は [route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) のOWNER-SESSION境界と、本issue #662のconsole route entryで使う。
+- SOURCE: `packages/api/src/server.ts` のexplicit route admission、`packages/api/src/better-auth.ts` の`checkOwnerSession`。
+- TEST: `packages/api/src/server.test.ts` と `packages/api/src/better-auth.persistence.test.ts`。
 
 ### API-PERSIST-001 — 永続化の状態
 

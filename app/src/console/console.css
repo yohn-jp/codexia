@@ -1,0 +1,209 @@
+.codexia-console {
+  min-height: 100vh;
+  padding: clamp(1rem, 3vw, 2.25rem);
+  color: var(--ink);
+  background: var(--page-bg);
+}
+
+.codexia-console__wrap {
+  width: min(78rem, 100%);
+  margin-inline: auto;
+}
+
+.codexia-console__masthead,
+.codexia-console__masthead-actions,
+.codexia-console__actions,
+.codexia-console__auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.codexia-console__masthead {
+  min-height: 3.25rem;
+  padding-block-end: 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.codexia-console__masthead-actions { justify-content: flex-end; flex-wrap: wrap; }
+
+.codexia-console__brand {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+  font-size: 1.15rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+
+.codexia-console__brand span { color: var(--accent); }
+.codexia-console__return { min-width: 0; white-space: normal; }
+
+.codexia-console__session {
+  color: var(--success);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  gap: clamp(1.25rem, 3vw, 2.5rem);
+  padding-block-start: clamp(1.2rem, 3vw, 2.25rem);
+}
+
+.codexia-console__sidebar,
+.codexia-console__content,
+.codexia-console__panel { min-width: 0; }
+
+.codexia-console__sidebar {
+  align-self: start;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--paper);
+}
+
+.codexia-console__eyebrow {
+  margin: 0 0 0.65rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__sidebar nav { display: grid; gap: 0.25rem; }
+.codexia-console__sidebar nav a {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.35rem;
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.codexia-console__sidebar nav a:hover { background: var(--surface-hover); }
+.codexia-console__sidebar nav a[aria-current="page"] {
+  color: var(--accent-strong);
+  font-weight: 700;
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 var(--surface-selected-border);
+}
+
+.codexia-console__sidebar-note {
+  margin: 1rem 0 0;
+  padding-block-start: 0.75rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__content { padding: 0.35rem 0 2rem; }
+.codexia-console__content h1,
+.codexia-console__panel h1 {
+  margin: 0;
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__intro,
+.codexia-console__panel > p:not(.codexia-console__eyebrow),
+.codexia-console__notice p {
+  max-width: 68ch;
+  color: var(--muted);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-block-start: 1.5rem;
+}
+
+.codexia-console__card {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  min-width: 0;
+  min-height: 9rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: var(--paper);
+  text-decoration: none;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.codexia-console__card:hover { border-color: var(--interaction-boundary, var(--input-border)); background: var(--surface-subtle); }
+.codexia-console__card:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.codexia-console__card-title { color: var(--accent-strong); font-size: 1.1rem; font-weight: 700; }
+.codexia-console__card-action { align-self: end; color: var(--muted); font-size: 0.9rem; }
+
+.codexia-console__notice,
+.codexia-console__panel {
+  margin-block-start: 1.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--paper);
+}
+
+.codexia-console__link { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--accent-strong); font-weight: 650; }
+.codexia-console__link:hover { text-decoration-thickness: 2px; }
+.codexia-console__auth-actions { justify-content: flex-start; flex-wrap: wrap; margin-block-start: 1.5rem; }
+.codexia-console__actions { justify-content: flex-start; flex-wrap: wrap; margin-block-start: 1.25rem; }
+.codexia-console__alert { padding: 0.75rem; border-inline-start: 3px solid var(--error); color: var(--error-text); background: var(--error-bg); line-height: 1.5; overflow-wrap: anywhere; }
+.codexia-console__sign-in { width: min(38rem, 100%); margin: clamp(2rem, 10vh, 6rem) auto 0; }
+
+.codexia-console-nav-error {
+  position: fixed;
+  z-index: 20;
+  inset-inline: max(1rem, calc((100vw - 38rem) / 2));
+  inset-block-end: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--error-border);
+  border-radius: 0.55rem;
+  color: var(--error-text);
+  background: var(--error-bg);
+  box-shadow: 0 0.5rem 1.5rem var(--focus-shadow);
+}
+
+.codexia-console-nav-error p { min-width: 0; margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+
+@media (max-width: 52rem) {
+  .codexia-console__layout { grid-template-columns: minmax(0, 1fr); }
+  .codexia-console__sidebar nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .codexia-console__sidebar-note { margin-block-start: 0.75rem; }
+}
+
+@media (max-width: 35rem) {
+  .codexia-console { padding: 0.75rem; }
+  .codexia-console__masthead { align-items: flex-start; flex-wrap: wrap; }
+  .codexia-console__masthead-actions { justify-content: flex-start; width: 100%; }
+  .codexia-console__session { flex: 1 1 100%; }
+  .codexia-console__sidebar { padding: 0.75rem; }
+  .codexia-console__sidebar nav { grid-template-columns: minmax(0, 1fr); }
+  .codexia-console__cards { grid-template-columns: minmax(0, 1fr); }
+  .codexia-console__card { min-height: 0; }
+  .codexia-console__actions,
+  .codexia-console__auth-actions { align-items: stretch; flex-direction: column; }
+  .codexia-console__actions > button,
+  .codexia-console__auth-actions > button,
+  .codexia-console__panel > button { width: 100%; }
+  .codexia-console-nav-error { align-items: stretch; flex-direction: column; inset-inline: 0.75rem; }
+}
