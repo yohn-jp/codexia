@@ -711,6 +711,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/persistence-postgres
 
+  scripts/ci/evidence:
+    dependencies:
+      '@zip.js/zip.js':
+        specifier: 2.25.0
+        version: 2.25.0
+
 packages:
 
   '@babel/code-frame@8.0.6':
@@ -2186,6 +2192,10 @@ packages:
     peerDependenciesMeta:
       xstate:
         optional: true
+
+  '@zip.js/zip.js@2.25.0':
+    resolution: {integrity: sha512-oNRqUuU1XFu6G5d7Z0jufJ9dS9WteO0xiU/PNxsUrb4itZCsSbn191jpJzU00Gmc6S680X3DPZeF5EV4zAEMAg==}
+    engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
 
   abstract-logging@2.0.1:
     resolution: {integrity: sha512-2BjRTZxTPvheOvGbBslFSYOUkr+SjPtOnrLP33f+VIWLzezQpZcqVg7ja3L4dBXmzzgwT+a029jRx5PCi3JuiA==}
@@ -4883,6 +4893,8 @@ snapshots:
       xstate: 5.33.4
     transitivePeerDependencies:
       - '@types/react'
+
+  '@zip.js/zip.js@2.25.0': {}
 
   abstract-logging@2.0.1: {}
 
