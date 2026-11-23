@@ -18,6 +18,7 @@ private struct LibraryView: View {
                     Text("作品の読み込みと保存はまだ利用できません。サンプルの編集内容は終了時に失われます。")
                 }
             }
+            .accessibilityIdentifier("screen.library")
             .navigationTitle("ライブラリ")
         }
     }
@@ -33,6 +34,7 @@ private struct FixtureProjectView: View {
                 Text("履歴、レビュー、知識と設定はまだ利用できません。")
             }
         }
+        .accessibilityIdentifier("screen.project")
         .navigationTitle("サンプル作品")
     }
 }
@@ -48,6 +50,7 @@ private struct FixtureListView: View {
                 }
             }
         }
+        .accessibilityIdentifier("screen.outline")
         .navigationTitle("構成と原稿")
         .navigationDestination(isPresented: Binding(
             get: { editor != nil },

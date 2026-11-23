@@ -32,10 +32,14 @@ public struct ManuscriptEditor: UIViewRepresentable {
         // and the text view remains the owner of IME and selection while focused.
         guard view.markedTextRange == nil, !view.isFirstResponder,
               view.text != state.text else { return }
+        Self.applyText(state.text, to: view)
+    }
+
+    private static func applyText(_ text: String, to view: UITextView) {
         let selection = view.selectedRange
         let offset = view.contentOffset
-        view.text = state.text
-        let length = (state.text as NSString).length
+        view.text = text
+        let length = (text as NSString).length
         let location = min(selection.location, length)
         view.selectedRange = NSRange(location: location, length: min(selection.length, length - location))
         view.setContentOffset(offset, animated: false)
@@ -71,6 +75,10 @@ public struct ManuscriptEditor: UIViewRepresentable {
             synchronize(textView)
             var current = state.wrappedValue
             current.setFocused(false)
+            // Install a deferred response before focus can return to this view.
+            if textView.markedTextRange == nil, textView.text != current.text {
+                ManuscriptEditor.applyText(current.text, to: textView)
+            }
             state.wrappedValue = current
         }
     }

@@ -2,6 +2,8 @@
 import XCTest
 import SwiftUI
 import UIKit
+import QuartzCore
+import Darwin
 @testable import CodexiaEditor
 
 @MainActor
@@ -60,6 +62,40 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         window.isHidden = true
     }
 
+    func testFixtureInputLayoutScrollAndMemoryObservation() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        for count in [10_000, 100_000, 500_000] {
+            let box = Box()
+            box.state = EditorState(documentID: "fixture-\(count)", text: manuscriptFixture(characterCount: count))
+            let binding = Binding(get: { box.state }, set: { box.state = $0 })
+            let coordinator = ManuscriptEditor.Coordinator(state: binding)
+            let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+            view.frame = controller.view.bounds
+            controller.view.addSubview(view)
+            XCTAssertTrue(view.becomeFirstResponder())
+            view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+            let start = CACurrentMediaTime()
+            view.insertText("あ")
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            let inputLayoutMilliseconds = (CACurrentMediaTime() - start) * 1000
+            let scrollStart = CACurrentMediaTime()
+            view.setContentOffset(CGPoint(x: 0, y: max(0, view.contentSize.height - view.bounds.height)), animated: false)
+            view.layoutIfNeeded()
+            let scrollMilliseconds = (CACurrentMediaTime() - scrollStart) * 1000
+            var usage = rusage()
+            let memoryStatus = getrusage(RUSAGE_SELF, &usage)
+            print("FIXTURE_METRIC chars=\(count) input_layout_ms=\(inputLayoutMilliseconds) scroll_layout_ms=\(scrollMilliseconds) process_peak_rss_bytes=\(memoryStatus == 0 ? usage.ru_maxrss : -1)")
+            XCTAssertTrue(view.text.hasSuffix("あ"))
+            view.resignFirstResponder()
+            view.removeFromSuperview()
+        }
+        window.isHidden = true
+    }
+
     func testFocusDefersRemoteUntilEditingEnds() {
         let box = Box()
         let request = box.state.beginRemoteRequest()
@@ -71,6 +107,7 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         XCTAssertEqual(box.state.text, "原稿")
         coordinator.textViewDidEndEditing(view)
         XCTAssertEqual(box.state.text, "新しい原稿")
+        XCTAssertEqual(view.text, "新しい原稿")
     }
 }
 #endif
