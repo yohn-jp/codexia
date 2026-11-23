@@ -6,7 +6,7 @@
 
 ## v2 SDKの採用とプロトコル世代を分ける
 
-- **SDK:** `@modelcontextprotocol/server` v2 stable、必要な `@modelcontextprotocol/hono` と `@modelcontextprotocol/node`。stdioには `@modelcontextprotocol/server/stdio` の公式entrypointを使う。
+- **SDK:** `@modelcontextprotocol/server` v2 stable、Fastifyから公式Web標準handlerを呼ぶ際に必要なNode adapter。Hono専用adapterは導入しない。stdioには `@modelcontextprotocol/server/stdio` の公式entrypointを使う。
 - **ツール:** `McpServer` の登録方式を公式migration guideに沿って変更する。input/output Schema、tool metadata、戻り値とerrorのvalidationをZod v4へ統一する。既存のtool nameやeffect権限を無断変更しない。
 - **2026-07-28 wire protocol:** SDK v2のインストールだけでは自動で新世代にならない。2026のHTTPは原則statelessで、旧 `initialize`、`Mcp-Session-Id`、GET stream/DELETE sessionへの依存を取り除く。公式 `createMcpHandler(factory)` が2026 per-request HTTP entrypoint、stdioは `serveStdio(factory)` が新旧世代の接続を選ぶ。
 - **異なる世代への扱い:** v2 entrypointには2025-era向けstateless fallbackの設定がある。これを**無期限のlegacy承認とはみなさない**。受入を要求するクライアントの実際の対応状況を調べ、対象protocol/versionと移行期限、2025-eraを拒否する条件を設計に明示する。古いsessionful実装と新しいstatelessを無秩序に並行維持しない。
@@ -77,7 +77,7 @@ Existing Core / PostgreSQL snapshot / proposal
 | --- | --- | --- |
 | MCPV-001 | Compile/schema | v2 SDK+Zod v4で全toolの登録・入出力schemaが型・実行時に有効 |
 | MCPV-002 | Protocol conformance | `npx @modelcontextprotocol/conformance server --url <isolated-url>/mcp --requirements 2026-07-28` を隔離認可環境で実行。required failureなし。スコア対象外failureは別記 |
-| MCPV-003 | Inspector | Inspector CLI/Webで工具名/Schema、各transport、相互運用・再接続・新世代へのnegotiationを確認 |
+| MCPV-003 | Inspector | Inspector CLI/Webでツール名/Schema、各transport、相互運用・再接続・新世代へのnegotiationを確認 |
 | MCPV-004 | Cross-principal | owner、MCP、失効client、別project、scope不足/過剰の認可拒否。MCPによるapprove/apply不可 |
 | MCPV-005 | State integrity | snapshot競合、提案後の作者承認、replay/duplicate、transaction receipt、実PostgreSQL再起動 |
 | MCPV-006 | Transport/lifecycle | HTTP/stdio、stream abort、timeout、invalid header、oversized input、shutdown/drain、別request/別clientの漏えい |
