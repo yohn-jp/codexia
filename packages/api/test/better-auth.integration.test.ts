@@ -255,6 +255,40 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     const restartedLoginSession = await apiRequest(`${baseAuth}/get-session`, { headers: { cookie: cookieHeader() } });
     assert.equal(restartedLoginSession.status, 200, "the Better Auth login session remains available after the API runtime restart");
 
+    const { session: currentSession } = await restartedLoginSession.json() as { session: { token: string } };
+    assert.ok(currentSession?.token);
+    const ownerHeaders = { cookie: cookieHeader(), origin };
+    const sessions = await apiRequest(`${baseAuth}/list-sessions`, { headers: ownerHeaders });
+    assert.equal(sessions.status, 200);
+    assert.equal(sessions.headers.get("cache-control"), "no-store");
+    const listedSessions = await sessions.json() as Array<{ token: string; userId: string }>;
+    assert.ok(listedSessions.some(({ token, userId }) => token === currentSession.token && userId === fixture.ownerSubject));
+    assert.equal((await apiRequest(`${baseAuth}/list-sessions`, {
+      headers: { ...ownerHeaders, authorization: `Bearer ${accessToken}` },
+    })).status, 403);
+    const missingWriteOrigin = await apiRequest(`${baseAuth}/revoke-other-sessions`, {
+      method: "POST", headers: { cookie: cookieHeader(), "content-type": "application/json" }, body: "{}",
+    });
+    assert.equal(missingWriteOrigin.status, 403);
+    assert.equal((await missingWriteOrigin.json()).code, "MISSING_OR_NULL_ORIGIN");
+    const revokeCurrent = await apiRequest(`${baseAuth}/revoke-session`, {
+      method: "POST",
+      headers: { ...ownerHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ token: currentSession.token }),
+    });
+    assert.equal(revokeCurrent.status, 403);
+    assert.equal((await revokeCurrent.json()).code, "OWNER_SECURITY_CURRENT_SESSION");
+    const ownerPasskeys = await apiRequest(`${baseAuth}/passkey/list-user-passkeys`, { headers: ownerHeaders });
+    assert.equal(ownerPasskeys.status, 200);
+    assert.deepEqual(await ownerPasskeys.json(), []);
+    assert.equal((await apiRequest(`${baseAuth}/passkey/list-user-passkeys`, {
+      headers: { ...ownerHeaders, "sec-fetch-site": "same-site" },
+    })).status, 403);
+    assert.equal((await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: ownerHeaders })).status, 404);
+    assert.equal((await apiRequest(`${baseAuth}/codexia/owner-security/revoke-consent`, {
+      method: "POST", headers: { ...ownerHeaders, "content-type": "application/json" }, body: "{}",
+    })).status, 404);
+
     const refreshResponse = await apiRequest(`${baseAuth}/oauth2/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", connection: "close" },

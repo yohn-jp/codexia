@@ -4,12 +4,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Request, type Route } from "@playwright/test";
+import { signInAuthorBrowser, startAuthorBrowserFixture } from "./author-oauth-server";
 import { expectServerSaved, manuscriptEditor } from "./postgres-fixture";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { startBetterAuthFixture, type BootstrapRegistration } from "../../packages/api/test/fixtures/better-auth-server.js";
+import { startBetterAuthFixture, type BetterAuthFixture, type BootstrapRegistration } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appAssets = mkdtempSync(join(tmpdir(), "codexia-oauth-web-assets-"));
 const fixtureDatabaseUrl = process.env.CODEXIA_WEB_OAUTH_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
@@ -326,4 +327,102 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     if (context) await context.close();
     await fixture.close();
   }
+});
+
+const ownerConsoleTest = test.extend<{ authorServer: BetterAuthFixture }>({
+  authorServer: async ({}, use) => {
+    assert.ok(fixtureDatabaseUrl, "Owner Console acceptance requires a disposable PostgreSQL database");
+    const server = await startAuthorBrowserFixture({
+      databaseUrl: fixtureDatabaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", apiHostname: "localhost",
+    });
+    try { await use(server); }
+    finally { await server.close(); }
+  },
+});
+
+ownerConsoleTest("Owner Console manages Passkeys and sessions and shows the read-only identity projection", async ({ page, authorServer }) => {
+  // The first fixture runtime registers clients. The restart starts the ordinary
+  // runtime with the confirmed owner and registered clients already configured.
+  await authorServer.restartApi();
+  const origin = authorServer.apiOrigin;
+  // Mirror the exact Cloudflare Pages entry rewrites while Fastify serves the
+  // fixture's own same-origin scripts and authentication requests.
+  await page.route((url) => url.origin === origin && ["/console/security", "/console/identity"].includes(url.pathname), async (route) => {
+    const entry = await route.fetch({ url: `${origin}/desktop/` });
+    await route.fulfill({ response: entry });
+  });
+  await page.goto(`${origin}/console/security`);
+  await expect(page.getByRole("heading", { name: "所有者としてサインイン" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "パスキー", exact: true })).toHaveCount(0);
+
+  await signInAuthorBrowser(page, origin, "desktop");
+  await page.goto(`${origin}/console/security`);
+  await expect(page.getByRole("heading", { name: "セキュリティ", exact: true })).toBeVisible();
+  const sessions = page.getByRole("list", { name: "有効なセッション" });
+  const current = sessions.getByRole("listitem").filter({ hasText: "現在の端末" });
+  await expect(current).toBeVisible();
+  await expect(current.getByRole("button", { name: /セッションを終了/u })).toHaveCount(0);
+
+  const authenticator = await page.context().newCDPSession(page);
+  await authenticator.send("WebAuthn.enable");
+  const newAuthenticator = () => authenticator.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2", transport: "internal", hasResidentKey: true,
+      hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+    },
+  });
+  try {
+    const passkeys = page.getByRole("list", { name: "登録済みのパスキー" });
+    const addPasskey = async (name: string) => {
+      await page.getByLabel("名前（任意）").fill(name);
+      await page.getByRole("button", { name: "パスキーを追加", exact: true }).click();
+      await expect(passkeys.getByRole("heading", { name, exact: true })).toBeVisible();
+    };
+    const firstAuthenticator = await newAuthenticator();
+    await addPasskey("Console first key");
+    await expect(page.getByRole("button", { name: "Console first keyを削除" })).toBeDisabled();
+    const lastPasskeyDenied = await page.evaluate(async () => {
+      const list = await fetch("/api/auth/passkey/list-user-passkeys");
+      if (!list.ok) throw new Error("Owner Passkeys could not be listed");
+      const [key] = await list.json() as Array<{ id: string }>;
+      if (!key) throw new Error("The first Passkey was not registered");
+      const response = await fetch("/api/auth/passkey/delete-passkey", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: key.id }),
+      });
+      return { status: response.status, code: (await response.json()).code };
+    });
+    expect(lastPasskeyDenied).toEqual({ status: 403, code: "OWNER_SECURITY_LAST_PASSKEY" });
+
+    await authenticator.send("WebAuthn.removeVirtualAuthenticator", firstAuthenticator);
+    await newAuthenticator();
+    await addPasskey("Console second key");
+    await page.getByRole("button", { name: "Console first keyの名前を変更" }).click();
+    await page.getByLabel("新しい名前").fill("Console renamed key");
+    await page.route(`${origin}/api/auth/passkey/update-passkey`, async (route) => {
+      // Commit the real mutation server-side, then simulate losing its response.
+      expect((await route.fetch()).status()).toBe(200);
+      await route.abort("failed");
+    }, { times: 1 });
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(passkeys.getByRole("heading", { name: "Console renamed key" })).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("操作の応答を確認できませんでした。再取得した一覧で状態を確認してください。");
+    await page.getByRole("button", { name: "Console second keyを削除" }).click();
+    await page.getByRole("button", { name: "削除する", exact: true }).click({ timeout: 8_000 });
+    await expect(passkeys.getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Console renamed keyを削除" })).toBeDisabled();
+
+    await page.getByRole("button", { name: "他のすべてのセッションを終了", exact: true }).click();
+    await page.getByRole("button", { name: "他のセッションを終了する", exact: true }).click();
+    await expect(sessions.getByRole("listitem")).toHaveCount(1);
+    await expect(current).toBeVisible();
+  } finally {
+    await authenticator.detach();
+  }
+
+  await page.getByRole("link", { name: "連携ID", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "外部IDプロバイダー", exact: true })).toBeVisible();
+  await expect(page.getByText("運用者による設定があります。所有者との連携はこの画面では未確認です。", { exact: true })).toBeVisible();
+  const consents = page.getByRole("list", { name: "保存したアプリ同意" });
+  await expect(consents.getByRole("heading", { name: authorServer.webClientId, exact: true })).toBeVisible();
+  await expect(consents.getByRole("button")).toHaveCount(0);
 });

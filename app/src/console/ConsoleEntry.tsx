@@ -70,21 +70,23 @@ export function ConsoleEntry() {
     setMessage("");
     const result = await checkOwnerSession();
     if (sequence !== requestSequence.current) return result;
+    setMethods(null);
+    setMethodsFailed(false);
     setAccess(result);
-    if (result === "unauthorized") {
+    if (result === "unauthorized" || (result === "owner" && route === "identity")) {
       try {
-        setMethods(await fetchAuthMethodAvailability());
-        setMethodsFailed(false);
+        const availability = await fetchAuthMethodAvailability((url, init) => fetch(url, {
+          ...init,
+          redirect: "error",
+          signal: AbortSignal.timeout(5_000),
+        }));
+        if (sequence === requestSequence.current) setMethods(availability);
       } catch {
-        setMethods(null);
-        setMethodsFailed(true);
+        if (sequence === requestSequence.current) setMethodsFailed(true);
       }
-    } else {
-      setMethods(null);
-      setMethodsFailed(false);
     }
     return result;
-  }, []);
+  }, [route]);
 
   useEffect(() => {
     if (route === "setup" || route === "not-found") return;
@@ -225,10 +227,13 @@ export function ConsoleEntry() {
               </a>)}
             </div>
           </> : route === "security" ? <IdentityManagementPanel placement="console" />
-            : route === "identity" ? <div className="identity-management"><OwnerIdentityPanel headingLevel={2} /></div>
-            : <div className="codexia-console__notice">
-              <p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
-              <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
+            : route === "identity" ? <div className="identity-management">
+              {methodsFailed ? <><p role="alert">外部IDプロバイダーの設定を確認できませんでした。</p>
+                <button className="identity-management__secondary" type="button" onClick={() => void inspect()}>再試行</button></>
+                : methods ? <OwnerIdentityPanel oidcConfigured={methods.upstreamOidc} headingLevel={2} />
+                  : <p>外部IDプロバイダーの設定を確認しています。</p>}
+            </div> : <div className="codexia-console__notice"><p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
+            <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
           <div className="codexia-console__auth-actions">
             <button type="button" disabled={busy} onClick={() => void inspect()}>セッションを再確認</button>
             <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
