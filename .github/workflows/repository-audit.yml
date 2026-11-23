@@ -328,7 +328,8 @@ jobs:
           path: ${{ runner.temp }}/audit-site
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 3  deploy:
+          retention-days: 3
+  deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: pack
     runs-on: ubuntu-24.04
