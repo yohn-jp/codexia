@@ -28,7 +28,7 @@
 | CON-02 | /console/setupの一回限りowner登録とsetup-only API/Ansible整合 | auth/setup API、console setup UI、bootstrap | CON-01 |
 | CON-03 | /console/security・identityのPasskey/session/OIDC/OAuth UX・権限 | app console security/identity・Better Auth adapter | CON-01、CON-02と共有ファイルの排他 |
 | BKC-01 | backup profile/draft/active・sealed credential・probe・owner session API/運用schema | 独立backup settings API、運用schema、probes | OPS-01、HTTP-01（route統合）、CON-01（共通session） |
-| BKC-02 | /console/backups配置・設定フォーム・検証・activate・status/history/recovery UI | app console backup screens | CON-01、BKC-01 |
+| BKC-02 | /console/backups配置・設定フォーム・検証・activate・status/history/recovery UI | app console backup screens | CON-01、BKC-01、BKC-03 |
 | BKC-03 | 手動/maintenance-window保全、単一host lock・writer停止・復帰・run receipt・deploy admission接続 | protected backup executor、Ansible backup stage、run tests | OPS-01、BKC-01 |
 | STATE-02 | ChangeSet/認証/backupへのXState適用（状態契約・非同期・中断） | 当該UI featureごとのmachine | STATE-01、CON-03/BKC-02とファイル排他 |
 | DOC-01 | StrictDoc/Scalar/LikeC4を唯一のRepository Audit Pagesへ公開・表示検証 | scripts/audit/pages/、repository-audit.yml | SPEC-01、SPEC-02、ARCH-01 |
