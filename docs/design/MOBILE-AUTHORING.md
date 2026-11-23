@@ -31,9 +31,9 @@ CodeMirror/browserが本文操作とIME、Ionicがsheetのgestureとfocusを担�
 
 ## 実装した画面と検証
 
-初期WritingはCodeMirrorと日本語原稿を中心にし、構成・知識／保存の参照dockと4項目のbottom navigationから移動する。通常の参照はIonic sheetで開き、CodeMirrorのnodeを維持したまま閉じられる。320pxで横方向にoverflowしないこと、390×844pxでsheetが表示完了した後の構成／知識内容、Light／Darkの実レンダリングは[視覚受入記録](../../evidence/ui-redesign-v2/acceptance.md)に記録した。
+初期WritingはCodeMirrorと日本語原稿を中心にし、構成・知識／保存の参照dockと4項目のbottom navigationから移動する。通常の参照はIonic sheetで開き、CodeMirrorのnodeを維持したまま閉じられる。320pxで横方向にoverflowしないこと、390×844pxでsheetが表示完了した後の構成／知識内容、Light／Darkの実レンダリングは[視覚受入記録](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md)に記録した。
 
-![Mobile Writing](../../evidence/ui-redesign-v2/after-mobile-writing.png)
+![Mobile Writing](https://raw.githubusercontent.com/yohn-jp/codexia/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-mobile-writing.png)
 
 ## 受入
 

@@ -74,7 +74,7 @@
 
 `createWorkspacePreset` はWritingを20:80のoutline/editor splitにし、Research／Reviewはeditorと補助stackの68:32 splitを生成する。これは初期配置だけを変更し、layout schema/version、panel ID、保存key、浮遊panel、非表示panel、ユーザー保存済み配置を置換しない。`history`が登録されていない構成で無効な履歴railを置かず、WRT-02の実在する履歴導線を使う。Knowledgeの一覧・詳細はinspectorから利用できる。多数のmoduleが有効でもResearchの初期タブへ全投入しない。選択したパネルは可視範囲に収め、追加パネルは既存の補助stackで表示する。既存のカスタム配置は自動的に書き換えない。新panelが必要な場合もhostのcatalogと登録手順に従い、同じeditorの複数instanceを作らない。
 
-実装した初期画面、Before / after、視覚・操作・accessibility・persistence・performanceの評価は[視覚受入記録](../../evidence/ui-redesign-v2/acceptance.md)を参照する。案の比較は[Folio Atlas](../../evidence/ui-redesign-v2/direction-folio.png)と[Quiet Page](../../evidence/ui-redesign-v2/direction-focus.png)に記録した。
+実装した初期画面、Before / after、視覚・操作・accessibility・persistence・performanceの評価は[視覚受入記録](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md)を参照する。案の比較は[Folio Atlas](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-folio.png)と[Quiet Page](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-focus.png)に記録した。
 
 ### 画面部位ごとの操作仕様
 
