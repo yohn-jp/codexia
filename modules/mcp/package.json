@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "codexiaDisplay": {
     "name": "MCP connections",
-    "description": "Connect an authorized MCP client to Codexia tools through Praetorium OAuth; proposed changes still require author approval."
+    "description": "Connect a registered MCP client to Codexia tools with OAuth. Applying proposed changes requires author approval."
   },
   "type": "module",
   "main": "./dist/index.js",
