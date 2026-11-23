@@ -184,7 +184,7 @@
     {
       "kind": "route",
       "id": "POST /api/auth/codexia/owner-session",
-      "classification": "candidate REQ-AUTH-005 / API-OWNER-SESSION-001: cookie-only owner confirmation, no API bearer elevation; conformance remains unverified"
+      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
     },
     {
       "kind": "route",
