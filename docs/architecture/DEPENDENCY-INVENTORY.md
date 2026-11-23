@@ -2,7 +2,7 @@
 
 **種別: 維持管理する依存台帳。** [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)の補助文書。実際のインストール版・integrityの機械的正本は各`package.json`、`pnpm-lock.yaml`、Nativeの`package-lock.json`、SwiftPM指定、Ansible要件、Actions参照およびOCI digestであり、本書は採用理由・例外・更新時の検証責務を管理する。設計の正本は[システム設計](SYSTEM-DESIGN.md)と[選定規約](DEPENDENCY-POLICY.md)。依存宣言が変更されるPRは本台帳も更新し、実装／設計のずれを放置しない。
 
-以下の値は**直接依存のマニフェスト指定**であり、npmレジストリの最新安定版とは限らない。`^`と` ``はSemVer範囲指定、数値のみはマニフェストの厳密指定である。いずれもlockfileは実際の依存ツリーを固定する。`workspace:*`、`file:`、推移依存は下表の外で管理する。検査対象には`app/native`・`edge/frontend`の独立したnpm lockfile、SwiftPM、Python、GitHub Actions、OCIも含める。
+以下の値は**直接依存のマニフェスト指定**であり、npmレジストリの最新安定版とは限らない。`^`と`~`はSemVer範囲指定、数値のみはマニフェストの厳密指定である。いずれもlockfileは実際の依存ツリーを固定する。`workspace:*`、`file:`、推移依存は下表の外で管理する。検査対象には`app/native`・`edge/frontend`の独立したnpm lockfile、SwiftPM、Python、GitHub Actions、OCIも含める。
 
 ## 判定の意味
 
@@ -27,7 +27,7 @@
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
-| `typescript` | ` ``5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
+| `typescript` | `~5.9.3` | root・型検査 | **制約**: v7.0.2のCIでNode組込みモジュール／`NodeJS`型の解決が失敗。移行で解決し、最新版に追従 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 
@@ -106,7 +106,7 @@
 
 ## アップデートの審査・記録
 
-1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、` ``は既に最新版という証拠ではない。
+1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
 2. **判定**: 更新対象／連動／制約／整理対象／要検証を振り分ける。「今のビルドは通る」「過去から固定されている」だけで意図的なピンとしない。廃止予定の機能・不要な直接依存なら先に削除を評価する。
 3. **制約の証拠**: 固定する場合、対象パッケージ・許可範囲、最新候補、具体的な再現条件・失敗ログ・依存境界、解除条件をPRに記録する。期限なしの例外は設けない。代替案や上流の修正を評価する。
 4. **更新の単位**: 同期必須の依存（Better Auth群、Capacitor群、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
