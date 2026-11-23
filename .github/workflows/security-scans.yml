@@ -32,6 +32,7 @@ jobs:
           scan-ref: .
           version: v0.76.2
           scanners: vuln,misconfig
+          trivyignores: .trivyignore.yaml
           format: sarif
           output: trivy.sarif
           exit-code: '0'
@@ -55,6 +56,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # PRs scan every commit reachable from the head but absent from the
+      # exact base. Main retains full-history scanning. Never guess a range.
+      - name: Verify exact Git history scan scope
+        id: history
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+        run: |
+          set -euo pipefail
+          # Emit merge-result patches without restricting ancestry traversal.
+          if [[ "$GITHUB_EVENT_NAME" != 'pull_request' ]]; then
+            printf 'log_opts=--diff-merges=first-parent HEAD\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid PR base identity' >&2; exit 1; }
+          [[ "$PR_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid PR head identity' >&2; exit 1; }
+          git cat-file -e "${PR_BASE_SHA}^{commit}"
+          git cat-file -e "${PR_HEAD_SHA}^{commit}"
+          git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA" >/dev/null
+          [[ "$(git rev-list --count "${PR_BASE_SHA}..${PR_HEAD_SHA}")" -gt 0 ]] || {
+            echo 'PR contains no verifiable commits to scan' >&2
+            exit 1
+          }
+          printf 'log_opts=--diff-merges=first-parent %s..%s\n' "$PR_BASE_SHA" "$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Scan Git history
         run: |
           docker run --rm --network none \
@@ -63,7 +89,7 @@ jobs:
             --mount "type=bind,src=$RUNNER_TEMP,dst=/reports" \
             --workdir /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            git --config /repo/.gitleaks.toml --redact=100 --report-format sarif \
+            git --config /repo/.gitleaks.toml --log-opts "${{ steps.history.outputs.log_opts }}" --redact=100 --report-format sarif \
               --report-path /reports/gitleaks.sarif --exit-code 0 /repo
       - name: Upload Gitleaks SARIF
         uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4

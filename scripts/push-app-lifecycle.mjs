@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
-import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles } from './ci/evidence/download-artifacts.mjs';
 import { collectGitHubArrayPages, collectGitHubPages } from './release-policy.mjs';
 import { expectedBackendMigrationFingerprint, assertBackendImageIdentity } from './backend-image-inspection.mjs';
 import { compareComponentVersions, readComponentVersion } from './component-release-version.mjs';
@@ -28,11 +29,38 @@ const actions = env.GITHUB_ACTIONS === 'true';
 const runId = Number(env.GITHUB_RUN_ID);
 const attempt = Number(env.GITHUB_RUN_ATTEMPT);
 const sourceSha = env.CODEXIA_LIFECYCLE_SOURCE_SHA || env.GITHUB_SHA;
-const evidencePath = env.CODEXIA_LIFECYCLE_EVIDENCE_FILE || path.join(tempRoot, 'codexia-push-app-lifecycle', 'evidence.json');
-const reportPath = env.CODEXIA_LIFECYCLE_REPORT_FILE || path.join(tempRoot, 'codexia-push-app-lifecycle', 'outcome.json');
-const preparedPath = path.join(path.dirname(evidencePath), 'prepared-images.json');
+const lifecycleDirectory = path.resolve(tempRoot, 'codexia-push-app-lifecycle');
+const evidencePath = path.join(lifecycleDirectory, 'evidence.json');
+const reportPath = path.join(lifecycleDirectory, 'outcome.json');
+const preparedPath = path.join(lifecycleDirectory, 'prepared-images.json');
+// The runner owns this directory; environment overrides must not redirect evidence writes.
+if (env.CODEXIA_LIFECYCLE_EVIDENCE_FILE && path.resolve(env.CODEXIA_LIFECYCLE_EVIDENCE_FILE) !== evidencePath) {
+  throw new Error('Lifecycle evidence override must equal the runner-owned path');
+}
+if (env.CODEXIA_LIFECYCLE_REPORT_FILE && path.resolve(env.CODEXIA_LIFECYCLE_REPORT_FILE) !== reportPath) {
+  throw new Error('Lifecycle report override must equal the runner-owned path');
+}
 function check(condition, message) { assert.ok(condition, message); }
 function positive(value) { return Number.isSafeInteger(Number(value)) && Number(value) > 0; }
+
+// Writes only run-owned JSON files, atomically replacing their directory entries.
+// An exclusive temporary descriptor prevents symlink following or partial evidence files.
+async function writeLifecycleJson(destination, value) {
+  check([reportPath, preparedPath, evidencePath].includes(destination), 'Unapproved lifecycle evidence destination');
+  await mkdir(lifecycleDirectory, { recursive: true, mode: 0o700 });
+  const staged = path.join(lifecycleDirectory, `.${path.basename(destination)}-${randomUUID()}.tmp`);
+  try {
+    const handle = await open(staged, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try {
+      await handle.writeFile(JSON.stringify(value, null, 2) + '\n');
+    } finally {
+      await handle.close();
+    }
+    await rename(staged, destination);
+  } finally {
+    await rm(staged, { force: true });
+  }
+}
 function rootlessPodman(args, options = {}) {
   const uid = execFileSync('id', ['-u', 'codexia'], { encoding: 'utf8' }).trim();
   const home = execFileSync('getent', ['passwd', 'codexia'], { encoding: 'utf8' }).trim().split(':')[5];
@@ -279,7 +307,7 @@ async function prepareImages() {
   check(report.sourceSha === sourceSha && report.runId === runId && report.runAttempt === attempt,
     'Existing lifecycle report does not belong to this exact Actions run');
   report.status = 'IN_PROGRESS';
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(reportPath, report);
   const head = await loadExactSourceFullCandidate();
   validateImageIdentity(head.identity, sourceSha);
   check(digestPattern.test(head.artifactDigest || ''), 'Head candidate must bind an immutable artifact digest');
@@ -296,14 +324,14 @@ async function prepareImages() {
   }
   const prepared = { format: 'codexia-push-app-lifecycle-prepared/v1', sourceSha, runId, runAttempt: attempt, head, published };
   // codeql[js/http-to-file-access] Only verified immutable GitHub artifact identities are persisted to this private runner file.
-  await writeFile(preparedPath, JSON.stringify(prepared, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(preparedPath, prepared);
   report.images = [
     { role: 'head', sourceSha: head.identity.sourceSha, identity: head.identity, producerRunId: head.producerRunId, artifactId: head.artifactId, artifactDigest: head.artifactDigest, certificateResult: 'NOT_USED_SOURCE_ARTIFACT_IDENTITY_VERIFIED' },
   ];
   if (published) report.images.push({ role: 'prior', sourceSha: published.identity.sourceSha, identity: published.identity, releaseTag: published.releaseTag, certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' });
   report.status = 'IMAGES_VERIFIED_WAITING_FOR_DISPOSABLE_REGISTRY';
   // codeql[js/http-to-file-access] Verified source metadata is recorded as inert 0600 JSON, never executed.
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(reportPath, report);
   console.log(JSON.stringify({ preparedPath, reportPath, publishedRelease: published?.releaseTag }, null, 2));
 }
 async function mirrorPreparedImages() {
@@ -325,7 +353,7 @@ async function mirrorPreparedImages() {
       certificateArtifactId: published.certificateArtifactId, certificateArtifactDigest: published.certificateArtifactDigest, certificateVerified: true } }),
     imageChecks: { sourceArtifactDigest: head.artifactDigest, sourceArtifactIdentityVerified: true, sourceArtifactEvent: head.producerEvent,
       publishedCertificateVerified: Boolean(publishedRef), fullProfile: true, platform: 'linux/amd64' } };
-  await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(evidencePath, evidence);
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   report.images = [
     { role: 'head', image: headRef.image, digest: headRef.digest, imageId: headRef.imageId, repoDigests: headRef.repoDigests, sourceSha: head.identity.sourceSha, identity: head.identity, producerRunId: head.producerRunId, producerEvent: head.producerEvent, artifactId: head.artifactId, artifactDigest: head.artifactDigest, certificateResult: 'NOT_USED_SOURCE_ARTIFACT_IDENTITY_VERIFIED' },
@@ -334,7 +362,7 @@ async function mirrorPreparedImages() {
   report.transition = evidence.transition;
   report.imageEvidence = { path: evidencePath, format: evidence.format, productionAdmissionUsed: false };
   report.status = 'PREPARED';
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(reportPath, report);
   console.log(JSON.stringify({ evidencePath, reportPath, headImage: headRef.image, publishedImage: publishedRef?.image }, null, 2));
 }
 async function recordFailedCandidate(image) {
@@ -355,11 +383,11 @@ async function recordFailedCandidate(image) {
   check(observed.imageId !== base.imageId && image !== base.image, 'Fault injection did not create a distinct image');
   evidence.candidates.failed = { image, digest: image.slice(image.indexOf('@') + 1), imageId: observed.imageId, profile: 'full', identity: observed.identity,
     injection: 'ENTRYPOINT=/bin/false', testOnly: true };
-  await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(evidencePath, evidence);
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   report.images.push({ role: 'failed-candidate-fixture', image, digest: image.slice(image.indexOf('@') + 1), imageId: observed.imageId, repoDigests: observed.repoDigests, sourceSha: observed.identity.sourceSha, identity: observed.identity,
     testOnly: true, productionAdmissionUsed: false });
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(reportPath, report);
 }
 
 async function recordAuthCandidate(scenario, image) {
@@ -381,10 +409,10 @@ async function recordAuthCandidate(scenario, image) {
   const candidate = { image, digest: image.split('@')[1], imageId: observed.imageId, profile: 'full', identity: observed.identity,
     baseImage: evidence.candidates.head.image, testOnly: true };
   evidence.candidates[scenario] = candidate;
-  await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(evidencePath, evidence);
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   report.images.push({ ...candidate, role: scenario, repoDigests: observed.repoDigests, productionAdmissionUsed: false });
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  await writeLifecycleJson(reportPath, report);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -401,7 +429,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       prior.sourceSha = sourceSha; prior.runId = runId; prior.runAttempt = attempt;
       prior.status = 'FAIL';
       prior.failure = bounded; prior.updatedAt = new Date().toISOString();
-      await writeFile(reportPath, JSON.stringify(prior, null, 2) + '\n', { mode: 0o600 });
+      await writeLifecycleJson(reportPath, prior);
     } catch {}
     console.error(bounded); process.exitCode = 1;
   });

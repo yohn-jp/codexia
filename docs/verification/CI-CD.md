@@ -14,16 +14,141 @@ This is the normative execution and release architecture. [Test architecture](TE
 
 | Responsibility | Canonical implementation |
 | --- | --- |
-| Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci-contract.mjs) |
-| Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci-impact.mjs) |
-| Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs) |
-| Task producer invocation, input-proof generation, and coverage input inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci-coverage-inputs.mjs) |
-| Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci-workspace.mjs), [ci-group.mjs](../../scripts/ci-group.mjs) |
+| Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci/impact/contract.mjs) |
+| Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci/impact/plan.mjs) |
+| Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs) |
+| Task producer invocation, input-proof generation, and coverage input inventory | [group.mjs](../../scripts/ci/execution/group.mjs), [ci-task-input-proof.mjs](../../scripts/ci/evidence/input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci/evidence/coverage-inputs.mjs) |
+| Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci/execution/workspace.mjs), [group.mjs](../../scripts/ci/execution/group.mjs) |
 | Verification DAG | [verify.yml](../../.github/workflows/verify.yml) |
-| Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) uses pinned `actions/download-artifact@v8.0.2` by selector-validated immutable artifact ID and fails on digest mismatch; [certify-ci.mjs](../../scripts/certify-ci.mjs) validates the downloaded evidence. Cross-run API retrieval still uses [download-ci-artifacts.mjs](../../scripts/download-ci-artifacts.mjs). |
+| Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) retrieves each selector-validated immutable artifact ID through [download-artifacts.mjs](../../scripts/ci/evidence/download-artifacts.mjs), verifies its SHA-256 and extracts only the plan or report JSON. Execution reports use one directory per artifact regardless of selection count. [certify.mjs](../../scripts/ci/certification/certify.mjs) validates the downloaded evidence. |
 | Release eligibility and exact main source | [release-policy.mjs](../../scripts/release-policy.mjs), [verify-release-source.mjs](../../scripts/verify-release-source.mjs) |
 
 Do not maintain a parallel hand-written inventory. Update the declarative contract, workflow, impact rules, coverage checks, evidence selector, certifier and release consumers together when their interfaces change. Every workspace, test source, required profile and named validation must be covered. Workspace prerequisites come from package scripts and declared dependencies, never regex parsing the root test command.
+
+## CI admission, execution and resource policy
+
+This section is the **normative scheduling and resource contract**. The canonical task
+inventory, impact selection, input-closure proof and certifier above remain authoritative.
+Workflow `paths`, local shell guards and special-purpose release filters are implementation
+of those decisions, never independent permission to waive a required verification task.
+The design below is the accepted target; an item is operational only after its workflow,
+impact rules, tests and CI acceptance are committed and observed.
+
+### Admission and ownership
+
+**Three distinct stages must not be conflated:**
+
+1. **Event admission** prevents a workflow run from being created when none of its
+   required obligations can be affected. Use `on.pull_request.paths` / `on.push.paths`
+   only for domains with a complete and independently tested input-closure mapping;
+   include the workflow and its relevant policy/configuration files. A change outside
+   that closure must not activate unrelated release or integration lanes.
+2. **Job admission** happens in one cheap exact-source plan. Use the existing
+   `scripts/ci/impact/plan.mjs` task selection and `scripts/ci/impact/contract.mjs` job inventory; expose selected
+   prerequisites explicitly. Do not launch a costly job merely because another task
+   shares its job family. Unknown paths, unavailable diffs, invalid identities and
+   unreviewed dependency edges fail closed to wider verification.
+3. **Step admission / reuse** installs or executes expensive tools only for actually
+   selected tasks. Chromium, StrictDoc, model files, image builds and temporary hosts
+   must not be prepared for a `NOT_SELECTED` task. Reuse only through existing
+   content-addressed, toolchain-bound and source/attempt-verified receipts.
+
+```mermaid
+flowchart TD
+  E[PR or main event] --> C{Owning domain impacted?}
+  C -->|No, complete closure proved| X[No independent heavy workflow]
+  C -->|Yes or unknown| P[Exact-source canonical plan]
+  P --> S{Task or component selected?}
+  S -->|No| N[NOT_SELECTED with certifier evidence]
+  S -->|Yes| T[Prepare only required tools]
+  T --> V[Run tests and retain proof]
+  N --> G[Canonical certification]
+  V --> G
+  G -->|Certified main source only| R[Release eligibility]
+```
+
+| Change/input owner | Required proof | Avoid when unrelated |
+| --- | --- | --- |
+| Native iOS SwiftUI/transport and Xcode projects | Native Swift build, API contract, simulator/physical acceptance as specified by iOS design | Desktop browser E2E, backend OCI, real-model OCI |
+| Database contract-only tests / isolated proof fixtures | DB contract, affected type/unit and coverage | Backend/frontend image release builds, app host lifecycle, real-model OCI |
+| Runtime Backend/Core/Full sources and packaging inputs | Applicable unit/type, actual Core/Full OCI, API/integration and exact-image identity | Unrelated Pages and iOS workflows |
+| Desktop React, static assets, or frontend build inputs | Desktop type/build, affected browser shards, UI asset packaging/delivery | Backend publication and VM lifecycle unless shared runtime inputs change |
+| Auth, PostgreSQL runtime schema or deployment state machine | Owning DB/API contract, auth E2E, relevant host and rollback acceptance | Unrelated model, native or Pages integration |
+| StrictDoc/specification inputs | Requirements trace with its pinned StrictDoc/Chromium toolchain and affected Pages acceptance | Full model or backend image solely because a trace test changed |
+| Pages generators, diagram/graph/audit inputs | Generator tests, source-bound report, faithful browser rendering | OCI builds and host lifecycle |
+| JavaScript/TypeScript or analyzer rule inputs | CodeQL and quality checks per analyzed source closure | A CodeQL run for unrelated native/docs-only input |
+| Dependency, container, IaC and secret-handling inputs | Trivy and appropriate config/security checks, plus affected runtime proofs | Full Git-history scan for every unchanged history |
+| New, renamed, deleted, unknown or missing-diff inputs | Conservative safe superset / full verification until closure is proven | Unverified skipping or unconditional success |
+
+**Independent-workflow owners.** `verify.yml` is the only owner of task inventory
+and canonical certification. `backend-release.yml` and `frontend-release.yml` own
+component build, package, promotion and publication; `push-app-lifecycle.yml`,
+deployment-config/host/backup flows own real operational proof; `repository-audit.yml`
+owns development Pages; `ios-*.yml` own native acceptance;
+`codeql.yml` and `security-scans.yml` own static security scanning.
+Do not run a backend image or disposable VM lifecycle merely because a
+`packages/**` test file or unrelated deployment documentation changed. Conversely,
+include packaging scripts, profile manifests, dependency locks, workflows and actual
+runtime inputs in the relevant closure. A package filename suffix is not by itself
+proof that a file is irrelevant: generated/test assets consumed by a build remain inputs.
+
+**Security admission.** CodeQL PR analysis must cover changed analyzable JS/TS
+or analyzer configuration, with main/default-branch and scheduled scanning retained.
+Trivy must cover dependency locks, Dockerfiles, containers, IaC, action/dependency
+security configuration and other verified scanner inputs. Gitleaks must inspect new
+PR commits (including file renames) without rescanning unrelated full history on
+each PR, and retain complete-history review on main/schedule. If the commit base,
+history span, or scan coverage cannot be verified, run the broader scan or fail.
+Preserve SARIF upload/category behavior and non-bypassed security controls.
+Security alerts, static policy gates and CI certification are separate obligations.
+
+**Main and delivery.** Every main source requires full exact-source verification or
+the already defined strictly validated same-tree merged-PR reuse. Direct pushes,
+manual runs and invalid reuse use full execution. Publication/deployment starts
+only after successful exact-main certification; the completed event is not an
+excuse to create redundant backend/frontend jobs for unaffected components.
+Never cancel source certification, image publication, rollback or protected
+deployment merely because a later PR arrives. Cancel only superseded PR heads
+in the *same* workflow and PR; no cross-PR or cross-source cancellation.
+Reuse verified artifacts, not stale success statuses or unverified skip contexts.
+
+**Required checks.** Before enabling a GitHub event-level path exclusion, verify
+the active branch ruleset and every effective required check context for the repo.
+An excluded workflow may leave a required check pending; a skipped job may appear
+successful while proving nothing. Keep a cheap, stable admission/certification
+status, emit `NOT_SELECTED` with an explicit owning input closure and reason,
+and independently verify that no selected task or security gate disappeared.
+Branch protection/merge queue and status check migration must be updated atomically;
+if effective rules cannot be read, do not deploy a potentially deadlocking filter.
+
+### Measurement and change acceptance
+
+Measure **run count**, cancellation before and after runner acquisition,
+per-PR workflow multiplicity, executed versus queued job count, p50/p95 queue time, runner seconds,
+critical path, wall clock, cold/warm cache state, failure/retry rate, and the
+specific phases (tool downloads, fixture setup, build, browser, artifacts).
+`cancelled` run count is *not* equal to wasted runner minutes; check actual job
+start/logs before making a savings claim. Actions queued/waiting jobs may expose
+placeholder start timestamps; they consume no observed runner seconds and must
+not be counted as executed jobs. Cancelled jobs may also expose placeholder
+timestamps even after becoming `completed`; require a positive assigned
+`runner_id` before claiming runner consumption, and report pre/post-runner
+cancellations separately. Prefer comparable exact-source and
+toolchain runs; record counterfactual estimates separately from observed results.
+Compare a full run, native-only changes, test-only DB changes, documentation-only
+changes, frontend/backend runtime changes, unknown/new paths and changed workflow
+definitions before and after an admission change. For rapid consecutive main merges,
+record each source SHA and its actual PR plan mode, base SHA, merge parent,
+reusable proof decision, queued jobs, executed jobs and runner seconds. A green
+`affected` PR check is not a complete main certificate; a stale base or
+unverified proof must trigger exact-source execution, not an implicit pass.
+
+A rollout passes only when (a) the canonical plan and actual workflow trigger
+agree; (b) every selected task is proven or blocked/fails, never silently skipped;
+(c) selected security and release gates remain enforced; (d) source/attempt/lock/
+profile identities are preserved; (e) test-only and unrelated changes no longer
+start expensive lanes; and (f) comparable actual CI demonstrates improved queue,
+runner and wall-clock behavior. A budget alone never authorizes dropping proof.
 
 ## Static quality and Code Scanning contract
 
@@ -84,7 +209,7 @@ A skipped job is not proof of a selected task. Certification must validate the p
 
 ### Merged-tree source certification (Build once, Test once, Promote many)
 
-The source-certification increment in #215 retains the existing Verify workflow and canonical task inventory. Its main-push plan may select the compact path only for a single two-parent merge commit whose second parent is the successfully verified same-repository PR head, whose first parent is the actual push's previous main, and whose Git tree is byte-for-byte identical to the verified head. The original PR must have been verified against that first parent and the exact actual diff. Read the merged PR association and latest exact workflow/attempt from GitHub, require successful pre-merge certification, revalidate the plan and all selected reports and producer identities by immutable artifact ID/digest. This compact path still requires a complete full PR plan. An affected PR plan proves omitted task identity only through the complete task input reuse receipts described above; if any proof is ineligible or differs, planning expands it to the full inventory. The `ci-task-input-proof.mjs` validator defines the fail-closed input-proof shape covering source, tests, dependency closure, environment, toolchain, recipe and producers, and compares complete task inventories. Verify execution reports also carry a producer inventory with the source, workflow run/attempt/job, selected task inventory, top-level task/group commands and runner identity. The plan passes only the eligible flag to certification; certification independently resolves and validates exact-source proof before succeeding, without persisting API lookup receipts between jobs. Every heavy group must be skipped for the compact main path. Direct pushes, fork PRs, different trees, stale bases, unavailable/expired/ambiguous evidence, failed or pending proof and any mismatch fall back to the full graph at planning; invalidated proof at certification fails the run. The only release authority remains the successful exact-main-push certification. Never execute a downloaded PR artifact in a privileged context.
+The source-certification increment in #215 retains the existing Verify workflow and canonical task inventory. Its main-push plan may select the compact path only for a single two-parent merge commit whose second parent is the successfully verified same-repository PR head, whose first parent is the actual push's previous main, and whose Git tree is byte-for-byte identical to the verified head. The original PR must have been verified against that first parent and the exact actual diff. Read the merged PR association and latest exact workflow/attempt from GitHub, require successful pre-merge certification, revalidate the plan and all selected reports and producer identities by immutable artifact ID/digest. This compact path still requires a complete full PR plan. An affected PR plan proves omitted task identity only through the complete task input reuse receipts described above; if any proof is ineligible or differs, planning expands it to the full inventory. The `scripts/ci/evidence/input-proof.mjs` validator defines the fail-closed input-proof shape covering source, tests, dependency closure, environment, toolchain, recipe and producers, and compares complete task inventories. Verify execution reports also carry a producer inventory with the source, workflow run/attempt/job, selected task inventory, top-level task/group commands and runner identity. The plan passes only the eligible flag to certification; certification independently resolves and validates exact-source proof before succeeding, without persisting API lookup receipts between jobs. Every heavy group must be skipped for the compact main path. Direct pushes, fork PRs, different trees, stale bases, unavailable/expired/ambiguous evidence, failed or pending proof and any mismatch fall back to the full graph at planning; invalidated proof at certification fails the run. The only release authority remains the successful exact-main-push certification. Never execute a downloaded PR artifact in a privileged context.
 
 Frontend main releases may promote the immutable UI archive from the latest successful same-repository PR run when the canonical resolver proves its full-plan verification, exact merged tree/base and current successful build attempt. The selector makes one bounded lookup for the latest exact-SHA main Verify push run. Release selection starts only after a completed successful exact-main Verify event, so release runners never poll unfinished verification. Unavailable or invalid PR promotion evidence falls back to an exact-source frontend build inside the verified release workflow. Protected deployment independently requires the successful exact-SHA main push certification before accepting a promoted artifact or deploying. The artifact name binds the PR number, producer run, head SHA and attempt; the protected consumer checks its digest and embedded identity without running its code. The UI keeps its producer SHA/version, while the GitHub release tag and top-level release metadata stay bound to the exact merged main SHA and record the producer receipt separately. Missing, stale, foreign, failed, ambiguous, tree-mismatched, incompatible or non-newer artifacts fall back to the exact-source main build. Main source certification, protected deployment preflight, live API compatibility and post-deploy identity checks still gate publication and deployment.
 
@@ -120,7 +245,7 @@ The normative release gate is common to **both** main-source component lanes: co
 
 ## Measuring and changing the graph
 
-Use [measure-ci.mjs](../../scripts/measure-ci.mjs), the [CI Observatory Pages dashboard](CI-DASHBOARD.md) and actual workflow/artifact evidence. Pages timing is a bounded observational sample, not certification or measured counterfactual critical-path savings. Compare equivalent full/affected plans, runner classes, toolchain, profiles, fixture and cache conditions. Record wall-clock, critical path, queue and runner seconds, producer build/transfer/extraction, fixture setup, failure/retry rates and per-test time separately. Compare at least three matched successful runs where practical; record all values and limitations. No runtime target is justification for changing verification coverage or release gates. The optimization objective is shorter critical path and lower total runner time with equal or stronger detection and certification. Cache immutable model data by the exact pinned manifest digest, not by unrelated workflow/test edits, and verify every file checksum before use. Do not install workspace dependencies on the backend image runner outside Docker when its host probes use only Node built-ins.
+Use [measure.mjs](../../scripts/ci/dashboard/measure.mjs), the [CI Observatory Pages dashboard](CI-DASHBOARD.md) and actual workflow/artifact evidence. Pages timing is a bounded observational sample, not certification or measured counterfactual critical-path savings. Compare equivalent full/affected plans, runner classes, toolchain, profiles, fixture and cache conditions. Record wall-clock, critical path, queue and runner seconds, producer build/transfer/extraction, fixture setup, failure/retry rates and per-test time separately. Compare at least three matched successful runs where practical; record all values and limitations. No runtime target is justification for changing verification coverage or release gates. The optimization objective is shorter critical path and lower total runner time with equal or stronger detection and certification. Cache immutable model data by the exact pinned manifest digest, not by unrelated workflow/test edits, and verify every file checksum before use. Do not install workspace dependencies on the backend image runner outside Docker when its host probes use only Node built-ins.
 
 A graph change must demonstrate complete coverage, dependency failure propagation, exact-source/attempt binding, correct partial reruns, and rejection of stale, missing or tampered artifacts. Test both allowed and denied release cases. Any removal or migration of test obligations must follow the [test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md). Record execution evidence in PRs and machine artifacts, not in this document.
 

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWorkspacePreset, hideWorkspacePanel, resizeWorkspaceSplit } from "./layout";
+import { createWorkspacePreset, hideWorkspacePanel, resizeWorkspaceSplit, visiblePanelIds } from "./layout";
 import {
   loadWorkspaceSnapshot,
   saveWorkspaceSnapshot,
   workspaceSnapshotStorageKey,
+  type WorkspaceLoad,
   type WorkspaceStorage,
 } from "./persistence";
 
@@ -25,6 +26,19 @@ class MemoryStorage implements WorkspaceStorage {
 }
 
 const panelIds = ["editor", "outline", "inspector", "history", "review"];
+
+function assertWritingFallback(loaded: WorkspaceLoad, state: Exclude<WorkspaceLoad["state"], "valid">): void {
+  assert.equal(loaded.state, state);
+  assert.equal(loaded.layout.preset, "writing");
+  // Desktop Authoring specifies the Writing dock as outline 20%, editor 80%.
+  const { root } = loaded.layout;
+  assert.ok(root.type === "split");
+  assert.equal(root.direction, "horizontal");
+  assert.deepEqual(visiblePanelIds(root), ["outline", "editor"]);
+  assert.deepEqual(root.sizes, [20, 80]);
+  assert.ok(loaded.layout.hiddenPanelIds.includes("inspector"));
+  assert.deepEqual(loaded.floating, []);
+}
 
 test("a workspace save commits dock layout and floating geometry together for one author and device", () => {
   const storage = new MemoryStorage();
@@ -66,9 +80,7 @@ test("only the atomic record is read and an explicit save preserves bytes at ret
 
   const loaded = loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds);
   const currentKey = "scriptorium:workspace:v2:author%3Aone:desktop";
-  assert.deepEqual(loaded, {
-    layout: createWorkspacePreset("writing", panelIds), floating: [], state: "missing",
-  });
+  assertWritingFallback(loaded, "missing");
   assert.deepEqual(storage.reads, [currentKey]);
   assert.deepEqual(storage.writes, []);
 
@@ -107,9 +119,8 @@ test("malformed workspace records fall back without deleting their original byte
   storage.values.set(key, malformed);
 
   const loaded = loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds);
-  assert.equal(loaded.state, "invalid");
-  assert.equal(loaded.layout.preset, "writing");
-  assert.deepEqual(loaded.floating, []);
+  assertWritingFallback(loaded, "invalid");
+  assert.deepEqual(storage.writes, []);
   assert.equal(storage.getItem(key), malformed);
 
   assert.equal(saveWorkspaceSnapshot(storage, "author:one", "desktop", { layout: loaded.layout, floating: [] }), true);
@@ -149,13 +160,18 @@ test("oversized or non-declarative payloads are rejected without storage writes"
 });
 
 test("storage errors fall back without pretending that persistence succeeded", () => {
+  const writes: string[] = [];
   const inaccessible: WorkspaceStorage = {
     getItem() { throw new Error("blocked"); },
-    setItem() { throw new Error("blocked"); },
+    setItem(key) { writes.push(key); throw new Error("blocked"); },
   };
-  const layout = createWorkspacePreset("writing", panelIds);
-  assert.deepEqual(loadWorkspaceSnapshot(inaccessible, "author:one", "mobile", panelIds), {
-    layout, floating: [], state: "unavailable",
-  });
-  assert.equal(saveWorkspaceSnapshot(inaccessible, "author:one", "mobile", { layout, floating: [] }), false);
+  const desktop = loadWorkspaceSnapshot(inaccessible, "author:one", "desktop", panelIds);
+  assertWritingFallback(desktop, "unavailable");
+  const mobile = loadWorkspaceSnapshot(inaccessible, "author:one", "mobile", panelIds);
+  assertWritingFallback(mobile, "unavailable");
+  assert.deepEqual(writes, []);
+
+  const { layout, floating } = mobile;
+  assert.equal(saveWorkspaceSnapshot(inaccessible, "author:one", "mobile", { layout, floating }), false);
+  assert.deepEqual(writes, [workspaceSnapshotStorageKey("author:one", "mobile")]);
 });

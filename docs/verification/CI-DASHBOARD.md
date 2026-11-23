@@ -13,7 +13,7 @@ CI Observatory displays a progressively enumerated inventory of public GitHub Ac
 
 ## Source and sampling
 
-Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [analysis.mjs](../../scripts/ci-dashboard/analysis.mjs); [static client](../../scripts/ci-dashboard/site/).
+Collector: [collect.mjs](../../scripts/ci/dashboard/collect.mjs); analyzer: [analysis.mjs](../../scripts/ci/dashboard/analysis.mjs); [static client](../../scripts/ci/dashboard/site/).
 
 1. The browser initially queries one page of repository `pull_request` Actions runs (100 records). The full-history control requests additional pages until the API stops returning pages or an error interrupts the scan. After ten full pages in one filtered GitHub search (the 1,000-result search window), it advances a dated `created` cursor to continue with older runs and deduplicates overlapping boundary records. Runs are deduplicated by run ID across pages. The status reports fetched runs, GitHub's reported total when supplied, unresolved associations, and whether more history may exist.
 2. A run is attributable only when `run.head_sha` is a valid executed source SHA and GitHub associates it with exactly one distinct PR number. The mutable `pull_requests[].head.sha` is not used for grouping. Runs with missing or ambiguous PR/source identity are excluded and counted as unresolved. **No Verify requirement or fixed PR/workflow count may hide otherwise attributable revisions.**
@@ -27,11 +27,11 @@ The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` wh
 
 - The **last canonical validation leaf** is the latest finished required validation job preceding successful `certification`. Its observed dependency ancestry is derived from the exact published Verify needs graph, not inferred from bar lengths alone.
 - **Runner queue** is the recorded job creation-to-start interval. **Before validation** is the job start to `Run selected validations` step start; it may include VM/container provisioning, checkout, dependency installation, artifact restoration and runtime checks. It is **not** a pure image pull or startup measurement.
-- **Container initialization** is the `Initialize containers` step duration when GitHub provides it. **Validation** is only the duration of `Run selected validations`; it includes all tasks scheduled by `ci-group.mjs` and is not a sum of per-task execution times. **After validation** is the interval from that step's end to the job's end.
+- **Container initialization** is the `Initialize containers` step duration when GitHub provides it. **Validation** is only the duration of `Run selected validations`; it includes all tasks scheduled by `group.mjs` and is not a sum of per-task execution times. **After validation** is the interval from that step's end to the job's end.
 - **Runner-up gap** is the observed finish-time difference between the last canonical validation leaf and the second-latest one. **Near finish** lists other leaves within 15 seconds of that finish. The gap is not guaranteed time saved by optimizing one job: shared resource contention and reruns can alter the result.
 - **Certification tail** is last-leaf completion to certification completion, including dependency/job scheduling and the certification steps.
 - Missing, cancelled, failed, carried or subsequent-attempt evidence yields an unavailable attribution, not a successful claim. Missing step timestamps render individual phase values unknown, not zero.
-- Individual tasks already report timing in the `ci-group.mjs` logs and `ci-evidence-*/report.json` artifacts. The public, no-token dashboard deliberately does not download job logs or authenticated artifacts, and therefore **cannot identify the slowest Playwright task**. Use the exact run's logs or evidence artifact for task-level attribution; a future telemetry export must be independently reviewed for permissions, privacy and source identity.
+- Individual tasks already report timing in the `group.mjs` logs and `ci-evidence-*/report.json` artifacts. The public, no-token dashboard deliberately does not download job logs or authenticated artifacts, and therefore **cannot identify the slowest Playwright task**. Use the exact run's logs or evidence artifact for task-level attribution; a future telemetry export must be independently reviewed for permissions, privacy and source identity.
 
 ## Copyable diagnostic JSON
 
@@ -58,7 +58,7 @@ The copied diagnostic model aggregates:
 - Explicit `interpretation.notMeasured` reasons for unavailable telemetry.
 
 **Collection boundary:** The browser only reads public GitHub Actions REST run/job/step
-metadata. The existing per-task timings in `ci-group.mjs` logs and `ci-evidence`
+metadata. The existing per-task timings in `group.mjs` logs and `ci-evidence`
 artifacts cannot be read as API step metrics. Likewise, CPU PSI, memory usage,
 I/O, per-test Playwright timings, pure image pull and cache-hit evidence remain
 unavailable without separately authorized CI telemetry collection. The JSON does not
@@ -92,7 +92,7 @@ The inventory does **not** establish all required checks: API history retention,
 
 ## CI impact and iOS agreement
 
-Pure changes under **scripts/ci-dashboard/**, **scripts/ios/** and **app/native/**, or to the iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
+Pure changes under **scripts/ci/dashboard/**, **scripts/ios/** and **app/native/**, or to the iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
 
 The unsigned IPA workflow runs for native-related PR changes or manual dispatch, and moves to **xcode-27 ARM64** and **iOS 27.0 minimum**. **Adopted target: Desktop React Web + native SwiftUI iOS with UIKit/TextKit editor.** Current Ionic/Capacitor IPA packaging is legacy until SwiftUI-specific CI replaces it; Mobile React viewport E2E is not a native release gate. A native unsigned archive does not prove Simulator acceptance, Apple signing, Keychain or physical installation. See [iOS client contract](../deployment/IOS-CLIENT.md).
 
@@ -101,14 +101,14 @@ The unsigned IPA workflow runs for native-related PR changes or manual dispatch,
 With repository Node/pnpm dependencies installed:
 
 ~~~sh
-node --test scripts/ci-dashboard/*.test.mjs scripts/ci-impact.test.mjs
+node --test scripts/ci/dashboard/*.test.mjs scripts/ci/impact/plan.test.mjs
 ~~~
 
 The static preview bundle requires no GitHub credentials:
 
 ~~~sh
 mkdir -p /tmp/codexia-audit-site
-node scripts/ci-dashboard/collect.mjs /tmp/codexia-audit-site --preview
+node scripts/ci/dashboard/collect.mjs /tmp/codexia-audit-site --preview
 ~~~
 
 If GitHub's public telemetry API is unavailable or rate-limited, the page shows the error with a retry control and a link to GitHub Actions. The browser client renders job names as text and permits only constrained GitHub run URLs.

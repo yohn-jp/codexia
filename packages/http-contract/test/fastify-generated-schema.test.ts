@@ -183,3 +183,50 @@ test("generated document listing validates limit and passes the persistence defa
   }
   assert.deepEqual(acceptedLimits, [500, 1, 1000]);
 });
+
+test("generated anchor write responses preserve persisted evidence and reject incomplete output", async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  for (const schema of schemas) app.addSchema(schema);
+
+  const basePath = "/api/v1/persistence/projects/:projectId/documents/:documentId/anchors";
+  const createAnchor = routes.find(({ method, url }) => method === "POST" && url === basePath);
+  const updateAnchor = routes.find(({ method, url }) => method === "PATCH" && url === `${basePath}/:anchorId`);
+  assert.ok(createAnchor);
+  assert.ok(updateAnchor);
+
+  const anchor = {
+    id: "anchor-1", projectId: "project-1", documentId: "document-1", revisionId: "revision-1",
+    fromUtf16: 0, toUtf16: 2, quoteSha256: "a".repeat(64), status: "confirmed", version: 1,
+    createdAt: "2026-11-23T00:00:00Z", updatedAt: "2026-11-23T00:00:00Z",
+    projectionMetadata: { generation: 1 },
+  };
+  const created = { anchor, quote: "引用", nodeId: null, authorId: "owner-1" };
+  app.route<{ Params: { documentId: string } }>({
+    method: createAnchor.method,
+    url: createAnchor.url,
+    schema: createAnchor.schema as FastifySchema,
+    handler: async (request, reply) => reply.code(201).send(request.params.documentId === "incomplete"
+      ? { ...created, anchor: { ...anchor, quoteSha256: undefined } }
+      : created),
+  });
+  app.route({
+    method: updateAnchor.method,
+    url: updateAnchor.url,
+    schema: updateAnchor.schema as FastifySchema,
+    handler: async () => ({ ...anchor, version: 2 }),
+  });
+
+  const url = "/api/v1/persistence/projects/project-1/documents/document-1/anchors";
+  const creation = await app.inject({ method: "POST", url, payload: {} });
+  assert.equal(creation.statusCode, 201, creation.payload);
+  assert.deepEqual(creation.json(), created);
+
+  const update = await app.inject({ method: "PATCH", url: `${url}/anchor-1`, payload: {} });
+  assert.equal(update.statusCode, 200, update.payload);
+  assert.deepEqual(update.json(), { ...anchor, version: 2 });
+
+  const incomplete = await app.inject({ method: "POST", url: url.replace("document-1", "incomplete"), payload: {} });
+  assert.equal(incomplete.statusCode, 500, incomplete.payload);
+  assert.match(incomplete.json().message, /quoteSha256.*required/u);
+});

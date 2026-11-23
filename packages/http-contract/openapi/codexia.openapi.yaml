@@ -3108,8 +3108,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceAnchorCreatedResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -3163,8 +3162,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PersistenceEvidenceAnchor'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -4586,6 +4584,25 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    PersistenceAnchorCreatedResponse:
+      type: object
+      required:
+        - anchor
+        - quote
+        - nodeId
+        - authorId
+      properties:
+        anchor:
+          $ref: '#/components/schemas/PersistenceEvidenceAnchor'
+        quote:
+          type: string
+        nodeId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        authorId:
+          type: string
+      additionalProperties: {}
     PersistenceDocument:
       type: object
       required:
@@ -4689,6 +4706,58 @@ components:
         authorId:
           type: string
         createdAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    PersistenceEvidenceAnchor:
+      type: object
+      required:
+        - id
+        - projectId
+        - documentId
+        - revisionId
+        - fromUtf16
+        - toUtf16
+        - quoteSha256
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        documentId:
+          type: string
+        revisionId:
+          type: string
+        fromUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        toUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        quoteSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - needs_review
+            - orphaned
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
       additionalProperties: {}

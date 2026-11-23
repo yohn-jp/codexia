@@ -7,7 +7,17 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { distribution, readRegularFile, save, writeNewJsonResult } from './common.mjs';
 import { generate, git, verifyFixture } from './dataset.mjs';
-import { runWorker } from './run.mjs';
+import { runWorker, selectCoreDatasets } from './run.mjs';
+
+test('Core measurement defaults exclude fixtures that cannot be seeded', () => {
+  assert.deepEqual(selectCoreDatasets(), ['small', 'long-form', 'knowledge-dense', 'limit-999']);
+});
+
+test('an explicit dataset list can request seeding-rejection fixtures', () => {
+  assert.deepEqual(selectCoreDatasets('limit-1001,limit-1000,small'), ['limit-1001', 'limit-1000', 'small']);
+  assert.deepEqual(selectCoreDatasets(''), []);
+  assert.throws(() => selectCoreDatasets('unknown'), /Unknown dataset: unknown/u);
+});
 
 test('nearest-rank quantiles retain missing observations and sample count', () => {
   assert.deepEqual(distribution([]), { n: 0, p50: null, p95: null, p99: null });
@@ -221,6 +231,8 @@ test('PostgreSQL author pipeline records receipts without manuscript Git process
       assert.ok(sample && sample.status === 'complete' && sample.ms > 0 && sample.counters.gitProcesses === 0, name);
     }
     assert.equal(git(join(datasetPath, 'seed'), 'rev-parse', 'HEAD'), fixture.transport.commit);
+    const { manifest: verified } = await verifyFixture(datasetPath);
+    assert.equal(verified.fixtureSha256, fixture.fixtureSha256, 'post-workload fixture must match its original content identity');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

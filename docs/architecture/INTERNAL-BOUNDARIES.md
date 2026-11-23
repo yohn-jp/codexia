@@ -79,7 +79,7 @@ OAuth verification and introspection outages fail closed. The browser continues 
 
 ## 8. Verification authority
 
-[CI/CD architecture](../verification/CI-CD.md) owns execution, evidence and release gates; [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement. The executable inventory remains in `scripts/ci-contract.mjs`. Keep workspace prerequisites declared in package scripts and dependencies; no duplicate task authority.
+[CI/CD architecture](../verification/CI-CD.md) owns execution, evidence and release gates; [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement. The executable inventory remains in `scripts/ci/impact/contract.mjs`. Keep workspace prerequisites declared in package scripts and dependencies; no duplicate task authority.
 
 ## 9. Structural acceptance contract
 

@@ -4,3 +4,5 @@
 081c998530f0a6f9d027452646aacd69323daf63:scripts/verify-backend-image.sh:generic-api-key:165
 # Browser test heading and synthetic OAuth asset filename.
 37789b7d97d71b8730cb2a070f58535a4304e7a6:packages/api/src/server.test.ts:generic-api-key:1377
+# Historical design prose about routing and credentials; no secret value exists on this line.
+338e24df1bbc135a1912d4d849ac6d82f9c30ddc:docs/architecture/API-AUTHN-AUTHZ.md:generic-api-key:135

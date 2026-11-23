@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS } from './ci/impact/contract.mjs';
 
 test('commit publication CLI requires exact main source and the complete successful job set', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-release-gate-'));

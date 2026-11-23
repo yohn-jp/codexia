@@ -75,7 +75,11 @@ export function ConsoleEntry() {
     setAccess(result);
     if (result === "unauthorized" || (result === "owner" && route === "identity")) {
       try {
-        const availability = await fetchAuthMethodAvailability();
+        const availability = await fetchAuthMethodAvailability((url, init) => fetch(url, {
+          ...init,
+          redirect: "error",
+          signal: AbortSignal.timeout(5_000),
+        }));
         if (sequence === requestSequence.current) setMethods(availability);
       } catch {
         if (sequence === requestSequence.current) setMethodsFailed(true);
@@ -226,7 +230,7 @@ export function ConsoleEntry() {
             : route === "identity" ? <div className="identity-management">
               {methodsFailed ? <><p role="alert">外部IDプロバイダーの設定を確認できませんでした。</p>
                 <button className="identity-management__secondary" type="button" onClick={() => void inspect()}>再試行</button></>
-                : methods ? <OwnerIdentityPanel oidcConfigured={methods.upstreamOidc} />
+                : methods ? <OwnerIdentityPanel oidcConfigured={methods.upstreamOidc} headingLevel={2} />
                   : <p>外部IDプロバイダーの設定を確認しています。</p>}
             </div> : <div className="codexia-console__notice"><p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
             <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}

@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS } from './ci/impact/contract.mjs';
 import * as handoff from './verify-backend-push-handoff.mjs';
 import {
   assertTrustedBackendPublicationRun,

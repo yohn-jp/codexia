@@ -9,6 +9,8 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   const revisionId = "historical-revision" as RevisionId;
   let markdown = "Opening 😀 evidence, then edited text";
   let quote = "evidence";
+  const evidenceDigest = "ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e";
+  let quoteSha256 = evidenceDigest;
   let fromUtf16 = markdown.indexOf(quote);
   let batchReads = 0;
   const knowledgeIds = ["knowledge-1", "knowledge-2"] as KnowledgeNodeId[];
@@ -46,7 +48,7 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
         mentions: [{ projectId, evidenceId, nodeId: knowledgeIds[0]!, status: "confirmed", source: "author",
           confidence: null, extractorVersion: null, ...times }],
         anchors: [{ id: evidenceId, projectId, documentId, revisionId, fromUtf16, toUtf16: fromUtf16 + quote.length,
-          quoteSha256: createHash("sha256").update(quote).digest("hex"), status: "confirmed", version: 1,
+          quoteSha256, status: "confirmed", version: 1,
           createdAt: "", updatedAt: "" }],
         revisions: [sourceRevision()],
         assertionEvidence: assertionIds.map(assertionId => ({
@@ -70,6 +72,18 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.equal(evidence?.anchor.revisionId, revisionId);
   assert.equal(evidence?.quote, "evidence");
   assert.equal(evidence?.current, false);
+
+  // SHA-256 of "sentence", a different eight-byte quote.
+  quoteSha256 = "821119d79af8b9fcf86d782863d55861708cc4040673f905f9e3b616cfb71199";
+  const mismatched = await projectKnowledgeContext(reader, "project-1" as ProjectId, documents, documentMappings);
+  const unverified = mismatched.entries[0]!.evidence[0];
+  assert.ok(unverified);
+  assert.equal(unverified.anchor.id, evidenceId);
+  assert.equal(unverified.anchor.revisionId, revisionId);
+  assert.equal(unverified.quote, null);
+  assert.equal(Object.hasOwn(unverified, "quoteOmission"), false);
+  quoteSha256 = evidenceDigest;
+
   const initial = makeKnowledgeProjection({ projectId: "project-1", projectVersion: 5 }, projection);
   const advanced = makeKnowledgeProjection({ projectId: "project-1", projectVersion: 6 }, {
     nodeLimitReached: projection.nodeLimitReached, entries: projection.entries, documentMappings: projection.documentMappings,
@@ -85,6 +99,7 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.equal(ambiguous.documentMappings.every(mapping => mapping.mapping === "ambiguous"), true);
   assert.equal(ambiguous.entries[0]!.evidence[0]!.storySceneId, null);
   quote = "漢".repeat(2000); markdown = quote; fromUtf16 = 0;
+  quoteSha256 = createHash("sha256").update(quote).digest("hex");
   const oversizedDocuments = [
     { id:documentId, projectId:"project-1" as ProjectId, kind:"scene", parentId:null, title:"Scene", orderKey:"1", headRevisionId:revisionId, version:2, createdAt:"", updatedAt:"" },
   ];
@@ -104,5 +119,5 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.equal(bounded.entries[0]!.relationLimitReached, true);
   assert.equal(bounded.entries[0]!.evidence[0]!.assertions.length, 100);
   assert.equal(bounded.entries[0]!.evidence[0]!.assertionLimitReached, true);
-  assert.equal(batchReads, 5, "each batched projection requests one bounded batch");
+  assert.equal(batchReads, 6, "each batched projection requests one bounded batch");
 });

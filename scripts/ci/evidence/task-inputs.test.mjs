@@ -1,0 +1,302 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
+import { captureTaskInputSource, taskInvocation, taskWorkflowJob } from './task-inputs.mjs';
+import { createVerificationPlan } from '../impact/plan.mjs';
+
+function captureTaskInputClosure({ root, sha, task, runtime }) {
+  return captureTaskInputSource({ root, sha, runtime })(task);
+}
+
+async function git(root, ...args) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+}
+
+async function fixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codexia-task-inputs-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await git(root, 'init', '-q');
+  await git(root, 'config', 'user.email', 'ci@example.test');
+  await git(root, 'config', 'user.name', 'CI');
+  await mkdir(path.join(root, 'scripts/ci/execution'), { recursive: true });
+  await mkdir(path.join(root, 'scripts/ci/impact'), { recursive: true });
+  await mkdir(path.join(root, 'scripts/ci/browser'), { recursive: true });
+  await mkdir(path.join(root, 'scripts/architecture'), { recursive: true });
+  await mkdir(path.join(root, '.github/workflows'), { recursive: true });
+  for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci/execution/group.mjs',
+    'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/workspace.mjs', '.github/workflows/verify.yml',
+    'scripts/architecture/package.json', 'scripts/architecture/package-lock.json', 'scripts/architecture/verify.mjs',
+    'packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/index.test.mjs', 'docs/README.md']) {
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    const content = file === 'package.json' ? JSON.stringify({ packageManager: 'pnpm@12.21.0' })
+      : file.endsWith('/package.json') ? JSON.stringify({ name: '@codexia/core', dependencies: {} }) : file + '\n';
+    await writeFile(target, content);
+  }
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'fixture');
+  return root;
+}
+
+const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
+  cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261122.1' };
+
+test('task input closure is stable for an unchanged tree and ignores only impact-excluded documentation', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime };
+  const first = captureTaskInputClosure(input);
+  assert.deepEqual(captureTaskInputClosure(input), first);
+  await writeFile(path.join(root, 'docs/README.md'), 'documentation changed\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'docs only');
+  const docsOnly = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.deepEqual(docsOnly, first, 'documentation excluded by the canonical impact rules does not change task inputs');
+});
+
+test('task input closure binds source, test, dependency, environment, toolchain, recipe, and producer inputs', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const input = { root, sha, task: 'unit-core', runtime };
+  const original = captureTaskInputClosure(input);
+  for (const [file, nextSha, dimension] of [
+    ['packages/core/src/index.ts', 'source change\n', 'source'],
+    ['packages/core/index.test.mjs', 'test change\n', 'tests'],
+    ['packages/core/package.json', 'dependency change\n', 'dependencies'],
+    ['scripts/architecture/package-lock.json', 'isolated architecture dependency change\n', 'dependencies'],
+  ]) {
+    await writeFile(path.join(root, file), nextSha);
+    await git(root, 'add', '.');
+    await git(root, 'commit', '-qm', 'change ' + dimension);
+    const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+    assert.notEqual(changed[dimension], original[dimension], `${dimension} change must invalidate the proof`);
+    await git(root, 'reset', '--hard', sha);
+  }
+  const changedRuntime = captureTaskInputClosure({ ...input,
+    runtime: { ...runtime, imageVersion: '20261123.1' } });
+  assert.notEqual(changedRuntime.environment, original.environment);
+  assert.notEqual(changedRuntime.toolchain, original.toolchain);
+  const changedRecipe = captureTaskInputClosure({ ...input, task: 'unit-app' });
+  assert.notEqual(changedRecipe.recipe, original.recipe);
+  assert.notEqual(changedRecipe.producers, original.producers);
+});
+
+test('a historical task closure uses the package manager from its requested Git tree', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime };
+  const historical = captureTaskInputClosure(input);
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ packageManager: 'pnpm@12.22.0' }));
+  await git(root, 'add', 'package.json');
+  await git(root, 'commit', '-qm', 'new toolchain');
+  assert.deepEqual(captureTaskInputClosure(input), historical);
+  const current = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(current.toolchain, historical.toolchain);
+});
+
+test('a deployment document checked by root tests is included in the task source closure', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-root', runtime };
+  const original = captureTaskInputClosure(input);
+  await mkdir(path.join(root, 'docs/deployment'), { recursive: true });
+  await writeFile(path.join(root, 'docs/deployment/IOS-CLIENT.md'), 'asserted deployment contract\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'add executable documentation input');
+  const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(changed.source, original.source);
+});
+
+test('task proof identities distinguish shared Git inputs from actual invocation inputs', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const core = capture('unit-core');
+  const app = capture('unit-app');
+  const browser = capture('browser-full-ui-v1');
+
+  // All tasks bind the same immutable source tree; task-specific execution must
+  // still have a different recipe, environment or producer identity.
+  for (const field of ['source', 'tests', 'dependencies', 'toolchain']) {
+    assert.equal(core[field], app[field], field);
+    assert.equal(browser[field], app[field], field);
+    assert.match(core[field], /^[0-9a-f]{64}$/u, field);
+  }
+  assert.notEqual(core.recipe, app.recipe);
+  assert.notEqual(browser.recipe, app.recipe);
+  assert.notEqual(browser.environment, app.environment);
+  assert.notEqual(browser.producers, app.producers);
+
+  const canonical = taskInvocation('unit-app', runtime.execPath);
+  assert.equal(Array.isArray(canonical), false);
+  const misconfigured = capture('unit-app', {
+    ...canonical,
+    arguments: [...canonical.arguments, '--skip-tests'],
+    environmentKeys: [...canonical.environmentKeys, 'ADDED_RUNTIME_INPUT'],
+  });
+  assert.notEqual(misconfigured.recipe, app.recipe, 'Changed execution must not reuse a certified recipe');
+  for (const field of ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'producers']) {
+    assert.equal(misconfigured[field], app[field], field);
+  }
+  assert.throws(() => capture('unit-does-not-exist'), /exactly one verification group/u);
+});
+
+test('uncommitted worktree changes cannot influence proof for a pinned Git SHA', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const original = captureTaskInputClosure({ root, sha, task: 'unit-core', runtime });
+  await writeFile(path.join(root, 'packages/core/src/index.ts'), 'local uncommitted source mutation\\n');
+  assert.deepEqual(captureTaskInputClosure({ root, sha, task: 'unit-core', runtime }), original);
+  await git(root, 'add', 'packages/core/src/index.ts');
+  await git(root, 'commit', '-qm', 'commit changed source');
+  const committed = captureTaskInputClosure({ root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime });
+  assert.notEqual(committed.source, original.source, 'Commit content must change source proof');
+  for (const field of ['tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
+    assert.equal(committed[field], original[field], field);
+  }
+});
+
+test('browser input proofs bind the lane image for both browsers in the shared WebKit lane', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const mutatedRoot = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
+  const mutatedScripts = path.join(mutatedRoot, 'scripts/ci/evidence');
+  await mkdir(mutatedScripts, { recursive: true });
+  await mkdir(path.join(mutatedRoot, 'scripts/ci/impact'), { recursive: true });
+  await mkdir(path.join(mutatedRoot, 'scripts/ci/browser'), { recursive: true });
+  t.after(() => rm(mutatedRoot, { recursive: true, force: true }));
+  await cp(new URL('task-inputs.mjs', import.meta.url), path.join(mutatedScripts, 'task-inputs.mjs'));
+  await cp(new URL('../impact/contract.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/ci/impact/contract.mjs'));
+  await cp(new URL('../browser/image-digests.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/ci/browser/image-digests.mjs'));
+  const toolchainDirectory = path.join(mutatedRoot, 'packages/persistence-postgres/tests/db-contract');
+  await mkdir(toolchainDirectory, { recursive: true });
+  await cp(new URL('../../../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url),
+    path.join(toolchainDirectory, 'toolchain.json'));
+  const digestsFile = path.join(mutatedRoot, 'scripts/ci/browser/image-digests.mjs');
+  const digests = await readFile(digestsFile, 'utf8');
+  await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
+  await mkdir(path.join(mutatedRoot, 'scripts/architecture'), { recursive: true });
+  await cp(new URL('../../architecture/constants.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/architecture/constants.mjs'));
+  const { captureTaskInputSource: captureWithChangedWebKitImage } = await import(
+    pathToFileURL(path.join(mutatedScripts, 'task-inputs.mjs')).href
+  );
+  const inputs = { root, sha, runtime };
+  const original = captureTaskInputSource(inputs);
+  const changed = captureWithChangedWebKitImage(inputs);
+  for (const profile of ['core', 'full']) {
+    for (const shard of ['ui-v1', 'oauth-web', 'webkit']) {
+      const task = `browser-${profile}-${shard}`;
+      assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed multi-browser image`);
+    }
+    const writing = `browser-${profile}-core`;
+    assert.equal(changed(writing).environment, original(writing).environment, `${writing} uses the unchanged Chromium-only image`);
+  }
+});
+
+test('Passkey browser shard binds the dedicated acceptance environment', () => {
+  assert.deepEqual(taskInvocation('browser-core-passkey-bootstrap', '/opt/node/bin/node'), {
+    executable: '/opt/node/bin/node',
+    arguments: ['scripts/ci/browser/run-shard.mjs', '--profile', 'core', '--suite', 'passkey-bootstrap', '--prebuilt'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL',
+      'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
+      'CODEXIA_PASSKEY_ACCEPTANCE'],
+  });
+});
+
+test('database contract proof records its isolated PG17/pgTAP/tbls/age verification command', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  assert.deepEqual(taskInvocation('db-contract', runtime.execPath), {
+    executable: 'pnpm',
+    arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR'],
+  });
+  const closure = captureTaskInputClosure({ root, sha, task: 'db-contract', runtime });
+  for (const field of ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']) {
+    assert.match(closure[field], /^[0-9a-f]{64}$/u, field);
+  }
+  assert.notEqual(closure.producers, captureTaskInputClosure({ root, sha, task: 'unit-core', runtime }).producers);
+});
+
+test('architecture G5 proof binds its isolated tool lock, immutable image, invocation, and nested report location', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const capture = captureTaskInputSource({ root, sha, runtime });
+  const closure = capture('architecture-g5');
+  assert.equal(taskWorkflowJob('architecture-g5'), 'unit');
+  assert.deepEqual(taskInvocation('architecture-g5', runtime.execPath), [
+    { executable: 'npm', arguments: ['ci', '--prefix', 'scripts/architecture', '--ignore-scripts', '--no-audit', '--no-fund'], environmentKeys: [] },
+    { executable: 'docker', arguments: ['pull', 'docker.io/threagile/threagile@sha256:abb9eccb111a2059c4876759a24245db02ad295b1608d3a4634ec250f38d9640'], environmentKeys: [] },
+    { executable: runtime.execPath, arguments: ['scripts/architecture/verify.mjs'], environmentKeys: ['CODEXIA_ARCHITECTURE_EVIDENCE_DIR'] },
+  ]);
+  assert.notEqual(closure.recipe, capture('unit-core').recipe);
+  assert.notEqual(closure.producers, capture('unit-core').producers);
+  const expectedEnvironment = {
+    CI: 'true', NODE_ENV: 'workflow-default', TZ: 'workflow-default', LANG: 'runner-default', LC_ALL: 'runner-default',
+    CODEXIA_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_test',
+    CODEXIA_AUTH_TEST_DATABASE_URL: 'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test',
+    CODEXIA_AUTH_TEST_DISPOSABLE: '1',
+    CODEXIA_ARCHITECTURE_EVIDENCE_DIR: '<CODEXIA_CI_REPORT_DIR>/architecture',
+  };
+  const expectedEnvironmentIdentity = {
+    runtime: { platform: runtime.platform, arch: runtime.arch, imageOS: runtime.imageOS, imageVersion: runtime.imageVersion },
+    env: expectedEnvironment,
+  };
+  assert.equal(closure.environment, createHash('sha256').update(JSON.stringify(expectedEnvironmentIdentity)).digest('hex'));
+
+  await writeFile(path.join(root, 'scripts/architecture/package-lock.json'), 'updated lock identity\n');
+  await git(root, 'add', 'scripts/architecture/package-lock.json');
+  await git(root, 'commit', '-qm', 'change architecture tool lock');
+  const changed = captureTaskInputSource({ root, sha: await git(root, 'rev-parse', 'HEAD'), runtime })('architecture-g5');
+  assert.notEqual(changed.dependencies, closure.dependencies);
+});
+
+test('affected requirements trace receives the exact source and isolated task environment', async t => {
+  const root = await fixture(t);
+  const sourceRoot = path.resolve(import.meta.dirname, '../../..');
+  const archive = execFileSync('git', ['archive', 'HEAD'], { cwd: sourceRoot, maxBuffer: 100 * 1024 * 1024 });
+  execFileSync('tar', ['-x', '-C', root], { input: archive });
+  await rm(path.join(root, 'packages/core/index.test.mjs'));
+  await symlink(path.join(sourceRoot, 'node_modules'), path.join(root, 'node_modules'));
+  await symlink(path.join(sourceRoot, 'packages/core/node_modules'), path.join(root, 'packages/core/node_modules'));
+  const trace = path.join(root, 'scripts/strictdoc/verify.mjs');
+  await writeFile(trace, `import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+const { CODEXIA_CI_REPORT_DIR: report, CODEXIA_CI_SOURCE_SHA: source,
+  CODEXIA_CI_TASK: task, STRICTDOC_BIN: tool } = process.env;
+await mkdir(report, { recursive: true });
+await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, source, task, tool, cwd: process.cwd(), node: process.execPath }));
+`);
+  await git(root, 'add', '-A');
+  await git(root, 'commit', '-qm', 'fixture baseline');
+  const base = await git(root, 'rev-parse', 'HEAD');
+  await writeFile(trace, (await readFile(trace, 'utf8')) + '// affected requirements trace\n');
+  await git(root, 'add', 'scripts/strictdoc/verify.mjs');
+  await git(root, 'commit', '-qm', 'affected trace');
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const plan = createVerificationPlan({ files: ['scripts/strictdoc/verify.mjs'], event: 'pull_request', sha, base });
+  assert.ok(plan.groups.includes('types-tests'));
+  assert.ok(plan.tasks.includes('coverage') && plan.tasks.includes('requirements-trace'));
+  const planPath = path.join(root, 'plan.json');
+  const report = path.join(root, 'reports');
+  const tool = path.join(root, 'isolated-strictdoc');
+  await writeFile(planPath, JSON.stringify(plan));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    !key.startsWith('GITHUB_') && !key.startsWith('CODEXIA_CI_') && !key.startsWith('NODE_TEST_') && key !== 'STRICTDOC_BIN'));
+  Object.assign(env, { CODEXIA_CI_PLAN_PATH: planPath, CODEXIA_CI_REPORT_DIR: report,
+    CODEXIA_CI_SOURCE_SHA: 'f'.repeat(40), CODEXIA_CI_TASK: 'wrong-task', STRICTDOC_BIN: tool });
+  execFileSync(process.execPath, ['scripts/ci/execution/group.mjs', 'types-tests'],
+    { cwd: root, env, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  const observed = JSON.parse(await readFile(path.join(report, 'requirements-trace/observed.json'), 'utf8'));
+  assert.deepEqual(observed, { report: path.join(report, 'requirements-trace'), source: sha,
+    task: 'requirements-trace', tool, cwd: root, node: process.execPath });
+  const result = JSON.parse(await readFile(path.join(report, 'report.json'), 'utf8'));
+  const traceResult = result.results.find(item => item.task === 'requirements-trace');
+  assert.deepEqual(traceResult.invocations, [taskInvocation('requirements-trace', process.execPath)],
+    'Observed execution must match the certified task recipe');
+  assert.deepEqual(Object.fromEntries(result.results.map(({ task, status }) => [task, status])),
+    { coverage: 'passed', 'requirements-trace': 'passed' });
+});
