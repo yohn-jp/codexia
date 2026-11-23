@@ -8,7 +8,7 @@
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
-既存のReact、CodeMirror、Radix、Ionic React、可変パネル、Vite、Fastify、PostgreSQLの技術選択を維持する。Desktop／Mobileは別のpresentation、authoring coordinatorと保存・復旧は共通の責務とする。新しい状態管理基盤、別エディタ、別保存方式でUX問題を回避しない。
+**Desktop WebはReact/CodeMirror、インストール型iOSはSwiftUI（編集面はUIKit/TextKit 2）**を採用する。Mobile React/Ionic/Capacitor WebView執筆は廃止対象であり、Mobile Web/PWA向けUIや狭幅React画面の検証を要求しない。クライアント間でReact部品・ローカル状態実装を共通化しない。共有するのはCore/API契約と保存・Revision・認可の意味論である。実装詳細は[iOS SwiftUI](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。既存実装が移行済みという意味ではない。
 
 配色、余白、画面割り、ナビゲーション、パネルの初期配置は本書の範囲で改善できる。プリセットを固定モードへ縮退させたり、対応済みの執筆・閲覧機能を見た目のために削除してはならない。
 
@@ -116,7 +116,7 @@ receiptの記録や作者承認を表示速度のために省略しない。
 
 Writing／Research／Reviewからすぐ使え、各panelを許された範囲で並べ替え・分割・tab化・resize・非表示にできる。固定3カラムや固定モードだけへ縮退させない。キーボード／ボタンによる移動とfocus復帰を用意する。[R9]
 
-配置はauthorとdevice classのbrowser設定で、PostgreSQLの原稿やdraft journalとは独立する。DesktopとMobileの配置を相互に上書きしない。壊れたlayoutはCoreの利用可能な配置にfallbackし、明示的に置換保存するまで元の設定を消さない。
+Desktop Workspace配置はauthorとbrowser設定で原稿やdraft journalと独立する。ネイティブiOSは別の画面状態を所有し、Web Workspace配置を読み書きしない。壊れたlayoutはCoreの利用可能な配置にfallbackし、明示的に置換保存するまで元の設定を消さない。
 
 panelを閉じても原稿は破棄されない。未導入／無効moduleのpanelは説明付きの回復可能なfallbackとし、他panelを止めない。不要なmount・worker・requestは解放し、隠れたpanelが無制限の仕事を継続しない。
 
@@ -133,21 +133,19 @@ panelを閉じても原稿は破棄されない。未導入／無効moduleのpan
 
 **採用済みの管理UX目標:** 管理者の入口はWorkersで提供する`/console`、初回セットアップは`/console/setup`、Passkey・セッションは`/console/security`、OIDC・OAuth管理は`/console/identity`。初回キーは256-bitの一回限りの導入資格情報であり、Ansibleはownerを作成しない。初回の本人登録はBetter AuthのPasskey ceremonyを伴い、SSHで一時登録サーバーを手動起動しない。登録中断・期限切れ・API応答不明・既存owner復旧の画面を区別し、既存ownerを再作成しない。実装前の設計目標は[管理画面遷移](ADMIN-SCREEN-FLOW.md)と[初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)に従い、現行UIとは区別する。
 
-認証の仕様正本は [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md#accepted-target-passkey-first-authentication-and-identity-management) に従う。Desktop／Mobile共通の操作語彙として、Passkeyの登録・確認・名称変更・削除、連携OIDC、セッション・OAuth同意、管理者のOIDC設定を明確に分ける。Passkeyログインを基本とし、外部OIDC未設定でも利用できる。追加認証のために原稿のローカル下書きを消してはならない。
+認証の仕様正本は [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md#accepted-target-passkey-first-authentication-and-identity-management) に従う。Desktop Web／iOSアプリ共通の意味論として、Passkeyの登録・確認・名称変更・削除、連携OIDC、セッション・OAuth同意、管理者のOIDC設定を明確に分ける。Passkeyログインを基本とし、外部OIDC未設定でも利用できる。追加認証のために原稿のローカル下書きを消してはならない。
 
 認証状態は「未登録」「利用可能」「検証中」「失敗」「再認証が必要」「回復が必要」を区別する。未検証のOIDC設定を利用可能と表示しない。Client Secretと回復用grantは再表示・永続ブラウザー保存せず、最後の利用可能な本人認証手段を削除させない。セキュリティ操作はサーバーでowner確認、fresh reauthentication、CSRF対策を強制し、非ownerはUIを迂回しても変更できない。
 
-Desktopでは設定から作業位置へ復帰でき、Mobileではsafe area、画面幅320 CSS px相当、スクリーンリーダー、keyboard/focusを保つ。OS認証ダイアログのキャンセル／未対応やリダイレクト後の状態不明を失敗・成功と混同しない。製品のトーンとコントロールは [app design system](../../app/DESIGN.md) に従い、スクリーンショットやプロトタイプは仕様の代替としない。
+Desktopでは設定から作業位置へ復帰でき、iOSではsafe area、Dynamic Type、VoiceOver、keyboard/focusを保つ。OS認証ダイアログのキャンセル／未対応やリダイレクト後の状態不明を失敗・成功と混同しない。製品のトーンとコントロールは [app design system](../../app/DESIGN.md) に従い、スクリーンショットやプロトタイプは仕様の代替としない。
 
-## 7. Desktop／Mobileと操作の連続性
+## 7. Desktop Web／iOSネイティブと操作の連続性
 
-### S-11 — DesktopとMobileは異なる操作面で同じ原稿を扱う
+### S-11 — 異なるUI実装で同じ原稿・Revisionを扱う
 
-`/desktop/`と`/mobile/`の独立shell、明示選択と記憶を維持する。画面幅、向き、キーボード表示、pinch zoomでshellを勝手に入れ替えない。狭いDesktopでも内容を失わず、広いMobileでも別製品状態を作らない。
+DesktopはReact/CodeMirrorの可動Workspace、iOSは独立したSwiftUI画面とUIKit/TextKit 2の本文エディタを使用する。/desktop/はWeb専用、iOSはネイティブ画面遷移とdeep linkを所有し、/mobile/や?view=を共有しない。WebとiOSのUI部品・state machine・画面配置を同期させない。ユーザーの作品・文書・RevisionとAPI認可、原稿保護の保証は共通である。
 
-Desktopは本文と構成・参照・差分の並行作業を支える。Mobileは本文を中心に、必要な構成／保存情報をIonic sheet等で一時参照して戻れるようにする。通常の参照sheetの開閉で本文editorをunmountしない。別sceneへの移動は既存のguardを通す。
-
-本文の選択・long press・scroll・IMEはCodeMirror／browserに、sheetのdrag・閉じる・focusはIonicに責務を置く。全画面swipe listenerで競合させない。閉じた時にkeyboardを勝手に再表示せず、適切なinvokerにfocusを返す。safe areaとkeyboardで本文caret・主要操作を隠さない。
+iOSでは本文中心の画面から構成・保存・知識をnative sheet等で一時参照し、同じ本文へ戻る。scene遷移前はローカルdraft保護guardを通し、未保護の場合は閉じない。TextKit編集面のmarked text・caret・undo・選択・scrollをSwiftUI再描画で失わせない。キーボード/VoiceOver/安全領域とback gestureを実機で検証する。
 
 ### S-12 — 保存・通知・背景処理が執筆を揺らさない
 
@@ -194,23 +192,23 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 | S-A09 | preset適用、任意配置、keyboard移動、layout保存、壊れたlayout | 自由配置とfocus保持、原稿非変更、復旧可能fallback、draftは独立保持 | S-09 |
 | S-A10 | 検索無効／index更新中／古い結果／曖昧用語、Core-only起動 | 執筆を妨げず、結果のscopeと鮮度を明示、勝手なモデル起動・source変更なし | S-04,10 |
 | S-A11 | 外部provider未設定・未同意・送信scope確認 | local作業可能、同意前の原稿送信なし、提案の直接書込みなし | S-10 |
-| S-A12 | Mobileで原稿から構成／保存sheetを開閉、back、scene選択、keyboard | 通常参照でeditor再mountなし、guard・focus復帰・safe area、突然のkeyboardなし | S-02,11,12 |
-| S-A13 | Desktopを狭める、Mobileを広げる、shellを明示切替え | 自動shell変更なし、回復と作業対象保持、各layout scopeは独立 | S-09,11 |
+| S-A12 | ネイティブiOSで原稿から構成／保存sheetを開閉、back、scene選択、keyboard | TextKit editorとdraft state保持、guard・focus復帰・safe area、突然のkeyboardなし（実機確認） | S-02,11,12 |
+| S-A13 | Desktopのresize/zoom、iOSアプリ復帰・端末間で同一作品を開く | UI共通化なしでRevisionとローカルdraftの独立性を保持 | S-09,11 |
 | S-A14 | 長い構成名、多数scene、背景処理、遅い保存、空状態、zoom | 原稿優先、操作場所が動かず、入力反応と完了時間を分離して測定 | S-01,12,13 |
 
-Desktopは1440／1920、Mobileは320／375／390／430 CSS pxを基本とし、狭いDesktop、拡大、長文とkeyboard条件を加える。幅とは独立にshellを指定する。
+Desktop Webは1440／1920を基本にブラウザーのzoom/リサイズとアクセシビリティを検証する。Mobile React 320／375／390／430 CSS pxとemulated Mobile WebKitの製品受入は撤廃する。iOSはSimulatorと物理iPhoneで画面サイズ・Dynamic Type・IME・keyboard・VoiceOver・長文を検証する。Webの/console・公開readerの必要なアクセシビリティ検証まで免除するものではない。
 
 検証は **視覚・情報階層／操作・accessibility／入力・保存・認可** の別gateで報告する。fixtureで失敗状態を再現することと、正規Core／journal／PostgreSQLを通した保存の成功は別の証拠。テストは生成した作品・隔離browserで行い、作者の実原稿や本番remoteへ書き込まない。
 
 Playwright CLIで画面を開き、操作前・受付・遅延・結果・復帰を観察し、回帰条件は既存Playwright Testへ残す。画像の存在だけで合格にしない。DOM／操作／networkの確認、画像の目視、keyboard・支援技術による評価を組み合わせる。[R12][R13]
 
-Synthetic composition eventやWebKit emulationは、物理iPhone、OSの日本語IME、native keyboard、long pressを検証したことにはならない。実機未確認はNOT_CHECKEDとし、そのために独立した検証や実装を停止しない。原稿保護が未確認なら全体を完了と主張しない。
+WebのSynthetic composition eventやMobile WebKit emulationは、物理iPhoneのSwiftUI/TextKit、日本語IME、native keyboard、long pressを検証したことにはならない。実機未確認はNOT_CHECKEDとし、そのために独立した検証や実装を停止しない。原稿保護が未確認なら全体を完了と主張しない。
 
 結果にはrevision、profile、browser／viewport、fixture、操作、期待／実際、PASS／FAIL／BLOCKED／NOT_CHECKED、artifactを記録する。原稿本文や認証済みstorageを公開せず、実行結果はPR・machine artifactに置く。[Verification](../verification/README.md)の正規gateを省略しない。
 
 ## 10. 実装の責務と非目標
 
-SharedApplicationは作業状態と許可されたcommandを調整し、Desktop／Mobileはその表示・操作を担う。Checkpoint protocol、browser journal、CoreStore、HTTP admission、module hostは既存の唯一の責務を維持する。UIのための第二のsave state machineやwriterを作らない。
+WebのSharedApplicationはDesktop Reactの作業状態とcommandを調整する。iOSは独立したSwift native authoring coordinatorと保護draft journalを持つ。両者ともサーバー側CoreStore/HTTP admissionと同じRevision・冪等・receipt契約を守るが、UI/クライアント実装を共有しない。サーバーに第二のwriterやDB正本を作らない。
 
 本書は新規NLP機能、任意外部plugin sandbox、Git互換運用、別のcloud同期、共同編集、完全offline保証、CI省略、公開・本番デプロイを追加しない。既存能力の不足は最小の正規境界の差分として示し、モックの成功値や架空の操作で埋めない。
 
