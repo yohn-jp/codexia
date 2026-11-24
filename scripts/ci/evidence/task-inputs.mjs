@@ -64,7 +64,8 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
 const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
-  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file);
+  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
+    (/^app\/src\/.*\.[jt]sx?$/u.test(file) && !/\.test\./u.test(file));
 }
 
 export function isNonExecutableDocumentation(file) {

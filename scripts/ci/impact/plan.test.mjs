@@ -225,6 +225,7 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],
     ['docs/design/SCREEN-CONTROL-CATALOG.md', null],
+    ['app/src/App.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
     ['deploy/backup/backup.sh', 'db-contract'],
   ]) {
