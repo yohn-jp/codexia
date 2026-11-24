@@ -162,7 +162,7 @@ jobs:
       CODEXIA_AUTH_TEST_DISPOSABLE: "1"
     services:
       postgres:
-        image: ${{ matrix.group != 'architecture' && 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' || '' }}
+        image: ${{ matrix.group != 'architecture' && matrix.group != 'db' && 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' || '' }}
         env:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
@@ -196,7 +196,7 @@ jobs:
       - name: Restore content-addressed dependency cache
         id: dependencies
         uses: actions/cache/restore@v6.1.0
-        if: matrix.group != 'architecture'
+        if: matrix.group != 'architecture' && matrix.group != 'api' && matrix.group != 'db'
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
@@ -205,13 +205,27 @@ jobs:
           UNIT_GROUP: ${{ matrix.group }}
         run: |
           set -euo pipefail
-          if [[ "$UNIT_GROUP" == architecture ]]; then
-            pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
-          else
-            pnpm install --frozen-lockfile --prefer-offline
-          fi
+          case "$UNIT_GROUP" in
+            architecture)
+              pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+              ;;
+            api|db)
+              # Both tasks require the exact API dependency closure; the DB
+              # contract also builds it before its isolated rootless fixture.
+              pnpm --filter '@codexia/api...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
+              ;;
+            core|modules) pnpm install --frozen-lockfile --prefer-offline ;;
+            *) exit 2 ;;
+          esac
+      - name: Materialize pinned DB contract restore image
+        if: matrix.group == 'db'
+        run: |
+          set -euo pipefail
+          image=$(node -p "require('./packages/persistence-postgres/tests/db-contract/toolchain.json').postgresImage")
+          [[ "$image" =~ @sha256:[a-f0-9]{64}$ ]]
+          docker pull "$image"
       - name: Create isolated Better Auth persistence database
-        if: matrix.group == 'core'
+        if: matrix.group == 'core' || matrix.group == 'api'
         env:
           POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_auth_test
@@ -447,7 +461,6 @@ jobs:
     name: browser-${{ matrix.group }}
     needs:
       - plan
-      - build
     if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.browser != '[]'
     permissions:
       contents: read
@@ -490,11 +503,22 @@ jobs:
       - name: Restore content-addressed dependency cache
         id: dependencies
         uses: actions/cache/restore@v6.1.0
+        if: matrix.profile == 'full'
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -eu
+          case "$PROFILE" in
+            core)
+              pnpm --filter '@codexia/profile-core...' --filter '@codexia/app...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
+              ;;
+            full) pnpm install --frozen-lockfile --prefer-offline ;;
+            *) exit 2 ;;
+          esac
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
@@ -503,6 +527,8 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
+      # Runner/container setup and dependency installation overlap build.
+      # The exact same-profile producer must finish successfully before restore.
       - name: Restore exact profile producer
         id: restore-profile
         env:
@@ -519,10 +545,10 @@ jobs:
           CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci/execution/group.mjs "browser-${{ matrix.group }}"
-      # Only one main-push browser job populates the scoped cache after passing
+      # Only one full-install main-push browser job populates the scoped cache after passing
       # every selected validation. A cache failure must not replace CI evidence.
       - name: Save browser pnpm cache from main
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'core-reference' && steps.dependencies.outputs.cache-hit != 'true'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'full-reference' && steps.dependencies.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v6.1.0
         with:
@@ -535,6 +561,7 @@ jobs:
           path: ${{ runner.temp }}/ui-review-screens
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -545,6 +572,7 @@ jobs:
             tests/e2e/test-results/**/journal-draft-*-diagnostic.json
           if-no-files-found: ignore
           retention-days: 7
+          compression-level: 0
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:

@@ -164,7 +164,8 @@ async function main(){
     return;
   }
   const {selected,job,bytes}=await fetchLatestProducerArtifact({plan,runId:GITHUB_RUN_ID,repository:GITHUB_REPOSITORY,
-    token:GH_TOKEN,producerJob:identity.producerJob,artifactName:'ci-profile-build-'+profile,maxArchive:MAX_BYTES});
+    token:GH_TOKEN,producerJob:identity.producerJob,artifactName:'ci-profile-build-'+profile,maxArchive:MAX_BYTES,
+    waitForProducerMs:90_000,expectedAttempt:Number(GITHUB_RUN_ATTEMPT)});
   assert.ok(job.run_attempt<=Number(GITHUB_RUN_ATTEMPT),'Invalid producer attempt');
   identity.producerAttempt=job.run_attempt;
   const bundle=JSON.parse(await extractJsonEntry(bytes,'profile-build.json'));

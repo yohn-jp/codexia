@@ -37,7 +37,11 @@ export const VERIFICATION_TASKS = [
 // Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
   biome: ['biome-ci'],
-  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract', 'root'].map(id => `unit-${id}`).concat('db-contract'),
+  'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'http-contract', 'root'].map(id => `unit-${id}`),
+  // API integration and the rootless DB contract each own mutable fixtures.
+  // They execute on distinct runners instead of serial exclusive barriers.
+  'unit-api': ['unit-api'],
+  'unit-db': ['db-contract'],
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
@@ -70,5 +74,5 @@ export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'deployment_cut
 /** @param {string[]} tasks */
 export function requiresWorkspacePreparation(tasks) {
   return tasks.some(task => task.startsWith('unit-') || task.startsWith('typecheck-') ||
-    task.startsWith('test-types-') || task === 'safety');
+    task.startsWith('test-types-') || task === 'safety' || task === 'db-contract');
 }
