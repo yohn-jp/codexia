@@ -582,9 +582,11 @@ private struct AccountScreen: View {
                         Button("サインイン") { Task { await account.signIn() } }
                     }
                 }
-                Section("このアプリについて") {
-                    Text("原稿の保存と編集機能は準備中です。利用できない機能を使用可能として表示しません。")
-                        .foregroundStyle(.secondary)
+                if let notice = account.accountNotice {
+                    Section {
+                        Text(notice).font(.callout)
+                        Button("通知を閉じる", action: account.dismissNotice)
+                    }
                 }
             }
             .accessibilityIdentifier("screen.settings")
@@ -825,10 +827,9 @@ private final class ProductEditorModel: ObservableObject {
             do {
                 try await Task.sleep(for: .milliseconds(450))
                 try await protect(snapshot)
-                guard !Task.isCancelled, state.snapshot == snapshot, state.canLeave, state.hasLocalEdits,
-                      !saveIsInFlight, !canReconcile, pendingState != .conflict else { return }
+                guard !Task.isCancelled, state.snapshot == snapshot else { return }
                 protectionTask = nil
-                await save()
+                await saveProtectedChangesIfReady()
             } catch is CancellationError {
                 return
             } catch {
@@ -859,6 +860,7 @@ private final class ProductEditorModel: ObservableObject {
         let result = await account.save(prepared, documentID: documentID)
         await refreshJournalState()
         await handle(result)
+        continueAutosave(after: result)
     }
 
     func reconcile() async {
@@ -868,6 +870,18 @@ private final class ProductEditorModel: ObservableObject {
         let result = await account.reconcile(prepared, documentID: documentID)
         await refreshJournalState()
         await handle(result)
+        continueAutosave(after: result)
+    }
+
+    private func continueAutosave(after result: SaveDisposition) {
+        guard case .saved = result, state.hasLocalEdits else { return }
+        Task { [weak self] in await self?.saveProtectedChangesIfReady() }
+    }
+
+    private func saveProtectedChangesIfReady() async {
+        guard state.canLeave, state.hasLocalEdits, !saveIsInFlight, !canReconcile,
+              pendingState == .protected else { return }
+        await save()
     }
 
     private func handle(_ result: SaveDisposition) async {
