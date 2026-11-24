@@ -41,6 +41,18 @@ const drillOutput = [
   `Isolated maintenance rehearsal verified: ${binding.candidateImage}`,
 ].join('\n');
 
+async function writeAuthEvidence(directory, transactionBinding) {
+  const evidence = {};
+  for (const check of Object.keys(authRecovery.evidence)) {
+    const record = JSON.stringify({ format: 'codexia-epoch-cutover-recovery-check/v1', check,
+      binding: transactionBinding, recoveryHostId: authRecovery.recoveryHostId,
+      verifiedAt: authRecovery.verifiedAt, status: 'verified', verificationEvidenceSha256: hash('e') });
+    await writeFile(path.join(directory, `${check}.json`), record, { mode: 0o600 });
+    evidence[check] = createHash('sha256').update(record).digest('hex');
+  }
+  return { ...authRecovery, binding: transactionBinding, evidence };
+}
+
 test('admits only an independent and timely recovery receipt bound to the stopped source', () => {
   assert.deepEqual(validateEpochCutoverRecoveryReceipt(receipt, binding, window), receipt);
   for (const [field, value] of Object.entries({
@@ -62,15 +74,8 @@ test('admits only an independent and timely recovery receipt bound to the stoppe
 test('produces a receipt only after the canonical isolated drill verifies the recorded backup and candidate', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-cutover-recovery-evidence-'));
   try {
-    const evidence = {};
-    for (const check of Object.keys(authRecovery.evidence)) {
-      const record = JSON.stringify({ format: 'codexia-epoch-cutover-recovery-check/v1', check, binding,
-        recoveryHostId: authRecovery.recoveryHostId, verifiedAt: authRecovery.verifiedAt, status: 'verified',
-        verificationEvidenceSha256: hash('e') });
-      await writeFile(path.join(directory, `${check}.json`), record, { mode: 0o600 });
-      evidence[check] = createHash('sha256').update(record).digest('hex');
-    }
-    const protectedAuthRecovery = { ...authRecovery, evidence };
+    const protectedAuthRecovery = await writeAuthEvidence(directory, binding);
+    const { evidence } = protectedAuthRecovery;
     const options = { binding, window, authRecovery: protectedAuthRecovery, authEvidenceDirectory: directory,
       recoveryHostId: hash('8'), runDrill: async () => drillOutput, now: () => window.now };
     assert.deepEqual(await produceEpochCutoverRecoveryReceipt(options), { ...receipt, authRecovery: protectedAuthRecovery });
@@ -94,6 +99,54 @@ test('produces a receipt only after the canonical isolated drill verifies the re
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('new recovery evidence binds the exact plan and an API-only or first-activation restore', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-pair-recovery-'));
+  try {
+    const apiOnly = { ...binding, planSha256: hash('f'), migration: null };
+    const activation = { ...apiOnly, priorImage: null, priorMigrationFingerprint: null };
+    const readOnlyLedgerProof = `Isolated candidate ledger verified: ${binding.candidateMigrationFingerprint}`;
+    const noConversionOutput = drillOutput.replace(`Isolated maintenance rehearsal verified: ${binding.candidateImage}`, readOnlyLedgerProof);
+    for (const currentBinding of [apiOnly, activation]) {
+      const proof = await writeAuthEvidence(directory, currentBinding);
+      const options = { binding: currentBinding, window, authRecovery: proof, authEvidenceDirectory: directory,
+        recoveryHostId: hash('8'), now: () => window.now,
+        runDrill: async input => {
+          assert.deepEqual(input, { backupDirectory: undefined, ageIdentityFile: undefined,
+            candidateImage: binding.candidateImage, candidateMigrationFingerprint: binding.candidateMigrationFingerprint, migration: null });
+          return noConversionOutput;
+        } };
+      const result = await produceEpochCutoverRecoveryReceipt(options);
+      assert.deepEqual(result.binding, currentBinding);
+      assert.throws(() => validateEpochCutoverRecoveryReceipt(result, { ...currentBinding, planSha256: hash('0') }, window), /does not match/u);
+      assert.throws(() => validateEpochCutoverRecoveryReceipt(receipt, currentBinding, window), /does not match/u);
+      await assert.rejects(produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => drillOutput }), /restore drill did not verify/u);
+      await assert.rejects(produceEpochCutoverRecoveryReceipt({
+        ...options, runDrill: async () => `${noConversionOutput}\nIsolated maintenance rehearsal verified: ${binding.candidateImage}`,
+      }), /restore drill did not verify/u);
+    }
+
+    const conversion = { ...apiOnly, migration: 'snapshot-history-v2' };
+    const conversionProof = await writeAuthEvidence(directory, conversion);
+    const options = { binding: conversion, window, authRecovery: conversionProof, authEvidenceDirectory: directory,
+      recoveryHostId: hash('8'), now: () => window.now };
+    assert.deepEqual((await produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => `${drillOutput}\n${readOnlyLedgerProof}` })).binding, conversion);
+    await assert.rejects(produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => noConversionOutput }), /restore drill did not verify/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects partial, unknown and unsupported pair recovery bindings before the drill', async () => {
+  const pair = { ...binding, planSha256: hash('f'), migration: null };
+  for (const invalid of [
+    { ...binding, migration: null }, { ...binding, planSha256: hash('f') },
+    { ...pair, migration: 'unknown' }, { ...pair, priorImage: null },
+    { ...pair, priorMigrationFingerprint: null },
+    { ...pair, priorImage: null, priorMigrationFingerprint: null, migration: 'snapshot-history-v2' },
+    { ...pair, priorMigrationFingerprint: `sha256:${hash('8')}` },
+  ]) await assert.rejects(produceEpochCutoverRecoveryReceipt({ binding: invalid, window }), /binding/u);
 });
 
 test('reads receipts only from protected regular files', async () => {

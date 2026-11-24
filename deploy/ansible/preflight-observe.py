@@ -77,8 +77,8 @@ def observe_transaction(state_dir):
     for name, expected, phases in (
         ("deploy-transaction.json", "codexia-deploy-transaction/v1", ("pending", "committed")),
         ("cutover-transaction.json", "codexia-cutover-host/v1",
-         ("intent", "checkpointed", "converting", "candidate-ready", "candidate-tunnel",
-          "recovering", "prior-ready", "prior-tunnel")),
+         ("intent", "quiescing", "checkpointed", "converting", "activating", "candidate-ready", "candidate-tunnel",
+          "candidate-publishing", "recovering", "safe-stopped", "prior-ready", "prior-tunnel", "prior-publishing")),
     ):
         path = state_dir / name
         if metadata(path) is None:

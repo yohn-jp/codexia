@@ -63,7 +63,9 @@ export function requiredBuildProfile(group) {
 }
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
-export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'biome', 'unit', 'types', 'build', 'oci', 'browser']);
+export const DEPLOYMENT_FIXTURE_CALLER = 'deployment-cutover';
+export const DEPLOYMENT_FIXTURE_JOB = DEPLOYMENT_FIXTURE_CALLER + ' / Verify selected deployment fixtures';
+export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'deployment_cutover', 'biome', 'unit', 'types', 'build', 'oci', 'browser']);
 
 /** @param {string[]} tasks */
 export function requiresWorkspacePreparation(tasks) {

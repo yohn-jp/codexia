@@ -229,13 +229,16 @@ expect_denial() {
 observe() { bash "$host_program" observe; }
 
 start_plan() {
-  local scenario=$1 unit="$state/candidate-epoch2.container" plan_sha
+  local scenario=$1 unit="$state/candidate-epoch2.container" plan_sha owner
   observe > "$work/observed.json"
   plan_sha=$(printf '%s\n' "$scenario" "$(hash_file "$work/observed.json")" | sha256sum | cut -d ' ' -f 1)
+  owner=$(printf '%s' "$oci_owner_subject" | sha256sum | cut -d ' ' -f 1)
   jq --arg planSha256 "$plan_sha" --arg candidateUnit "$unit" --arg notAfter "$(date -u -d '1 hour' '+%FT%T.000Z')" \
+    --arg settingsSha256 "$settings_sha" --arg ownerBindingSha256 "sha256:$owner" \
     --arg candidateUnitSha256 "$(hash_file "$unit")" --slurpfile candidate "$work/candidate-image.json" '
     {sourceHostId,databaseSystemIdentifier,priorContainerId,priorImage,priorIdentity,priorUnitSha256,
-      $planSha256,$candidateUnit,$candidateUnitSha256,$notAfter,candidateImage:$candidate[0].image,candidateIdentity:$candidate[0].identity}
+      $planSha256,$candidateUnit,$candidateUnitSha256,$notAfter,$settingsSha256,$ownerBindingSha256,
+      migration:"snapshot-history-v2",candidateImage:$candidate[0].image,candidateIdentity:$candidate[0].identity}
   ' "$work/observed.json" > "$request"
   chmod 0600 "$request"
 }
@@ -372,6 +375,7 @@ replace_request
 host recover | jq -e '.status == "prior-ready"' >/dev/null
 verify_runtime restored 1 false
 host open-tunnel | jq -e '.status == "prior-tunnel"' >/dev/null
+host publishing | jq -e '.status == "prior-publishing"' >/dev/null
 host finish > "$work/finished.json"
 host finish > "$work/duplicate-finish.json"
 cmp "$work/finished.json" "$work/duplicate-finish.json"
@@ -388,6 +392,8 @@ verify_runtime candidate 2 false
 jq '.outcome = "candidate"' "$request" > "$work/request.tmp"
 replace_request
 host open-tunnel | jq -e '.status == "candidate-tunnel"' >/dev/null
+host publishing | jq -e '.status == "candidate-publishing"' >/dev/null
+expect_denial 'does not permit rollback after possible publication' host recover-quiesce
 host finish | jq -e '.status == "finished" and .outcome == "candidate"' >/dev/null
 [[ "$(jq -er .image "$state/deployed-release.json")" == "$candidate_image" ]]
 [[ ! -e "$state/cutover-transaction.json" ]]

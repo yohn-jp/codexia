@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { readPreservationEvidence } from '../cutover/preservation.mjs';
 import { digestEvidence } from '../cutover/coordinator.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
 
@@ -47,13 +48,12 @@ export function parsePreflightRequest(raw) {
   return request;
 }
 
-async function hostObservation() {
-  const binding = runBinding();
+export async function readLifecycleHost({ inventory, targetHost }) {
   const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-lifecycle-'));
   try {
     const pin = await readFile(join(env.RUNNER_TEMP, 'codexia-ssh/known_hosts'), 'utf8');
-    assert.ok(env.CODEXIA_PREFLIGHT_TARGET_HOST && pin);
-    const hostPinSha256 = digestEvidence({ target: env.CODEXIA_PREFLIGHT_TARGET_HOST, pin });
+    assert.ok(targetHost && pin);
+    const hostPinSha256 = digestEvidence({ target: targetHost, pin });
     const out = join(scratch, 'host.json');
     const vars = join(scratch, 'vars.json');
     let query;
@@ -75,14 +75,22 @@ async function hostObservation() {
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
       codexia_preflight_quadlets: quadlets,
     }), { mode: 0o600, flag: 'wx' });
-    await run('ansible-playbook', ['-i', join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml'),
+    await run('ansible-playbook', ['-i', inventory,
       'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
     const host = JSON.parse(await readFile(out, 'utf8'));
-    await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
-      JSON.stringify({ ...binding, hostPinSha256, host }) + '\n', { mode: 0o600, flag: 'wx' });
+    return { hostPinSha256, host };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+async function hostObservation() {
+  const binding = runBinding();
+  const observed = await readLifecycleHost({
+    inventory: join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml'), targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST,
+  });
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
+    JSON.stringify({ ...binding, ...observed }) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
 async function mainSource() {
@@ -104,12 +112,11 @@ async function certifiedAuthSchemas(sourceSha) {
   return values;
 }
 
-async function candidateObservation() {
-  const binding = runBinding();
+export async function readLifecycleCandidate(request) {
+  runBinding();
   const { verifyCutoverBackendPublication } = await import('../handoff/verify-push.mjs');
   const { verifyCutoverFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
   const { selectReleaseSource } = await import('../../release/components/source-gate.mjs');
-  const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
   const main = await mainSource();
   const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
   const candidateBackend = backend.fullCertificate;
@@ -128,9 +135,15 @@ async function candidateObservation() {
     } catch { /* normalized plan retains the unverified-source blocker */ }
   }
   await mainSource();
+  return { candidateBackend, candidateFrontend, authSchemas, priorBackend };
+}
+
+async function candidateObservation() {
+  const binding = runBinding();
+  const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
+  const candidate = await readLifecycleCandidate(request);
   await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-candidate.json'),
-    JSON.stringify({ ...binding, requestSha256: digestEvidence(request), candidateBackend,
-      candidateFrontend, authSchemas, priorBackend }) + '\n', { mode: 0o600, flag: 'wx' });
+    JSON.stringify({ ...binding, requestSha256: digestEvidence(request), ...candidate }) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
 async function planObservation() {
@@ -150,8 +163,6 @@ async function planObservation() {
     assert.ok(rawHash.test(receipt.hostPinSha256));
     const host = receipt.host;
     assert.equal(host.format, 'codexia-lifecycle-host/v1');
-    const priorBackend = host.backend?.state === 'running' && host.backend.writer.image === candidateBackend.image
-      ? candidateBackend : candidate.priorBackend;
     stage = 'edge-observation';
     const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
     const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
@@ -170,8 +181,9 @@ async function planObservation() {
     stage = 'plan';
     const { planFromObservations } = await import('./observe.mjs');
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
-      candidateBackend, candidateFrontend, authSchemas, priorBackend,
-      intent: request.intent, window: request.window ?? null });
+      candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
+      intent: request.intent, window: request.window ?? null,
+      preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
     await mainSource();
     await writeFile(output(), JSON.stringify({ ...binding, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     console.log('Read-only lifecycle candidate route: ' + result.plan.candidateRoute +
