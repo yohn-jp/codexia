@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
 import { verifySpecifications } from './specifications.mjs';
 import { parseGeneratedMermaid } from '../architecture/contract.mjs';
+import { inspectUxArtifact } from './ux-artifact.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const CANONICAL_ORIGIN = 'https://yohn-jp.github.io/codexia';
@@ -70,12 +71,14 @@ function likec4Provenance(site, sourceSha) {
 function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
-  const rootLinks = ['requirements/html/',...(existsSync(page(site,'/api/')) ? ['api/'] : []),'architecture/','graph/','ci/','security/','audit/','manifest.json',
+  const uxAvailable = existsSync(join(site, 'ux', 'manifest.json'));
+  const rootLinks = ['requirements/html/',...(existsSync(page(site,'/api/')) ? ['api/'] : []),...(uxAvailable ? ['ux/'] : []),'architecture/','graph/','ci/','security/','audit/','manifest.json',
     ...snapshotBranches.flatMap(sha => [`snapshots/${sha}/`,`snapshots/${sha}/repomix.json`]), ...reviewBranches.map(sha => `reviews/${sha}/index.html`)];
   const routes = [
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
     { route:'/requirements/html/', label:'Requirements and traceability', description:'StrictDoc requirements and trace matrix; source references are not test results.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/html/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs/requirements', internalLinks:existsSync(page(site,'/requirements/html/')) ? ['../../','requirements/REQUIREMENT-REGISTER.md-TRACE.html'] : ['../../'] },
     ...(existsSync(page(site,'/api/')) ? [{ route:'/api/', label:'API Reference', description:'Static Scalar view of the TypeSpec-generated target OpenAPI contract. Runtime implementation and verification state are reported separately.', category:'Contracts', sourceSha, generationStatus:'ready', coverageStatus:'generated-target-contract', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/packages/http-contract/openapi', internalLinks:['../','codexia.openapi.yaml','manifest.json'] }] : []),
+    ...(uxAvailable ? [{ route:'/ux/', label:'UX Simulator', description:'Source-bound design and implementation projections with explicit coverage gaps.', category:'Design', sourceSha, generationStatus:'ready', coverageStatus:JSON.parse(readPageFile(join(site,'ux','manifest.json'),'utf8')).status, dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/design/UX-SIMULATOR-CONTRACT.md`, internalLinks:['../','manifest.json','snapshot.json'] }] : []),
     { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
     { route:'/graph/', label:'Code Map', description:'Static code relationships extracted by Graphify.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['../','communities.html'] },
     { route:'/ci/', label:'CI Observatory', description:'Public GitHub Actions run and job observations, fetched by the browser.', category:'Verification', generationStatus: existsSync(page(site,'/ci/')) ? 'ready':'unavailable', coverageStatus:'live-public-actions-api', dataKind:'browser-live', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/actions', internalLinks:['../'] },
@@ -327,7 +330,7 @@ function verifyAuditArtifacts(site,audit) {
 }
 
 function validateRegistry(site,manifest,audit,origin) {
-  const base=['/','/requirements/html/',...(existsSync(page(site,'/api/'))?['/api/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
+  const base=['/','/requirements/html/',...(existsSync(page(site,'/api/'))?['/api/']:[]),...(existsSync(join(site,'ux','manifest.json'))?['/ux/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
   const expected=[...base,...snapshotRoutes,...reviewRoutes];
@@ -376,6 +379,14 @@ function validateRegistry(site,manifest,audit,origin) {
     const apiManifest=verifyScalar(site,sourceSha);
     assert.deepEqual(manifest.scalar,apiManifest,'Top-level Scalar provenance differs from API artifact manifest');
   } else assert.equal(manifest.scalar,undefined,'Scalar provenance exists without a registered route');
+  const uxRoute=manifest.routes.find(item=>item.route==='/ux/');
+  if (uxRoute) {
+    assert.equal(uxRoute.generationStatus,'ready','UX projections must be generated before Pages publication');
+    assert.equal(uxRoute.sourceSha,sourceSha,'UX route source differs from Pages build');
+    const ux=inspectUxArtifact(join(site,'ux'),{expectedSourceSha:sourceSha});
+    assert.equal(uxRoute.coverageStatus,ux.manifest.status,'UX route status differs from its manifest');
+    assert.equal(uxRoute.externalDocumentationUrl,`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/design/UX-SIMULATOR-CONTRACT.md`,'UX source link must use the exact Pages source SHA');
+  } else assert.equal(existsSync(join(site,'ux','manifest.json')),false,'UX artifact exists without a registered route');
   const architecture=manifest.routes.find(item=>item.route==='/architecture/');
   if (architecture.generationStatus==='ready') {
     const atlas=JSON.parse(readFileSync(join(site,'architecture','manifest.json'),'utf8'));

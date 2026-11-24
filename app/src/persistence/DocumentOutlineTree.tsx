@@ -157,6 +157,7 @@ export function DocumentOutlineTree({
         {item.isRenaming()
           ? <input {...item.getRenameInputProps()} className="pg-outline-rename" aria-label={`${node.title}の名前を変更`} maxLength={256} />
           : <button {...item.getProps()} type="button"
+              data-ux-control={!isHeading ? "OUT-01.B" : undefined}
               className={`pg-outline-document${isHeading ? " pg-outline-heading" : ""}${!isHeading && id === selectedId ? " is-selected" : ""}`}
               aria-current={!isHeading && id === selectedId ? "page" : undefined}
               aria-selected={!isHeading && id === selectedId}
