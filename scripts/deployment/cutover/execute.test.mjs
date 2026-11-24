@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { advancePair, verifyReactivationWindow } from './execute.mjs';
 import { digestEvidence } from './coordinator.mjs';
+import { assertReactivationObservation } from './run.mjs';
 
 const approved = 'a'.repeat(64);
 const timestamp = '2026-11-23T12:00:00.000Z';
@@ -244,4 +245,23 @@ test('a renewed first activation window binds the same staged plan, window and p
   cut.failAfter = null;
   await assert.rejects(advancePair(cut), /durable checkpoint/u);
   assert.equal((await advancePair(retry)).status, 'awaiting-independent-recovery-proof');
+});
+
+test('R6 reactivation requires a ready host and the same database, owner and certified pair', () => {
+  const original = { hostId: 'host', hostPinSha256: 'pin', databaseSha256: 'db', authSha256: 'owner' };
+  const target = { identitySha256: 'certified-pair' };
+  const candidate = { image: 'full-image', identity: { version: '1.0.0' } };
+  const host = { M: 'ready', H: 'ready', transaction: { phase: 'safe-stopped' },
+    backend: { state: 'absent' }, database: { authState: 'ready' } };
+  const verified = { host, original, target, candidate, certified: candidate,
+    current: { observation: { binding: original }, target } };
+  assert.doesNotThrow(() => assertReactivationObservation(verified));
+  for (const H of ['drift', 'unknown', 'partial']) {
+    assert.throws(() => assertReactivationObservation({ ...verified, host: { ...host, H } }), /ready host/u);
+  }
+  assert.throws(() => assertReactivationObservation({ ...verified, current: {
+    ...verified.current, observation: { binding: { ...original, authSha256: 'foreign-owner' } },
+  } }), /prepared owner/u);
+  assert.throws(() => assertReactivationObservation({ ...verified, certified: { ...candidate, image: 'different' } }),
+    /certified candidate/u);
 });

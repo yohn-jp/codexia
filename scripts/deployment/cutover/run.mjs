@@ -123,6 +123,17 @@ function pairInputs(deployment, artifacts, retained, current, references) {
   return { format: planFormat, deployment, artifacts, environment, prior, candidate };
 }
 
+export function assertReactivationObservation({ host, current, original, target, candidate, certified }) {
+  requireCondition(host.M === 'ready' && host.H === 'ready' &&
+    host.transaction?.phase === 'safe-stopped' && host.backend.state === 'absent' &&
+    host.database.authState === 'ready' &&
+    ['hostId', 'hostPinSha256', 'databaseSha256', 'authSha256'].every(key =>
+      current.observation.binding[key] === original[key]) &&
+    isDeepStrictEqual(current.target, target) && certified.image === candidate.image &&
+    isDeepStrictEqual(certified.identity, candidate.identity),
+  'First activation retry no longer matches its ready host, prepared owner, database or certified candidate');
+}
+
 // The protected lifecycle caller supplies the approved Preflight envelope and
 // artifact references. All mutations share the production queue and host journal.
 export async function executePairCutover(operation, input, scratch) {
@@ -229,14 +240,8 @@ export async function executePairCutover(operation, input, scratch) {
       ]);
       const { plan: refreshed } = planFromObservations({ host, edge: null, hostPinSha256, ...releases,
         intent: artifacts.intent, window: artifacts.window });
-      const original = deployment.plan.observation.binding;
-      const current = refreshed.observation.binding;
-      requireCondition(host.transaction?.phase === 'safe-stopped' && host.backend.state === 'absent' &&
-        host.database.authState === 'ready' &&
-        ['hostId', 'hostPinSha256', 'databaseSha256', 'authSha256'].every(key => current[key] === original[key]) &&
-        isDeepStrictEqual(refreshed.target, deployment.plan.target) && releases.candidateBackend.image === candidate.image &&
-        isDeepStrictEqual(releases.candidateBackend.identity, candidate.identity),
-      'First activation retry no longer matches its prepared owner, database or certified candidate');
+      assertReactivationObservation({ host, current: refreshed, original: deployment.plan.observation.binding,
+        target: deployment.plan.target, candidate, certified: releases.candidateBackend });
     },
     checkpointProof: checkpoint => {
       if (!deployment.plan.requiresPreservation) return { request: {} };
