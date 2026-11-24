@@ -180,3 +180,18 @@ test('candidate Worker live before the Tunnel checkpoint blocks mutation', async
   await assert.rejects(advancePair(cut), /Worker drifted/u);
   assert.ok(!calls.includes('apply'));
 });
+
+test('recovery rejects a different healthy API at the recorded prior outcome', async () => {
+  const { cut, calls } = fixture();
+  cut.independent = true;
+  await advancePair(cut);
+  await advancePair({ ...cut, operation: 'recover' });
+  const observe = cut.host;
+  cut.host = async (action, request) => {
+    const result = await observe(action, request);
+    return action === 'observe' ? { ...result, apiRunning: true, priorImage: 'foreign' } : result;
+  };
+  const before = [...calls];
+  await assert.rejects(advancePair({ ...cut, operation: 'recover' }), /prior API identity drifted/u);
+  assert.deepEqual(calls, before);
+});

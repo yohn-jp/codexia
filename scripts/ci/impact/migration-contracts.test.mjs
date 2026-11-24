@@ -68,3 +68,10 @@ test('certification requires each selected migration proof once at the normal so
   }
   assert.throws(() => assertDeploymentFixtureJobs([job], []), /selected deployment fixture jobs/);
 });
+
+test('shared host and edge guards select all proof while the historical driver selects its own fixture', () => {
+  const ids = files => deploymentFixtureImpact({ files }).map(row => row.id);
+  assert.deepEqual(ids(['deploy/ansible/require-clean-api-target.sh']), ['shared', 'full-persistence-1-to-2']);
+  assert.deepEqual(ids(['scripts/verification/infrastructure/identity-probe-client.mjs']), ['shared', 'full-persistence-1-to-2']);
+  assert.deepEqual(ids(['deploy/ansible/epoch-cutover-rootless-fixture.sh']), ['full-persistence-1-to-2']);
+});

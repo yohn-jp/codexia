@@ -13,5 +13,6 @@ export default {
     'scripts/deployment/cutover/migrations/full-persistence-1-to-2.mjs',
     'deploy/ansible/cutover-snapshot-history-v2.py',
     'deploy/ansible/test-epoch-cutover-fixture.sh',
+    'deploy/ansible/epoch-cutover-rootless-fixture.sh',
   ],
 };

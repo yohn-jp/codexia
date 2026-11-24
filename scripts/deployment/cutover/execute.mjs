@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { assertFunctionalAcceptance, digestEvidence } from './coordinator.mjs';
 
 function requireCondition(condition, message) {
@@ -121,6 +122,10 @@ export async function advancePair({
     await ensureFence();
     const priorResumed = ['prior-ready', 'prior-tunnel'].includes(journal.phase) &&
       journal.apiRunning !== false && journal.apiVerified !== false;
+    if (priorResumed && journal.apiRunning === true) {
+      requireCondition(journal.priorImage === prior.image && journal.priorUnitSha256 === prior.unitSha256 &&
+        isDeepStrictEqual(journal.priorIdentity, prior.identity), 'Restored prior API identity drifted');
+    }
     if (!priorResumed && journal.phase !== 'safe-stopped') {
       // The journal records recovery intent before stopping the services.
       // A lost response in that interval must never authorize a live restore.
