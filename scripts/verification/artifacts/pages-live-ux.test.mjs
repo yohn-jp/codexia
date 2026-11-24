@@ -8,12 +8,13 @@ const sourceSha = 'a'.repeat(40);
 
 test('live Pages proof checks public response revision, route and snapshot bytes', async () => {
   const snapshot = JSON.stringify({ sourceSha });
-  const digest = createHash('sha256').update(snapshot).digest('hex');
+  const html = '<title>UX Simulator · Codexia</title>';
+  const digest = (value) => createHash('sha256').update(value).digest('hex');
   const urls = new Map([
-    ['/codexia/ux/', '<title>UX Simulator · Codexia</title>'],
+    ['/codexia/ux/', html],
     ['/codexia/site-manifest.json', JSON.stringify({ sourceSha, routes: [{ route: '/ux/', sourceSha, coverageStatus: 'partial' }] })],
     ['/codexia/ux/manifest.json', JSON.stringify({ schemaVersion: 2, route: '/ux/', status: 'partial',
-      sourceSha, outputs: { 'snapshot.json': digest } })],
+      sourceSha, outputs: { 'index.html': digest(html), 'snapshot.json': digest(snapshot) } })],
     ['/codexia/ux/snapshot.json', snapshot],
   ]);
   const get = async (url, options) => {
@@ -25,6 +26,9 @@ test('live Pages proof checks public response revision, route and snapshot bytes
   };
   await verifyLiveUx(base, sourceSha, get);
   urls.set('/codexia/ux/snapshot.json', snapshot + ' ');
-  await assert.rejects(verifyLiveUx(base, sourceSha, get), /digest/);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get), /projection digest/);
+  urls.set('/codexia/ux/snapshot.json', snapshot);
+  urls.set('/codexia/ux/', html + '<p>Older page</p>');
+  await assert.rejects(verifyLiveUx(base, sourceSha, get), /page digest/);
   await assert.rejects(verifyLiveUx('https://other.example/', sourceSha, get), /Unexpected Pages deployment URL/);
 });

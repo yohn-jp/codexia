@@ -31,6 +31,8 @@ export async function verifyLiveUx(pageUrl, sourceSha, get = fetch) {
   const route = site.routes.find(({ route }) => route === '/ux/');
   assert.equal(route?.sourceSha, sourceSha, 'Published site is missing the UX route at this revision');
   assert.equal(route.coverageStatus, ux.status);
+  assert.equal(createHash('sha256').update(html).digest('hex'), ux.outputs['index.html'],
+    'Published UX page digest differs from its manifest');
   assert.equal(createHash('sha256').update(snapshotBytes).digest('hex'), ux.outputs['snapshot.json'],
     'Published UX projection digest differs from its manifest');
 }
