@@ -99,7 +99,11 @@ export function assertVerificationJobs(jobs) {
   assertNamedJobs(jobs, required, skipped);
 }
 
-/** @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null) => Promise<unknown[]> }} client */
+/**
+ * @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null, options?: {maxItems?: number}) => Promise<unknown[]> }} client
+ * @param {string} endpoint
+ * @param {string} itemsKey
+ */
 export async function collectGitHubPages(client, endpoint, itemsKey) {
   if (typeof client?.paginate !== 'function' || typeof endpoint !== 'string' || typeof itemsKey !== 'string' || !itemsKey) {
     throw new Error('Invalid GitHub pagination request');
@@ -107,7 +111,10 @@ export async function collectGitHubPages(client, endpoint, itemsKey) {
   return client.paginate(endpoint, {}, itemsKey);
 }
 
-/** @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null) => Promise<unknown[]> }} client */
+/**
+ * @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null, options?: {maxItems?: number}) => Promise<unknown[]> }} client
+ * @param {string} endpoint
+ */
 export async function collectGitHubArrayPages(client, endpoint) {
   if (typeof client?.paginate !== 'function' || typeof endpoint !== 'string') throw new Error('Invalid GitHub array pagination request');
   return client.paginate(endpoint, {}, null, { maxItems: 1_000_000 });
