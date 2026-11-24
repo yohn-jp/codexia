@@ -218,34 +218,23 @@ jobs:
           node-version: '24.22.3'
       # The backend build installs the locked dependencies inside Docker.
       # Host identity and smoke probes use Node's standard library only.
-      - uses: docker/setup-buildx-action@v4.4.1
-      - name: Resolve exact backend build identity
-        id: build-identity
+      - name: Build API-only image
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          PROFILE: ${{ matrix.profile }}
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           version="$(node scripts/release/components/version.mjs backend)"
           echo "CODEXIA_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Build API-only image
-        uses: docker/build-push-action@v7.4.0
-        env:
-          DOCKER_BUILD_SUMMARY: "false"
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-        with:
-          context: .
-          file: Dockerfile.backend
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: codexia-backend-ci
-          build-args: |
-            CODEXIA_RELEASE_VERSION=${{ steps.build-identity.outputs.version }}
-            CODEXIA_PRODUCER_REVISION=${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
-            PROFILE=${{ matrix.profile }}
-          cache-from: type=gha,scope=backend-v1-${{ matrix.profile }},timeout=1m
-          cache-to: type=gha,scope=backend-v1-${{ matrix.profile }},mode=max,ignore-error=true,timeout=2m
+          # The Docker driver retains its local build cache and writes the
+          # result directly to the local image store. Avoid exporting large
+          # intermediate layers or a second docker-container builder tarball.
+          DOCKER_BUILDKIT=1 docker build --platform linux/amd64 \
+            --build-arg "CODEXIA_RELEASE_VERSION=$version" \
+            --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" \
+            --build-arg "PROFILE=$PROFILE" \
+            --tag codexia-backend-ci --file Dockerfile.backend .
       - name: Verify API image before publication
         env:
           PROFILE: ${{ matrix.profile }}

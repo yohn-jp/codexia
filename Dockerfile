@@ -5,7 +5,8 @@ ARG PROFILE=core
 
 FROM ${NODE_IMAGE} AS pnpm-base
 ARG PNPM_VERSION
-ENV CI=true
+ENV CI=true \
+    npm_config_store_dir=/pnpm/store
 RUN corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /opt/codexia
@@ -13,16 +14,20 @@ WORKDIR /opt/codexia
 FROM pnpm-base AS source
 # Fetch the locked external packages before copying frequently changed source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# Materialize the locked store in the intermediate layer: a remote layer
-# cache hit must not depend on a cache mount left behind on another runner.
-RUN pnpm fetch --store-dir=/pnpm/store
+# Keep the package store local to the builder, not in large exported OCI layers.
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
+    pnpm fetch
 COPY . ./
-RUN pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
+# A local cache mount may be empty after garbage collection. Frozen install
+# can obtain missing locked packages; never require an out-of-band store.
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
+    pnpm install --prefer-offline --frozen-lockfile --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE
 ENV CODEXIA_PROFILE=${PROFILE}
-RUN node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --out /runtime
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
+    node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --out /runtime
 
 FROM ${NODE_IMAGE} AS runtime
 ARG PROFILE

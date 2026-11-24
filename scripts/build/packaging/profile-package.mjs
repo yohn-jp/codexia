@@ -130,7 +130,7 @@ async function main() {
 
   for (const step of createBuildCommands(profileName, profile, { includeUi: !serverOnly })) run(step.command, step.args, step.env);
   try {
-    run('pnpm', ['--filter', packageManifest.name, 'deploy', '--prod', '--frozen-lockfile', outputDirectory]);
+    run('pnpm', ['--filter', packageManifest.name, 'deploy', '--prod', '--frozen-lockfile', '--prefer-offline', outputDirectory]);
     await cp(path.join(root, 'profiles/launch.mjs'), path.join(outputDirectory, 'launch.mjs'));
     if (!serverOnly) await cp(path.join(root, 'app/dist'), path.join(outputDirectory, 'app/dist'), { recursive: true });
     run(process.execPath, [
