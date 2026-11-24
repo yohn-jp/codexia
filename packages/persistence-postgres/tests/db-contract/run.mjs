@@ -528,6 +528,12 @@ async function main() {
     await chmod(agePath, 0o755);
     await chmod(path.join(ageDirectory, 'age/age-keygen'), 0o755);
 
+    // BuildKit's FROM layer cache is not a Docker image-store reference. The
+    // isolated restore drill saves the pinned base image, so materialize that
+    // exact digest explicitly even on a runner without a PostgreSQL service.
+    stage = 'pinned PostgreSQL image materialization';
+    invoke('docker', ['pull', pgImage], { maxBuffer: 4 * 1024 * 1024 });
+    stage = 'pgTAP contract image build';
     invoke('docker', ['build', '--file', path.join(contractDirectory, 'Dockerfile'), '--tag', contractImage,
       '--build-arg', `POSTGRES_IMAGE=${pgImage}`, '--build-arg', `PGTAP_VERSION=${toolchain.pgtap.version}`,
       '--build-arg', `PGTAP_ARCHIVE_SHA256=${toolchain.pgtap.archiveSha256}`,
