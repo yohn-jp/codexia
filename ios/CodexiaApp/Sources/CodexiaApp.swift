@@ -589,7 +589,7 @@ private struct AccountScreen: View {
                     }
                 }
             }
-            .accessibilityIdentifier("screen.settings")
+            .accessibilityIdentifier("screen.account")
             .navigationTitle("アカウント")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } } }
             .confirmationDialog("サインアウトしますか？", isPresented: $showingSignOutConfirmation, titleVisibility: .visible) {
