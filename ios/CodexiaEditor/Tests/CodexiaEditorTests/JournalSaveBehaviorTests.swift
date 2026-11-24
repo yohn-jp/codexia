@@ -213,7 +213,11 @@ final class JournalSaveBehaviorTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = JournalSaveFixture()
-        let conflict = responseJSON(["code": "PERSISTENCE_CONFLICT", "error": "stale", "details": NSNull(), "current": NSNull()])
+        let observedAtConflict = try JSONSerialization.jsonObject(with: makeReceipt(
+            markdown: "first", sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+            parent: baseRevision, revision: "head-at-conflict"
+        ))
+        let conflict = responseJSON(["code": "PERSISTENCE_CONFLICT", "error": "stale", "details": NSNull(), "current": observedAtConflict])
         await fixture.append(.status(409, conflict))
         await fixture.append(.status(200, makeReceipt(markdown: "merged", sha256: "3f8f09c8e09f712b362183db69f4f061bd948d7a61e7663b585d723602c559b1", parent: "server-head", revision: "saved")))
         let journal = try ProtectedDraftJournal(directory: root)
@@ -221,7 +225,8 @@ final class JournalSaveBehaviorTests: XCTestCase {
         var editor = EditorState(documentID: "document", text: "base")
         editor.edit("local")
         let original = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: baseRevision, baseText: "base")
-        guard case .conflict(_) = await coordinator.save(documentID: "document") else {
+        guard case .conflict(let response) = await coordinator.save(documentID: "document"),
+              response?.current?.revision?.id == "head-at-conflict" else {
             return XCTFail("A stale base must remain a conflict")
         }
         editor.edit("merged")

@@ -400,10 +400,6 @@ public actor JournalSaveCoordinator {
         guard let conflicted = try await journal.records(scope: key).first(where: {
             $0.operationID == expectedOperationID && $0.state == .conflict
         }), conflicted.sessionID == snapshot.sessionID else { throw DraftJournalError.staleConflict }
-        if let serverRevision = conflicted.conflict?.current?.revision,
-           (serverRevision.id != currentRevisionID || !Data(serverRevision.markdown.utf8).elementsEqual(Data(currentText.utf8))) {
-            throw DraftJournalError.staleConflict
-        }
         let hash = ProtectedDraftJournal.sha256(snapshot.text)
         let request = Components.Schemas.SaveDocumentRequest(
             baseRevisionId: currentRevisionID,

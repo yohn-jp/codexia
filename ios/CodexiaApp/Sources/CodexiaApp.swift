@@ -102,6 +102,8 @@ private final class AccountSession: ObservableObject {
             }
         }
         status = .signingIn
+        projects = []
+        projectLoadMessage = nil
         do {
             if requiresReauthentication {
                 closingSession = true
@@ -381,6 +383,8 @@ private final class AccountSession: ObservableObject {
 
     func requireReauthentication() { status = .reauthenticationRequired }
 
+    func dismissNotice() { accountNotice = nil }
+
     func signOutAfterProtectingEditor() async {
         do { try await activeEditorGuard?.protect() }
         catch {
@@ -445,10 +449,14 @@ private struct LibraryView: View {
     @StateObject private var account = AccountSession()
     @State private var path: [String] = []
     @State private var visibleAuthorID: String?
+    @State private var showingAccount = false
+#if DEBUG
+    private let showsEditorFixture = ProcessInfo.processInfo.arguments.contains("--codexia-fixture-editor")
+#endif
 
     var body: some View {
         NavigationStack(path: $path) {
-            LibraryScreen(account: account)
+            library
                 .navigationDestination(for: String.self) { projectID in
                     ProjectScreen(projectID: projectID, account: account)
                 }
@@ -460,7 +468,7 @@ private struct LibraryView: View {
         }
         .onChange(of: account.status) { _, status in
             switch status {
-            case .signedOut:
+            case .signedOut, .signingIn:
                 path = []
                 visibleAuthorID = nil
             case .signedIn(let subject):
@@ -472,17 +480,20 @@ private struct LibraryView: View {
         }
         .task { await account.restoreSession() }
         .onOpenURL { url in account.receive(url) }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let notice = account.accountNotice {
+                HStack {
+                    Text(notice).font(.callout)
+                    Spacer()
+                    Button("閉じる", action: account.dismissNotice)
+                }
+                .padding()
+                .background(.regularMaterial)
+            }
+        }
     }
-}
 
-private struct LibraryScreen: View {
-    @ObservedObject var account: AccountSession
-    @State private var showingAccount = false
-#if DEBUG
-    private let showsEditorFixture = ProcessInfo.processInfo.arguments.contains("--codexia-fixture-editor")
-#endif
-
-    var body: some View {
+    private var library: some View {
         List {
             switch account.status {
             case .checking:
@@ -491,7 +502,7 @@ private struct LibraryScreen: View {
             case .signedOut:
                 Section("アカウント") {
                     Button("サインイン") { Task { await account.signIn() } }
-                        .accessibilityIdentifier("CTRL-LIB-01.B")
+                        .accessibilityIdentifier("account.signIn")
                     Text("Codexia APIへシステム認証で接続します。")
                         .foregroundStyle(.secondary)
                 }
@@ -517,13 +528,13 @@ private struct LibraryScreen: View {
                 Section("再認証が必要です") {
                     Text("セッションの確認に失敗しました。未送信の下書きがある場合は保持されています。")
                     Button("再認証") { Task { await account.signIn() } }
-                        .accessibilityIdentifier("CTRL-LIB-01.B")
+                        .accessibilityIdentifier("account.reauthenticate")
                 }
             case .unavailable(let message):
                 Section("接続できません") {
                     Text(message)
                     Button("再試行") { Task { await account.restoreSession() } }
-                        .accessibilityIdentifier("CTRL-LIB-01.B")
+                        .accessibilityIdentifier("account.retry")
                 }
             }
 #if DEBUG
@@ -540,7 +551,7 @@ private struct LibraryScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("アカウント", systemImage: "person.crop.circle") { showingAccount = true }
-                    .accessibilityIdentifier("CTRL-LIB-01.C")
+                    .accessibilityIdentifier("account.entry")
             }
         }
         .sheet(isPresented: $showingAccount) {
@@ -562,7 +573,7 @@ private struct AccountScreen: View {
                     case .signedIn(let subject):
                         LabeledContent("アカウント", value: subject)
                         Button("サインアウト", role: .destructive) { showingSignOutConfirmation = true }
-                            .accessibilityIdentifier("CTRL-PREF-01.A")
+                            .accessibilityIdentifier("account.signOut")
                     case .reauthenticationRequired:
                         Text("再認証が必要です")
                         Button("再認証") { Task { await account.signIn() } }
@@ -583,7 +594,7 @@ private struct AccountScreen: View {
                 Button("サインアウト", role: .destructive) {
                     Task {
                         await account.signOut()
-                        dismiss()
+                        if case .signedOut = account.status { dismiss() }
                     }
                 }
                 Button("キャンセル", role: .cancel) { }
@@ -814,6 +825,10 @@ private final class ProductEditorModel: ObservableObject {
             do {
                 try await Task.sleep(for: .milliseconds(450))
                 try await protect(snapshot)
+                guard !Task.isCancelled, state.snapshot == snapshot, state.canLeave, state.hasLocalEdits,
+                      !saveIsInFlight, !canReconcile, pendingState != .conflict else { return }
+                protectionTask = nil
+                await save()
             } catch is CancellationError {
                 return
             } catch {
@@ -945,7 +960,7 @@ private final class ProductEditorModel: ObservableObject {
             let records = try await account.records(prepared, documentID: documentID)
             guard let conflict = records.first(where: { $0.state == .conflict }) else { return false }
             let head = try await account.conflictHead(prepared, documentID: documentID)
-            guard head.revisionID == displayedRevision, state.isCurrent(snapshot), !state.isComposing else {
+            guard head.revisionID == displayedRevision, state.snapshot == snapshot, !state.isComposing else {
                 conflictRemoteText = head.text
                 conflictRevisionID = head.revisionID
                 saveMessage = "本文またはサーバーのRevisionが変わりました。もう一度比較してください。"
