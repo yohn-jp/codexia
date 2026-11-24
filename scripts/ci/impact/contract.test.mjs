@@ -210,7 +210,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.equal(biome.steps.find(step => step.name === 'Publish Biome Lint results to Code Scanning').with.category, 'biome-lint');
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, '${{ always() && !cancelled() }}');
-  assert.deepEqual(gate.needs.toSorted(), ['plan', 'biome', 'unit', 'types', 'build', 'oci', 'browser'].toSorted());
+  assert.deepEqual(gate.needs.toSorted(), CERTIFICATION_DEPENDENCIES.toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.name === 'Download selected plan by exact artifact ID');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');

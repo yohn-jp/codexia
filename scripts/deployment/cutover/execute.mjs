@@ -48,7 +48,11 @@ export async function advancePair({
     const wanted = plan[outcome].workerVersion;
     const previous = plan[outcome === 'prior' ? 'candidate' : 'prior'].workerVersion;
     requireCondition(wanted !== null, 'A verified Worker is required to reopen the paired Tunnel');
-    if (outcome === 'candidate') await proveStagedWorker();
+    if (outcome === 'candidate') {
+      requireCondition(journal.phase === 'candidate-tunnel' || id(ingress) === previous,
+        'Worker drifted before the Tunnel checkpoint');
+      await proveStagedWorker();
+    }
     await mutateHost('open-tunnel', { outcome });
     await verifyFence();
     if (id(ingress) !== wanted) {
@@ -61,8 +65,12 @@ export async function advancePair({
     const pinned = plan[outcome];
     const observation = await verifyPair(outcome);
     if (!acceptance) {
-      const status = journal.phase === 'finished' ? 'finished' : 'awaiting-functional-acceptance';
-      return { status, outcome, planSha256, observation };
+      ingress = await verifyIngress();
+      if (journal.phase === 'finished' && !ingress.fence.enabled) {
+        await edge.verifyUnfenced();
+        return { status: 'finished', outcome, planSha256, observation };
+      }
+      return { status: 'awaiting-functional-acceptance', outcome, planSha256, observation };
     }
     const since = new Date(Math.max(Date.parse(journal.tunnelOpenedAt ?? journal.phaseChangedAt),
       Date.parse(observation.edge.deployment.createdAt))).toISOString();
@@ -75,7 +83,10 @@ export async function advancePair({
     try {
       ingress = await verifyIngress();
       verifyApproval();
-      if (ingress.fence.enabled) await edge.unfence();
+      if (ingress.fence.enabled) {
+        verifyApproval({ opening: outcome });
+        await edge.unfence();
+      }
       await edge.verifyUnfenced();
       await verifyPair(outcome);
       const result = await mutateHost('finish', { outcome });
@@ -107,25 +118,28 @@ export async function advancePair({
   requireCondition(operation !== 'reconcile', 'No recorded publication is available for reconciliation');
 
   if (operation === 'recover') {
-    if (journal.phase === 'safe-stopped') return { status: 'safe-stopped' };
     await ensureFence();
-    if (!['prior-ready', 'prior-tunnel'].includes(journal.phase)) {
-      if (journal.phase !== 'recovering') await mutateHost('recover-quiesce');
+    const priorResumed = ['prior-ready', 'prior-tunnel'].includes(journal.phase) &&
+      journal.apiRunning !== false && journal.apiVerified !== false;
+    if (!priorResumed && journal.phase !== 'safe-stopped') {
+      // The journal records recovery intent before stopping the services.
+      // A lost response in that interval must never authorize a live restore.
+      await mutateHost('recover-quiesce');
       await observeCheckpoint();
       const proof = await restoreProof(journal);
       if (proof === null) return { status: 'awaiting-restoration', journal };
-      const recovered = await mutateHost('recover', proof);
-      if (recovered.status === 'safe-stopped') {
-        await observeCheckpoint();
-        if (prior.workerVersion !== null && prior.workerVersion !== candidate.workerVersion) {
-          await verifyFence();
-          if (id(ingress) === candidate.workerVersion) {
-            verifyApproval();
-            await edge.deploy({ fromVersionId: candidate.workerVersion, toVersionId: prior.workerVersion });
-          }
+      await mutateHost('recover', proof);
+      await observeCheckpoint();
+    }
+    if (journal.phase === 'safe-stopped') {
+      if (prior.workerVersion !== null && prior.workerVersion !== candidate.workerVersion) {
+        await verifyFence();
+        if (id(ingress) === candidate.workerVersion) {
+          verifyApproval();
+          await edge.deploy({ fromVersionId: candidate.workerVersion, toVersionId: prior.workerVersion });
         }
-        return recovered;
       }
+      return { status: 'safe-stopped' };
     }
     if (prior.workerVersion === null || prior.image === null) {
       return { status: 'safe-stopped', reason: 'prior-pair-absent' };
@@ -146,6 +160,8 @@ export async function advancePair({
     await verifyFence();
   }
   if (journal.phase === 'checkpointed') {
+    requireCondition(id(ingress) === prior.workerVersion, 'Worker drifted at the stopped host checkpoint');
+    await proveStagedWorker();
     const proof = await checkpointProof(journal);
     if (proof.request === null) return { status: 'awaiting-independent-recovery-proof', binding: proof.binding, checkpoint: journal };
     await mutateHost('apply', proof.request);

@@ -41,4 +41,4 @@ Dispatch `recover` with the same staged plan. The executor fences and quiesces t
 
 Resume `recover`. For an installed pair, the executor verifies the restored prior identities and runs the restricted prior acceptance before reopening. Upload fresh acceptance with `outcome: "prior"` and resume `recover` to publish that outcome. Without a complete prior pair, recovery retains the database and owner and leaves public ingress fenced.
 
-After the publication checkpoint, ordinary rollback is blocked because new writes may have reached the database. Use `reconcile` with the same plan and protected acceptance to verify and finish the recorded outcome. A later data restore requires a new recovery plan that accounts for the writes since publication.
+After the publication checkpoint, ordinary rollback is blocked because new writes may have reached the database. Use `reconcile` with the same plan and protected acceptance to verify and finish the recorded outcome. Opening a fenced candidate still requires a current publication window. A later data restore requires a new recovery plan that accounts for the writes since publication.

@@ -87,6 +87,7 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   assert.ok(activation.blockers.includes('missing-preservation-evidence'));
   const ui = fixture();
   absentFrontend(ui);
+  ui.priorBackend = null;
   assert.equal(planFromObservations(ui).plan.candidateRoute, 'R7');
   assert.deepEqual(planFromObservations(ui).plan.blockers, ['approval-required']);
   assert.equal(planFromObservations(ui).plan.requiresPreservation, false);
@@ -133,7 +134,11 @@ test('unknown edge, contradictory identity, orphan fence, unverified publication
     f => { f.edge.frontendState = 'unknown'; },
     f => { f.edge.backend.version = '0.1.0'; },
     f => { f.edge.fence.enabled = true; },
-    f => { f.priorBackend = null; },
+    f => {
+      f.priorBackend = null;
+      f.candidateBackend = { ...f.candidateBackend, image: image('9'),
+        identity: { ...f.candidateBackend.identity, version: '1.0.1' } };
+    },
     f => { f.host.transaction = { phase: 'pending' }; },
   ]) {
     const f = fixture();

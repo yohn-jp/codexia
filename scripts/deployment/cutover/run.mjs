@@ -177,7 +177,9 @@ export async function executePairCutover(operation, input, scratch) {
     plan.environment.origin === origin, 'Maintenance approval does not match the staged plan and origin');
   const { deployment, prior, candidate } = plan;
   assertPairRoute(deployment.plan);
-  const verifyApproval = () => assertDeploymentPlanBinding({ ...deployment, recover: operation !== 'advance' });
+  const verifyApproval = ({ opening } = {}) => assertDeploymentPlanBinding({
+    ...deployment, recover: operation !== 'advance' && opening !== 'candidate',
+  });
   verifyApproval();
   const request = hostInput(plan, planSha256);
   const verifyIngress = async () => {

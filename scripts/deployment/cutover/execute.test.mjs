@@ -35,7 +35,7 @@ function fixture({ first = false, changeWorker = true } = {}) {
     },
     edge: {
       async fence() { calls.push('fence'); fenced = true; },
-      async unfence() { assert.match(phase, /-publishing$/u); calls.push('unfence'); fenced = false; },
+      async unfence() { assert.match(phase, /-publishing$|^finished$/u); calls.push('unfence'); fenced = false; },
       async verifyFenced() { assert.ok(fenced); },
       async verifyUnfenced() { assert.ok(!fenced); },
       async assertStaged() { assert.notEqual(workerVersion, 'new'); },
@@ -56,7 +56,8 @@ function fixture({ first = false, changeWorker = true } = {}) {
     async checkpointProof() { return cut.independent ? { request: {} } : { request: null, binding: 'backup' }; },
     async restoreProof() { return {}; },
   };
-  return { cut, calls, compete() { owner = 'foreign'; phase = 'intent'; } };
+  return { cut, calls, compete() { owner = 'foreign'; phase = 'intent'; },
+    switchWorker() { workerVersion = plan.candidate.workerVersion; } };
 }
 
 function accept(cut, outcome = 'candidate') {
@@ -131,3 +132,51 @@ for (const phase of ['admit', 'checkpoint', 'apply', 'open-tunnel']) {
     assert.equal(calls.filter(action => action === 'apply').length, 1);
   });
 }
+
+test('recovery repeats quiescence after an interrupted stop before returning a restore checkpoint', async () => {
+  const { cut, calls } = fixture();
+  cut.independent = true;
+  await advancePair(cut);
+  cut.failAfter = 'recover-quiesce';
+  cut.restoreProof = async () => null;
+  await assert.rejects(advancePair({ ...cut, operation: 'recover' }), /connection lost/u);
+  cut.failAfter = null;
+  assert.equal((await advancePair({ ...cut, operation: 'recover' })).status, 'awaiting-restoration');
+  assert.deepEqual(calls.slice(-2), ['recover-quiesce', 'recover-quiesce']);
+});
+
+test('a recorded release behind a reclosed fence is not reported as released without acceptance', async () => {
+  const { cut } = fixture();
+  cut.independent = true;
+  cut.failAfter = 'finish';
+  accept(cut);
+  await assert.rejects(advancePair(cut), /connection lost/u);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+  cut.failAfter = null;
+  const reconcile = { ...cut, operation: 'reconcile', acceptance: null };
+  assert.equal((await advancePair(reconcile)).status, 'awaiting-functional-acceptance');
+  assert.equal((await advancePair({ ...reconcile, acceptance: cut.acceptance })).status, 'finished');
+});
+
+test('reconciliation must still authorize reopening the fenced candidate', async () => {
+  const { cut, calls } = fixture();
+  cut.independent = true;
+  cut.failAfter = 'publishing';
+  accept(cut);
+  await assert.rejects(advancePair(cut), /connection lost/u);
+  cut.failAfter = null;
+  cut.verifyApproval = ({ opening } = {}) => {
+    if (opening === 'candidate') throw new Error('publication expired');
+  };
+  await assert.rejects(advancePair({ ...cut, operation: 'reconcile' }), /publication expired/u);
+  assert.ok(!calls.includes('unfence'));
+});
+
+test('candidate Worker live before the Tunnel checkpoint blocks mutation', async () => {
+  const { cut, calls, switchWorker } = fixture();
+  await advancePair(cut);
+  switchWorker();
+  cut.independent = true;
+  await assert.rejects(advancePair(cut), /Worker drifted/u);
+  assert.ok(!calls.includes('apply'));
+});

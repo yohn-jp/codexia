@@ -163,8 +163,6 @@ async function planObservation() {
     assert.ok(rawHash.test(receipt.hostPinSha256));
     const host = receipt.host;
     assert.equal(host.format, 'codexia-lifecycle-host/v1');
-    const priorBackend = host.backend?.state === 'running' && host.backend.writer.image === candidateBackend.image
-      ? candidateBackend : candidate.priorBackend;
     stage = 'edge-observation';
     const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
     const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
@@ -183,7 +181,7 @@ async function planObservation() {
     stage = 'plan';
     const { planFromObservations } = await import('./observe.mjs');
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
-      candidateBackend, candidateFrontend, authSchemas, priorBackend,
+      candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
       intent: request.intent, window: request.window ?? null,
       preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
     await mainSource();

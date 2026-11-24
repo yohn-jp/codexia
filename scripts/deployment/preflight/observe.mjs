@@ -38,10 +38,10 @@ function candidateIdentity(backend, frontend, authSchemas) {
 function publicFrontendEvidence(value) {
   if (!value) return null;
   const { oauthConfigIdentity, ...rest } = frontendIdentity(value);
-  const publicConfig = parsePublicFrontendConfigIdentity(oauthConfigIdentity);
+  parsePublicFrontendConfigIdentity(oauthConfigIdentity);
   // This is an integrity fingerprint of validated public browser configuration,
   // not a hash of a password, bearer credential or arbitrary identity string.
-  return { ...rest, oauthConfigSha256: publicConfig === undefined ? null : digestEvidence({ settings: publicConfig }) };
+  return { ...rest, oauthConfigSha256: oauthConfigIdentity === undefined ? null : digestEvidence(oauthConfigIdentity) };
 }
 
 function stateDatabase(database, target, intent) {
@@ -60,6 +60,9 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   candidateFrontend, authSchemas, priorBackend = null, intent, window = null,
   preservationReceipt = null, resolveTransition = resolveMigrationContracts, now = new Date() }) {
   assert.ok(rawHash.test(hostPinSha256));
+  const installed = host?.backend;
+  const installedCertificate = installed?.state === 'running' && installed.writer.image === candidateBackend.image
+    ? candidateBackend : priorBackend;
   const targetIdentity = candidateIdentity(candidateBackend, candidateFrontend, authSchemas);
   const target = {
     backendCertificateSha256: digestEvidence(candidateBackend),
@@ -79,7 +82,6 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     state.A = host.database?.authState ?? 'unknown';
     state.T = host.transaction ? (['converting', 'recovering', 'pending'].includes(host.transaction.phase) ? 'recover' : 'resume') : 'none';
     if (state.T !== 'none') blockers.push('recovery-plan-required');
-    const installed = host.backend;
     if (installed?.state === 'running') {
       const writer = installed.writer;
       const identity = validateBackendIdentity(writer.identity);
@@ -87,7 +89,8 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       assert.ok(image.test(writer.image));
       source = { backend: identity, image: writer.image, authMode: writer.authMode,
         authSchemaSha256: host.database?.authSchemaSha256 ?? null };
-      if (!priorBackend || priorBackend.image !== writer.image || !isDeepStrictEqual(priorBackend.identity, identity)) {
+      if (!installedCertificate || installedCertificate.image !== writer.image ||
+          !isDeepStrictEqual(installedCertificate.identity, identity)) {
         blockers.push('unverified-installed-backend-publication');
       }
       if (writer.image !== targetIdentity.image) {
@@ -165,7 +168,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       hostId: host?.hostId ?? null, databaseSha256: hash(host?.database),
       authSha256: hash(host?.database ? { state: host.database.authState, schema: host.database.authSchemaSha256 ?? null,
         owner: host.database.ownerBindingSha256 ?? null, settings: host.database.settingsSha256 ?? null } : null),
-      backendSha256: hash(host ? { observed: host.backend, publication: hash(priorBackend) } : null), frontendSha256: hash(edge ? {
+      backendSha256: hash(host ? { observed: host.backend, publication: hash(installedCertificate) } : null), frontendSha256: hash(edge ? {
         state: edge.frontendState, deployment: edge.deployment, identity: publicFrontendEvidence(edge.frontend) } : null),
       ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest, fence: edge.fence } : null),
       transactionSha256: host ? digestEvidence(host.transaction) : null,
@@ -188,7 +191,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     host, edge: edge ? { observedAt: edge.observedAt, origin: edge.origin, deployment: edge.deployment,
       fence: edge.fence, ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
       frontend: publicFrontendEvidence(edge.frontend), backend: edge.backend } : null,
-    sourceBackendCertificateSha256: priorBackend ? digestEvidence(priorBackend) : null,
+    sourceBackendCertificateSha256: hash(installedCertificate),
     candidate: { backendImage: targetIdentity.image, backendIdentity: targetIdentity.backend,
       backendVerifiedMainSha: candidateBackend.verifiedMainSha, frontend: publicFrontendEvidence(targetIdentity.frontend),
       frontendRunId: candidateFrontend.runId, frontendVerifyRunId: candidateFrontend.verifyRunId,

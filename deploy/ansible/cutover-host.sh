@@ -794,13 +794,15 @@ def apply(request, plan, journal):
 
 def recover_quiesce(plan, journal):
     require(journal["phase"] in ("intent", "quiescing", "checkpointed", "converting", "activating",
-                                "candidate-ready", "candidate-tunnel", "recovering", "safe-stopped"),
+                                "candidate-ready", "candidate-tunnel", "prior-ready", "prior-tunnel", "recovering", "safe-stopped"),
             "This checkpoint does not permit rollback after possible publication")
     if journal["phase"] == "safe-stopped":
         require_inactive(TUNNEL)
         require_inactive(API)
         emit(phase_status(journal))
         return
+    if journal["phase"] in ("prior-ready", "prior-tunnel"):
+        journal.pop("recoveryStartedAt", None)
     transition(journal, "recovering")
     if changes_backend(plan):
         quiesce()
@@ -958,9 +960,13 @@ def observe(journal):
     result["tunnelRunning"] = running(TUNNEL)
     result["apiRunning"] = running(API)
     if result["apiRunning"]:
-        live = active_api()
-        result.update(priorContainerId=live["containerId"], priorImage=live["image"], priorIdentity=live["identity"],
-                      priorUnitSha256=sha256(regular(ACTIVE_UNIT).read_bytes()), apiVersion=live["apiVersion"])
+        try:
+            live = active_api()
+            result.update(priorContainerId=live["containerId"], priorImage=live["image"], priorIdentity=live["identity"],
+                          priorUnitSha256=sha256(regular(ACTIVE_UNIT).read_bytes()), apiVersion=live["apiVersion"])
+        except (CutoverError, OSError):
+            require(journal is not None, "An unverified API cannot be used as the cutover baseline")
+            result["apiVerified"] = False
     if journal is not None:
         result["planSha256"] = journal["plan"]["planSha256"]
         result.update({key: journal[key] for key in (*BACKUP_FIELDS, "backupDirectory", "requiresRestore", "phaseChangedAt",
