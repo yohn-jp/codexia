@@ -2,7 +2,7 @@ import { ApiError } from "./api-error";
 import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, type ResponseGuard } from "./api-response";
-import { getPersistenceDocumentsGetUrl, persistenceDocumentAnchorsPost, persistenceStatusGet } from "./generated/http/client";
+import { persistenceDocumentAnchorsPost, persistenceDocumentsGet, persistenceStatusGet } from "./generated/http/client";
 import type { PersistenceAnchorCreatedResponse } from "./generated/http/schemas/persistenceAnchorCreatedResponse.zod";
 import type { PersistenceStatusResponse } from "./generated/http/schemas/persistenceStatusResponse.zod";
 import type {
@@ -531,14 +531,19 @@ export const api = {
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/apply`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
   persistenceDocuments: async (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
     const limit = 1000;
-    const url = getPersistenceDocumentsGetUrl(projectId, {
+    const result = await persistenceDocumentsGet(projectId, {
       limit,
       ...(parentId !== undefined ? { parentId: parentId ?? "root" } : {}),
-    });
-    // The generated schema currently accepts negative document versions.
-    const result = await request(dto.persistenceDocuments, url, { ...(signal ? { signal } : {}) });
+    }, { request, ...(signal ? { signal } : {}) });
+    // Preserve this domain invariant until the authoritative OpenAPI schema
+    // expresses it; all wire fields are validated by the generated schema.
+    if (result.documents.some(document => document.version < 1)) {
+      throw new ApiError("The server returned an invalid response", 502, "INVALID_RESPONSE");
+    }
     if (result.documents.length >= limit) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
-    return result;
+    // Generated IDs are plain strings; the generated schema has validated
+    // their wire shape before they cross into branded domain identifiers.
+    return result as unknown as { documents: PersistenceDocument[] };
   },
   persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgePage> => {
     const query = new URLSearchParams({ limit: "50", q: filters.q, type: filters.type, status: filters.status });

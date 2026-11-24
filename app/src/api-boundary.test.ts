@@ -123,7 +123,7 @@ test("Knowledge browse rejects responses without an explicit cursor and project 
 test("complete workspace document reads cover 999 records and reject an ambiguous full page", async () => {
   const documents = Array.from({length:1000},(_,index)=>({
     id:`doc-${index}`,projectId:"project-1",parentId:null,kind:"scene",title:`Scene ${index}`,
-    orderKey:String(index),headRevisionId:null,version:1,createdAt:"",updatedAt:"",
+    orderKey:String(index),headRevisionId:null,version:1,createdAt:"2026-11-23T00:00:00.000Z",updatedAt:"2026-11-23T00:00:00.000Z",
   }));
   let count=999;
   globalThis.fetch=async input=>{

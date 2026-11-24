@@ -150,7 +150,6 @@ export const responseContracts = {
     record(v) && record(v.changeSet) && text(v.changeSet.projectId) && text(v.changeSet.id) &&
     /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(v.changeSet.id),
   nativeChangeSetApplication: changeSetApplication,
-  persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
   persistenceKnowledgePage: (v: unknown): v is PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) && nullableText(v.nextCursor) && integer(v.projectVersion),
   persistenceDocumentEnvelope: (v: unknown): v is { document: PersistenceDocument } => record(v) && persistenceDocument(v.document),
   apply: application,
