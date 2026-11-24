@@ -19,12 +19,17 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ios-editor-${{ github.event.pull_request.number || github.ref }}
+  group: ios-editor-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   editor:
+    name: Native iOS (${{ matrix.lane }})
     runs-on: xcode-27
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [state-model, editor-simulator, app-simulator]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -35,40 +40,82 @@ jobs:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -m)" = arm64
           xcodebuild -version | grep -E '^Xcode 27\.'
           xcrun --sdk iphonesimulator --show-sdk-version | grep -E '^27(\.|$)'
           swift --version
-      - name: Build for iOS Simulator
-        working-directory: ios/CodexiaEditor
-        run: xcodebuild -scheme CodexiaEditor -destination 'generic/platform=iOS Simulator' -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
       - name: Test state model
+        if: ${{ matrix.lane == 'state-model' }}
         working-directory: ios/CodexiaEditor
         run: swift test --force-resolved-versions --jobs 4
-      - name: Select and boot Simulator
-        id: simulator_boot
-        timeout-minutes: 10
+      - name: Select Simulator
+        if: ${{ matrix.lane != 'state-model' }}
         run: |
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
           DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for runtime, devices in d["devices"].items() if ".iOS-27-" in runtime for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
           echo "EDITOR_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-          xcrun simctl bootstatus "$DEVICE_ID" -b
-      - name: Test UIKit adapter on Simulator
-        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
+      - name: Build test products while Simulator boots
+        if: ${{ matrix.lane != 'state-model' }}
+        timeout-minutes: 25
+        env:
+          LANE: ${{ matrix.lane }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-evidence"
+          derived="$RUNNER_TEMP/native-derived"
+          # The build and boot are independent; both must succeed before testing.
+          xcrun simctl bootstatus "$EDITOR_SIMULATOR_ID" -b > "$RUNNER_TEMP/native-evidence/simulator-boot.log" 2>&1 &
+          boot_pid=$!
+          trap 'kill "$boot_pid" 2>/dev/null || true' EXIT
+          args=(-destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID"
+            -derivedDataPath "$derived" -onlyUsePackageVersionsFromResolvedFile
+            -parallel-testing-enabled NO
+            -resultBundlePath "$RUNNER_TEMP/native-evidence/build.xcresult")
+          case "$LANE" in
+            editor-simulator)
+              cd ios/CodexiaEditor
+              args=(-scheme CodexiaEditor "${args[@]}")
+              ;;
+            app-simulator)
+              args=(-project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI "${args[@]}")
+              ;;
+            *) exit 1 ;;
+          esac
+          build_status=0
+          xcodebuild "${args[@]}" build-for-testing || build_status=$?
+          boot_status=0
+          wait "$boot_pid" || boot_status=$?
+          trap - EXIT
+          cat "$RUNNER_TEMP/native-evidence/simulator-boot.log"
+          test "$build_status" -eq 0
+          test "$boot_status" -eq 0
+          # Use only the test products produced on this exact-source runner.
+          test_run=$(python3 - "$derived" <<'PY'
+          import pathlib, sys
+          runs = sorted((pathlib.Path(sys.argv[1]) / "Build" / "Products").glob("*.xctestrun"))
+          if len(runs) != 1 or not runs[0].is_file():
+              raise SystemExit(f"Expected exactly one xctestrun, found {runs}")
+          print(runs[0])
+          PY
+          )
+          echo "NATIVE_TEST_RUN=$test_run" >> "$GITHUB_ENV"
+      - name: Run Simulator tests without rebuilding
+        if: ${{ matrix.lane != 'state-model' }}
         timeout-minutes: 15
-        working-directory: ios/CodexiaEditor
-        run: xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-package.xcresult" test
-      - name: Test SwiftUI shell, draft navigation and scene on Simulator
-        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
-        timeout-minutes: 15
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-app.xcresult" test
-      - name: Retain Simulator results
-        if: ${{ !cancelled() }}
+        run: |
+          test -f "$NATIVE_TEST_RUN"
+          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
+            -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/native-evidence/tests.xcresult" test-without-building
+          test -d "$RUNNER_TEMP/native-evidence/tests.xcresult"
+      - name: Retain lane Simulator results
+        if: ${{ !cancelled() && matrix.lane != 'state-model' }}
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ios-simulator-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            ${{ runner.temp }}/editor-package.xcresult
-            ${{ runner.temp }}/editor-app.xcresult
+          name: ios-simulator-${{ matrix.lane }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-evidence/
+          if-no-files-found: error
           retention-days: 14
   native-ipa:
     name: Native unsigned IPA

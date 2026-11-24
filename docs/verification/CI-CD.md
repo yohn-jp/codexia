@@ -124,6 +124,8 @@ simulator acceptance remain owned by native workflows. Shared OpenAPI inputs
 retain their affected contract tasks; lockfiles or unknown inputs retain the
 applicable conservative verification scope.
 
+**Native iOS execution.** As with independent Chromium groups, keep native state-model, UIKit editor Simulator, SwiftUI application Simulator and ARM64 unsigned IPA proof in independent hosted `xcode-27` lanes; do not fail-fast across them. Preserve PR-only supersession cancellation, exact candidate checkout, SDK/architecture validation, locked SwiftPM inputs, and the existing signing/archive certificate. Each Simulator lane overlaps device readiness with its own test-product build, then executes the same scheme's complete test inventory from its local `.xctestrun` without rebuilding. Both build and actual Simulator readiness must succeed; missing or ambiguous test products and missing successful result bundles fail the lane. Keep lane/source/attempt-specific Simulator evidence. The test-product compilation replaces a redundant standalone Editor Simulator build; macOS state-model tests remain independent until their separate obligation is explicitly retired. The API workflow, physical-device acceptance and legacy cutover obligations are unchanged. Measure queue time, runner seconds, boot, build, test, and wall-clock separately; do not adopt remote DerivedData or cached test results as proof.
+
 
 **Independent-workflow owners.** `verify.yml` is the only owner of task inventory
 and canonical certification. `backend-release.yml` and `frontend-release.yml` own
