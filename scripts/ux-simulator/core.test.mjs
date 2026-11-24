@@ -1,100 +1,90 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { readAuthority, reconcile } from './authority.mjs';
-import { start, dispatch, inject, replay, share, trace, validate } from './model.mjs';
-import { demo } from './features/reference.mjs';
+import { createSource } from './source.mjs';
+import { designProjection } from './design.mjs';
+import { reconcile } from './authority.mjs';
+import { step, begin, replay, share, back, trace } from './model.mjs';
 
+const source = createSource(new URL('../../', import.meta.url));
+const design = () => designProjection(source);
 const sha = 'a'.repeat(40);
-const read = (name) => readFileSync(new URL('../../' + name, import.meta.url), 'utf8');
-const initial = () => start([demo], 'desktop', 'reference-authoring', 'sample-library', 'start');
+const snapshot = () => ({ sourceSha: sha, expected: design(), observed: { screens: [], controls: [], transitions: [] } });
 
-test('inventory keeps adopted, proposal, conceptual and operator records separate', () => {
-  const authority = readAuthority(read);
-  assert.equal(authority.screens.find(({ id }) => id === 'KNO-03').adoption, 'proposal');
-  assert.equal(authority.screens.find(({ id }) => id === 'OPS-01').adoption, 'external');
-  assert.equal(authority.screens.find(({ id }) => id === 'CFG-01').adoption, 'conceptual');
-  assert.deepEqual(authority.screens.find(({ id }) => id === 'WRT-01').platforms, ['desktop', 'ios']);
-  assert.ok(authority.controls.some(({ id }) => id === 'CON-32.B'));
-  const coverage = reconcile(authority, [demo]);
-  assert.equal(coverage.status, 'partial');
-  assert.ok(coverage.records.some(({ id, status }) => id === 'PUB-01' && status === 'missing'));
-  assert.throws(() => reconcile(authority, [demo, demo]), /duplicate/i);
-  assert.throws(() => reconcile(authority, [{ ...demo, screens: ['KNO-03'] }]), /coverage/i);
+test('the design projection covers adopted IDs without enacting proposal or external screens', () => {
+  const { screens, controls, scenarios, transitions } = design();
+  assert.equal(screens.find(({ id }) => id === 'KNO-03').adoption, 'proposal');
+  assert.equal(screens.find(({ id }) => id === 'CFG-01').adoption, 'conceptual');
+  assert.equal(screens.find(({ id }) => id === 'OPS-01').adoption, 'external');
+  assert.ok(controls.some(({ id }) => id === 'CON-32.B'));
+  assert.ok(!scenarios.some(({ screens }) => screens.includes('KNO-03')));
+  assert.ok(transitions.some(({ event }) => event === '応答不明/競合'));
 });
 
-test('normal, cancelled and injected paths carry context and differ from a direct start', () => {
-  const initialState = initial();
-  const entered = dispatch(initialState, 'open');
-  assert.equal(entered.screen, 'OUT-01');
-  assert.equal(entered.context.project, 'synthetic-lighthouse');
-  assert.equal(dispatch(entered, 'back').screen, 'LIB-01');
-  const direct = start([demo], 'desktop', 'reference-authoring', 'sample-library', 'outline');
-  assert.equal(direct.entry, 'direct');
-  assert.equal(direct.history.length, 0);
-  const refused = dispatch(inject(initialState, 'forbidden'), 'open');
-  assert.equal(refused.screen, 'LIB-01');
-  assert.equal(refused.history.at(-1).outcome, 'refused');
-  assert.equal(dispatch(refused, 'open').screen, 'OUT-01');
-  assert.equal(dispatch(entered, 'unknown-event').history.at(-1).outcome, 'refused');
+test('implementation absence and observation absence are distinct', () => {
+  const expected = design();
+  const location = source.location('app/src/application/persistence-save-machine.ts', 'createMachine');
+  assert.ok(location);
+  const declared = { id: 'WRT-01', platform: 'desktop', source: location };
+  const coverage = reconcile(expected, { screens: [declared], controls: [], transitions: [], gaps: [] });
+  assert.equal(coverage.find(({ id, platform }) => id === 'WRT-01' && platform === 'desktop').status, 'unobserved');
+  assert.equal(coverage.find(({ id, platform }) => id === 'WRT-01.A' && platform === 'desktop').status, 'unextracted');
+  assert.throws(() => reconcile(expected, { screens: [declared, declared], controls: [], transitions: [] }), /Duplicate/);
 });
 
-test('reproduction requires an exact artifact and approved identifiers; trace excludes input', () => {
-  const state = dispatch(dispatch(initial(), 'create'), 'name', 'a private draft');
-  assert.equal(state.context.name, 'a private draft');
-  assert.ok(!JSON.stringify(trace(state, sha)).includes('a private draft'));
-  assert.equal(replay(share(state, sha), sha, [demo]).screen, 'LIB-01');
-  assert.throws(() => replay(share(state, sha), 'b'.repeat(40), [demo]), /版/);
-  assert.throws(() => replay(share(state, sha) + '&x=1', sha, [demo]), /識別子/);
+test('design navigation walks only projected edges, tracks history and replays exact source', () => {
+  const data = snapshot();
+  const flow = data.expected.scenarios.find(({ screens }) => screens.includes('REC-01'));
+  const initial = begin(data, 'expected', flow.platforms[0], flow.id, 'start');
+  const edge = data.expected.transitions.find(({ from }) => from === initial.at);
+  const next = step(initial, edge.id);
+  assert.equal(next.at, edge.to);
+  assert.equal(step(next, 'foreign').at, next.at);
+  assert.equal(back(next).at, initial.at);
+  assert.equal(replay(data, share(next)).at, initial.at);
+  assert.equal(trace(next).history[0].edge, edge.id);
+  assert.throws(() => replay({ ...data, sourceSha: 'b'.repeat(40) }, share(next)), /版/);
+  assert.throws(() => replay(data, share(next) + '&extra=1'), /識別子/);
 });
 
-test('malformed edges, unapproved responses, and setup-only author fixtures fail validation', () => {
-  const first = demo.edges[0];
-  assert.throws(() => validate([{ ...demo, edges: [{ ...first, to: 'OUT-01' }, ...demo.edges.slice(1)] }]), /transition/);
-  const [scenario] = demo.scenarios;
-  assert.throws(() => validate([{ ...demo, scenarios: [{ ...scenario, responses: ['arbitrary'] }] }]), /scenario/);
-  const invalid = { ...demo, scenarios: [{ ...scenario, checkpoints: {
-    ...scenario.checkpoints, start: { ...scenario.checkpoints.start, principal: 'SETUP', context: { principal: 'SETUP' } },
-  } }] };
-  assert.throws(() => reconcile(readAuthority(read), [invalid]), /principal/);
-});
-
-test('a guarded handoff uses the destination fixture authority and preserves the original replay', () => {
-  const login = {
-    id: 'auth', platform: 'auth', screens: ['AUTH-01'],
-    fixtures: { 'signed-request': { principal: 'ANON' } },
-    scenarios: [{ id: 'signed-login', label: 'ログイン', kind: 'normal', fixture: 'signed-request',
-      checkpoints: { start: { at: 'AUTH-01/ready', principal: 'ANON' } } }],
-    edges: [{ id: 'login-handoff', from: 'AUTH-01/ready', event: 'login', to: 'LIB-01/ready',
-      source: 'docs/design/SCREEN-STATE-ATLAS.md', effect: true, guardDescription: '有効な同意',
-      guard: (_context, consent) => consent === 'allow', replayInputs: ['allow'],
-      handoff: { platform: 'desktop', scenario: 'reference-authoring', checkpoint: 'start' },
-      carry: () => ({ principal: 'SETUP', document: 'synthetic-continuation' }),
-    }],
+test('editing an Atlas branch changes only the independent design projection', () => {
+  const changed = {
+    ...source, read(path) {
+      const value = source.read(path);
+      return path.endsWith('SCREEN-STATE-ATLAS.md') ? value.replace('応答不明/競合', '応答遅延/競合') : value;
+    },
   };
-  const features = validate([demo, login]);
-  const state = start(features, 'auth', 'signed-login', 'signed-request', 'start');
-  assert.equal(dispatch(state, 'login').screen, 'AUTH-01');
-  assert.equal(dispatch(inject(state, 'forbidden'), 'login', 'allow').screen, 'AUTH-01');
-  const result = dispatch(state, 'login', 'allow');
-  assert.equal(result.screen, 'LIB-01');
-  assert.equal(result.context.principal, 'OWNER-API');
-  assert.equal(result.context.document, 'synthetic-continuation');
-  assert.equal(result.entry, 'start');
-  assert.equal(replay(share(result, sha), sha, features).screen, 'AUTH-01');
-  assert.equal(trace(result, sha).history[0].input, 'allow');
+  const before = design();
+  const after = designProjection(changed);
+  assert.ok(before.transitions.some(({ event }) => event === '応答不明/競合'));
+  assert.ok(after.transitions.some(({ event }) => event === '応答遅延/競合'));
+  assert.deepEqual(before.controls, after.controls);
 });
 
-test('an edge reachable only by direct entry does not establish control coverage', () => {
-  const [scenario] = demo.scenarios;
-  const onlyDirect = {
-    ...demo, scenarios: [{ ...scenario, checkpoints: {
-      ...scenario.checkpoints, isolated: { at: 'LIB-01/isolated', principal: 'OWNER-API' },
-    } }],
-    edges: [...demo.edges, {
-      ...demo.edges[0], id: 'isolated-import', from: 'LIB-01/isolated', control: 'LIB-01.C',
-    }],
+test('a Desktop-only entry cannot be opened through a native reproduction link', () => {
+  assert.throws(() => begin(snapshot(), 'expected', 'ios', 'atlas-entry-01', 'atlas-entry-01/WEB'), /開始位置/);
+});
+
+test('deleting control authority cannot produce a mapped design', () => {
+  const changed = {
+    ...source, read(path) {
+      const value = source.read(path);
+      return path.endsWith('SCREEN-CONTROL-CATALOG.md') ? value.replace(/^\| [A-Z]+-\d{2}\.[A-Z] .+$/gm, '') : value;
+    },
   };
-  const coverage = reconcile(readAuthority(read), validate([onlyDirect]));
-  assert.equal(coverage.records.find(({ id, platform }) => id === 'LIB-01.C' && platform === 'desktop').status, 'missing');
+  assert.throws(() => designProjection(changed), /Missing controls/);
+});
+
+test('an adapter cannot promote source declarations to execution evidence or use a design document as binding', async () => {
+  const { observedProjection } = await import('./observed.mjs');
+  const origin = source.location('app/src/application/persistence-save-machine.ts', 'createMachine');
+  const forged = () => ({
+    transitions: [{ id: 'forged', platform: 'desktop', from: 'opening', to: 'saved', event: 'save',
+      source: origin, method: 'trace', trace: { sourceSha: sha, outcome: 'passed', source: origin } }],
+  });
+  await assert.rejects(observedProjection(source, sha, (domain) => domain === 'desktop' ? { project: forged } : null),
+    /No independently verified execution evidence/);
+  const docs = () => ({ screens: [{ id: 'WRT-01', platform: 'desktop',
+    source: { path: 'docs/design/SCREEN-STATE-ATLAS.md', line: 1 } }] });
+  await assert.rejects(observedProjection(source, sha, (domain) => domain === 'desktop' ? { project: docs } : null),
+    /Invalid canonical source location/);
 });

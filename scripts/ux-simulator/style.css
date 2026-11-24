@@ -79,9 +79,6 @@
 .ux-page dialog h2 { margin-block-start: 0; }
 .ux-page dialog:modal { overscroll-behavior: contain; }
 .ux-page dialog::backdrop { background: #24211d99; overflow: hidden; overscroll-behavior: contain; }
-.reference-page { max-inline-size: 44rem; min-block-size: 18rem; }
-.reference-page .library-item { border-block: 1px solid var(--ux-line); padding-block: .75rem; margin-block-end: 1rem; }
-.reference-page .library-item h3 { margin: 0 0 .5rem; }
 @media (min-width: 900px) {
   .ux-layout { grid-template-columns: minmax(14rem, 1fr) minmax(0, 3fr); }
   .ux-inspector { grid-column: 2; }
@@ -92,3 +89,22 @@
   .ux-catalog-results { max-block-size: 64dvh; overflow: auto; padding-inline: .25rem; }
 }
 .ux-coverage-label { display: block; color: var(--ux-muted); }
+
+.ux-wireframe {
+  background: #f9f6ef;
+  border: 1px solid var(--ux-line);
+  border-radius: .5rem;
+  padding: clamp(.75rem, 2vw, 1.25rem);
+}
+.ux-wireframe h2 { margin-block: 0 .5rem; font-size: clamp(1.2rem, .9rem + 1vw, 1.65rem); }
+.ux-wireframe[data-form="sheet"], .ux-wireframe[data-form="dialog"] { max-inline-size: min(100%, 36rem); margin-inline: auto; }
+.ux-region { border-block-start: 1px solid var(--ux-line); padding-block: .5rem; }
+.ux-region h3 { font-size: .9rem; margin: 0; }
+.ux-region small, .ux-branches small { color: var(--ux-muted); }
+.ux-branches { display: grid; gap: .5rem; list-style: none; padding-inline-start: 0; }
+.ux-branches small { display: block; }
+.ux-route-map { border-block-start: 1px solid var(--ux-line); padding-block-start: .75rem; margin-block-start: 1rem; }
+.ux-route-map li { margin-block-end: .3rem; }
+.ux-route-map [aria-current="step"] { color: var(--ux-accent); text-decoration: underline; text-underline-offset: .15em; }
+.ux-page button[aria-pressed="true"] { color: var(--ux-paper); background: var(--ux-accent); }
+.ux-page button[aria-pressed="true"]:hover { background: #573321; }
