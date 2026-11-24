@@ -111,6 +111,7 @@ flowchart TD
 | Auth, PostgreSQL runtime schema or deployment state machine | Owning DB/API contract, auth E2E, relevant host and rollback acceptance | Unrelated model, native or Pages integration |
 | StrictDoc/specification inputs | Requirements trace with its pinned StrictDoc/Chromium toolchain and affected Pages acceptance | Full model or backend image solely because a trace test changed |
 | Pages generators, diagram/graph/audit inputs | Generator tests, source-bound report, faithful browser rendering | OCI builds and host lifecycle |
+| UX Simulator design/model/fixture/generator inputs (adopted target) | [UX Simulator](../design/UX-SIMULATOR-CONTRACT.md) exact-source mapping, affected transition proofs, shared-change regression and Pages browser interaction | Product OCI, production VM and native runtime acceptance for simulator-only changes |
 | JavaScript/TypeScript or analyzer rule inputs | CodeQL and quality checks per analyzed source closure | A CodeQL run for unrelated native/docs-only input |
 | Dependency, container, IaC and secret-handling inputs | Trivy and appropriate config/security checks, plus affected runtime proofs | Full Git-history scan for every unchanged history |
 | New, renamed, deleted, unknown or missing-diff inputs | Conservative safe superset / full verification until closure is proven | Unverified skipping or unconditional success |

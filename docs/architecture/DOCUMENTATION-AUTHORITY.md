@@ -46,6 +46,7 @@
 | 本番Deploymentの状態分類・経路選択・初回協調配備・非互換切替・排他/再開 | [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md)（横断契約。個別stage・認証・CI・backupの正本を置換しない） |
 | 初期導入・VM の収束 | [初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)・[IaC](../deployment/IAC.md) |
 | 自動更新・復旧 | [更新遷移](../deployment/UPDATE-FLOW.md)・[Push deployment](../deployment/PUSH-DEPLOYMENT.md) |
+| 設計体験の実行可能な検証モデル・合成シナリオ・coverage・独立受入 | [UX Simulator契約](../design/UX-SIMULATOR-CONTRACT.md)（採用目標。製品の画面・API・権限の正本を置換しない） |
 | GitHub Pages の画面設計、機能、公開 | [Pages サイトマップと UX](../design/DEVELOPMENT-PAGES-UX.md)（設計詳細）／ [Pages 機能台帳](../verification/PAGES-FUNCTION-INVENTORY.md)（観測）／ [CI/CD](../verification/CI-CD.md)（公開と証拠の契約） |
 | CI・証明・実測 | [CI/CD](../verification/CI-CD.md)・[Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) |
 

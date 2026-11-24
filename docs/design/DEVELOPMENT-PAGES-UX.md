@@ -27,6 +27,7 @@
 | `/graph/communities.html` | Community Overview / GRAPH-02 | Graphify の集約概観を閲覧 |
 | `/ci/` | CI Observatory / CI-01 | PR と実行 SHA を起点とする公開 CI テレメトリ、履歴、診断 JSON |
 | `/api/` | API Reference / API-01 | TypeSpec由来のOpenAPI契約からmethod、schema、security、error responseを参照 |
+| `/ux/` | UX Simulator / UX-01〜04（採用目標） | 正本の画面・操作・状態遷移を合成シナリオで操作し、体験・異常系・版差分を検証。[UX Simulator契約](UX-SIMULATOR-CONTRACT.md) |
 | `/audit/` | Source Audit / AUDIT-01 | 観測したブランチ、snapshot、レビュー入力の索引と収録状況 |
 | `/reviews/<SHA>/` | Review Materials / AUDIT-02 | OCR が選定したレビュー入力、差分、収録の根拠 |
 | `/snapshots/<SHA>/` | Source Snapshot Artifacts / AUDIT-03 | Repomix の全体 JSON、分割 JSON、manifest |
@@ -39,6 +40,8 @@
 ```mermaid
 flowchart TB
     HOME["/ — Development Portal<br/>サイトマップ・版と状態"]
+    HOME --> UX["/ux/<br/>設計体験を操作・検証"]
+    UX --> UXPLAY["シナリオ/画面/状態・履歴・正本"]
     HOME --> ARCH["/architecture/<br/>設計図を探す"]
     HOME --> GRAPH["/graph/<br/>コードの参照を探す"]
     HOME --> CI["/ci/<br/>CI観測を調べる"]
@@ -56,8 +59,8 @@ flowchart TB
 
 **Desktop:**
 
-1. **グローバルヘッダー:** `Codexia / Development`、`概要`・`Architecture`・`Code Map`・`CI`・`API`・`Source Audit`。正本GitHub Docsは外部リンクとして明示する。各機能の現在位置は`aria-current`で示す。
-2. **トップの主領域:** ユーザーのタスクから探せる4カテゴリカード。「設計を確認」「コード構造を追う」「CIの待ちを分析」「レビュー資料を得る」。各カードは**何が分かるか・何が分からないか・データの基準**を短く記載し、一つの明確な操作リンクを置く。
+1. **グローバルヘッダー:** `Codexia / Development`、`概要`・`Architecture`・`Code Map`・`CI`・`API`・`UX Simulator`・`Source Audit`。正本GitHub Docsは外部リンクとして明示する。各機能の現在位置は`aria-current`で示す。
+2. **トップの主領域:** ユーザーのタスクから探せる4カテゴリカード。「設計を確認」「コード構造を追う」「CIの待ちを分析」「レビュー資料を得る」。設計カテゴリにUX Simulatorの入口を設け、図の閲覧と体験検証を区別する。各カードは**何が分かるか・何が分からないか・データの基準**を短く記載し、一つの明確な操作リンクを置く。
 3. **サイトマップ:** 全主要URLと説明、詳細画面・ダウンロードの関係を表示。生成されなかった機能を機能一覧から消さず「利用不可／証拠不明」と示し、代替のGitHubリンクを提供する。
 4. **版とデータの帯:** 「Published Pages source SHA」（サイト生成に使用したmain SHA）と、各機能の観測モデルを別々に表示。CIを`live`、Graph/Atlasを`build snapshot`、Auditを`branch snapshots`として区別する。
 5. **補助領域:** サイトの生成方針、検証対象、Docs・Actionsへのリンク。実際のrunner/CIのグリーン判定は表示しない。
@@ -77,6 +80,8 @@ flowchart TB
 flowchart LR
     OPEN["Portal-01<br/>目的から選ぶ"] --> SELECT{"関心領域"}
     SELECT -->|設計| A["ARCH-01<br/>設計図一覧"]
+    SELECT -->|体験検証| U["UX-01〜04<br/>シナリオ・操作・状態・比較"]
+    U --> HOME
     SELECT -->|構造| G["GRAPH-01<br/>ファイル探索"]
     SELECT -->|CI| C["CI-01<br/>PRとジョブ分析"]
     SELECT -->|監査| S["AUDIT-01<br/>ブランチ資料"]
@@ -224,6 +229,10 @@ flowchart LR
     UNVERIFIED --> BACK
     DOC --> BACK
 ```
+
+## UX Simulator（採用目標）
+
+開発ポータルの設計検証機能として `/ux/` を追加する。画面の意味・状態・権限は既存の画面正本、操作可能な派生モデル・検証・合成データ・版管理は[UX Simulator契約](UX-SIMULATOR-CONTRACT.md)が所有する。採用済み全画面と操作、platform別journeyを操作できることを要求し、製品実装や実機受入を代替しない。既存の唯一のPages publisher、非publish PR preview、site manifest、共通navigationを再利用する。未生成/partialは正確に表示する。
 
 ## 7. データ、ナビゲーション、公開責務
 
