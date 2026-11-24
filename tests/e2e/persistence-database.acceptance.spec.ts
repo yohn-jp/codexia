@@ -187,6 +187,7 @@ preparedAuthorTest("the manuscript opens and remains editable while its anchor r
       const commands = page.locator(".pg-editor-command-menu");
       if (!await commands.evaluate((element) => (element as HTMLDetailsElement).open)) await commands.locator("summary").click();
       await expect(commands.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeDisabled();
+      await commands.locator("summary").click();
       await appendManuscript(page, addition);
       await expect(editor).toHaveText(original + addition);
       await expectDeviceDraft(page);

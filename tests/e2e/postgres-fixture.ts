@@ -54,19 +54,33 @@ export async function openManuscriptScene(page: Page, scene: Pick<FixtureDocumen
 }
 export async function replaceManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
+  const normalized = normalizeManuscriptNewlines(text);
   await clickManuscriptEnd(editor);
   await editor.press("ControlOrMeta+a");
-  if (text) await editor.pressSequentially(text);
+  if (normalized) await typeManuscriptText(editor, normalized);
   else await editor.press("Backspace");
-  await expect.poll(() => readManuscriptMarkdown(page)).toBe(text);
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(normalized);
 }
 
 export async function appendManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
   const previous = await readManuscriptMarkdown(page);
+  const normalized = normalizeManuscriptNewlines(text);
   await clickManuscriptEnd(editor);
-  await editor.pressSequentially(text);
-  await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + text);
+  await typeManuscriptText(editor, normalized);
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + normalized);
+}
+
+function normalizeManuscriptNewlines(text: string): string {
+  return text.replace(/\r\n?/gu, "\n");
+}
+
+async function typeManuscriptText(editor: Locator, text: string): Promise<void> {
+  const lines = text.split("\n");
+  for (const [index, line] of lines.entries()) {
+    if (index > 0) await editor.press("Enter");
+    if (line) await editor.pressSequentially(line);
+  }
 }
 
 async function clickManuscriptEnd(editor: Locator): Promise<void> {
