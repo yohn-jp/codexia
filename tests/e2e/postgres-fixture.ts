@@ -63,8 +63,7 @@ export async function replaceManuscript(page: Page, text: string): Promise<void>
 }
 
 export async function appendManuscript(page: Page, text: string): Promise<void> {
-  await manuscriptEditor(page).press("Control+End");
-  await page.keyboard.insertText(text);
+  await replaceManuscript(page, (await readManuscriptMarkdown(page)) + text);
 }
 
 export async function fillDraft(page: Page, text: string): Promise<void> {
