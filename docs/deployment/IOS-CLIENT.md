@@ -4,7 +4,7 @@
 
 ## Goal and boundaries
 
-Ship an installable **native SwiftUI** iOS application for a personally owned iPhone. Desktop Web remains React. Mobile Web/PWA, Capacitor/Ionic WebView authoring, WebView-based CodeMirror and React Mobile-shell parity are not deliverables; iOS and Desktop do not share UI components, route state or client-side application implementations. Both use the **same** Fastify/Better Auth/Core/PostgreSQL API and manuscript authorization contract. Do not move Core/DB/MCP to the device.
+Ship an installable **native SwiftUI** iOS application for a personally owned iPhone. Desktop Web remains React on Windows Chromium (Chrome/Edge). macOS Xcode CI remains an iOS build/acceptance environment, not a macOS author-client commitment. Mobile Web/PWA, Capacitor/Ionic WebView authoring, WebView-based CodeMirror and React Mobile-shell parity are not deliverables; iOS and Desktop do not share UI components, route state or client-side application implementations. Both use the **same** Fastify/Better Auth/Core/PostgreSQL API and manuscript authorization contract. Do not move Core/DB/MCP to the device.
 
 Web static assets remain under Cloudflare Access; the app uses an independently registered **public OAuth/PKCE iOS client** to reach the HTTPS API, subject to the same owner/project/effect authorization. The existing Web same-hostname deployment does **not** yet prove Access-independent API reachability; the required ingress and authorization cutover is governed by [deployment](README.md) and [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md).
 

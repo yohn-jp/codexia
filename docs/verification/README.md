@@ -38,7 +38,7 @@ The second command prints the fingerprint only when the applied ledger exactly m
 
 ## Browser checks
 
-Install the configured browsers and run acceptance against each profile:
+During transition install the configured browsers and run acceptance against each profile. The adopted author Web target is Windows Chromium; once the executable inventory has migrated per [E2E execution](E2E-EXECUTION.md), install only Chromium for ordinary author acceptance. Until then the command below reflects the current executable inventory, not a permanent WebKit support requirement:
 
 ```sh
 pnpm exec playwright install chromium webkit
@@ -48,7 +48,7 @@ CODEXIA_PROFILE=core pnpm test:e2e
 CODEXIA_PROFILE=full pnpm test:e2e
 ```
 
-On a supported host, `CODEXIA_E2E_CHROMIUM` selects a system Chromium executable. The Playwright configuration and test sources define browser/display requirements and conditional cases. A skipped case is not a passed check. Physical-device keyboards, OS IME and native gestures require device testing beyond synthetic composition events.
+On a verification host (not necessarily a supported product OS), `CODEXIA_E2E_CHROMIUM` selects a system Chromium executable. The Playwright configuration and test sources define browser/display requirements and conditional cases. A skipped case is not a passed check. Physical-device keyboards, OS IME and native gestures require Windows/iPhone device testing beyond Linux Chromium and synthetic composition events.
 
 Browser acceptance covers editing, conflicts, recovery, shell switching, module contributions, workspace layouts, terminology and job review. Tests use generated repositories and isolated browser state. Do not point fixture-driven tests at author work.
 
@@ -76,6 +76,6 @@ This opt-in source-build acceptance is not a replay of the byte-identical deploy
 
 ## Repository CI and release
 
-[CI/CD architecture](CI-CD.md) is the execution, evidence and certification contract. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) defines the proof placement and model-based/representative E2E strategy. The executable inventory is maintained in [ci-contract.mjs](../../scripts/ci/impact/contract.mjs).
+[CI/CD architecture](CI-CD.md) is the execution, evidence and certification contract. [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) defines the proof placement and model-based/representative E2E strategy. [E2E execution](E2E-EXECUTION.md) defines the browser optimization target and transition gates. The executable inventory is maintained in [ci-contract.mjs](../../scripts/ci/impact/contract.mjs).
 
 Local verification and CI are separate results. Record exact commands, source identity, exits and skipped or blocked cases in PR checks and machine artifacts. Verification does not publish or deploy. See [OCI releases](OCI-RELEASE.md) and [Deployment](../deployment/README.md) for delivery and operational checks.

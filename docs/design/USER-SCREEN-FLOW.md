@@ -123,4 +123,4 @@ stateDiagram-v2
 | optional module 不可 | 関連する panel のエラーに限定し、Core 原稿を利用可能に保つ |
 | 競合・回復保護に失敗 | 遷移を禁止し、原稿・journal・作業 context を残す |
 
-**受入証拠:** Desktop Webは実ブラウザーと実PostgreSQLで、iOSはSimulatorに加えて物理iPhoneと実PostgreSQLで、OAuth/IME/保存追加入力/競合/応答喪失/アプリ復帰/作者切替/権限拒否を確認する。Mobile React向けviewport E2Eは受入対象としない。本書は画面操作の正本であり、上記がすべて実装・検証済みであるとの宣言ではない。
+**受入証拠:** Desktop WebはWindows Chromiumを正式対象とし、Chromiumと実PostgreSQL、Windows固有の操作は実Windowsで、iOSはSimulatorに加えて物理iPhoneと実PostgreSQLで、OAuth/IME/保存追加入力/競合/応答喪失/アプリ復帰/作者切替/権限拒否を確認する。Mobile React向けviewport E2Eは受入対象としない。本書は画面操作の正本であり、上記がすべて実装・検証済みであるとの宣言ではない。

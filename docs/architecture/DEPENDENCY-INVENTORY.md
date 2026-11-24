@@ -47,7 +47,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@better-auth/core` | `1.7.26` | API・Better Auth | **連動**: Better Auth本体と同期 |
 | `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
-| `oauth4webapi` | `3.8.9` | app・Web公開クライアントのDiscovery、PKCE、認可応答およびトークン交換 | **既存採用**: 実行時依存とpeer依存を持たないESM。更新時はBetter Authとの認証フローをChromiumとWebKitで実行し、Core/Fullのビルドと依存閉包を検証 |
+| `oauth4webapi` | `3.8.9` | app・Web公開クライアントのDiscovery、PKCE、認可応答およびトークン交換 | **既存採用**: 実行時依存とpeer依存を持たないESM。更新時はBetter Authとの認証フローをChromiumで実行し、公開面・移行期に別途必要なブラウザー証明は [E2E execution](../verification/E2E-EXECUTION.md) に従い、Core/Fullのビルドと依存閉包を検証 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
 | `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |

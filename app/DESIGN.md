@@ -49,7 +49,7 @@ Full: .impeccable/design-full.md (expanded rationale and requirements; read sect
 
 **静かで文学的、明晰。** Writingは本文優先。他作業は情報密度と効率を高め、視認性・発見性・accessibilityを保つ。
 
-**対象はDesktop React Webのみ**（Impeccable platform: `web`）。Mobile Web/PWA・Capacitor authoring UIは採用目標から除外。iOSは独立したSwiftUI設計であり、本WebデザイントークンやReact部品の共通化を要求しない。詳細は[iOS SwiftUI設計](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
+**対象はWindows Chromium（Chrome/Edge）のDesktop React Webのみ**（Impeccable platform: `web`）。Mobile Web/PWA・Capacitor authoring UIは採用目標から除外。iOSは独立したSwiftUI設計であり、本WebデザイントークンやReact部品の共通化を要求しない。詳細は[iOS SwiftUI設計](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
 本書の値は目標で実装証拠ではない。[詳細](.impeccable/design-full.md)。UX/a11yは[UX contract](../docs/design/UX-CONTRACT.md)、過去案は[Visual history](../docs/design/VISUAL-SYSTEM.md)、製品目的は[Product](PRODUCT.md)。
 

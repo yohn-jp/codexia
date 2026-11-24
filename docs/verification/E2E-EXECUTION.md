@@ -1,0 +1,78 @@
+# Browser E2E execution and optimization contract
+
+**Status: accepted design target; implementation and measured acceptance pending.** Owner: CI/verification maintainers. Audience: implementers, reviewers and CI operators. [System design](../architecture/SYSTEM-DESIGN.md) owns supported clients; [Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement; [CI/CD](CI-CD.md) owns the sole execution plan, certification, artifact identity, release and runner security. This document refines browser execution only. No parallel task inventory, alternate release gate, new browser framework or production migration is authorized by this document.
+
+## 1. Required proof and platform boundary
+
+| Surface | Target evidence | Transition / exclusion |
+| --- | --- | --- |
+| Author Desktop Web | Windows Chrome/Edge (Chromium); real Chromium + exact profile + real API/PostgreSQL in routine CI; Windows device evidence for OS-specific IME, input, font and accessibility | macOS/Safari/Firefox/other OS compatibility is not an author product requirement; no UA-based blocking |
+| Owner console | Real supported Chromium and API/authz; focus, zoom, accessibility and failure/recovery | No removal of narrow viewport accessibility or protected owner admission tests |
+| Public reader and externally presented auth/consent | Their independent route, authentication, authorization, reader behavior and accessibility contracts | Preserve existing required proofs; no implicit universal browser support or silent Safari removal for these surfaces. An additional browser is required only by an independently justified contract, with scoped proof, not a full author matrix |
+| Native iOS | Swift Testing/XCTest and XCUITest on the accepted simulator and actual iPhone for native/device obligations; same real API semantics | Playwright WebKit is neither Safari on an actual device nor native SwiftUI/TextKit/Keychain/system-auth evidence. macOS build hosts are not macOS product clients |
+| Legacy Mobile React/Capacitor | Transitional checks required by the existing migration contract | Remove legacy routes, UI, dedicated tests/builds/dependencies only after [#794](https://github.com/yohn-jp/codexia/issues/794) prerequisites including Native physical-device acceptance; do not remove live legacy proof merely to shorten CI |
+| Core and Full | Both real profiles, profile-specific UI/module boundaries, API/authz, persistence, representative browser acceptance and OCI startup | Shared implementation does not prove equal runtime composition; move a redundant obligation only under the proof-placement contract |
+
+The author Desktop target is Chromium-only. The permanent full-suite WebKit duplication is retired as a requirement. Until cutover, classify every existing WebKit test by contract: (a) author Desktop browser-only compatibility, (b) shared browser behavior that must remain covered in Chromium, (c) independently required legacy Mobile or public/auth behavior. Remove (a) from the author matrix, retain/prove (b) at the faithful layer, keep (c) scoped to its actual obligation until the owning contract permits removal. Mixed cases must be split or preserved; do not treat name, viewport, skip or a green Chromium suite as proof of equivalence. No WebKit fallback for missing Chromium proof. No production browser-specific compatibility workaround is required solely for unsupported author browsers; remove one only after tracing all remaining consumers.
+
+## 2. Single execution authority and intended graph
+
+The current six browser lanes (Core/Full × writing/reference/WebKit) are implementation, not a permanent product interface. Start with the existing runner count and at most two independent validations per runner, one worker per spec. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase. Use the existing Chromium-only digest-pinned Git-capable runtime for all ordinary target lanes after the complete inventory and preflight agree. A separately required transitional browser may retain a narrowly selected isolated execution path within the existing CI budget or require a reviewed change to that budget.
+
+```mermaid
+flowchart TD
+  P[Exact source and impact plan] --> B[Core and Full profile producers]
+  P --> R[Selected browser runner preparation]
+  B --> V[Verify immutable profile receipt]
+  R --> V
+  V --> S[Isolated fixture and runtime configuration]
+  S --> W[Balanced selected Chromium tasks]
+  S --> T[Explicit transitional browser obligations if required]
+  W --> E[Per task evidence]
+  T --> E
+  E --> C[Exact source certification]
+  P --> N[Independent API DB unit OCI and security proof]
+  N --> C
+```
+
+Use the existing BROWSER_SHARDS, VERIFICATION_GROUPS, impact/coverage, input fingerprints, producer receipt and certifier. Derive any finer test selection from canonical task definitions; prove the union equals the required inventory with no duplicates, gaps, unexpected skips, unreported failures or foreign evidence. Preserve negative admission controls and partial-rerun behavior. Changes to runtime images, test identity, invocation, profile, artifact and fixture recipe invalidate affected evidence; do not promote an old WebKit-inclusive proof as an unexplained substitute. Preserve the existing exact-source main release rules. Merge queue, runner infrastructure or release governance changes are separate decisions.
+
+## 3. Minimize work at its owning layer
+
+| Obligation | Required strategy |
+| --- | --- |
+| Pure state/decision/expiry/pagination combinations | Independent unit/property or domain/API contract tests at the cheapest faithful layer; retain representative actual UI behavior |
+| DOM/focus/layout | Component or actual Chromium harness when no backend boundary is under test; no unnecessary DB/auth startup |
+| Persistence, authorization, token expiry and transactions | Real API and PostgreSQL contract checks; no mock DB/token as equivalent proof |
+| Author journeys, browser recovery and IndexedDB | Representative real browser, real authenticated API, independent contexts, fault injection and observable persisted outcomes |
+| Browser performance smoke | Retain isolated representative workload; never run concurrently with CPU-heavy siblings or claim functional assertions as performance evidence |
+| Native interaction | Native test tools and actual device acceptance, not a shared JS browser automation abstraction |
+
+For each migrated or deleted test record governing requirement, old identifier, independently observable failure/counterexample, new/retained test and layer, profile/browser applicability, negative-control evidence and cost. Apply existing [#615](https://github.com/yohn-jp/codexia/issues/615) proof-debt governance. Do not target test count, duplicate the implementation as an oracle, weaken assertions or remove a test before its retained/replacement proof executes. Independent public/auth and real DB contracts remain unchanged.
+
+## 4. Fixture, authentication and build lifecycle
+
+- Start browser runner setup independently of the profile build; wait on the successful exact same-profile immutable producer before restoring and executing. No speculative use of unverified artifacts. Inspect actual fixture calls as well as top-level build steps: the prebuilt flag alone does not prove that no Vite build executes.
+- Target one build of each required profile/entry per distinct source/toolchain/configuration closure. The current author OAuth fixture injects issuer, origin, client ID and redirect configuration and rebuilds entries; measure it separately. Prefer reuse of the immutable producer with verified fixture-specific configuration, or reuse of a configuration-equivalent isolated build, only after proving behavior and provenance. Runtime configuration must preserve trusted origin/issuer/audience/redirect restrictions, CSP and fail-closed validation; never accept untrusted URL/query configuration, bypass real OAuth, alter a certified artifact in place or introduce production configuration solely to make tests fast. If equivalence is not demonstrated, retain required distinct builds.
+- Split fixtures by proof: component-only tasks need only the actual required browser/harness; author integration requires the existing disposable PostgreSQL, real API, real auth. Use worker-scoped server and immutable initialization where safe, distinct DB/state/ports for independent tasks, per-test isolated contexts and unique data. Benchmark template DB cloning versus migrations; bind template to exact schema/extension/toolchain and ensure no live connections, credentials or mutable author data are copied. Preserve dedicated migration, bootstrap, restart, failure and recovery tests that cannot use a preinitialized fixture.
+- Auth-specific tests exercise actual OAuth, bootstrap, PKCE, passkey, session revocation, expiry and recovery. For unrelated editing, prepare real authenticated state through the existing fixture and restore into an isolated context only when the actual token/session/storage semantics permit. Playwright storageState is a candidate, not evidence by itself (session storage/in-memory credentials may require another legitimate path). No shared mutable auth state across independent accounts, fabricated token, bypass, credential artifact or stale auth receipt. Separate fixture self-checks from duplicated negative assertions only after retaining their independent proof.
+- Use declarative readiness, deferred responses and observable state notifications. Fixed elapsed sleep is not synchronization. Browser clock controls browser time; server expiry must be driven by an appropriate server/domain clock or an equivalent independently tested boundary, not by changing the client clock. Preserve real expiry denial and UI error/recovery; do not reduce a production timeout just to speed CI.
+- Keep locked minimal pnpm dependency closures, avoid hidden install/build calls and compare fetch/restore with local computation. Use existing cache hierarchy and admission rules; no new remote cache service by default. Preserve failure traces, source/attempt binding and required visual evidence; do not compress already-compressed files twice or collect unnecessary artifacts.
+
+## 5. Scheduling and measurement
+
+Measure actual full-run critical path, not the sum of parallel test durations. Use existing [CI Observatory](CI-DASHBOARD.md) and source-bound logs/artifacts; extend the existing reporter if needed rather than creating a second telemetry authority. Record per lane: queue, image pull/extract and PostgreSQL readiness, checkout/toolchain/install/cache, producer wait/transfer/verification, fixture DB/migration/bootstrap/key generation, Vite build, browser/context/auth, spec and test including hooks, controlled/real waits, teardown and artifact transfer. Distinguish concurrent work, elapsed duration and runner consumption. Preserve performance smoke isolation and stable task identity.
+
+First rebalance long UI and auth tasks across existing lanes (Chromium auth does not inherently require WebKit). Partition large specs only if independently isolated; do not increase Playwright worker count inside a spec under the current CI contract. A change to concurrency or runner count needs a reviewed budget and evidence that isolation, failure propagation and proof remain valid. Schedule independent preparation before a producer barrier; no busy waiting or arbitrary gate delays.
+
+Keep Playwright as the browser runner; use its native fixtures, clock, storage state and measured scheduling. Swift Testing/XCTest/XCUITest own native proof. Existing unit runner and real API/DB tests own their layers; evaluate Testing Library or fast-check only for a concrete migration, after checking existing dependencies, independent detection and total cost. Do not adopt Cypress, Selenium, WebdriverIO, Puppeteer, Appium or a generic testing DSL merely to replace Playwright or unify unrelated clients. New dependencies follow [dependency policy](../architecture/DEPENDENCY-POLICY.md).
+
+## 6. Admission and completion
+
+For every execution change:
+1. Pin main/candidate source, plan, runner class, runtime digest, lock, fixture and cache condition. Compare at least three matched successful full runs where practical, record all results and any unmatched dimensions. Record per-task and per-phase measurements, wall-clock, critical path, total runner time, queue, flake/retry rate, evidence size and failure behavior in PR/run artifacts.
+2. Prove all required obligations via the canonical plan/coverage and independent certifier; prove invalid/missing/wrong-profile/foreign/stale evidence is rejected. Report NOT_SELECTED/NOT_RUN/BLOCKED distinctly from PASS. A benchmark alone never certifies a release.
+3. Demonstrate lower critical-path time or total runner consumption without weaker detection or unacceptable regression in the other metric. Prefer reducing actual work; do not transfer waste to an unrelated runner. Target browser completion at or below the longest independent non-browser lane on comparable full CI, not an absolute mandatory seconds threshold. Track certification tail separately.
+4. Retire obsolete image pins, dependency entries, cache paths, selectors, workflow branches, docs and references when the corresponding proof has been deliberately retired; retain historical evidence. No parallel canonical lists. No unsupported-client blocking, new macOS client, production auth changes, legacy Mobile cutover before admission or changes to API/PostgreSQL authority.
+
+The implementation sequence is governed by the relevant Issues/PRs, not a second work backlog in this document. Design adoption is not implementation completion or measured acceleration.

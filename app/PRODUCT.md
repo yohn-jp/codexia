@@ -20,7 +20,7 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Operating Context
 
-- **Accepted target:** Desktop Web (React/CodeMirror) and a separate **native iOS app (SwiftUI, with UIKit/TextKit where justified)**. Mobile Web/PWA authoring and Capacitor/WebView authoring are retired targets, pending implementation removal.
+- **Accepted target:** Windows Chromium (Chrome/Edge) Desktop Web (React/CodeMirror) and a separate **native iOS app (SwiftUI, with UIKit/TextKit where justified)**. Mobile Web/PWA authoring and Capacitor/WebView authoring are retired targets, pending implementation removal.
 - Desktop and iOS **do not share UI components or client-side state implementation**. They share only the server API/domain requirements and manuscript protection semantics. The web Impeccable design system applies to Desktop Web; native iOS design/acceptance is governed by [iOS SwiftUI architecture](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md). Android support is not implied.
 - Writing, reading, reference, and review are ways to work with the same manuscript context, not separate manuscript authorities.
 

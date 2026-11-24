@@ -4,6 +4,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 
 | Topic | Reference |
 | --- | --- |
+| Browser E2E execution and optimization | [E2E execution](verification/E2E-EXECUTION.md) — Chromium target, migration gates, fixture/artifact reuse and measured optimization |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
 | Implementation workstreams, dependencies and acceptance | [Specification implementation contract](architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md) — workstream boundaries and integration gates, not proof of implementation |
 | Backup settings in owner console | [Backup console contract](architecture/BACKUP-CONSOLE-CONTRACT.md) · [Backup screen flows](design/ADMIN-SCREEN-FLOW.md) — target routes, S3 settings and protected executor; not yet implemented |

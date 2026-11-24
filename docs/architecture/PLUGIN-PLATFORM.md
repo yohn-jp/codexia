@@ -199,7 +199,7 @@ Optional Plugin UI / Compute
 - `iframe sandbox="allow-scripts"`を基準とし、`allow-same-origin`、Top Navigation、Popup、Form等は既定では付けない。**同一origin frameの`allow-scripts allow-same-origin`を併用しない**。必要な例外は別設計/検証。Sandboxでブラウザ機能が使えないPluginはSDKへ委譲させる。
 - `postMessage`の初期通信はHostが生成したFrameの`contentWindow`と予期したArtifact/Sessionを束縛し、必要な`MessagePort`だけ渡す。Opaque Origin（`origin="null"`）の場合に`event.origin`だけで正当性を判定しない。受信ごとにChannel/Activation Epoch/Capability/Schemaを検査する。
 - Pluginの`fetch`によるHost/API認証迂回を禁止。CSP `connect-src 'none'`等とPermission Policyを既定とし、外部アクセスはBrokerの明示Capabilityで処理。画像・フォント等のアセット配信も同じResource Budget/Origin Policyに従う。
-- Plugin描画ループが固着したらHostはPanelを閉じる。ブラウザによってFrameとHostが同一Renderer Processになる場合やブラウザ全体OOMは**完全に防げると主張しない**。ブラウザ実機（Chromium/WebKit/モバイル）でRecoveryを含めて検証する。
+- Plugin描画ループが固着したらHostはPanelを閉じる。ブラウザによってFrameとHostが同一Renderer Processになる場合やブラウザ全体OOMは**完全に防げると主張しない**。採用された作者用Web対象（Windows Chromium）でRecoveryを含めて検証する。将来のプラグイン提案で対象外ブラウザーやMobile Webの互換性を復活させない。Native拡張の採用は別途決定する。
 
 ## 7. Lifecycle、Quotas、エラー閉じ込め
 

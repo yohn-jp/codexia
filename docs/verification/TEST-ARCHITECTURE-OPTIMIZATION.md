@@ -20,7 +20,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 | 単体・モデル | 純粋計算、分岐、境界値、不変条件、決定的な状態遷移 | packages/modules/appの既存unit suite |
 | コンポーネント | 描画状態・表示条件、イベント、shared controller、エラー表示の結線 | appの既存テスト基盤。必要なら既存ブラウザ環境で局所テスト |
 | 実DB結合・API E2E | 永続化、Revision、トランザクション、認可、冪等、契約間の整合 | persistence-postgres、core、api、MCP integration |
-| ブラウザE2E | Desktop React Web/console/readerから正本までの結合、IndexedDB、再起動、IMEと実ブラウザ差。**Mobile React専用viewportは対象外** | tests/e2e、Core/Full、Chromium/WebKit |
+| ブラウザE2E | Desktop React Web/console/readerから正本までの結合、IndexedDB、再起動、IME。正式対応はWindows Chromium系。**Mobile React専用viewportは目標対象外** | tests/e2e、Core/Full、Chromium。旧Mobile/公開面の移行例外は [E2E execution](E2E-EXECUTION.md) |
 | 実行環境・パッケージング | OCI startup/drain、migration identity、Core/Fullの構成分離 | verify-oci、profile-package |
 | 特殊資源・運用受入 | 実モデル推論、native workerの解放、物理端末、バックアップ復元、実配備 | [Integration](INTEGRATION.md)、[OCI](OCI.md)、運用契約 |
 
@@ -52,6 +52,10 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 - Core/Fullとブラウザ固有の差、実OCIライフサイクルの証明。
 
 テスト移管時は、契約ID、旧テスト識別子、検出対象の反例、移管先、実装前の失敗または故障注入、保持するE2E、適用profileを対応付ける。移管先がまだ実行されていない段階で旧テストを削除しない。
+
+### ブラウザー・プラットフォームの証明境界
+
+[System design](../architecture/SYSTEM-DESIGN.md) の採用対象に従う。作者用DesktopのWebKit/macOS/Firefox互換性は独立した品質要求ではない。Chromiumに残す正常・異常・境界証明とWebKit固有の旧Mobile/公開面の証明を識別し、削除理由を記録する。旧Mobileの撤去は #794 のNative受入条件を変更しない。公開reader・外部認証の契約は別管理し、狭幅アクセシビリティ、セキュリティ、実DB/実APIの証明は維持する。Windows固有のIME・入力・フォントは実Windows受入、NativeはSimulatorと物理iPhoneで証明する。Browser実行最適化の詳細は [E2E execution](E2E-EXECUTION.md) が所有する。
 
 ## 3. 状態遷移ベースのテスト設計
 

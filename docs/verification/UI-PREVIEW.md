@@ -1,6 +1,6 @@
 # UI preview and Impeccable Detector (Windows / Linux / macOS)
 
-**Current implementation note:** the preview still serves Desktop and *legacy* Mobile React UIs with a shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. The accepted product target is **Desktop React Web + native SwiftUI iOS**; the Mobile Web preview is not future product acceptance or native evidence. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+**Current implementation note:** the preview still serves Desktop and *legacy* Mobile React UIs with a shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. The accepted product target is **Windows Chromium Desktop React Web + native SwiftUI iOS**. Preview tooling may run on Linux/macOS; this is not a product support promise. The supported product and browser-test transition are defined in [System design](../architecture/SYSTEM-DESIGN.md) and [E2E execution](E2E-EXECUTION.md). Accordingly, the Mobile Web preview is not future product acceptance or native evidence. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
 
 ## Design checks on GitHub
 

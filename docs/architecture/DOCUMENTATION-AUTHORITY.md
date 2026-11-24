@@ -20,7 +20,7 @@
 | --- | --- |
 | 採用済み仕様ツールチェーンと移行の比較・合格条件 | [Specification toolchain](SPECIFICATION-TOOLCHAIN.md)（設計正本は本書と各領域に従う） |
 | XState採用対象・machineとAPI/DB副作用の境界 | [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md)（Webクライアントの対象。ネイティブSwiftUIにはReact/XState runtimeを要求しない） |
-| Desktop ReactとネイティブiOS SwiftUIの画面基盤・モバイルWeb廃止 | [System design](SYSTEM-DESIGN.md)（製品境界）・[iOS SwiftUI architecture](IOS-SWIFTUI-ARCHITECTURE.md)（ネイティブ実装正本） |
+| Windows Chromiumの作者用Web対応境界・Desktop ReactとネイティブiOS SwiftUI・モバイルWeb廃止 | [System design](SYSTEM-DESIGN.md)（製品境界）・[iOS SwiftUI architecture](IOS-SWIFTUI-ARCHITECTURE.md)（ネイティブ実装正本） |
 | 仕様駆動移行の実装分割/依存関係/検証引渡し | [実装契約と統合計画](SPECIFICATION-IMPLEMENTATION-CONTRACT.md)（製品要求の第二正本ではない） |
 | ファイル命名・ソース配置の規範 | [Source layout and naming](SOURCE-LAYOUT-CONVENTIONS.md)（全リポジトリの新規・移動ファイルの配置と例外） |
 | scripts移行の作業分割・完全対応表 | [Issue #690](https://github.com/yohn-jp/codexia/issues/690)（移行作業の計画と対応表。設計正本ではない） |
@@ -48,7 +48,7 @@
 | 自動更新・復旧 | [更新遷移](../deployment/UPDATE-FLOW.md)・[Push deployment](../deployment/PUSH-DEPLOYMENT.md) |
 | 設計体験の実行可能な検証モデル・合成シナリオ・coverage・独立受入 | [UX Simulator契約](../design/UX-SIMULATOR-CONTRACT.md)（採用目標。製品の画面・API・権限の正本を置換しない） |
 | GitHub Pages の画面設計、機能、公開 | [Pages サイトマップと UX](../design/DEVELOPMENT-PAGES-UX.md)（設計詳細）／ [Pages 機能台帳](../verification/PAGES-FUNCTION-INVENTORY.md)（観測）／ [CI/CD](../verification/CI-CD.md)（公開と証拠の契約） |
-| CI・証明・実測 | [CI/CD](../verification/CI-CD.md)・[Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) |
+| CI・証明・実測 | [CI/CD](../verification/CI-CD.md)（実行・認定）・[Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md)（証明配置）・[E2E execution](../verification/E2E-EXECUTION.md)（Browser実行最適化の詳細。上位契約を置換しない） |
 
 ## 設計変更の順序
 

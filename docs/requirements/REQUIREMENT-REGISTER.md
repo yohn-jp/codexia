@@ -453,7 +453,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Exact-run reference**: NOT_RUN
 **Comment**: Desktop web mapping exists; iOS implementation and physical-device acceptance remain unverified, so this cross-platform requirement is only partial.
 
-Desktop React WebとiOS SwiftUIはUIを共有せず、共通のCore/API・Revision・保存/復旧契約を満たす。Mobile Web/PWA作者UIは対象外
+作者用Desktop React Webの正式対応はWindows Chromium（Chrome/Edge）に限定する。DesktopとiOS SwiftUIはUIを共有せず、共通のCore/API・Revision・保存/復旧契約を満たす。Mobile Web/PWA作者UIは対象外。旧Mobile撤去の受入条件および独立した公開reader/外部認証契約は維持する
 
 **Relations**:
 
