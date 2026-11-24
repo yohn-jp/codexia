@@ -6,7 +6,7 @@ import { hasStandaloneOAuthIdentity, validateBackendIdentity } from '../../relea
 const sha256 = /^[a-f0-9]{64}$/u;
 const immutableImage = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 const checks = ['ownerLogin', 'passkey', 'oauth', 'manuscript', 'history', 'permissionDenial', 'accessBoundary'];
-const comparableIdentity = ['format', 'sourceSha', 'version', 'profile', 'apiEpoch', 'oauthConfigIdentity'];
+const comparableIdentity = ['format', 'sourceSha', 'version', 'profile', 'apiEpoch'];
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
@@ -54,7 +54,7 @@ export function assertPairedObservation({ edge, host, pinned, environment, now =
     pinned.frontend.apiEpoch === expected.apiEpoch && edge.backend?.name === 'codexia' &&
     ['version', 'profile', 'apiEpoch'].every(key => edge.backend[key] === expected[key]),
   'Public backend version does not match the pinned Full release');
-  requireCondition((pinned.standaloneOAuth === false ? !hasStandaloneOAuthIdentity(edge.backend) : hasStandaloneOAuthIdentity(edge.backend)),
+  requireCondition((pinned.protocol === 'legacy' ? !hasStandaloneOAuthIdentity(edge.backend) : hasStandaloneOAuthIdentity(edge.backend)),
     'Public backend OAuth contract differs from the reviewed release');
   requireCondition(immutableImage.test(pinned.image) && pinned.image === host.writer.image &&
     isDeepStrictEqual(expected, host.writer.identity) && host.writer.authMode === 'better-auth',

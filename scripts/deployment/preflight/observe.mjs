@@ -35,13 +35,13 @@ function candidateIdentity(backend, frontend, authSchemas) {
   return { backend: identity, image: backend.image, frontend: ui, authSchemas: [...new Set(authSchemas)].sort() };
 }
 
-function publicFrontendEvidence(value) {
+export function publicFrontendEvidence(value) {
   if (!value) return null;
   const { oauthConfigIdentity, ...rest } = frontendIdentity(value);
   parsePublicFrontendConfigIdentity(oauthConfigIdentity);
-  // This is an integrity fingerprint of validated public browser configuration,
-  // not a hash of a password, bearer credential or arbitrary identity string.
-  return { ...rest, oauthConfigSha256: oauthConfigIdentity === undefined ? null : digestEvidence(oauthConfigIdentity) };
+  // The exact archive digest or immutable Worker deployment binds these
+  // public settings. Keep only release identity fields in the plan evidence.
+  return rest;
 }
 
 function stateDatabase(database, target, intent) {

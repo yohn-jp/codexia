@@ -3,9 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
+import { assertFrontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { createCloudflareCutover } from '../../release/cutover/cloudflare.mjs';
 import { validateEpochCutoverRecoveryReceipt } from '../recovery/epoch-cutover.mjs';
-import { planFromObservations } from '../preflight/observe.mjs';
+import { planFromObservations, publicFrontendEvidence } from '../preflight/observe.mjs';
 import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
 import { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } from '../preflight/run.mjs';
 import { assertPairedObservation, digestEvidence } from './coordinator.mjs';
@@ -102,9 +103,9 @@ function pairInputs(deployment, artifacts, retained, current, references) {
   };
   const prior = {
     image: writer?.image ?? null, identity: writer?.identity ?? null,
-    frontend: network.frontend, workerVersion: network.deployment?.versionId ?? null,
+    frontend: publicFrontendEvidence(network.frontend), workerVersion: network.deployment?.versionId ?? null,
     containerId: writer?.containerId ?? null, unitSha256: writer?.quadletSha256?.slice(7) ?? null,
-    standaloneOAuth: network.backend?.standaloneOAuth ?? null,
+    protocol: network.backend?.standaloneOAuth === false ? 'legacy' : 'standalone',
     archiveSha256: network.deployment ? retained.priorArchiveSha256 : null,
   };
   requireCondition(rawHash.test(environment.ingressReviewSha256 ?? '') &&
@@ -114,7 +115,8 @@ function pairInputs(deployment, artifacts, retained, current, references) {
   'Independent ingress review, owner settings and retained prior archive evidence are required');
   const candidate = {
     image: candidateBackend.image, identity: candidateBackend.identity,
-    frontend: candidateFrontend.identity, frontendArtifact: candidateFrontend,
+    frontend: publicFrontendEvidence(candidateFrontend.identity),
+    frontendArtifact: { artifactDigest: candidateFrontend.artifactDigest },
     unitSha256: references?.candidate.unitSha256 ?? null,
     workerVersion: references?.candidate.workerVersion ?? null,
   };
@@ -191,10 +193,18 @@ export async function executePairCutover(operation, input, scratch) {
     return observation;
   };
   const verifyPair = async outcome => {
-    const [network, machine] = await Promise.all([edge.observe({ allowLegacyBackend: plan[outcome].standaloneOAuth === false }),
+    const [network, machine] = await Promise.all([edge.observe({ allowLegacyBackend: plan[outcome].protocol === 'legacy' }),
       ansible(scratch, inventory, 'cutover-observe.yml', {}, 'codexia_cutover_observation_file')]);
-    assertPairedObservation({ edge: network, host: machine, pinned: plan[outcome], environment: plan.environment });
-    return { edge: network, host: machine };
+    const edgeEvidence = { ...network, frontend: publicFrontendEvidence(network.frontend) };
+    if (outcome === 'candidate') {
+      assertFrontendOAuthConfigIdentity(network.frontend, env);
+      if (prior.workerVersion !== candidate.workerVersion) {
+        await edge.assertWorkerArtifact({ versionId: candidate.workerVersion,
+          artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest });
+      }
+    }
+    assertPairedObservation({ edge: edgeEvidence, host: machine, pinned: plan[outcome], environment: plan.environment });
+    return { edge: edgeEvidence, host: machine };
   };
   return advancePair({ plan, planSha256, request, host, edge, operation, verifyApproval, verifyIngress, verifyPair,
     admitFresh: async () => {

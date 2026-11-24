@@ -190,10 +190,11 @@ test('each present observation must have its own fresh canonical timestamp', () 
 });
 
 
-test('frontend evidence binds validated public settings and rejects arbitrary identity contents', () => {
+test('frontend evidence binds immutable deployment and archive while validating public settings', () => {
   const baseline = fixture();
   const before = planFromObservations(baseline);
   const changed = fixture();
+  changed.edge.deployment = { versionId: 'version-older' };
   changed.edge.frontend = { ...changed.edge.frontend, version: '0.9.0',
     oauthConfigIdentity: frontendOAuthConfigIdentity({ ...publicSettings, VITE_CODEXIA_OAUTH_CLIENT_ID: 'other-public-client' }) };
   const after = planFromObservations(changed);

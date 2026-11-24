@@ -236,13 +236,18 @@ export function createCloudflareCutover({
     return observed;
   }
 
-  async function assertStaged({ versionId, artifactDigest }) {
+  async function assertWorkerArtifact({ versionId, artifactDigest }) {
     const tag = candidateTag(artifactDigest);
-    const [version, deployment] = await Promise.all([readVersion(versionId), observeDeployment({ allowAbsent: true }), assertPrivateWorker()]);
+    const [version] = await Promise.all([readVersion(versionId), assertPrivateWorker()]);
     assert.ok(version.annotations?.['workers/tag'] === tag, 'Candidate Worker version tag does not match the verified frontend archive');
-    assert.ok(version.metadata?.hasPreview !== true && versionId !== deployment?.versionId,
-      'Candidate Worker version must be staged without live traffic or a public preview');
+    assert.ok(version.metadata?.hasPreview !== true, 'Candidate Worker must not have a public preview');
     return { versionId, tag };
+  }
+
+  async function assertStaged(input) {
+    const [staged, deployment] = await Promise.all([assertWorkerArtifact(input), observeDeployment({ allowAbsent: true })]);
+    assert.notEqual(staged.versionId, deployment?.versionId, 'Candidate Worker must be staged without live traffic');
+    return staged;
   }
 
   async function stage({ previousVersionId, artifactDigest }) {
@@ -481,6 +486,6 @@ export function createCloudflareCutover({
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, fence: () => setFence(true),
+  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
     unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy };
 }
