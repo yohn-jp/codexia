@@ -225,6 +225,7 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],
     ['docs/design/SCREEN-CONTROL-CATALOG.md', null],
+    ['docs/design/INTERACTION-CONTRACT.md', null],
     ['app/src/App.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
     ['deploy/backup/backup.sh', 'db-contract'],
@@ -453,12 +454,12 @@ test('architecture design documents select G5 in the existing Verify unit matrix
     'docs/architecture/THREAT-MODEL.md',
     'docs/verification/ARCHITECTURE-ATLAS.md',
   ]);
-  assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5']);
-  assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests']);
+  assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
+  assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests', 'types-trace']);
   const outputs = verificationPlanOutputs(selected);
   assert.deepEqual(JSON.parse(outputs.unit), ['architecture']);
-  assert.deepEqual(JSON.parse(outputs.types), ['tests']);
-  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5']);
+  assert.deepEqual(JSON.parse(outputs.types), ['tests', 'trace']);
+  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
   assert.deepEqual((await plan(['docs/security/authorization.md'])).tasks, ['coverage', 'architecture-g5']);
   assert.deepEqual((await plan(['docs/deployment/IAC.md'])).tasks, ['unit-root', 'coverage', 'architecture-g5']);
 
@@ -543,6 +544,7 @@ test('known operational inputs retain root proof without unrelated browser or OC
       '.github/workflows/backend-deployment-handoff.yml', '.github/workflows/push-backup.yml',
       'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/deploy.yml',
       'deploy/ansible/restore-drill.yml', 'deploy/backup/s3_transfer.py',
+      'docs/deployment/BACKUP.md', 'docs/deployment/README.md',
     ].includes(file)) expected.push('requirements-trace');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);

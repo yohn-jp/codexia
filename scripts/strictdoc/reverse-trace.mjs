@@ -173,8 +173,8 @@ function isExactSurfaceReference(value, surface) {
   const surfaceIds = Array.isArray(value.surfaceIdentifiers) ? value.surfaceIdentifiers : [];
   if (surfaceIds.some((item) => item && item.id === surface.id && surfaceKindMatches(item.kind, surface.kind))) return true;
   const typedKeys = [
-    ['operationId', 'httpOperation'], ['routeId', 'httpRuntimeRoute'], ['toolName', 'mcpTool'],
-    ['objectId', 'databaseObject'], ['controlId', 'uiControl'], ['surfaceId', surface.kind],
+    ['routeId', 'routeId'], ['toolName', 'toolName'],
+    ['objectId', 'objectId'], ['controlId', 'controlId'], ['surfaceId', 'surfaceId'],
   ];
   return typedKeys.some(([key, kind]) => value[key] === surface.id && surfaceKindMatches(kind, surface.kind));
 }
@@ -188,7 +188,10 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
   const violations = [];
   const inventoryEntries = Array.isArray(inventory) ? inventory : inventory.classifications ?? [];
   const registered = [...obligations];
-  const admittedHttpOperations = new Set(surfaces.filter((surface) => ['httpOperation', 'httpExternalOperation'].includes(surface.kind)).map((surface) => surface.id));
+  const admittedHttpOperations = new Set(surfaces.filter(surface =>
+    (surface.kind === 'httpOperation' && surface.classification === 'current') ||
+    surface.kind === 'httpExternalOperation'
+  ).map(surface => surface.id));
 
   for (const surface of surfaces) {
     const references = registered.filter((obligation) => {
@@ -198,7 +201,7 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
     });
     const kindMatches = inventoryEntries.filter((entry) => entry.id === surface.id || entry.id === `${surface.kind} ${surface.id}` || (surface.kind === 'httpRuntimeRoute' && entry.id === surface.id));
     const provenance = surface.provenance ?? 'Source discovery provided without provenance.';
-    if (surface.kind === 'httpRuntimeRoute' && (surface.classification === 'unadmitted' || (!admittedHttpOperations.has(surface.id) && surface.classification !== 'delegated-better-auth-metadata'))) {
+    if (surface.kind === 'httpRuntimeRoute' && (surface.classification === 'unadmitted' || !admittedHttpOperations.has(surface.id))) {
       violations.push(`Runtime HTTP operation is absent from the admitted HTTP inventory: ${surface.id} (${surface.source?.path ?? 'source unknown'})`);
       gaps.push({ kind: 'DEVIATION', surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, reason: 'Runtime HTTP operation is absent from the admitted HTTP inventory.' });
     }

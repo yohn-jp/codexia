@@ -84,3 +84,14 @@ test('openAPI deviations and unavailable discovery inputs stay visible', () => {
   assert.ok(result.gaps.some((gap) => gap.kind === 'UNVERIFIED'));
   assert.ok(!result.rows.some((row) => row.status === 'VERIFIED'));
 });
+
+test('a target API does not admit registration as a current route', () => {
+  const id = 'GET /api/console/backups/config';
+  const source = { path: 'packages/api/src/server.ts' };
+  const result = buildReverseTrace({ discovered: [
+    { kind: 'httpOperation', id, classification: 'target', source },
+    { kind: 'httpRuntimeRoute', id, source },
+  ] });
+  assert.ok(result.rows.some(row => row.surface.kind === 'httpOperation' && row.status === 'BLOCKED'));
+  assert.ok(result.violations.some(violation => violation.includes(id)));
+});

@@ -77,7 +77,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       const separator = item.indexOf('=');
       const kind = separator > 0 ? item.slice(0, separator) : '';
       const id = separator > 0 ? item.slice(separator + 1) : '';
-      if (!['httpOperation', 'operationId', 'routeId', 'toolName', 'objectId', 'controlId', 'surfaceId', 'identifier'].includes(kind) || !id) {
+      if (!['httpOperation', 'routeId', 'toolName', 'objectId', 'controlId', 'surfaceId', 'identifier'].includes(kind) || !id) {
         violations.push(`${obligation.UID} has invalid surface identifier ${item}`);
         return null;
       }

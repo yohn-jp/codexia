@@ -112,11 +112,11 @@ test('a deployment document checked by root tests is included in the task source
   assert.notEqual(changed.source, original.source);
 });
 
-test('UI authority changes invalidate the trace proof source without changing unrelated task input', async t => {
+test('design authority changes invalidate the trace proof source without changing unrelated task input', async t => {
   const root = await fixture(t);
   const before = { root, sha: await git(root, 'rev-parse', 'HEAD'), runtime };
   await mkdir(path.join(root, 'docs/design'), { recursive: true });
-  await writeFile(path.join(root, 'docs/design/SCREEN-CONTROL-CATALOG.md'), '# Screen control authority\n');
+  await writeFile(path.join(root, 'docs/design/INTERACTION-CONTRACT.md'), '# Interaction authority\n');
   await git(root, 'add', '.');
   await git(root, 'commit', '-qm', 'change UI trace authority');
   const after = { ...before, sha: await git(root, 'rev-parse', 'HEAD') };
