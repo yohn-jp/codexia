@@ -130,7 +130,10 @@ async function main() {
 
   for (const step of createBuildCommands(profileName, profile, { includeUi: !serverOnly })) run(step.command, step.args, step.env);
   try {
-    run('pnpm', ['--filter', packageManifest.name, 'deploy', '--prod', '--frozen-lockfile', '--prefer-offline', outputDirectory]);
+    const storeArgs = process.env.CODEXIA_PNPM_STORE_DIR
+      ? ['--store-dir', process.env.CODEXIA_PNPM_STORE_DIR]
+      : [];
+    run('pnpm', ['--filter', packageManifest.name, 'deploy', '--prod', '--frozen-lockfile', '--prefer-offline', ...storeArgs, outputDirectory]);
     await cp(path.join(root, 'profiles/launch.mjs'), path.join(outputDirectory, 'launch.mjs'));
     if (!serverOnly) await cp(path.join(root, 'app/dist'), path.join(outputDirectory, 'app/dist'), { recursive: true });
     run(process.execPath, [

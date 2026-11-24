@@ -6,7 +6,7 @@ ARG PROFILE=core
 FROM ${NODE_IMAGE} AS pnpm-base
 ARG PNPM_VERSION
 ENV CI=true \
-    npm_config_store_dir=/pnpm/store
+    CODEXIA_PNPM_STORE_DIR=/pnpm/store
 RUN corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /opt/codexia
@@ -15,12 +15,12 @@ FROM pnpm-base AS source
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Keep the package store local to the builder, not in large exported OCI layers.
 RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch
+    pnpm fetch --store-dir=/pnpm/store
 COPY . ./
 # A local cache mount may be empty after garbage collection. Frozen install
 # can obtain missing locked packages; never require an out-of-band store.
 RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --prefer-offline --frozen-lockfile --package-import-method=copy
+    pnpm install --prefer-offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE
