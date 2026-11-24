@@ -146,6 +146,7 @@
     "scripts/release/components/source-gate.test.mjs"
   ],
   "backendPullRequestOnly": [
+    "scripts/shared/python-env.sh",
     ".github/workflows/push-app-lifecycle.yml",
     "deploy/ansible/**",
     "deploy/backup/**",

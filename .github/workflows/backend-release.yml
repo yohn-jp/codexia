@@ -77,6 +77,7 @@ on:
       - scripts/release/components/impact.test.mjs
       - scripts/release/components/source-gate.mjs
       - scripts/release/components/source-gate.test.mjs
+      - scripts/shared/python-env.sh
       - .github/workflows/push-app-lifecycle.yml
       - deploy/ansible/**
       - deploy/backup/**
