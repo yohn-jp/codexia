@@ -209,6 +209,7 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+          CODEXIA_CUTOVER_PRESERVATION: ${{ secrets.CODEXIA_CUTOVER_PRESERVATION }}
         run: node scripts/deployment/preflight/run.mjs plan
       - name: Retain redacted evidence, including a safe stop
         if: always()

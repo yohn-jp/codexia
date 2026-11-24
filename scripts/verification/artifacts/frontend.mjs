@@ -423,7 +423,7 @@ async function writePromotionOutputs(file,output){
 }
 
 /** Read the independently built main archive when ordinary deployment is paused. */
-export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch = 2 } = {}) {
+export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch } = {}) {
   assert.ok(Number.isSafeInteger(expectedEpoch) && expectedEpoch > 0, 'Expected frontend API epoch is invalid');
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Cutover frontend repository mismatch');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover frontend verification requires main');

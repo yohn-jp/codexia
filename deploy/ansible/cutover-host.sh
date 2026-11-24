@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rootless host portion of the separately admitted API epoch cutover.
+# Rootless host portion of the separately admitted pair cutover.
 set -Eeuo pipefail
 umask 077
 
@@ -15,13 +15,14 @@ lock_mode=--exclusive
 flock "$lock_mode" --nonblock 9 ||
   { echo 'Another Codexia operation holds the deployment host lock' >&2; exit 75; }
 
-exec python3 - "$@" <<'PY'
+exec python3 - "$(dirname -- "${BASH_SOURCE[0]}")" "$@" <<'PY'
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import runpy
 import stat
 import subprocess
 import sys
@@ -43,6 +44,10 @@ DATABASE = "codexia-db"
 MAINTENANCE = "codexia-cutover-maintenance"
 ACTIVE_UNIT = QUADLETS / f"{API}.container"
 PRIOR_UNIT = STATE / "cutover-prior-api.container"
+API_WANTS = QUADLETS / "default.target.wants/codexia-api.service"
+TUNNEL_WANTS = QUADLETS / "default.target.wants/codexia-tunnel.service"
+HOST_TOOLS = Path(sys.argv.pop(1))
+load_cutover_migration = runpy.run_path(str(HOST_TOOLS / "cutover-migrations.py"))["load_cutover_migration"]
 PODMAN = ("podman",)
 SYSTEMCTL = ("systemctl", "--user")
 API_DIST = "/app/node_modules/@codexia/api/dist"
@@ -52,6 +57,7 @@ PLAN_FIELDS = (
     "planSha256", "sourceHostId", "databaseSystemIdentifier", "priorImage",
     "candidateImage", "priorIdentity", "candidateIdentity", "priorContainerId",
     "priorUnitSha256", "candidateUnit", "candidateUnitSha256", "notAfter",
+    "migration", "settingsSha256", "ownerBindingSha256",
 )
 BACKUP_FIELDS = ("checksumManifestSha256", "databaseFingerprint", "historyFingerprint")
 BLOCK_DROPIN = b"[Unit]\nConditionPathExists=/dev/null/codexia-cutover-blocked\n"
@@ -214,14 +220,14 @@ def host_identity():
     return sha256(machine_id.encode())
 
 
-def backend_identity(value, epoch):
+def backend_identity(value):
     require(isinstance(value, dict) and value.get("format") == "codexia-backend-identity/v1" and
             value.get("profile") == "full" and value.get("platform") == "linux/amd64" and
-            type(value.get("apiEpoch")) is int and value["apiEpoch"] == epoch and
-            type(value.get("persistenceFormat")) is int and value["persistenceFormat"] == epoch and
+            type(value.get("apiEpoch")) is int and value["apiEpoch"] > 0 and
+            type(value.get("persistenceFormat")) is int and value["persistenceFormat"] > 0 and
             matches(r"[0-9a-f]{40}", value.get("sourceSha")) and matches(r"(0|[1-9]\d*)(\.(0|[1-9]\d*)){2}", value.get("version")) and
             matches(r"sha256:[0-9a-f]{64}", value.get("migrationFingerprint")),
-            "Only the pinned Full API epoch 1/format 1 to epoch 2/format 2 cutover is supported")
+            "Invalid pinned Full image identity")
 
 
 def approved_deadline(plan):
@@ -235,21 +241,46 @@ def require_current_window(plan):
     require(datetime.now(timezone.utc) <= approved_deadline(plan), "Approved maintenance window has ended")
 
 
+def changes_backend(plan):
+    return plan["priorImage"] != plan["candidateImage"]
+
+
+def migration_handler(plan):
+    return load_cutover_migration(plan["migration"], HOST_TOOLS, require)
+
+
 def validate_plan(request):
     require(all(key in request for key in PLAN_FIELDS), "Cutover plan is incomplete")
     approved_deadline(request)
-    for key in ("planSha256", "sourceHostId", "priorUnitSha256", "priorContainerId", "candidateUnitSha256"):
+    for key in ("planSha256", "sourceHostId", "candidateUnitSha256", "settingsSha256"):
         require(matches(HASH, request[key]), f"Invalid cutover plan field {key}")
-    require(matches(IMMUTABLE_IMAGE, request["priorImage"]) and
-            matches(IMMUTABLE_IMAGE, request["candidateImage"]) and
-            request["priorImage"] != request["candidateImage"], "Cutover requires two distinct immutable Full images")
-    backend_identity(request["priorIdentity"], 1)
-    backend_identity(request["candidateIdentity"], 2)
-    require(request["priorIdentity"]["migrationFingerprint"] == request["candidateIdentity"]["migrationFingerprint"],
-            "This cutover requires an unchanged PostgreSQL schema migration ledger")
+    require(matches(r"sha256:" + HASH, request["ownerBindingSha256"]), "Invalid cutover owner binding")
+    require(matches(IMMUTABLE_IMAGE, request["candidateImage"]), "Invalid candidate immutable Full image")
+    backend_identity(request["candidateIdentity"])
     candidate = Path(request["candidateUnit"])
-    require(candidate.is_absolute() and candidate.parent == STATE and candidate.name.startswith("candidate-") and
-            candidate.suffix == ".container", "The candidate Quadlet must be staged in the private deployment state")
+    if changes_backend(request):
+        require(candidate.is_absolute() and candidate.parent == STATE and candidate.name.startswith("candidate-") and
+                candidate.suffix == ".container", "The candidate Quadlet must be staged in the private deployment state")
+    else:
+        require(candidate == ACTIVE_UNIT and request["candidateIdentity"] == request["priorIdentity"] and
+                request["candidateUnitSha256"] == request["priorUnitSha256"], "Retained API identity must match the prior release")
+    prior = request["priorIdentity"]
+    target = request["candidateIdentity"]
+    migration = migration_handler(request)
+    if request["priorImage"] is None:
+        require(all(request[key] is None for key in ("priorIdentity", "priorUnitSha256", "priorContainerId")) and
+                migration is None, "A first activation must have no prior API or data conversion")
+    else:
+        require(matches(IMMUTABLE_IMAGE, request["priorImage"]) and matches(HASH, request["priorUnitSha256"]) and
+                matches(HASH, request["priorContainerId"]), "Invalid prior immutable Full release")
+        backend_identity(prior)
+        if migration is None:
+            require(prior["persistenceFormat"] == target["persistenceFormat"] and
+                    prior["migrationFingerprint"] == target["migrationFingerprint"],
+                    "No migration is certified for the changed persistence format or PostgreSQL schema ledger")
+        else:
+            require(changes_backend(request), "Data conversion requires a changed API image")
+            migration["validate"](prior, target, require)
     return {key: request[key] for key in PLAN_FIELDS}
 
 
@@ -257,6 +288,52 @@ def validate_host(plan):
     require(plan["sourceHostId"] == host_identity() and plan["databaseSystemIdentifier"] == cluster_identity(),
             "Cutover plan does not match this host or PostgreSQL cluster")
     service_origin(TUNNEL)
+
+
+def stage(request):
+    require(not present(JOURNAL), "Cutover staging cannot change assets for a pending transaction")
+    require(matches(IMMUTABLE_IMAGE, request["candidateImage"]) and
+            matches(HASH, request["settingsSha256"]) and
+            matches(r"sha256:" + HASH, request["ownerBindingSha256"]), "Invalid candidate staging evidence")
+    backend_identity(request["candidateIdentity"])
+    validate_host(request)
+    validate_activation_links()
+    settings_dir = HOME_DIR / ".config/codexia-auth"
+    settings_path = settings_dir / f"runtime-{request['settingsSha256']}.env"
+    if request["priorImage"] is None:
+        require_first_activation(request)
+        source = settings_dir / "runtime.env"
+    else:
+        current = active_api(request["priorImage"], request["priorIdentity"])
+        require(current["containerId"] == request["priorContainerId"], "Admitted prior API container changed before staging")
+        source, prior_settings = setting_path(ACTIVE_UNIT, request["priorImage"], request["priorUnitSha256"])
+        require(prior_settings == request["settingsSha256"], "Staging may not change the installed auth settings")
+    contents = regular(source, private=True).read_bytes()
+    require(sha256(contents) == request["settingsSha256"], "Staging auth settings differ from the admitted settings")
+    require_owner(request, source)
+    template = regular(Path(request["stageUnit"]), private=True).read_text()
+    unit = template.replace("CODEXIA_BACKEND_IMAGE", request["candidateImage"]).replace("CODEXIA_BACKEND_PROFILE", "full")
+    unit = unit.replace("/home/codexia/.config/codexia-auth/runtime-", str(settings_dir / "runtime-"))
+    unit = unit.replace("AUTH_SETTINGS_DIGEST_PLACEHOLDER", request["settingsSha256"])
+    if not any(line.startswith("CODEXIA_OIDC_ISSUER=") for line in contents.decode().splitlines()):
+        unit = unit.replace("Secret=codexia-oidc-client-secret,type=env,target=CODEXIA_OIDC_CLIENT_SECRET\n", "")
+    _, auth_hash = parse_unit_settings(unit, request["candidateImage"])
+    require(auth_hash == request["settingsSha256"], "Staged Quadlet does not reference the admitted settings")
+    candidate = STATE / f"candidate-cutover-{request['candidateImage'].split('@sha256:')[1]}.container"
+    rendered = unit.encode()
+    unit_hash = sha256(rendered)
+    validate_plan({**request, "candidateUnit": str(candidate), "candidateUnitSha256": unit_hash})
+    require_current_window(request)
+    output((*PODMAN, "pull", request["candidateImage"]), "Could not stage the certified Full image")
+    require(image_identity(request["candidateImage"]) == request["candidateIdentity"],
+            "Pinned OCI identity differs from the admitted image")
+    if request["priorImage"] is None:
+        if present(settings_path):
+            require(regular(settings_path, private=True).read_bytes() == contents, "Existing auth settings snapshot changed")
+        else:
+            durable_write(settings_path, contents)
+    durable_write(candidate, rendered)
+    emit({"candidateUnitSha256": unit_hash})
 
 
 def image_identity(image):
@@ -271,7 +348,14 @@ def image_identity(image):
 def setting_path(unit, expected_image, expected_sha):
     contents = regular(unit).read_bytes()
     require(sha256(contents) == expected_sha, "The admitted API Quadlet changed")
-    lines = contents.decode().splitlines()
+    auth_file, settings_hash = parse_unit_settings(contents.decode(), expected_image)
+    require(sha256(regular(auth_file, private=True).read_bytes()) == settings_hash,
+            "The retained auth settings no longer match the API Quadlet")
+    return auth_file, settings_hash
+
+
+def parse_unit_settings(contents, expected_image):
+    lines = contents.splitlines()
     for key, expected in (("Image=", expected_image),
                           ("Environment=CODEXIA_AUTH_MODE=", "better-auth"),
                           ("Environment=CODEXIA_DATABASE_MIGRATE_ON_START=", "0")):
@@ -281,10 +365,42 @@ def setting_path(unit, expected_image, expected_sha):
                       if line.startswith("Environment=CODEXIA_AUTH_SETTINGS_SHA256=")]
     require(len(setting_hashes) == 1 and matches(HASH, setting_hashes[0]), "API Quadlet has no pinned auth settings")
     auth_file = HOME_DIR / ".config/codexia-auth" / f"runtime-{setting_hashes[0]}.env"
-    require([line for line in lines if line.startswith("EnvironmentFile=")] == [f"EnvironmentFile={auth_file}"] and
-            sha256(regular(auth_file, private=True).read_bytes()) == setting_hashes[0],
+    require([line for line in lines if line.startswith("EnvironmentFile=")] == [f"EnvironmentFile={auth_file}"],
             "The retained auth settings no longer match the API Quadlet")
     return auth_file, setting_hashes[0]
+
+
+def require_owner(plan, auth_file):
+    subjects = [line.partition("=")[2] for line in regular(auth_file, private=True).read_text().splitlines()
+                if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+    require(len(subjects) == 1 and "sha256:" + sha256(subjects[0].encode()) == plan["ownerBindingSha256"],
+            "Better Auth settings no longer identify the admitted owner")
+    owner = plan["ownerBindingSha256"].removeprefix("sha256:")
+    require(postgres_read(f'''SELECT EXISTS (SELECT FROM codexia_auth."user"
+          WHERE encode(sha256(convert_to(id::text, 'UTF8')), 'hex') = '{owner}')''') == "t",
+            "The admitted Better Auth owner is missing from the database")
+
+
+def require_first_activation(plan):
+    clean = HOME_DIR / ".local/bin/codexia-require-clean-api-target"
+    require(os.access(regular(clean), os.X_OK), "Canonical clean API slot verifier is unavailable")
+    output((str(clean),), "First activation requires a verified clean API slot")
+    marker = regular(STATE / "owner-setup.installation", private=True)
+    regular(STATE / "owner-setup.promoted", private=True)
+    require(marker.read_text().strip() == plan["databaseSystemIdentifier"],
+            "Owner setup was not prepared for the approved database cluster")
+
+
+def validate_activation_links(install=False):
+    for link, service_name in ((API_WANTS, API), (TUNNEL_WANTS, TUNNEL)):
+        target = f"../{service_name}.service"
+        if present(link):
+            require(link.is_symlink() and os.readlink(link) == target, "Unexpected systemd activation link")
+        elif install:
+            link.parent.mkdir(mode=0o755, exist_ok=True)
+            link.symlink_to(target)
+            fsync_dir(link.parent)
+            fsync_dir(QUADLETS)
 
 
 def require_release(path, image, identity, auth_hash):
@@ -303,19 +419,25 @@ def guard_installed(name):
     return present(path) and regular(path, private=True).read_bytes() == BLOCK_DROPIN
 
 
-def change_guard(name, enabled):
+def save_guard(name):
     path = guard_path(name)
-    if present(path):
-        require(guard_installed(name), "The persistent cutover service guard has unexpected content")
-        if not enabled:
-            path.unlink()
-            fsync_dir(path.parent)
-    elif enabled:
+    if not present(path):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         durable_write(path, BLOCK_DROPIN)
         # Persist the directory entry even when the drop-in directory is new.
         for parent in (path.parent.parent, SYSTEMD.parent, SYSTEMD.parent.parent):
             fsync_dir(parent)
+    require(guard_installed(name), "The persistent cutover service guard has unexpected content")
+
+
+def change_guard(name, enabled):
+    path = guard_path(name)
+    if enabled:
+        save_guard(name)
+    elif present(path):
+        require(guard_installed(name), "The persistent cutover service guard has unexpected content")
+        path.unlink()
+        fsync_dir(path.parent)
     output((*SYSTEMCTL, "daemon-reload"), "Could not reload persistent cutover service guards")
     guarded = str(path) in property_of(name, "DropInPaths").split()
     require(guarded == enabled, "systemd did not load the intended cutover service guard")
@@ -332,6 +454,9 @@ def history_containers():
 
 
 def close_service(name):
+    if name == API and not present(ACTIVE_UNIT):
+        require_inactive(API)
+        return
     try:
         change_guard(name, True)
     finally:
@@ -493,6 +618,7 @@ def wait_for_healthy_api():
 
 
 def activate(unit, image, identity):
+    save_guard(API)
     durable_write(ACTIVE_UNIT, regular(unit).read_bytes(), mode=0o644)
     change_guard(API, False)
     service("reset-failed", API)
@@ -511,37 +637,98 @@ def transition(journal, phase, **fields):
 
 
 def phase_status(journal):
-    return {"status": journal["phase"], "phaseChangedAt": journal["phaseChangedAt"]}
+    return {"status": journal["phase"], "phaseChangedAt": journal["phaseChangedAt"],
+            **{key: journal[key] for key in ("tunnelOpenedAt",) if key in journal}}
 
 
-def checkpoint(plan, journal):
-    require_current_window(plan)
-    if journal is None:
+def validate_admission(plan, reactivation=False):
+    if reactivation:
+        require(plan["priorImage"] is None and guard_installed(TUNNEL) and
+                (not present(guard_path(API)) or guard_installed(API)),
+                "Reactivation requires the guarded first activation slot")
+        require_inactive(API)
+        require_inactive(TUNNEL)
+    else:
         for name in (API, TUNNEL):
             require(not present(guard_path(name)), "Unexpected persistent cutover service guard")
+    validate_activation_links()
+    candidate = Path(plan["candidateUnit"])
+    candidate_settings, candidate_auth_hash = setting_path(candidate, plan["candidateImage"], plan["candidateUnitSha256"])
+    require(candidate_auth_hash == plan["settingsSha256"], "Cutover candidate must retain the admitted auth settings")
+    require_owner(plan, candidate_settings)
+    require(image_identity(plan["candidateImage"]) == plan["candidateIdentity"], "Pinned candidate OCI identity changed")
+    if plan["priorImage"] is None:
+        require_first_activation(plan)
+        require(sha256(regular(HOME_DIR / ".config/codexia-auth/runtime.env", private=True).read_bytes()) == candidate_auth_hash,
+                "Prepared owner handoff settings changed")
+        require_inactive(TUNNEL)
+        read_only_database_check(plan["candidateImage"], plan["candidateIdentity"], candidate_settings)
+    else:
         live = active_api(plan["priorImage"], plan["priorIdentity"])
         require(live["containerId"] == plan["priorContainerId"], "The admitted prior API container changed")
         require(property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL), "Prior Tunnel is not running")
         prior_settings, prior_auth_hash = setting_path(ACTIVE_UNIT, plan["priorImage"], plan["priorUnitSha256"])
         require_release(RELEASE, plan["priorImage"], plan["priorIdentity"], prior_auth_hash)
-        _, candidate_auth_hash = setting_path(Path(plan["candidateUnit"]), plan["candidateImage"], plan["candidateUnitSha256"])
         require(candidate_auth_hash == prior_auth_hash, "The cutover must retain the installed auth settings")
-        require(image_identity(plan["priorImage"]) == plan["priorIdentity"] and
-                image_identity(plan["candidateImage"]) == plan["candidateIdentity"], "Pinned OCI identities disagree with the plan")
-        require(database_maintenance(plan["priorImage"], "--check", ledger=True) ==
-                plan["priorIdentity"]["migrationFingerprint"], "Prior PostgreSQL migration ledger changed")
-        auth_cli(plan["priorImage"], prior_settings)
-        destination = os.environ["CODEXIA_BACKUP_DESTINATION"]
-        backup_command("validate-destination", destination)
-        require_current_window(plan)
+        read_only_database_check(plan["priorImage"], plan["priorIdentity"], prior_settings)
+    if changes_backend(plan):
+        backup_command("validate-destination", os.environ["CODEXIA_BACKUP_DESTINATION"])
+    require_current_window(plan)
+
+
+def admit(plan, journal):
+    require_current_window(plan)
+    if journal is not None:
+        require(journal["phase"] in ("intent", "quiescing", "checkpointed"), "Cutover already passed admission")
+        if journal["phase"] == "intent":
+            validate_admission(plan)
+        return journal
+    if present(TERMINAL):
+        require(data(TERMINAL, private=True)["planSha256"] != plan["planSha256"], "Cutover plan already completed")
+    validate_admission(plan)
+    if plan["priorImage"] is not None and changes_backend(plan):
         durable_write(PRIOR_UNIT, ACTIVE_UNIT.read_bytes())
         durable_write(PRIOR_RELEASE, RELEASE.read_bytes())
-        journal = {"format": "codexia-cutover-host/v1", "plan": plan, "requiresRestore": False}
-        transition(journal, "intent")
-    require(journal["phase"] in ("intent", "checkpointed"), "Cutover cannot restage a checkpoint in this phase")
+    journal = {"format": "codexia-cutover-host/v1", "plan": plan, "requiresRestore": False}
+    transition(journal, "intent")
+    return journal
+
+
+def read_only_database_check(image, identity, settings):
+    require(database_maintenance(image, "--check", ledger=True) == identity["migrationFingerprint"],
+            "Live PostgreSQL ledger does not match the exact release identity")
+    auth_cli(image, settings)
+
+
+def require_retained_pair(plan):
+    live = active_api(plan["priorImage"], plan["priorIdentity"])
+    require(live["containerId"] == plan["priorContainerId"], "Retained API container changed during cutover")
+    settings, settings_sha = setting_path(ACTIVE_UNIT, plan["priorImage"], plan["priorUnitSha256"])
+    require(settings_sha == plan["settingsSha256"], "Retained API auth settings changed during cutover")
+    require_release(RELEASE, plan["priorImage"], plan["priorIdentity"], settings_sha)
+    require_owner(plan, settings)
+    read_only_database_check(plan["priorImage"], plan["priorIdentity"], settings)
+    require(property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL), "Retained Tunnel is not running")
+
+
+def checkpoint(plan, journal, request):
+    restarting = journal is not None and journal["phase"] == "safe-stopped"
+    if restarting:
+        validate_admission(plan, reactivation=True)
+        if "backupDirectory" in journal:
+            verify_backup(journal)
+    else:
+        journal = admit(plan, journal)
+    if not changes_backend(plan):
+        require_retained_pair(plan)
+        transition(journal, "checkpointed")
+        emit(phase_status(journal))
+        return
     try:
-        quiesce()
         if journal["phase"] == "intent":
+            transition(journal, "quiescing")
+        quiesce()
+        if journal["phase"] == "quiescing" or restarting:
             destination = Path(os.environ["CODEXIA_BACKUP_DESTINATION"])
             report = backup_command("backup-locked", str(destination), os.environ["CODEXIA_BACKUP_RECIPIENT"],
                                     "--approved", "--lock-file", str(LOCK), "--lock-fd", "9")
@@ -554,6 +741,14 @@ def checkpoint(plan, journal):
                     "Canonical backup did not publish an immutable checkpoint")
             result = {"backupDirectory": str(artifact), "checksumManifestSha256": manifest, **fingerprint()}
             verify_backup(result)
+            if restarting:
+                require_current_window(plan)
+                journal.pop("recoveryStartedAt", None)
+                journal.pop("recoveryReceiptSha256", None)
+                result.update(reactivationWindow=request.get("reactivationWindow"),
+                              retainedCandidateWorker=request.get("retainedCandidateWorker") is True,
+                              reactivationStartedAt=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                              requiresRestore=False)
             transition(journal, "checkpointed", **result)
         verify_backup(journal)
         verified_fingerprints(journal)
@@ -570,6 +765,14 @@ def match_backup(request, journal):
 
 def apply(request, plan, journal):
     require_current_window(plan)
+    if not changes_backend(plan):
+        require(journal["phase"] in ("checkpointed", "candidate-ready", "candidate-tunnel"),
+                "Retained API is outside the approved checkpoint")
+        require_retained_pair(plan)
+        if journal["phase"] == "checkpointed":
+            transition(journal, "candidate-ready")
+        emit(phase_status(journal))
+        return
     match_backup(request, journal)
     receipt = request.get("recoveryReceiptSha256")
     require(matches(HASH, receipt), "An independently approved recovery receipt is required")
@@ -587,21 +790,17 @@ def apply(request, plan, journal):
         verified_fingerprints(journal)
         auth_file, _ = setting_path(candidate, image, plan["candidateUnitSha256"])
         require(image_identity(image) == identity, "Staged OCI identity changed after rehearsal")
-        require(database_maintenance(image, "--check", ledger=True) == identity["migrationFingerprint"],
-                "Candidate migration ledger differs from the exact installed PostgreSQL ledger")
-        auth_cli(image, auth_file)
-        database_pending = database_maintenance(image, "--check") == 2
-        history_pending = history_maintenance(image, "--check") == 2
+        require_owner(plan, auth_file)
+        read_only_database_check(image, identity, auth_file)
+        migration = migration_handler(plan)
+        pending = migration["prepare"](image, database_maintenance, history_maintenance) if migration else None
         # Record the possible DB/history mutation before the first write or
         # candidate start. Either can change persisted state despite failure.
         require_current_window(plan)
-        transition(journal, "converting", requiresRestore=True, recoveryReceiptSha256=receipt)
-        if database_pending:
-            database_maintenance(image, "--apply")
-        if history_pending:
-            history_maintenance(image, "--apply")
-        require(database_maintenance(image, "--check") == 0 and history_maintenance(image, "--check") == 0,
-                "Post-conversion database or history verification still reports unfinished maintenance")
+        transition(journal, "converting" if migration else "activating",
+                   requiresRestore=True, recoveryReceiptSha256=receipt)
+        if migration:
+            migration["apply"](pending, image, database_maintenance, history_maintenance, require)
         require_inactive(TUNNEL)
         require_inactive(API)
         validate_host(plan)
@@ -614,14 +813,63 @@ def apply(request, plan, journal):
     emit(phase_status(journal))
 
 
-def recover_quiesce(journal):
+def recover_quiesce(plan, journal):
+    require(journal["phase"] in ("intent", "quiescing", "checkpointed", "converting", "activating",
+                                "candidate-ready", "candidate-tunnel", "prior-ready", "prior-tunnel", "recovering", "safe-stopped"),
+            "This checkpoint does not permit rollback after possible publication")
+    if journal["phase"] == "safe-stopped":
+        require_inactive(TUNNEL)
+        require_inactive(API)
+        emit(phase_status(journal))
+        return
+    if journal["phase"] in ("prior-ready", "prior-tunnel"):
+        journal.pop("recoveryStartedAt", None)
     transition(journal, "recovering")
-    quiesce()
+    if changes_backend(plan):
+        quiesce()
+    else:
+        require_retained_pair(plan)
     emit({**phase_status(journal), "requiresRestore": journal["requiresRestore"], "recoveryStartedAt": journal["recoveryStartedAt"],
           **{key: journal.get(key) for key in BACKUP_FIELDS}})
 
 
 def recover(request, plan, journal):
+    if plan["priorImage"] is None:
+        require(journal["phase"] in ("recovering", "safe-stopped"), "Quiesce the first activation before safe stop")
+        quiesce()
+        require(not present(RELEASE) and not present(API_WANTS), "First activation acquired unexpected installed state")
+        if present(ACTIVE_UNIT):
+            setting_path(ACTIVE_UNIT, plan["candidateImage"], plan["candidateUnitSha256"])
+        if container_exists(API):
+            container_id = inspect(API, "Id")
+            require(journal["requiresRestore"] and matches(HASH, container_id) and
+                    inspect(container_id, "State.Running") == "false" and
+                    inspect(container_id, "ImageName") == plan["candidateImage"],
+                    "Stopped API container does not match the admitted first activation")
+            require_mount(container_id, "codexia-data", "/data")
+            require_mount(container_id, "codexia-history", "/history")
+            output((*PODMAN, "rm", "--", container_id), "Could not remove the stopped candidate container")
+        require(not container_exists(API), "First activation did not leave a clean API slot")
+        if present(ACTIVE_UNIT):
+            ACTIVE_UNIT.unlink()
+            fsync_dir(QUADLETS)
+            output((*SYSTEMCTL, "daemon-reload"), "Could not reload the clean API slot")
+        # With the unit and container absent, leave a clean API slot and keep
+        # the Tunnel guard installed for the next protected activation.
+        if present(guard_path(API)):
+            change_guard(API, False)
+        if "backupDirectory" in journal:
+            verify_backup(journal)
+        transition(journal, "safe-stopped")
+        emit(phase_status(journal))
+        return
+    if not changes_backend(plan):
+        require(journal["phase"] in ("recovering", "prior-ready", "prior-tunnel"), "Quiesce the deployment for recovery first")
+        require_retained_pair(plan)
+        if journal["phase"] == "recovering":
+            transition(journal, "prior-ready")
+        emit(phase_status(journal))
+        return
     if journal["phase"] in ("prior-ready", "prior-tunnel"):
         if journal["requiresRestore"]:
             match_backup(request, journal)
@@ -642,6 +890,7 @@ def recover(request, plan, journal):
             verified_fingerprints(journal)
         image, identity = plan["priorImage"], plan["priorIdentity"]
         auth_file, auth_hash = setting_path(PRIOR_UNIT, image, plan["priorUnitSha256"])
+        require_owner(plan, auth_file)
         require_release(PRIOR_RELEASE, image, identity, auth_hash)
         require(image_identity(image) == identity, "Retained prior OCI identity changed")
         require(database_maintenance(image, "--check", ledger=True) == identity["migrationFingerprint"],
@@ -661,6 +910,10 @@ def check_outcome(plan, journal, outcome, phases):
     require(journal["phase"] in [f"{outcome}-{phase}" for phase in phases],
             "The durable host phase does not match the requested outcome")
     active_api(plan[f"{outcome}Image"], plan[f"{outcome}Identity"])
+    settings, settings_sha = setting_path(ACTIVE_UNIT, plan[f"{outcome}Image"], plan[f"{outcome}UnitSha256"])
+    require(settings_sha == plan["settingsSha256"], "Running API settings differ from the approved settings")
+    require_owner(plan, settings)
+    read_only_database_check(plan[f"{outcome}Image"], plan[f"{outcome}Identity"], settings)
 
 
 def open_tunnel(plan, journal, outcome):
@@ -669,6 +922,12 @@ def open_tunnel(plan, journal, outcome):
     check_outcome(plan, journal, outcome, ("ready", "tunnel"))
     if "backupDirectory" in journal:
         verify_backup(journal)
+    if not changes_backend(plan):
+        require_retained_pair(plan)
+        if journal["phase"] != f"{outcome}-tunnel":
+            transition(journal, f"{outcome}-tunnel")
+        emit(phase_status(journal))
+        return
     if journal["phase"] == f"{outcome}-tunnel":
         if property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL) and not present(guard_path(TUNNEL)):
             emit(phase_status(journal))
@@ -686,22 +945,46 @@ def open_tunnel(plan, journal, outcome):
     emit(phase_status(journal))
 
 
-def finish(plan, journal, outcome):
-    check_outcome(plan, journal, outcome, ("tunnel",))
+def verify_ready_for_publication(plan, journal, outcome, phases):
+    check_outcome(plan, journal, outcome, phases)
     if "backupDirectory" in journal:
         verify_backup(journal)
     require(property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL) and
             not present(guard_path(API)) and not present(guard_path(TUNNEL)), "The accepted host components are not both online")
+    validate_activation_links()
+
+
+def publishing(plan, journal, outcome):
+    if outcome == "candidate":
+        require_current_window(plan)
+    verify_ready_for_publication(plan, journal, outcome, ("tunnel", "publishing"))
+    if journal["phase"] != f"{outcome}-publishing":
+        # The next controller step may reopen traffic, even if it disconnects
+        # before receiving confirmation from the edge. A prior backup can no
+        # longer account for every possible write after this durable barrier.
+        transition(journal, f"{outcome}-publishing", tunnelOpenedAt=journal["phaseChangedAt"])
+    emit(phase_status(journal))
+
+
+def finish(plan, journal, outcome):
+    verify_ready_for_publication(plan, journal, outcome, ("publishing",))
     image, identity = plan[f"{outcome}Image"], plan[f"{outcome}Identity"]
     _, auth_hash = setting_path(ACTIVE_UNIT, image, plan[f"{outcome}UnitSha256"])
-    if outcome == "prior":
+    if not changes_backend(plan):
+        require_retained_pair(plan)
+    elif outcome == "prior":
         require_release(PRIOR_RELEASE, image, identity, auth_hash)
         durable_write(RELEASE, PRIOR_RELEASE.read_bytes())
     else:
-        save(RELEASE, {"format": "codexia-push-deployment/v1", "image": image, "previousImage": plan["priorImage"],
+        if plan["priorImage"] is None:
+            validate_activation_links(install=True)
+            output((*SYSTEMCTL, "daemon-reload"), "Could not reload installed activation links")
+        save(RELEASE, {"format": "codexia-push-deployment/v1", "image": image, "previousImage": plan["priorImage"] or "",
                        "identity": identity, "authMode": "better-auth", "authSettingsSha256": auth_hash})
     result = {"status": "finished", "outcome": outcome, "planSha256": plan["planSha256"]}
-    save(TERMINAL, {**result, "plan": plan, "phaseChangedAt": journal["phaseChangedAt"]})
+    save(TERMINAL, {**result, "plan": journal["plan"], "phaseChangedAt": journal["phaseChangedAt"],
+                    "reactivationWindow": journal.get("reactivationWindow"),
+                    "tunnelOpenedAt": journal["tunnelOpenedAt"]})
     JOURNAL.unlink()
     fsync_dir(STATE)
     emit(result)
@@ -714,19 +997,25 @@ def observe(journal):
     result["tunnelRunning"] = running(TUNNEL)
     result["apiRunning"] = running(API)
     if result["apiRunning"]:
-        live = active_api()
-        result.update(priorContainerId=live["containerId"], priorImage=live["image"], priorIdentity=live["identity"],
-                      priorUnitSha256=sha256(regular(ACTIVE_UNIT).read_bytes()), apiVersion=live["apiVersion"])
+        try:
+            live = active_api()
+            result.update(priorContainerId=live["containerId"], priorImage=live["image"], priorIdentity=live["identity"],
+                          priorUnitSha256=sha256(regular(ACTIVE_UNIT).read_bytes()), apiVersion=live["apiVersion"])
+        except (CutoverError, OSError):
+            require(journal is not None, "An unverified API cannot be used as the cutover baseline")
+            result["apiVerified"] = False
     if journal is not None:
         result["planSha256"] = journal["plan"]["planSha256"]
         result.update({key: journal[key] for key in (*BACKUP_FIELDS, "backupDirectory", "requiresRestore", "phaseChangedAt",
-                                                    "recoveryStartedAt")
+                                                    "recoveryStartedAt", "tunnelOpenedAt", "reactivationStartedAt",
+                                                    "reactivationWindow", "retainedCandidateWorker")
                        if key in journal})
     elif present(TERMINAL):
         terminal = data(TERMINAL, private=True)
         if result.get("priorImage") == terminal["plan"][f"{terminal['outcome']}Image"]:
             result.update(phase="finished", planSha256=terminal["planSha256"], outcome=terminal["outcome"],
-                          phaseChangedAt=terminal["phaseChangedAt"])
+                          phaseChangedAt=terminal["phaseChangedAt"], tunnelOpenedAt=terminal.get("tunnelOpenedAt"),
+                          reactivationWindow=terminal.get("reactivationWindow"))
     emit(result)
 
 
@@ -745,35 +1034,56 @@ def main():
     if action == "observe" and len(sys.argv) == 2:
         observe(journal)
         return
-    require(action in ("checkpoint", "apply", "open-tunnel", "recover-quiesce", "recover", "finish") and
+    require(action in ("stage", "admit", "checkpoint", "apply", "open-tunnel", "recover-quiesce", "recover", "publishing", "finish") and
             len(sys.argv) == 3, "Usage: cutover-host.sh ACTION [INPUT.json]")
     request = data(Path(sys.argv[2]))
+    if action == "stage":
+        stage(request)
+        return
     plan = validate_plan(request)
     validate_host(plan)
+    renewal = request.get("reactivationWindow")
+    if renewal is not None:
+        require(isinstance(renewal, dict) and set(renewal) == {"notAfter", "approval"} and
+                matches(HASH, renewal["approval"]) and plan["priorImage"] is None,
+                "Invalid first activation renewal")
+        approved_deadline(renewal)
     if journal is not None:
         require(plan == journal["plan"], "Request does not match the durable cutover plan")
+        if action not in ("recover-quiesce", "recover"):
+            require((action == "checkpoint" and journal["phase"] == "safe-stopped") or
+                    renewal == journal.get("reactivationWindow"), "Request changed the durable activation window")
     elif action == "finish" and present(TERMINAL):
         terminal = data(TERMINAL, private=True)
-        require(terminal["plan"] == plan and terminal["outcome"] == request.get("outcome"),
+        require(terminal["plan"] == plan and terminal["outcome"] == request.get("outcome") and
+                renewal == terminal.get("reactivationWindow"),
                 "Completed cutover did not match the request")
         active_api(plan[f"{terminal['outcome']}Image"], plan[f"{terminal['outcome']}Identity"])
         emit({key: terminal[key] for key in ("status", "outcome", "planSha256")})
         return
+    else:
+        require(renewal is None, "An activation window can only be renewed from a durable safe stop")
+    if renewal is not None:
+        plan = {**plan, "notAfter": renewal["notAfter"]}
+    if action == "admit":
+        emit(phase_status(admit(plan, journal)))
+        return
     if action == "checkpoint":
-        checkpoint(plan, journal)
+        checkpoint(plan, journal, request)
         return
     require(journal is not None, "No matching durable cutover intent exists")
     if action == "apply":
         apply(request, plan, journal)
     elif action == "recover-quiesce":
-        recover_quiesce(journal)
+        recover_quiesce(plan, journal)
     elif action == "recover":
         recover(request, plan, journal)
+    elif action == "open-tunnel":
+        open_tunnel(plan, journal, request.get("outcome"))
+    elif action == "publishing":
+        publishing(plan, journal, request.get("outcome"))
     else:
-        if action == "open-tunnel":
-            open_tunnel(plan, journal, request.get("outcome"))
-        else:
-            finish(plan, journal, request.get("outcome"))
+        finish(plan, journal, request.get("outcome"))
 
 
 try:

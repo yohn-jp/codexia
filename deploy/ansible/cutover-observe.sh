@@ -176,7 +176,7 @@ try {
     `, settingsHash]);
     requireEvidence(installedOwner === ownerBindingSha256);
   } else {
-    requireEvidence(identity.apiEpoch === 1 && (configuredMode === undefined || configuredMode === 'token'));
+    requireEvidence(configuredMode === undefined || configuredMode === 'token');
   }
 
   stage = 'PostgreSQL cluster and migration ledger';

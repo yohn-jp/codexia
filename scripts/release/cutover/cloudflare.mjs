@@ -121,11 +121,10 @@ function assertPolicyIds(policies, expected) {
 }
 
 function assertCutoverBackendIdentity(identity) {
-  assert.ok(identity?.apiEpoch === 1 || identity?.apiEpoch === 2, 'Live backend API epoch is missing or invalid for cutover');
-  if (identity.apiEpoch === 2) return assertBackendIdentity(identity);
+  assert.ok(Number.isSafeInteger(identity?.apiEpoch) && identity.apiEpoch > 0, 'Live backend API epoch is missing or invalid for cutover');
   assert.ok(identity.name === 'codexia' && identity.profile === 'full' &&
     typeof identity.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(identity.version),
-  'Live epoch 1 backend identity is invalid');
+  'Live Full backend identity is invalid');
   return identity;
 }
 
@@ -237,32 +236,38 @@ export function createCloudflareCutover({
     return observed;
   }
 
-  async function assertStaged({ versionId, artifactDigest }) {
+  async function assertWorkerArtifact({ versionId, artifactDigest }) {
     const tag = candidateTag(artifactDigest);
-    const [version, deployment] = await Promise.all([readVersion(versionId), observeDeployment(), assertPrivateWorker()]);
+    const [version] = await Promise.all([readVersion(versionId), assertPrivateWorker()]);
     assert.ok(version.annotations?.['workers/tag'] === tag, 'Candidate Worker version tag does not match the verified frontend archive');
-    assert.ok(version.metadata?.hasPreview !== true && versionId !== deployment.versionId,
-      'Candidate Worker version must be staged without live traffic or a public preview');
+    assert.ok(version.metadata?.hasPreview !== true, 'Candidate Worker must not have a public preview');
     return { versionId, tag };
+  }
+
+  async function assertStaged(input) {
+    const [staged, deployment] = await Promise.all([assertWorkerArtifact(input), observeDeployment({ allowAbsent: true })]);
+    assert.notEqual(staged.versionId, deployment?.versionId, 'Candidate Worker must be staged without live traffic');
+    return staged;
   }
 
   async function stage({ previousVersionId, artifactDigest }) {
     const tag = candidateTag(artifactDigest);
-    const [before] = await Promise.all([observeDeployment(), readVersion(previousVersionId), assertPrivateWorker()]);
-    assert.ok(before.versionId === previousVersionId, 'Active Worker version changed before candidate upload');
+    const [before] = await Promise.all([observeDeployment({ allowAbsent: true }),
+      previousVersionId === null ? null : readVersion(previousVersionId), assertPrivateWorker()]);
+    assert.ok((before?.versionId ?? null) === previousVersionId, 'Active Worker version changed before candidate upload');
     assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
       'Missing Cloudflare credential for candidate upload');
     const versionId = await uploadVersion({ accountId, workerToken, tag });
-    const [staged, after] = await Promise.all([assertStaged({ versionId, artifactDigest }), observeDeployment()]);
+    const [staged, after] = await Promise.all([assertStaged({ versionId, artifactDigest }), observeDeployment({ allowAbsent: true })]);
     assert.deepEqual(after, before, 'Active Worker deployment changed during candidate upload');
     return staged;
   }
 
   async function deploy({ fromVersionId, toVersionId }) {
     assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence must be active before switching the Worker');
-    const [before] = await Promise.all([observeDeployment(), readVersion(toVersionId), assertPrivateWorker()]);
-    if (before.versionId === toVersionId) return before;
-    assert.ok(uuid.test(fromVersionId) && before.versionId === fromVersionId, 'Cloudflare has an unexpected live Worker version');
+    const [before] = await Promise.all([observeDeployment({ allowAbsent: true }), readVersion(toVersionId), assertPrivateWorker()]);
+    if (before?.versionId === toVersionId) return before;
+    assert.ok((fromVersionId === null || uuid.test(fromVersionId)) && (before?.versionId ?? null) === fromVersionId, 'Cloudflare has an unexpected live Worker version');
     try {
       await result('Worker deployment update', `${workerPath}/deployments`, {
         method: 'POST', token: workerToken,
@@ -360,10 +365,11 @@ export function createCloudflareCutover({
     assert.ok(domains.every(items => items.length === 0), 'Worker custom domains permit alternate ingress');
     assert.ok(Array.isArray(workerRoutes), 'Cloudflare Worker route inventory is invalid');
     const relevantRoutes = workerRoutes.filter(route => route.script === worker || allowsHostname(route.pattern, host));
-    const routePlan = lifecycle && deployment === null ? [] : [
+    const canonicalRoutes = [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
       ...routes.originRoutes.map(path => ({ pattern: host + path, script: null })),
     ];
+    const routePlan = lifecycle && deployment === null && relevantRoutes.length === 0 ? [] : canonicalRoutes;
     assert.deepEqual(relevantRoutes.map(route => ({ pattern: route.pattern, script: route.script ?? null }))
       .sort((a, b) => a.pattern.localeCompare(b.pattern)), routePlan.sort((a, b) => a.pattern.localeCompare(b.pattern)),
     'Worker routes expose alternate ingress or differ from the canonical routing contract');
@@ -417,17 +423,18 @@ export function createCloudflareCutover({
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
     return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest,
-      ...(lifecycle ? { scriptPresent } : {}) };
+      ...(lifecycle ? { scriptPresent, routesReady: routePlan.length > 0 } : {}) };
   }
 
-  async function observe() {
+  async function observe({ allowLegacyBackend = false } = {}) {
     const { origin: liveOrigin, clientId, clientSecret } = readFrontendReleaseConfiguration(accessEnv);
     assert.ok(liveOrigin.origin === target.origin,
       'Protected identity origin differs from the pinned Cloudflare hostname');
     const [ingress, live] = await Promise.all([
       observeIngress(),
       probeScopedIdentityAccess({ origin: liveOrigin, credentials: { clientId, clientSecret }, fetchImpl, checkBoundary: true,
-        validateBackend: assertCutoverBackendIdentity, validateFrontend: assertFrontendIdentity }),
+        validateBackend: allowLegacyBackend ? assertCutoverBackendIdentity : assertBackendIdentity,
+        validateFrontend: assertFrontendIdentity }),
     ]);
     const after = await observeDeployment();
     assert.deepEqual(ingress.deployment, after, 'Active Worker deployment changed during protected identity observation');
@@ -479,6 +486,6 @@ export function createCloudflareCutover({
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, fence: () => setFence(true),
+  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
     unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy };
 }

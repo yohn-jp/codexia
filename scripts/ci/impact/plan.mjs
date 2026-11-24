@@ -95,6 +95,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
+  '.github/workflows/epoch-cutover-fixture.yml',
+  '.github/workflows/production-epoch-cutover.yml',
   '.github/workflows/ios-unsigned-ipa.yml',
   '.github/workflows/push-backup.yml',
   '.github/workflows/push-host.yml',
@@ -105,6 +107,16 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/check_postgres_volume.py',
   'deploy/ansible/ci-mitogen-playbook.sh',
   'deploy/ansible/deploy.yml',
+  'deploy/ansible/cutover-host.sh',
+  'deploy/ansible/cutover-host.yml',
+  'deploy/ansible/cutover-migrations.py',
+  'deploy/ansible/cutover-observe.sh',
+  'deploy/ansible/cutover-observe.yml',
+  'deploy/ansible/cutover-snapshot-history-v2.py',
+  'deploy/ansible/epoch-cutover-rootless-fixture.sh',
+  'deploy/ansible/test-cutover-observe.sh',
+  'deploy/ansible/test-epoch-cutover-fixture.sh',
+  'deploy/ansible/test_cutover_host.py',
   'deploy/ansible/deploy-transaction.yml',
   'deploy/ansible/host-contract.py',
   'deploy/ansible/host-validate.yml',
@@ -186,6 +198,11 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/deployment/admission/validate.mjs',
   'scripts/deployment/admission/validate.test.mjs',
   'scripts/deployment/recovery/backup.test.mjs',
+  'scripts/deployment/recovery/epoch-cutover.mjs',
+  'scripts/deployment/recovery/epoch-cutover.test.mjs',
+  'scripts/ci/impact/migration-contracts.mjs',
+  'scripts/ci/impact/migration-contracts.test.mjs',
+  'scripts/ci/execution/deployment-fixtures.mjs',
   'scripts/deployment/admission/certificate.mjs',
   'scripts/deployment/admission/contract.test.mjs',
   'scripts/deployment/recovery/recovery.test.mjs',
@@ -223,7 +240,7 @@ export function isNativeIosOwnedInput(file) {
 }
 
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
-export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/ios/', 'app/native/']);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/deployment/cutover/', 'scripts/ios/', 'app/native/']);
 const DB_CONTRACT_SOURCE_PATHS = new Set([
   'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
   'docs/architecture/DATABASE-DETAIL-CONTRACT.md',

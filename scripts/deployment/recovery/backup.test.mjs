@@ -194,6 +194,7 @@ else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
   process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? 'none' : state.resources[args.at(-1)]);
 } else if (verb === 'run' && action === '-d') state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
 else if (verb === 'run' && args.includes('/bin/bash')) process.stdout.write('restored history');
+else if (verb === 'run' && args.at(-1).includes('verifyPostgresSchema')) process.stdout.write(process.env.DRILL_FIXTURE_LEDGER + '\\n');
 else if (verb === 'run' && args.at(-1) === '--apply') state[maintenanceTarget] = true;
 else if (verb === 'run' && args.at(-1) === '--check') {
   process.exit(state[maintenanceTarget] && process.env.DRILL_FIXTURE_UNRESOLVED !== maintenanceTarget ? 0 : 2);
@@ -202,7 +203,8 @@ else if (verb === 'rm' || verb === 'volume' && action === 'rm') delete state.res
 save();
 `);
     const candidate = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
-    const run = async (options, { unresolved = '', wrongDatabase = false } = {}) => {
+    const ledger = 'sha256:' + 'b'.repeat(64);
+    const run = async (options, { unresolved = '', wrongDatabase = false, ledgerResult = ledger } = {}) => {
       await writeFile(scratch, JSON.stringify({ resources: {} }));
       await writeFile(commands, '');
       const result = spawnSync('bash', [backupProgram, 'drill', archive, identity, '--approved', ...options], {
@@ -211,7 +213,7 @@ save();
           ...process.env, HOME: fixture.home, CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
           PATH: `${fixture.bin}:${process.env.PATH}`,
           DRILL_FIXTURE_RESOURCES: scratch, DRILL_FIXTURE_COMMANDS: commands,
-          DRILL_FIXTURE_UNRESOLVED: unresolved,
+          DRILL_FIXTURE_UNRESOLVED: unresolved, DRILL_FIXTURE_LEDGER: ledgerResult,
           DRILL_FIXTURE_BAD_RESTORE: wrongDatabase ? '1' : '',
         },
       });
@@ -225,6 +227,24 @@ save();
     assert.match(basic.stdout, /Verified checksum manifest sha256: [a-f0-9]{64}/u);
     assert.doesNotMatch(basic.stdout, /maintenance rehearsal/u);
     assert.equal(basic.calls.filter(call => call.includes('--entrypoint') && call.includes('node')).length, 0);
+
+    const readOnlyArgs = ['--candidate-full-image', candidate, '--candidate-ledger', ledger];
+    const readOnly = await run(readOnlyArgs);
+    assert.equal(readOnly.status, 0, readOnly.stderr);
+    assert.ok(readOnly.stdout.includes(`Isolated candidate ledger verified: ${ledger}`));
+    assert.doesNotMatch(readOnly.stdout, /maintenance rehearsal/u);
+    const candidateChecks = readOnly.calls.filter(call => call[0] === 'run' && call.includes(candidate));
+    assert.equal(candidateChecks.length, 2);
+    assert.ok(candidateChecks[1].at(-1).includes('verifyPostgresSchema'));
+    assert.ok(candidateChecks[1].some(argument => argument.includes('default_transaction_read_only')));
+    assert.ok(candidateChecks.every(call => call.includes('--read-only') && call.includes('--pull=never')));
+    assert.ok(candidateChecks.every(call => !call.includes('--apply') && !call.includes('--volume')));
+    const wrongLedger = await run(readOnlyArgs, { ledgerResult: 'sha256:' + 'c'.repeat(64) });
+    assert.equal(wrongLedger.status, 1);
+    assert.doesNotMatch(wrongLedger.stdout, /verified/u);
+    const unknownMigration = await run([...readOnlyArgs, '--migration', 'arbitrary-command']);
+    assert.equal(unknownMigration.status, 1);
+    assert.deepEqual(unknownMigration.calls, []);
 
     const tagged = await run(['--candidate-full-image', 'ghcr.io/yohn-jp/codexia-backend:latest']);
     assert.equal(tagged.status, 1);
