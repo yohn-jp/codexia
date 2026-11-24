@@ -175,8 +175,6 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/audit/ux-artifact.mjs',
   'scripts/audit/ux-artifact.test.mjs',
   'scripts/ci/impact/security-admission.test.mjs',
-  'scripts/ci/evidence/task-inputs.mjs',
-  'scripts/ci/evidence/task-inputs.test.mjs',
   'scripts/pages-api/pack.mjs',
   'scripts/pages-api/pack.test.mjs',
   'scripts/pages-api/package-lock.json',

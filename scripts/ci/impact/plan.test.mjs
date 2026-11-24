@@ -167,8 +167,10 @@ test('UX projection source and Pages inputs select scoped canonical proofs', asy
     if (file.startsWith('docs/requirements/')) assert.ok(selected.tasks.includes('requirements-trace'), file);
   }
   for (const file of ['scripts/audit/ux-artifact.mjs', 'scripts/audit/ux-artifact.test.mjs',
-    'scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/task-inputs.test.mjs',
     '.github/workflows/repository-audit.yml']) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
+  for (const file of ['scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/task-inputs.test.mjs']) {
+    assert.equal((await plan([file])).mode, 'full', 'shared CI evidence authority preserves full verification');
+  }
 });
 
 test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
