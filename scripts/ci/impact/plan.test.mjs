@@ -65,6 +65,18 @@ test('host dependencies are restore-only in Verify and cache mutation is scoped 
   assert.match(cleanup.steps[0].run, /--ref "refs\/pull\/\$PR_NUMBER\/merge"/u);
   assert.equal(cleanup.steps[0].env.PR_NUMBER, '${{ github.event.pull_request.number }}');
   assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture'/u);
+  assert.equal(workflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
+  assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture'");
+  for (const name of ['plan', 'certification']) {
+    const steps = workflow.jobs[name].steps;
+    const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    const materialize = steps.find(step => step.name === 'Materialize exact evidence inputs');
+    assert.equal(checkout.with['fetch-depth'], 0);
+    assert.equal(checkout.with['sparse-checkout'], 'scripts');
+    assert.equal(materialize.run, 'node scripts/ci/impact/evidence-checkout.mjs');
+    assert.ok(steps.indexOf(checkout) < steps.indexOf(materialize));
+    assert.ok(steps.indexOf(materialize) < steps.findIndex(step => step.name === 'Install frozen CI evidence dependencies'));
+  }
 });
 
 test('PR paths and completed-Verify release impact retain component build inputs', () => {

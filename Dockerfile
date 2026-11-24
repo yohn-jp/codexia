@@ -12,16 +12,14 @@ RUN corepack enable \
 WORKDIR /opt/codexia
 
 FROM pnpm-base AS source
-# Fetch the locked external packages before copying frequently changed source.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# Keep the package store local to the builder, not in large exported OCI layers.
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch --store-dir=/pnpm/store
+ARG PROFILE
 COPY . ./
-# A local cache mount may be empty after garbage collection. Frozen install
-# can obtain missing locked packages; never require an out-of-band store.
+# pnpm selects the transitive closure of this profile, rather than fetching
+# every importer in the monorepo. The shared local store is disposable;
+# frozen install retrieves any missing packages after cache eviction.
 RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --prefer-offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
+    pnpm --filter "@codexia/profile-${PROFILE}..." --filter '@codexia/app...' --fail-if-no-match install \
+      --prefer-offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE

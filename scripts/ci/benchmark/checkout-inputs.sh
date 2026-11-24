@@ -23,22 +23,17 @@ for mode in full blobless sparse; do
   git -C "$repo" fetch --no-tags "${args[@]}" origin "$BENCH_HEAD:refs/remotes/origin/benchmark-head" "$BENCH_BASE:refs/remotes/origin/benchmark-base"
   fetched=$(date +%s%N)
   if [[ "$mode" == sparse ]]; then
-    # Derived from the immutable tree, not an assumption about the sparse
-    # checkout. Keep all workspace manifests and all tests read by Coverage,
-    # plus the scripts and deployment/migration inputs for the Plan.
-    git -C "$repo" ls-tree -r -z --name-only "$BENCH_HEAD" | node --input-type=module -e '
-      import {readFileSync} from "node:fs";
-      const files=readFileSync(0,"utf8").split("\0").filter(Boolean);
-      const paths=new Set(["/*","!/*/","/scripts/","/deploy/","/.github/workflows/verify.yml","/packages/persistence-postgres/migrations/","/packages/persistence-postgres/src/migration-set.ts","/packages/persistence-postgres/tests/db-contract/toolchain.json","/packages/api/src/auth-schema.ts"]);
-      for(const f of files) {
-        if (/^(?:packages|modules)\/[^/]+\/package\.json$|^app\/package\.json$/u.test(f) ||
-            /^(?:app|packages|modules)\//u.test(f) && /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u.test(f)) {
-          if(/[\n\r\[\]*?\\]/u.test(f)) throw Error("Cannot express tracked path safely: "+f);
-          paths.add("/"+f);
-        }
-      }
-      console.log([...paths].join("\n"));
-    ' > "$out/sparse-patterns.txt"
+    (
+      cd "$repo"
+      git ls-tree -r -z --name-only "$BENCH_HEAD" | node --input-type=module -e '
+        import {readFileSync} from "node:fs";
+        import {pathToFileURL} from "node:url";
+        const {evidenceCheckoutInputs}=await import(pathToFileURL(process.argv[1]));
+        const inputs=evidenceCheckoutInputs(readFileSync(0,"utf8").split("\0").filter(Boolean));
+        if(!inputs) throw Error("Sparse candidate requires full fallback");
+        console.log(inputs.patterns.join("\n"));
+      ' "$GITHUB_WORKSPACE/scripts/ci/impact/evidence-checkout.mjs"
+    ) > "$out/sparse-patterns.txt"
     git -C "$repo" sparse-checkout set --no-cone --stdin < "$out/sparse-patterns.txt"
   fi
   git -C "$repo" checkout --detach -q "$BENCH_HEAD"
