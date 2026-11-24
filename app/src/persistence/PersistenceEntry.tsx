@@ -3,7 +3,6 @@ import { api, setOAuthAccessToken, type PersistenceStatus } from "../api";
 import { ApiError } from "../api-error";
 import { beginOAuthAuthorization, completeOAuthAuthorization, webOAuthConfig, type OAuthWebConfig } from "../oauth";
 import { authClient } from "../auth-client";
-import { PersistenceWorkspace } from "./PersistenceWorkspace";
 import { createConsoleReturnLocation } from "../console/console-return";
 import { CONSOLE_NAVIGATION_REQUEST } from "../console/console-navigation";
 import { attemptNativeLogout } from "./nativeLogout";
@@ -19,6 +18,7 @@ export interface NativePersistenceAuth {
 export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null }) {
   const nativeShell = nativeAuth !== undefined;
   const [state, setState] = useState<EntryState>("checking");
+  const [Workspace, setWorkspace] = useState<typeof import("./PersistenceWorkspace").PersistenceWorkspace | null>(null);
   const [oauthConfig, setOAuthConfig] = useState<OAuthWebConfig | null>(null);
   const [authorScope, setAuthorScope] = useState("owner");
   const [busy, setBusy] = useState(false);
@@ -52,6 +52,11 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       if (sequence !== inspectSequenceRef.current) return;
       const scope = session.authorScope;
       if (workspaceScopeRef.current !== null && workspaceScopeRef.current !== scope) throw new Error("認証された作者が変わりました。現在の下書きを保護してから再読み込みしてください。");
+      // Do not load the editor, module panels and recovery machinery on the signed-out path.
+      // Await the real workspace chunk before admitting the author; a failed load remains fail-closed.
+      const { PersistenceWorkspace } = await import("./PersistenceWorkspace");
+      if (sequence !== inspectSequenceRef.current) return;
+      setWorkspace(() => PersistenceWorkspace);
       workspaceScopeRef.current = scope;
       setAuthorScope(scope);
       setSessionBlocked(false);
@@ -225,9 +230,9 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     }
   }
 
-  if (state === "database") return <>
+  if (state === "database" && Workspace) return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+      <Workspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (nativeShell) { void completeNativeLogout(); return; }
         if (oauthConfig) void completeWebOAuthLogout();
       }} />
