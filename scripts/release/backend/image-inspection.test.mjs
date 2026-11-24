@@ -4,7 +4,9 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertBackendImageIdentity } from './image-inspection.mjs';
+import { assertBackendImageIdentity, expectedBackendMigrationFingerprint } from './image-inspection.mjs';
+import { createHash } from 'node:crypto';
+import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { verifyBuiltBackendImageIdentity } from './verify-image-identity.mjs';
 
 test('static backend image identity binds producer, profile, platform and compatibility',()=>{
@@ -113,4 +115,42 @@ switch (command) {
 test('built-image identity CLI rejects malformed producer data before Docker inspection',async()=>{
   await assert.rejects(()=>verifyBuiltBackendImageIdentity({args:['image','a'.repeat(40),'bad','core']}),/version is invalid/);
   await assert.rejects(()=>verifyBuiltBackendImageIdentity({args:['image','bad','0.1.1','core']}),/source SHA is invalid/);
+});
+
+test('historical release migration identity is computed from certified Git tree, never current files', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-migration-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.name', 'CI');
+  git('config', 'user.email', 'ci@example.test');
+  const directory = path.join(root, 'packages/persistence-postgres/migrations');
+  await mkdir(directory, { recursive: true });
+  const file = path.join(directory, '0001-initial.sql');
+  const original = 'SELECT 1;\n';
+  await writeFile(file, original);
+  git('add', '.'); git('commit', '-qm', 'certified source');
+  const sha = git('rev-parse', 'HEAD');
+  await writeFile(file, 'SELECT 2;\n');
+  const expected = migrationSetFingerprint([{ version: '0001-initial.sql',
+    checksum: createHash('sha256').update(original).digest('hex') }]);
+  assert.equal(await expectedBackendMigrationFingerprint(sha, { cwd: root }), expected);
+  await assert.rejects(expectedBackendMigrationFingerprint('HEAD', { cwd: root }), /Invalid certified migration source/);
+});
+
+
+test('disposable cutover host can verify embedded image identity with its minimal source archive', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-minimal-image-identity-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const relative of ['scripts/release/backend/image-inspection.mjs',
+    'scripts/release/backend/update-identity.mjs', 'scripts/release/components/version.mjs']) {
+    const destination = path.join(root, relative);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, await readFile(new URL('../../../' + relative, import.meta.url)));
+  }
+  const module = new URL('file://' + path.join(root, 'scripts/release/backend/image-inspection.mjs'));
+  const result = execFileSync(process.execPath, ['--input-type=module', '-e',
+    'import { assertBackendImageIdentity } from ' + JSON.stringify(module.href) + '; console.log(typeof assertBackendImageIdentity)'],
+  { cwd: root, encoding: 'utf8' });
+  assert.equal(result.trim(), 'function');
 });

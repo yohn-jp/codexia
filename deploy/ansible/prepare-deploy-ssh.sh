@@ -2,6 +2,14 @@
 # Prepare the pinned service account connection used by the production runner.
 set -euo pipefail
 umask 077
+user=codexia
+if [[ $# == 1 && "$1" == --preflight-admin ]]; then
+  [[ "${GITHUB_REPOSITORY:-}" == yohn-jp/codexia && "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && "${GITHUB_WORKFLOW:-}" == 'Production Access Preflight' ]] || exit 1
+  user=${CODEXIA_PREFLIGHT_SSH_USER:?Missing independently approved administrator user}
+  [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$user" != root && "$user" != codexia ]] || exit 1
+elif [[ $# != 0 ]]; then
+  exit 1
+fi
 directory="${RUNNER_TEMP:?}/codexia-ssh"
 mkdir -m 0700 "$directory"
 key="$directory/id_ed25519"
@@ -38,7 +46,7 @@ ssh-keygen -y -P '' -f "$key" >/dev/null
 cat > "$directory/config" <<CONFIG
 Host codexia-target
     HostName $host
-    User codexia
+    User $user
     IdentityFile "$key"
     IdentitiesOnly yes
     BatchMode yes
@@ -48,3 +56,4 @@ Host codexia-target
     GlobalKnownHostsFile /dev/null
 CONFIG
 printf 'host=%s\n' "$host" >> "${GITHUB_OUTPUT:?}"
+if [[ "$user" != codexia ]]; then printf 'user=%s\n' "$user" >> "$GITHUB_OUTPUT"; fi

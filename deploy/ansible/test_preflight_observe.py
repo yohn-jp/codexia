@@ -1,0 +1,83 @@
+"""Read-only lifecycle observer contract tests (no VM or Podman required)."""
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("preflight_observe", Path(__file__).with_name("preflight-observe.py"))
+observer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(observer)
+
+
+class ObserveDatabaseTests(unittest.TestCase):
+    def observe(self, *, volume=True, container=True, layout="ready", writer=None):
+        return observer.observe_database(
+            {"codexia-postgres": volume}, {"codexia-db": container},
+            Path("/unused"), Path("/unused"), writer, "", layout)
+
+    def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
+        with patch.object(observer, "command") as command:
+            self.assertEqual(self.observe(volume=False, container=False)["state"], "absent")
+            self.assertEqual(self.observe(container=False, layout="empty")["state"], "pristine")
+            self.assertEqual(self.observe(container=False, layout="ready")["state"], "unknown")
+            with self.assertRaises(ValueError):
+                self.observe(volume=False, container=True)
+            command.assert_not_called()
+
+    def test_stopped_database_is_unknown(self):
+        with patch.object(observer, "command", return_value=(0, "false")):
+            self.assertEqual(self.observe()["state"], "unknown")
+
+    def test_missing_database_and_legacy_writer(self):
+        cluster = {"clusterId": "123", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        with patch.object(observer, "command", return_value=(0, "true")):
+            with patch.object(observer, "json_sql", return_value={**cluster, "appExists": False}):
+                self.assertEqual(self.observe()["state"], "missing")
+            with patch.object(observer, "json_sql", side_effect=[
+                cluster, {"ledgerExists": True, "authExists": False, "appRelations": 5}, ledger
+            ]):
+                result = self.observe(writer={"authMode": "legacy"})
+                self.assertEqual(result["authState"], "legacy")
+                self.assertEqual(result["ledger"], ledger)
+
+    def test_unrecognized_objects_do_not_establish_pristine_database(self):
+        with patch.object(observer, "command", return_value=(0, "true")):
+            with patch.object(observer, "json_sql", side_effect=[
+                {"clusterId": "123", "appExists": True, "rolesValid": True},
+                {"ledgerExists": False, "authExists": False, "appRelations": 1}
+            ]):
+                with self.assertRaises(ValueError):
+                    self.observe()
+
+    def test_sql_forces_read_only_and_never_exports_password(self):
+        with patch.object(observer, "command", return_value=(0, "ok")) as command:
+            self.assertEqual(observer.sql("codexia", "SELECT 1;"), "ok")
+            args = command.call_args.args[0]
+            self.assertIn("default_transaction_read_only=on", args[6])
+            self.assertEqual(command.call_args.kwargs["stdin"], "SELECT 1;\n")
+
+
+class TransactionTests(unittest.TestCase):
+    def test_journal_binding_and_orphan_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            self.assertIsNone(observer.observe_transaction(directory))
+            path = directory / "deploy-transaction.json"
+            data = {"format": "codexia-deploy-transaction/v1", "phase": "pending",
+                    **{k: False for k in ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")}}
+            path.write_text(json.dumps(data))
+            self.assertEqual(observer.observe_transaction(directory)["sha256"], observer.digest(data))
+            path.write_text("{}")
+            with self.assertRaises(ValueError):
+                observer.observe_transaction(directory)
+            path.unlink()
+            (directory / "rollback-api.container").touch()
+            with self.assertRaises(ValueError):
+                observer.observe_transaction(directory)
+
+
+if __name__ == "__main__":
+    unittest.main()

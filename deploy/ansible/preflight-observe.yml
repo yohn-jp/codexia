@@ -1,0 +1,135 @@
+---
+- name: Observe production lifecycle without converging the target
+  hosts: codexia
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars:
+    codexia_service_user: codexia
+    runtime_environment:
+      HOME: "{{ ansible_facts.user_dir }}"
+      XDG_CONFIG_HOME: "{{ ansible_facts.user_dir }}/.config"
+      XDG_DATA_HOME: "{{ ansible_facts.user_dir }}/.local/share"
+      XDG_STATE_HOME: "{{ ansible_facts.user_dir }}/.local/state"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.user_uid }}/bus"
+  tasks:
+    - name: Require a single pinned target and controller output
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - codexia_preflight_observation_file is defined
+          - codexia_preflight_observation_file is match('^/[^\\r\\n]+$')
+          - codexia_preflight_auth_schema_query is defined
+          - not ansible_check_mode
+    - name: Read platform and account facts
+      ansible.builtin.setup:
+        gather_subset: ['!all', '!min', 'user', 'distribution', 'architecture', 'service_mgr']
+    - name: Reuse the canonical baseline inspection without logging raw fields
+      ansible.builtin.include_tasks:
+        file: inspect.yml
+        apply:
+          no_log: true
+          environment: "{{ runtime_environment if ansible_facts.user_id == 'codexia' else {} }}"
+    - name: Initialize evidence for existing base resources
+      ansible.builtin.set_fact:
+        lifecycle_base_drift: false
+        lifecycle_database_verified: false
+        lifecycle_tunnel_verified: false
+        lifecycle_writer: null
+        lifecycle_volume_layout: null
+    - name: Verify the installed runtime using the existing read-only checks
+      when:
+        - inspect_account.rc == 0
+        - inspect_podman_available | default(false) | bool
+      environment: "{{ runtime_environment }}"
+      block:
+        - name: Verify an existing database container
+          when: inspect_containers.results[0].rc == 0
+          block:
+            - ansible.builtin.include_tasks:
+                file: verify-base-db-container.yml
+                apply:
+                  no_log: true
+            - ansible.builtin.set_fact:
+                lifecycle_database_verified: true
+          rescue:
+            - ansible.builtin.set_fact:
+                lifecycle_base_drift: true
+        - name: Verify an existing Tunnel container
+          when: inspect_containers.results[2].rc == 0
+          block:
+            - ansible.builtin.include_tasks:
+                file: verify-base-tunnel-container.yml
+                apply:
+                  no_log: true
+            - ansible.builtin.set_fact:
+                lifecycle_tunnel_verified: true
+          rescue:
+            - ansible.builtin.set_fact:
+                lifecycle_base_drift: true
+        - name: Verify the existing PostgreSQL volume layout without initializing it
+          when: inspect_volumes.results[0].rc == 0
+          block:
+            - name: Read the canonical volume mountpoint
+              ansible.builtin.command:
+                argv: [podman, volume, inspect, --format, "{% raw %}{{.Mountpoint}}{% endraw %}", codexia-postgres]
+              register: lifecycle_volume_mount
+              changed_when: false
+              no_log: true
+            - name: Reuse the canonical PostgreSQL volume observer
+              ansible.builtin.command:
+                argv:
+                  - podman
+                  - unshare
+                  - python3
+                  - -c
+                  - "{{ lookup('ansible.builtin.file', playbook_dir + '/check_postgres_volume.py', rstrip=false) }}"
+                  - "{{ lifecycle_volume_mount.stdout }}"
+              register: lifecycle_volume_check
+              changed_when: false
+              no_log: true
+            - ansible.builtin.set_fact:
+                lifecycle_volume_layout: "{{ (lifecycle_volume_check.stdout | from_json).state }}"
+          rescue:
+            - ansible.builtin.set_fact:
+                lifecycle_base_drift: true
+        - name: Reuse the canonical installed writer and owner observation
+          when: inspect_containers.results[1].rc == 0
+          block:
+            - name: Read the existing Full writer
+              ansible.builtin.script:
+                cmd: cutover-observe.sh
+                executable: /bin/bash
+              register: lifecycle_writer_result
+              changed_when: false
+              no_log: true
+            - ansible.builtin.set_fact:
+                lifecycle_writer: "{{ lifecycle_writer_result.stdout | from_json }}"
+              no_log: true
+          rescue:
+            - ansible.builtin.set_fact:
+                lifecycle_writer: null
+    - name: Observe missing, setup, installed and recovery state under the existing shared lock
+      ansible.builtin.script:
+        cmd: preflight-observe.py
+        executable: /usr/bin/python3
+      environment: "{{ (runtime_environment if ansible_facts.user_id == 'codexia' else {}) | combine({
+        'CODEXIA_INSPECT_FACTS': {'accountPresent': inspect_account.rc == 0,
+          'storagePresent': (inspect_files.results[0].stat.exists | default(false)) if inspect_account.rc == 0 else false,
+          'baseDrift': lifecycle_base_drift, 'volumeLayout': lifecycle_volume_layout,
+          'quadlets': codexia_preflight_quadlets,
+          'baseEvidence': {'database': lifecycle_database_verified, 'tunnel': lifecycle_tunnel_verified}} | to_json,
+        'CODEXIA_WRITER_OBSERVATION': lifecycle_writer | to_json,
+        'CODEXIA_AUTH_SCHEMA_QUERY': codexia_preflight_auth_schema_query
+        }) }}"
+      register: lifecycle_host
+      changed_when: false
+      no_log: true
+    - name: Persist only the redacted result on the controller
+      ansible.builtin.copy:
+        content: "{{ lifecycle_host.stdout | from_json | to_json }}\n"
+        dest: "{{ codexia_preflight_observation_file }}"
+        mode: '0600'
+      delegate_to: localhost
+      no_log: true

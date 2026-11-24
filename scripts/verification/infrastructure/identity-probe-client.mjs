@@ -89,12 +89,12 @@ async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
 export const IDENTITY_PROBE_PATHS=Object.freeze({backend:'/api/version',frontend:'/desktop/update-identity.json'});
 /** Canonical exact-path identity probe for protected frontend release preflight.
  * @template Backend, Frontend
- * @param {{origin:URL,credentials:{clientId:string,clientSecret:string},fetchImpl?:typeof fetch,checkBoundary?:boolean,includeBackend?:boolean,validateBackend?:(value:unknown)=>Backend,validateFrontend:(value:unknown)=>Frontend}} options
+ * @param {{origin:URL,credentials:{clientId:string,clientSecret:string},fetchImpl?:typeof fetch,checkBoundary?:boolean,includeBackend?:boolean,includeFrontend?:boolean,validateBackend?:(value:unknown)=>Backend,validateFrontend:(value:unknown)=>Frontend}} options
  */
-export async function probeScopedIdentityAccess({origin,credentials,fetchImpl=fetch,checkBoundary=false,includeBackend=true,validateBackend,validateFrontend}){
+export async function probeScopedIdentityAccess({origin,credentials,fetchImpl=fetch,checkBoundary=false,includeBackend=true,includeFrontend=true,validateBackend,validateFrontend}){
   const backend=includeBackend?readLiveJson(IDENTITY_PROBE_PATHS.backend,origin,credentials,fetchImpl).then(validateBackend):undefined;
-  const deployed=readLiveJson(IDENTITY_PROBE_PATHS.frontend,origin,credentials,fetchImpl).then(validateFrontend);
-  const checks=[...(backend?[backend]:[]),deployed,...(checkBoundary?[
+  const deployed=includeFrontend?readLiveJson(IDENTITY_PROBE_PATHS.frontend,origin,credentials,fetchImpl).then(validateFrontend):undefined;
+  const checks=[...(backend?[backend]:[]),...(deployed?[deployed]:[]),...(checkBoundary?[
     assertProbeDenied(IDENTITY_PROBE_PATHS.backend,origin,null,fetchImpl),
     assertProbeDenied(IDENTITY_PROBE_PATHS.frontend,origin,null,fetchImpl),
     assertProbeDenied('/',origin,credentials,fetchImpl),
@@ -103,5 +103,5 @@ export async function probeScopedIdentityAccess({origin,credentials,fetchImpl=fe
   const results=await Promise.allSettled(checks);
   const errors=results.filter(result=>result.status==='rejected').map(result=>result.reason instanceof Error?result.reason.message:'Probe failed');
   if(errors.length)throw new Error('Production deployment preflight failed:\n- '+errors.join('\n- '));
-  return {...(backend?{backend:await backend}:{}),deployed:await deployed};
+  return {...(backend?{backend:await backend}:{}),...(deployed?{deployed:await deployed}:{})};
 }

@@ -423,7 +423,8 @@ async function writePromotionOutputs(file,output){
 }
 
 /** Read the independently built main archive when ordinary deployment is paused. */
-export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch } = {}) {
+export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch = 2 } = {}) {
+  assert.ok(Number.isSafeInteger(expectedEpoch) && expectedEpoch > 0, 'Expected frontend API epoch is invalid');
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Cutover frontend repository mismatch');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover frontend verification requires main');
   assert.ok(readFrontendOAuthConfig(env), 'Cutover requires the approved public frontend OAuth configuration');
@@ -473,7 +474,7 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   assert.equal(identity.version, readComponentVersion('frontend', String(run.run_number)), 'Frontend version differs from the producer');
   assert.equal(identity.sourceSha, sourceSha, 'Frontend archive source differs from the producer');
   assert.equal(identity.profile, 'full', 'Cutover requires a Full frontend');
-  assert.equal(identity.apiEpoch, 2, 'Cutover requires frontend API epoch 2');
+  assert.equal(identity.apiEpoch, expectedEpoch, 'Cutover requires the selected frontend API epoch');
   return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId };
 }
 
