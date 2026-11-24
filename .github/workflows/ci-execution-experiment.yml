@@ -1,4 +1,4 @@
-name: Benchmark Nx and Dagger execution candidates
+name: Benchmark Nx and minimum CI inputs
 on:
   pull_request:
     paths:
@@ -28,6 +28,10 @@ jobs:
           corepack pnpm@12.21.0 install --frozen-lockfile
       - name: Compare pnpm and Nx with verified output equivalence
         run: bash scripts/ci/benchmark/nx-build.sh
+      - name: Compare Nx dependency graph and affected tasks with canonical contracts
+        run: node scripts/ci/benchmark/nx-graph.mjs "$RUNNER_TEMP/nx-candidate"
+      - name: Verify local static validation reuse and invalidation
+        run: bash scripts/ci/benchmark/nx-validation.sh
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -35,35 +39,49 @@ jobs:
           path: ${{ runner.temp }}/nx-candidate
           retention-days: 2
           if-no-files-found: error
-  dagger:
+  checkout:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Prepare identical locked StrictDoc build context
-        run: |
-          mkdir -p "$RUNNER_TEMP/strictdoc-context"
-          git archive HEAD .github/docker/strictdoc-ci.Dockerfile scripts/strictdoc/requirements.lock.txt | tar -x -C "$RUNNER_TEMP/strictdoc-context"
-      - name: Docker cold runtime build and tool smoke
-        working-directory: ${{ runner.temp }}/strictdoc-context
-        run: |
-          docker build -f .github/docker/strictdoc-ci.Dockerfile -t strictdoc-benchmark .
-          docker run --rm strictdoc-benchmark sh -ec 'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright'
-      - name: Docker warm runtime build and tool smoke
-        working-directory: ${{ runner.temp }}/strictdoc-context
-        run: |
-          docker build -f .github/docker/strictdoc-ci.Dockerfile -t strictdoc-benchmark .
-          docker run --rm strictdoc-benchmark sh -ec 'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright'
-      - name: Install pinned Dagger CLI
-        uses: dagger/dagger-for-github@v8.4.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          version: "v0.21.11"
-      - name: Dagger cold runtime build and tool smoke
-        working-directory: ${{ runner.temp }}/strictdoc-context
-        run: bash "$GITHUB_WORKSPACE/scripts/ci/benchmark/dagger-strictdoc.sh"
-      - name: Dagger warm runtime build and tool smoke
-        working-directory: ${{ runner.temp }}/strictdoc-context
-        run: bash "$GITHUB_WORKSPACE/scripts/ci/benchmark/dagger-strictdoc.sh"
+          node-version: 24.22.3
+      - name: Compare exact-source full, blobless and sparse checkout
+        env:
+          BENCH_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BENCH_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: bash scripts/ci/benchmark/checkout-inputs.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: checkout-input-proof-and-timing
+          path: ${{ runner.temp }}/checkout-candidate
+          retention-days: 2
+          if-no-files-found: error
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: Compare fresh full and Core-filtered pnpm installs
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          bash scripts/ci/benchmark/pnpm-filter.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: pnpm-filter-comparison
+          path: ${{ runner.temp }}/pnpm-filter-candidate
+          retention-days: 2
+          if-no-files-found: error

@@ -119,7 +119,9 @@ test('the certified graph covers every declared obligation within the twenty-job
       expected, `StrictDoc admission for ${files.join(', ')}`);
   }
   assert.match(strictdocSetup.run, /requirements\.lock\.txt/u);
-  assert.match(strictdocSetup.run, /playwright install --with-deps chromium/u);
+  assert.match(strictdocSetup.run, /playwright install --with-deps --only-shell chromium/u);
+  assert.match(strictdocSetup.run, /wait "\$strictdoc_pid"/u);
+  assert.match(strictdocSetup.run, /strictdoc_status != 0 \|\| browser_status != 0/u);
   const python = workflow.jobs.types.steps.find(step => step.uses === 'actions/setup-python@v6.1.0');
   assert.equal(python.if, traceSelected);
   assert.equal(python.with['python-version'], '3.12');
