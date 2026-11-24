@@ -663,6 +663,7 @@ test('native Swift-only PR inputs select owner contract without unrelated Deskto
     'ios/CodexiaTransport/.gitignore',
     'ios/CodexiaTransport/Package.swift',
     'ios/CodexiaTransport/Package.resolved',
+    'ios/CodexiaTransport/check-operation-manifest.py',
     'ios/CodexiaTransport/generate.sh',
     'ios/CodexiaTransport/normalize-openapi.py',
     'ios/CodexiaTransport/openapi-generator-config.yaml',

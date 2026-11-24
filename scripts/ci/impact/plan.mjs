@@ -231,6 +231,7 @@ const NATIVE_IOS_ROOTS = Object.freeze([
   'ios/CodexiaEditor/',
 ]);
 const NATIVE_IOS_GENERATOR_INPUTS = new Set([
+  'ios/CodexiaTransport/check-operation-manifest.py',
   'ios/CodexiaTransport/generate.sh',
   'ios/CodexiaTransport/normalize-openapi.py',
   'ios/CodexiaTransport/openapi-generator-config.yaml',
