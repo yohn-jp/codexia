@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { digestEvidence } from '../cutover/coordinator.mjs';
 
 // Normalized observations are produced by trusted read-only adapters, not by a
 // workflow dispatch request. Unknown is distinct from positively observed absence.
@@ -15,7 +15,7 @@ export const STATES = Object.freeze({
 const axes = Object.keys(STATES);
 const intents = ['install', 'adopt', 'update', 'maintenance', 'restore'];
 const systems = Object.freeze({
-  R0: null, R1: 'recovery', R2: 'recovery', R3: 'maintenance',
+  R0: null, R1: 'recovery', R2: 'recovery', R3: 'recovery',
   R4: 'bootstrap', R5: 'bootstrap', R6: 'bootstrap', R7: 'cutover', R8: 'update',
 });
 const hashPattern = /^[a-f0-9]{64}$/u;
@@ -33,12 +33,6 @@ function requireCondition(condition, message) {
 function record(value, fields) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key));
-}
-function digest(value) {
-  return createHash('sha256').update(JSON.stringify(value, function sorted(_key, item) {
-    return item !== null && typeof item === 'object' && !Array.isArray(item)
-      ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item;
-  })).digest('hex');
 }
 function timestamp(value) {
   const ms = Date.parse(value);
@@ -61,6 +55,7 @@ export function selectRoute(state, intent, frontendAdmission) {
   if (T !== 'none') return 'R1';
   if (D === 'lost') return intent === 'restore' ? 'R2' : 'R0';
   if (intent === 'restore') return 'R0'; // Never reinterpret a restore as a fresh install.
+  if (H === 'absent' && (['compatible', 'incompatible'].includes(D) || B !== 'absent')) return 'R0';
   // A clean database cannot substantiate an existing installed writer or owner.
   if (['absent', 'pristine'].includes(D) &&
       (['ready', 'legacy', 'unprepared'].includes(A) || ['setup', 'compatible', 'incompatible'].includes(B))) return 'R0';
@@ -72,7 +67,7 @@ export function selectRoute(state, intent, frontendAdmission) {
     if (intent === 'adopt' && ['absent', 'pristine'].includes(D)) return 'R0';
     // Existing owners may be adopted, but a missing owner on an existing
     // database is not permission to create one.
-    if (intent === 'adopt' && A === 'absent') return 'R0';
+    if (A === 'absent' && (intent === 'adopt' || D === 'compatible')) return 'R0';
     return 'R4';
   }
   if (['pending', 'unprepared'].includes(A) || B === 'setup') {
@@ -102,7 +97,7 @@ function validateObservation(observation) {
     'authSha256', 'backendSha256', 'frontendSha256', 'ingressSha256', 'transactionSha256',
     'infrastructureSha256', 'backupSha256']) &&
     binding.environment === 'codexia-production' &&
-    hashPattern.test(binding.hostPinSha256 ?? '') &&
+    typeof binding.hostPinSha256 === 'string' && hashPattern.test(binding.hostPinSha256) &&
     Object.keys(binding).filter(key => !['environment', 'hostPinSha256'].includes(key))
       .every(key => binding[key] === null || (typeof binding[key] === 'string' && hashPattern.test(binding[key]))),
   'Invalid deployment evidence binding');
@@ -151,22 +146,23 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const changeAxes = changes.filter(key => observation.changeAxes.includes(key));
   const migrationAxes = ['api-epoch', 'oauth-contract', 'sql-ledger', 'persistence-format', 'auth-schema', 'auth-mode'];
   const requiresTransition = ['R3', 'R7'].includes(candidateRoute) &&
-    (changeAxes.some(key => migrationAxes.includes(key)) || ['incompatible', 'legacy'].includes(state.D) ||
+    (changeAxes.some(key => migrationAxes.includes(key)) || state.D === 'incompatible' ||
       state.A === 'legacy' || state.B === 'incompatible');
   if (requiresTransition && !transition) blockers.push('unsupported-transition');
   if (transition?.dataConversion && !changeAxes.some(key => ['sql-ledger', 'persistence-format', 'auth-mode'].includes(key))) {
     blockers.push('unexpected-data-conversion');
   }
   if (['R6', 'R7', 'R3', 'R2'].includes(candidateRoute) && !binding.backupSha256) blockers.push('missing-preservation-evidence');
-  if (['R2', 'R3', 'R6', 'R7'].includes(candidateRoute) &&
+  if (['R1', 'R2', 'R3', 'R6', 'R7'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
   if (candidateRoute === 'R4' && ['absent', 'pristine'].includes(state.D)) requiredApprovals.push('database-initialization');
   const route = blockers.length ? 'R0' : candidateRoute;
   const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes },
-    target, intent, window, transition, candidateRoute, route, system: systems[route],
+    target, intent, window, transition, candidateRoute, route,
+    system: route === 'R3' && requiresTransition ? 'cutover' : systems[route],
     requiredApprovals, blockers };
-  return { plan, planSha256: digest(plan) };
+  return { plan, planSha256: digestEvidence(plan) };
 }
 
 // Revalidate the first mutation admission after acquiring the production queue
@@ -176,7 +172,7 @@ export function assertDeploymentPlanApproval({ plan, planSha256, approval, curre
   now = new Date(), maxAgeMs = 5 * 60_000 }) {
   requireCondition(plan?.format === 'codexia-deployment-plan/v1' && plan.route !== 'R0' &&
     Array.isArray(plan.blockers) && plan.blockers.length === 0 &&
-    typeof planSha256 === 'string' && hashPattern.test(planSha256) && digest(plan) === planSha256,
+    typeof planSha256 === 'string' && hashPattern.test(planSha256) && digestEvidence(plan) === planSha256,
   'Deployment plan is blocked or altered');
   requireCondition(record(approval, ['planSha256', 'grants']) && approval.planSha256 === planSha256 &&
     Array.isArray(approval.grants) && isDeepStrictEqual([...approval.grants].sort(), [...plan.requiredApprovals].sort()),
