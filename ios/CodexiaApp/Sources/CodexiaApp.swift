@@ -14,6 +14,7 @@ private struct LibraryView: View {
             List {
                 Section("原稿エディターの検証") {
                     NavigationLink("サンプル作品") { FixtureProjectView() }
+                        .accessibilityIdentifier("CTRL-LIB-01.A")
                 }
                 Section {
                     Text("作品の読み込みと保存はまだ利用できません。サンプルの編集内容は終了時に失われます。")
@@ -49,7 +50,7 @@ private struct FixtureListView: View {
                 Button("\(count.formatted()) 文字のサンプル") {
                     editor = FixtureEditingSession(characterCount: count)
                 }
-                .accessibilityIdentifier("fixture.\(count)")
+                .accessibilityIdentifier("CTRL-OUT-01.B.fixture.\(count)")
             }
         }
         .accessibilityIdentifier("screen.outline")

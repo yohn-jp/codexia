@@ -1,12 +1,16 @@
 import XCTest
 
 final class AuthoringFlowUITests: XCTestCase {
+    private func fixtureButton(_ count: Int, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@", "CTRL-OUT-01.B.fixture.\(count)")).firstMatch
+    }
+
     private func openFixture(_ app: XCUIApplication) {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         app.buttons["サンプル作品"].tap()
         app.buttons["構成と原稿"].tap()
-        app.buttons["fixture.10000"].tap()
+        fixtureButton(10_000, in: app).tap()
     }
 
     private func menuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
@@ -31,7 +35,7 @@ final class AuthoringFlowUITests: XCTestCase {
         // Copy leaves a full-document selection. Reopen the same sample so the
         // Paste gesture starts in a fresh editor while retaining the app clipboard.
         app.buttons["戻る"].tap()
-        let sample = app.buttons["fixture.10000"]
+        let sample = fixtureButton(10_000, in: app)
         XCTAssertTrue(sample.waitForExistence(timeout: 10))
         sample.tap()
         XCTAssertTrue(editor.waitForExistence(timeout: 15))

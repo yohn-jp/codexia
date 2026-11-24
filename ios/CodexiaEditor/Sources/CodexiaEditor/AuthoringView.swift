@@ -13,6 +13,12 @@ private enum ReferenceScreen: String, CaseIterable, Identifiable {
         case .settings: return "設定"
         }
     }
+    var uxControlID: String? {
+        switch self {
+        case .reading: return "CTRL-WRT-01.B"
+        case .history, .review, .knowledge, .settings: return nil
+        }
+    }
 }
 
 /// An in-memory editor surface; a host must supply durable protection before leaving.
@@ -42,6 +48,7 @@ public struct AuthoringView: View {
                 Menu("参照") {
                     ForEach(ReferenceScreen.allCases) { screen in
                         Button(screen.title) { reference = screen }
+                            .accessibilityIdentifier(screen.uxControlID ?? "reference.\(screen.rawValue)")
                     }
                 }
                 .disabled(state.isComposing)
