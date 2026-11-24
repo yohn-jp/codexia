@@ -6,6 +6,9 @@ public struct EditorState {
         fileprivate let session: UUID
         public let documentID: String
         public let version: UInt64
+        /// Immutable manuscript contents captured at `version` for durable protection.
+        /// Later edits to `EditorState` never change this payload.
+        public let text: String
     }
 
     public struct RemoteRequest {
@@ -28,7 +31,9 @@ public struct EditorState {
         self.text = text
     }
 
-    public var snapshot: Snapshot { Snapshot(session: session, documentID: documentID, version: version) }
+    public var snapshot: Snapshot {
+        Snapshot(session: session, documentID: documentID, version: version, text: text)
+    }
     public var canLeave: Bool { version == protectedVersion && !isComposing }
 
     public mutating func edit(_ text: String) {

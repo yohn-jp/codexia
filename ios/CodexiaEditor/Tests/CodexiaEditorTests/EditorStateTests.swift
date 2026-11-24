@@ -69,10 +69,24 @@ final class EditorStateTests: XCTestCase {
         var state = EditorState(documentID: "a", text: "initial")
         state.edit("first")
         let protected = state.snapshot
+        XCTAssertEqual(protected.text, "first")
         state.edit("second")
+        XCTAssertEqual(protected.text, "first", "A protection write must retain the captured body while typing continues")
         state.markProtected(protected)
         XCTAssertFalse(state.canLeave)
         state.markProtected(state.snapshot)
         XCTAssertTrue(state.canLeave)
+    }
+
+    func testSnapshotCapturesInitialTextAndVersion() {
+        var state = EditorState(documentID: "a", text: "draft")
+        let snapshot = state.snapshot
+
+        state.edit("draft plus input")
+
+        XCTAssertEqual(snapshot.documentID, "a")
+        XCTAssertEqual(snapshot.version, 0)
+        XCTAssertEqual(snapshot.text, "draft")
+        XCTAssertEqual(state.snapshot.text, "draft plus input")
     }
 }
