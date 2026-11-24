@@ -434,7 +434,7 @@ test('impact selection is independent of proof availability; unknown diffs still
   const unknown = createVerificationPlan({ ...input, files: null });
   assert.equal(unknown.mode, 'full');
   assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
-  assert.deepEqual(JSON.parse(verificationPlanOutputs(unknown).unit), ['core', 'modules', 'architecture']);
+  assert.deepEqual(JSON.parse(verificationPlanOutputs(unknown).unit), ['core', 'api', 'db', 'modules', 'architecture']);
   assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, VERIFICATION_TASKS);
   assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
 });

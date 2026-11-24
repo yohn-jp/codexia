@@ -24,6 +24,7 @@ export async function waitForProducerJob({read,runId,sourceSha,producerJob,expec
     const remainingBeforeRead=deadline-now();
     assert.ok(remainingBeforeRead>=0,'Timed out waiting for exact profile producer: '+producerJob);
     const {run,jobs}=await read(Math.max(1,remainingBeforeRead));
+    assert.ok(now()<=deadline,'Timed out waiting for exact profile producer: '+producerJob);
     assert.equal(String(run.id),String(runId),'Producer run mismatch');
     assert.equal(run.head_sha,sourceSha,'Producer source mismatch');
     if(expectedAttempt!==undefined)assert.equal(run.run_attempt,expectedAttempt,'Producer run attempt changed');
