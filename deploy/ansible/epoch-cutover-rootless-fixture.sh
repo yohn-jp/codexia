@@ -28,6 +28,7 @@ readonly request="$work/request.json"
 declare -a passed=()
 
 mkdir -p "$work" "$evidence" "$quadlet" "$state" "$auth" "$CODEXIA_BACKUP_DESTINATION"
+chmod 0700 "$CODEXIA_BACKUP_PROGRAM"
 record() {
   passed+=("$1")
   printf '%s\n' "${passed[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))' > "$evidence/assertions.json"
@@ -169,6 +170,7 @@ systemctl --user daemon-reload
 systemctl --user start codexia-api.service codexia-tunnel.service
 jq -n --slurpfile release "$work/prior-image.json" --arg auth "$settings_sha" '
   $release[0] + {format:"codexia-push-deployment/v1",authMode:"better-auth",authSettingsSha256:$auth}' > "$state/deployed-release.json"
+chmod 0600 "$state/deployed-release.json"
 
 owner_fixture() { podman exec fixture-oidc node /fixture/fixture.mjs "$@"; }
 owner_fixture backend-smoke "$OCI_AUTH_WEB_CLIENT" "$oci_owner_subject" > "$work/projects.json"
@@ -198,7 +200,23 @@ readonly before_history_hash
 record established_owner_oauth_projects_and_history
 
 hash_file() { sha256sum "$1" | cut -d ' ' -f 1; }
-host() { bash "$host_program" "$1" "$request"; }
+host() {
+  local operation=$1 status path
+  if bash "$host_program" "$operation" "$request"; then return 0; else status=$?; fi
+  printf 'Fixture host action %s exited %s. Rootless uid %s.\n' "$operation" "$status" "$(id -u)" >&2
+  for path in "$request" "$state/deployed-release.json" "$auth/runtime-$settings_sha.env" \
+    "$quadlet/codexia-api.container" "$state/candidate-epoch2.container" "$CODEXIA_BACKUP_PROGRAM" \
+    "$state/cutover-transaction.json"; do
+    if [[ -e "$path" || -L "$path" ]]; then
+      printf '%s: %s\n' "${path##*/}" "$(stat -c 'type=%F mode=%a owner=%u' -- "$path")" >&2
+    fi
+  done
+  return "$status"
+}
+replace_request() {
+  chmod 0600 "$work/request.tmp"
+  mv -T "$work/request.tmp" "$request"
+}
 expect_denial() {
   local expected=$1
   shift
@@ -219,6 +237,7 @@ start_plan() {
     {sourceHostId,databaseSystemIdentifier,priorContainerId,priorImage,priorIdentity,priorUnitSha256,
       $planSha256,$candidateUnit,$candidateUnitSha256,$notAfter,candidateImage:$candidate[0].image,candidateIdentity:$candidate[0].identity}
   ' "$work/observed.json" > "$request"
+  chmod 0600 "$request"
 }
 
 both_stopped() {
@@ -228,16 +247,20 @@ both_stopped() {
 checkpoint_and_rehearse() {
   local scenario=$1 artifact manifest
   host checkpoint > "$work/checkpoint.json"
+  record "${scenario}_encrypted_checkpoint_created"
   host checkpoint > "$work/duplicate-checkpoint.json"
   cmp "$work/checkpoint.json" "$work/duplicate-checkpoint.json"
+  record "${scenario}_duplicate_checkpoint_identical"
   both_stopped
   systemctl --user start codexia-api.service codexia-tunnel.service
   both_stopped
+  record "${scenario}_guards_prevent_service_restart"
   jq --slurpfile checkpoint "$work/checkpoint.json" '
     . + ($checkpoint[0] | {checksumManifestSha256,databaseFingerprint,historyFingerprint})
   ' "$request" > "$work/request.tmp"
-  mv "$work/request.tmp" "$request"
+  replace_request
   expect_denial 'independently approved recovery receipt' host apply
+  record "${scenario}_candidate_refused_without_restore_rehearsal"
 
   artifact=$(jq -er .backupDirectory "$work/checkpoint.json")
   independent_backup="$work/recovery-storage/$scenario"
@@ -252,7 +275,8 @@ checkpoint_and_rehearse() {
   jq -n --arg image "$candidate_image" --arg sha "$manifest" --arg run "$scenario" \
     '{fixture:"isolated restore on disposable runner",image:$image,manifestSha256:$sha,scenario:$run}' > "$work/drill-receipt.json"
   jq --arg sha "$(hash_file "$work/drill-receipt.json")" '.recoveryReceiptSha256 = $sha' "$request" > "$work/request.tmp"
-  mv "$work/request.tmp" "$request"
+  replace_request
+  record "${scenario}_isolated_restore_and_conversion_rehearsed"
 }
 
 verify_runtime() {
@@ -329,7 +353,7 @@ expect_denial 'Interrupted cutover requires explicit recovery' host apply
 host recover-quiesce | jq -e '.requiresRestore == true' >/dev/null
 expect_denial 'Protected restore receipt is required' host recover
 jq --arg receipt "$(hash_file "$work/drill-receipt.json")" '.restoreReceiptSha256 = $receipt' "$request" > "$work/request.tmp"
-mv "$work/request.tmp" "$request"
+replace_request
 expect_denial 'fingerprints disagree' host recover
 both_stopped
 record interrupted_after_real_conversion_failed_closed
@@ -344,7 +368,7 @@ jq -n --arg checkpoint "$(jq -er .checksumManifestSha256 "$request")" \
   '{fixture:"disposable database and history restored",manifestSha256:$checkpoint}' > "$work/restore-receipt.json"
 jq --arg receipt "$(hash_file "$work/restore-receipt.json")" '.restoreReceiptSha256 = $receipt | .outcome = "prior"' \
   "$request" > "$work/request.tmp"
-mv "$work/request.tmp" "$request"
+replace_request
 host recover | jq -e '.status == "prior-ready"' >/dev/null
 verify_runtime restored 1 false
 host open-tunnel | jq -e '.status == "prior-tunnel"' >/dev/null
@@ -362,7 +386,7 @@ host apply | jq -e '.status == "candidate-ready"' >/dev/null
 verify_runtime candidate 2 false
 [[ "$(psql_admin -c "SELECT count(*) FROM module_record WHERE module_id = 'publishing' AND key = 'share-grants'")" == 1 ]]
 jq '.outcome = "candidate"' "$request" > "$work/request.tmp"
-mv "$work/request.tmp" "$request"
+replace_request
 host open-tunnel | jq -e '.status == "candidate-tunnel"' >/dev/null
 host finish | jq -e '.status == "finished" and .outcome == "candidate"' >/dev/null
 [[ "$(jq -er .image "$state/deployed-release.json")" == "$candidate_image" ]]

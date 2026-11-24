@@ -76,9 +76,13 @@ def present(path):
 
 def regular(path, private=False):
     info = path.lstat()
-    require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and
-            (not private or stat.S_IMODE(info.st_mode) == 0o600),
-            "Cutover input or state is not a rootless-owned regular file with the required permissions")
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or (private and mode != 0o600):
+        label = path.name
+        if not matches(r"[a-zA-Z0-9_.-]{1,128}", label):
+            label = "input"
+        raise CutoverError(f"Cutover {label} requires a rootless-owned regular file with the required permissions "
+                           f"(mode {mode:04o}, owner matches: {info.st_uid == os.getuid()})")
     return path
 
 
