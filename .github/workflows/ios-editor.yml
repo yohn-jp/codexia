@@ -5,6 +5,7 @@ on:
     paths:
       - 'ios/CodexiaEditor/**'
       - 'ios/CodexiaApp/**'
+      - 'ios/CodexiaTransport/**'
       - '.github/workflows/ios-editor.yml'
 permissions:
   contents: read
@@ -18,40 +19,47 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify Xcode
-        run: xcodebuild -version | grep -E '^Xcode 27\.'
+      - name: Verify exact source and native toolchain
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          xcrun --sdk iphonesimulator --show-sdk-version | grep -E '^27(\.|$)'
+          swift --version
       - name: Build for iOS Simulator
         working-directory: ios/CodexiaEditor
         run: xcodebuild -scheme CodexiaEditor -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Test state model
         working-directory: ios/CodexiaEditor
         run: swift test
-      - name: Build fixture app for Simulator
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
       - name: Select and boot Simulator
         id: simulator_boot
         timeout-minutes: 10
         run: |
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
+          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for runtime, devices in d["devices"].items() if ".iOS-27-" in runtime for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
           echo "EDITOR_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE_ID" || true
           xcrun simctl bootstatus "$DEVICE_ID" -b
-      - name: Install and launch fixture app
-        timeout-minutes: 10
-        run: |
-          xcrun simctl install "$EDITOR_SIMULATOR_ID" "$RUNNER_TEMP/codexia-editor/Build/Products/Debug-iphonesimulator/CodexiaApp.app"
-          xcrun simctl launch "$EDITOR_SIMULATOR_ID" jp.yohn.codexia.editorfixture
       - name: Test UIKit adapter on Simulator
         if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
         timeout-minutes: 15
         working-directory: ios/CodexiaEditor
         run: |
           xcodebuild -list
-          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
-      - name: Test app navigation and scene on Simulator
+          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-package.xcresult" test
+      - name: Test SwiftUI shell, draft navigation and scene on Simulator
         if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
         timeout-minutes: 15
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
+        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-app.xcresult" test
+      - name: Retain Simulator results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ios-simulator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/editor-package.xcresult
+            ${{ runner.temp }}/editor-app.xcresult
+          retention-days: 14
