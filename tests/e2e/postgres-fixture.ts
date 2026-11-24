@@ -54,8 +54,7 @@ export async function openManuscriptScene(page: Page, scene: Pick<FixtureDocumen
 }
 export async function replaceManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
-  // Let CodeMirror handle the selection as an editor command before typing.
-  await editor.click();
+  await clickManuscriptEnd(editor);
   await editor.press("ControlOrMeta+a");
   if (text) await editor.pressSequentially(text);
   else await editor.press("Backspace");
@@ -65,9 +64,34 @@ export async function replaceManuscript(page: Page, text: string): Promise<void>
 export async function appendManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
   const previous = await readManuscriptMarkdown(page);
-  await editor.press("Control+End");
+  await clickManuscriptEnd(editor);
   await editor.pressSequentially(text);
   await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + text);
+}
+
+async function clickManuscriptEnd(editor: Locator): Promise<void> {
+  const position = await editor.evaluate((element) => {
+    const lines = element.querySelectorAll(".cm-line");
+    const lastLine = lines.item(lines.length - 1);
+    if (!lastLine) return null;
+
+    const walker = element.ownerDocument.createTreeWalker(lastLine, NodeFilter.SHOW_TEXT);
+    let lastText: Text | null = null;
+    while (walker.nextNode()) lastText = walker.currentNode as Text;
+    if (!lastText?.length) return null;
+
+    const range = element.ownerDocument.createRange();
+    range.setStart(lastText, lastText.length - 1);
+    range.setEnd(lastText, lastText.length);
+    const textRect = range.getBoundingClientRect();
+    const editorRect = element.getBoundingClientRect();
+    return {
+      x: Math.max(1, Math.min(editorRect.width - 1, textRect.right - editorRect.left + 1)),
+      y: Math.max(1, Math.min(editorRect.height - 1, textRect.top - editorRect.top + textRect.height / 2)),
+    };
+  });
+  if (position) await editor.click({ position });
+  else await editor.click();
 }
 
 export async function fillDraft(page: Page, text: string): Promise<void> {
