@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
-import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
+import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.dockerignore',
@@ -285,6 +285,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
     }
+    if (isRequirementsTraceInput(file) || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('requirements-trace');
     if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
     if (file === 'deploy/backup/backup.sh') add('db-contract');
     if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||

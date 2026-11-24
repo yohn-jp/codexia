@@ -23,6 +23,8 @@ export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
   'docs/requirements/REQUIREMENT-REGISTER.md',
   'docs/requirements/STRICTDOC-TRACEABILITY.md',
   'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
+  'docs/design/SCREEN-CONTROL-CATALOG.md',
+  'docs/design/SCREEN-STATE-ATLAS.md',
 ]);
 export const UX_PROJECTION_DOCUMENTS = Object.freeze([
   'docs/design/UX-SIMULATOR-CONTRACT.md',
@@ -45,6 +47,24 @@ export const UX_PROJECTION_DOCUMENTS = Object.freeze([
 const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
 const requirementsTraceDocuments = new Set(REQUIREMENTS_TRACE_DOCUMENTS);
 const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
+export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
+  '.github/workflows/backend-deployment-handoff.yml',
+  '.github/workflows/backend-release.yml',
+  '.github/workflows/push-backup.yml',
+  'deploy/ansible/deploy-transaction.yml',
+  'deploy/ansible/deploy.yml',
+  'deploy/ansible/restore-drill.yml',
+  'deploy/backup/backup.sh',
+  'deploy/backup/s3_transfer.py',
+]);
+const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
+
+export function isRequirementsTraceInput(file) {
+  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
+    file.startsWith('packages/http-contract/openapi/') ||
+    file.startsWith('packages/http-contract/test/fixtures/') ||
+    file === 'packages/persistence-postgres/tests/db-contract/catalog-contract.json';
+}
 
 export function isNonExecutableDocumentation(file) {
   if (rootVerificationDocuments.has(file)) return false;

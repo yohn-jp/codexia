@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
+import { associateTraceCases } from './case-results.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -586,30 +587,26 @@ function requirementIdsFromSource(markdown) {
   return [...markdown.matchAll(/^\|\s*(REQ-[A-Z]+-\d{3})\s*\|/gmu)].map((match) => match[1]);
 }
 
-function collectRequirementNodes(value, found = []) {
+function collectNodes(value, type, found = []) {
   if (!value || typeof value !== 'object') return found;
-  if (Array.isArray(value)) {
-    for (const entry of value) collectRequirementNodes(entry, found);
-    return found;
-  }
-  if (value._NODE_TYPE === 'REQUIREMENT') found.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== '_NODE_TYPE') collectRequirementNodes(child, found);
-  }
+  if (value._NODE_TYPE === type) found.push(value);
+  for (const child of Object.values(value)) collectNodes(child, type, found);
   return found;
 }
 
-function collectTestNodes(value, found = []) {
-  if (!value || typeof value !== 'object') return found;
-  if (Array.isArray(value)) {
-    for (const entry of value) collectTestNodes(entry, found);
-    return found;
+async function executeTraceTests(root, tempRoot, reportName, testFiles, env = process.env) {
+  const resultPath = path.join(tempRoot, `${reportName}.ndjson`);
+  const result = execute(process.execPath, [
+    '--test',
+    '--test-reporter=tap', '--test-reporter-destination=stdout',
+    '--test-reporter=./scripts/strictdoc/case-results.mjs', `--test-reporter-destination=${resultPath}`,
+    ...testFiles,
+  ], { cwd: root, env });
+  if (result.status !== 0) {
+    throw new Error(`StrictDoc ${reportName} tests failed:\n${String(result.stdout)}\n${String(result.stderr)}`);
   }
-  if (value._NODE_TYPE === 'TEST') found.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== '_NODE_TYPE') collectTestNodes(child, found);
-  }
-  return found;
+  const outcomes = (await readFile(resultPath, 'utf8')).trim();
+  return { stdout: String(result.stdout).trim(), outcomes: outcomes ? outcomes.split('\n').map(line => JSON.parse(line)) : [] };
 }
 
 async function readGitFile(root, ref, relativePath) {
@@ -799,8 +796,8 @@ async function runVerifier(args) {
     await runStrictDoc(args.strictdoc, root, sourcePath, run1);
     await runStrictDoc(args.strictdoc, root, sourcePath, run2);
     const firstJson = JSON.parse(await readFile(path.join(run1, 'json/index.json'), 'utf8'));
-    const requirementNodes = collectRequirementNodes(firstJson);
-    const scenarioNodes = collectTestNodes(firstJson);
+    const requirementNodes = collectNodes(firstJson, 'REQUIREMENT');
+    const scenarioNodes = collectNodes(firstJson, 'TEST');
     const nodeViolations = validateRequirementNodes(requirementNodes);
     if (nodeViolations.length > 0) throw new Error(nodeViolations.join('\n'));
     const scenarioViolations = await validateScenarioNodes(scenarioNodes, requirementNodes, root);
@@ -842,17 +839,21 @@ async function runVerifier(args) {
     }
     const allNodeIds = [...exportedIds, ...scenarioNodes.map((node) => node.UID)];
     const staticOutput = await checkStaticOutput(finalOutput, allNodeIds, sourceRel, root);
-    const nodeTest = execute(process.execPath, ['--test', 'scripts/strictdoc/verify.test.mjs'], { cwd: root });
-    if (nodeTest.status !== 0) throw new Error(`StrictDoc Node fault-injection tests failed:\n${String(nodeTest.stdout)}\n${String(nodeTest.stderr)}`);
-    const browserTest = execute(process.execPath, ['--test', 'scripts/strictdoc/verify.browser.mjs'], {
-      cwd: root,
-      env: { ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput },
+    const nodeTest = await executeTraceTests(root, tempRoot, 'node', [
+      'scripts/strictdoc/verify.test.mjs',
+      'scripts/strictdoc/case-results.test.mjs',
+    ]);
+    const browserTest = await executeTraceTests(root, tempRoot, 'playwright', ['scripts/strictdoc/verify.browser.mjs'], {
+      ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput,
     });
-    if (browserTest.status !== 0) throw new Error(`StrictDoc Playwright static-page acceptance failed:\n${String(browserTest.stdout)}\n${String(browserTest.stderr)}`);
+    const caseExecutions = associateTraceCases(scenarioNodes, [...nodeTest.outcomes, ...browserTest.outcomes]);
     const git = await readGitIdentity(root);
     const run = resolveRunIdentity(process.env);
-    if (run.status === 'IN_PROGRESS' && run.sourceSha !== git.sourceSha) {
-      throw new Error(`Codexia exact-source SHA ${run.sourceSha} does not match checkout ${git.sourceSha}`);
+    if (run.status === 'IN_PROGRESS') {
+      if (run.sourceSha !== git.sourceSha) {
+        throw new Error(`Codexia exact-source SHA ${run.sourceSha} does not match checkout ${git.sourceSha}`);
+      }
+      if (!git.worktreeClean) throw new Error('Codexia exact-source trace requires a clean checkout');
     }
     const lockPath = path.join(SCRIPT_DIR, 'requirements.lock.txt');
     const lockDigest = await sha256File(lockPath);
@@ -897,9 +898,10 @@ async function runVerifier(args) {
         TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED', detail: 'Static output is staged safely; publication remains with the existing Repository Audit Pages publisher and DOC-01.' },
       },
       tests: {
-        node: { status: 'PASSED', output: String(nodeTest.stdout).trim() },
-        playwright: { status: 'PASSED', output: String(browserTest.stdout).trim() },
+        node: { status: 'PASSED', output: nodeTest.stdout },
+        playwright: { status: 'PASSED', output: browserTest.stdout },
       },
+      caseExecutions,
       execution: run,
       publication: { status: 'NOT_PUBLISHED', publisher: '.github/workflows/repository-audit.yml' },
     };
