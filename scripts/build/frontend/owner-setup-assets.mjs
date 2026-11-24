@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { inspectHtml } from '../../shared/html-document.mjs';
+import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import setupIngress from '../../../deploy/cloudflare/owner-setup.json' with { type: 'json' };
 
 const setup = 'console/setup';
@@ -28,12 +29,13 @@ export async function stageOwnerSetupAssets(frontendDirectory, destination) {
   for (const directory of [join(frontendDirectory, 'console'), source, join(source, 'assets')]) {
     assert.ok((await lstat(directory)).isDirectory(), 'Owner setup requires a regular asset directory');
   }
-  const index = join(source, 'index.html');
-  assert.ok((await lstat(index)).isFile(), 'Owner setup requires a regular HTML entry');
+  const entry = await readRegularFile(join(source, 'index.html'), {
+    encoding: null, message: 'Owner setup requires a regular HTML entry',
+  });
   const assets = await readdir(join(source, 'assets'), { withFileTypes: true });
   assert.ok(assets.length && assets.every(asset => asset.isFile() && assetName.test(asset.name)),
     'Owner setup assets must be regular JS or CSS files');
-  const { references, scripts, stylesheets } = inspectHtml(await readFile(index, 'utf8'));
+  const { references, scripts, stylesheets } = inspectHtml(entry.toString('utf8'));
   const locations = new Set(assets.map(asset => `/${setup}/assets/${asset.name}`));
   assert.ok(scripts.length > 0 && stylesheets.length > 0 && references.every(reference => locations.has(reference)),
     'Owner setup HTML must reference only its certified local assets');
@@ -42,8 +44,11 @@ export async function stageOwnerSetupAssets(frontendDirectory, destination) {
   try {
     const output = join(destination, setup);
     await mkdir(join(output, 'assets'), { recursive: true });
-    await copyFile(index, join(output, 'index.html'));
-    for (const { name } of assets) await copyFile(join(source, 'assets', name), join(output, 'assets', name));
+    await writeFile(join(output, 'index.html'), entry, { flag: 'wx' });
+    for (const { name } of assets) {
+      const bytes = await readRegularFile(join(source, 'assets', name), { encoding: null });
+      await writeFile(join(output, 'assets', name), bytes, { flag: 'wx' });
+    }
     await writeFile(join(destination, '_redirects'), redirects);
     await writeFile(join(destination, '_headers'), headers);
   } catch (error) {

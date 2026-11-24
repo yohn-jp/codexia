@@ -38,3 +38,12 @@ test('missing setup or unsafe certified asset trees are not staged', async t => 
   await rm(source, { recursive: true });
   await assert.rejects(stageOwnerSetupAssets(frontend, destination));
 });
+
+test('a symlink cannot supply the setup entry or replace certified bytes', async t => {
+  const { frontend, destination } = await fixture(t);
+  const entry = join(frontend, 'console/setup/index.html');
+  await rm(entry);
+  await symlink(join(frontend, 'desktop/index.html'), entry);
+  await assert.rejects(stageOwnerSetupAssets(frontend, destination), /regular HTML entry/u);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});
