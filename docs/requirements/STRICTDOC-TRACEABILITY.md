@@ -74,3 +74,13 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | TRC-07 | Repository Audit Pagesに静的サイトを公開 | **PENDING**: HTML/JSONをCI artifact pathへstageし、生成dashboardの絶対checkout pathをREPOSITORY_ROOTへ置換してからcredential/path検査し、Playwrightで要求ページを表示検査。公開経路の変更と公開SHA確認は依存Issue #669が所有 |
 
 StrictDoc導入の範囲は、要求nodeと局所的な自動trace verifier、正直な残件表示まで。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。symbol coverageと完全runtime inventoryはIssue #671の残件である。hosted green resultはexact source SHAごとにreportへ記録し、公開証跡はIssue #669のpublisherが確認する。
+
+## 個別義務trace projection
+
+`scripts/strictdoc/obligation-trace.mjs` は、StrictDoc nodeと実行観測値から要求→個別義務→設計→source/file/range→TEST-ID→exact-source run referenceを投影する補助APIである。入力にないrelationは推測せず、各欠落を`gaps`へ残す。要求の適合状態を認定せず、行の状態は最大でも`MAPPED_UNVERIFIED`であり、実行候補をVERIFIEDへ昇格しない。
+
+個別義務nodeは`OBL-<REQ-ID>-O01` UID、`Parent` relationからREQ-ID、`Design reference`文字列から設計アンカー、`Test IDs`から明示TEST-IDを受け取る。source anchorは既存StrictDoc `File` relationの`VALUE`と任意の`LINE_RANGE`を使用する。既存TEST nodeは現在のREQ ParentとCase name/File relationを維持し、義務node側の`Test IDs`がその義務との対応を示す。Junit、AST symbol coverage、試験名の類似度から対応づけを作らない。
+
+APIの`runEvidence`は観測済みcase execution候補であり、各値は`testId`, canonical `url`, `repository`, `sourceSha`, `runId`, `attempt`, `job`, `task`, `result`を含む。呼出側は`expectedRepository`と`expectedSourceSha`を指定する。run URL、repository、source SHAの不一致や識別情報不足は違反となる。まだartifact upload前のrunも記録できるためartifact ID/digestはこの候補データに含めない。artifact certificationと最終認定は別の既存jobの責務であり、この投影だけでは行わない。
+
+故障注入テストは重複義務UID、切れたTEST-ID、repository外source path、不一致repository、exact-source実行の欠落を検査する。testの存在だけ、または成功結果だけでは要求の適合を証明しない。
