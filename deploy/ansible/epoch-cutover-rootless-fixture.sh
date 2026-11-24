@@ -152,7 +152,7 @@ install -m 0600 "$work/runtime.env" "$auth/runtime-$settings_sha.env"
 
 render_api() {
   local image=$1 initialize=$2
-  sed -e "s@CODEXIA_BACKEND_IMAGE@$image@" -e 's/CODEXIA_BACKEND_PROFILE/full/' \
+  sed -e "s|CODEXIA_BACKEND_IMAGE|$image|" -e 's/CODEXIA_BACKEND_PROFILE/full/' \
     -e "s/AUTH_SETTINGS_DIGEST_PLACEHOLDER/$settings_sha/g" \
     -e "/^\[Container\]/a Secret=fixture-ca,type=mount,target=/run/secrets/fixture-ca.crt,mode=0444\nEnvironment=NODE_EXTRA_CA_CERTS=/run/secrets/fixture-ca.crt" \
     -e "s/CODEXIA_DATABASE_MIGRATE_ON_START=0/CODEXIA_DATABASE_MIGRATE_ON_START=$initialize/" \

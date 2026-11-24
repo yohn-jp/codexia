@@ -33,7 +33,7 @@ run_as_codexia() {
 }
 
 cleanup() {
-  local status=$? result
+  local status=$? result remaining_containers
   trap - EXIT
   set +e
   if [[ "$created_user" == true ]]; then
@@ -43,6 +43,14 @@ cleanup() {
       fi
     done
     run_as_codexia systemctl --user stop codexia-api.service codexia-tunnel.service codexia-db.service >/dev/null 2>&1
+    # Remove fixture containers in the rootless session before resetting its
+    # storage. A network-endpoint teardown error never certifies a remaining container.
+    run_as_codexia podman rm --force --ignore codexia-api codexia-tunnel codexia-db \
+      codexia-cutover-maintenance codexia-auth-registration fixture-oidc fixture-registry >/dev/null
+    if ! remaining_containers=$(run_as_codexia podman ps --all --quiet) || [[ -n "$remaining_containers" ]]; then
+      echo 'Disposable container cleanup did not verify an empty rootless inventory.' >&2
+      status=1
+    fi
     run_as_codexia podman system reset --force >/dev/null || status=1
     sudo -n loginctl disable-linger codexia || status=1
     sudo -n loginctl terminate-user codexia >/dev/null 2>&1
