@@ -33,7 +33,7 @@ run_as_codexia() {
 }
 
 cleanup() {
-  local status=$? result remaining_containers
+  local status=$? result remaining_containers attempt
   trap - EXIT
   set +e
   if [[ "$created_user" == true ]]; then
@@ -53,8 +53,32 @@ cleanup() {
     fi
     run_as_codexia podman system reset --force >/dev/null || status=1
     sudo -n loginctl disable-linger codexia || status=1
+    sudo -n systemctl stop "user@$fixture_uid.service" || status=1
     sudo -n loginctl terminate-user codexia >/dev/null 2>&1
+    # Netavark's final rootless helper can survive outside the user-manager
+    # scope. The fixture account was created for this run and owns no other work.
+    if [[ "$fixture_uid" =~ ^[1-9][0-9]*$ && "$(id -u codexia)" == "$fixture_uid" ]]; then
+      if pgrep -U "$fixture_uid" >/dev/null; then
+        sudo -n pkill --signal KILL -U "$fixture_uid" >/dev/null 2>&1
+        for ((attempt=0; attempt<20; attempt++)); do
+          if ! pgrep -U "$fixture_uid" >/dev/null; then break; fi
+          sleep 0.25
+        done
+      fi
+      if pgrep -U "$fixture_uid" >/dev/null; then
+        echo 'Disposable user cleanup still has running processes.' >&2
+        ps -U "$fixture_uid" -o state=,comm= >&2
+        status=1
+      fi
+    else
+      echo 'Could not verify the disposable account UID before process cleanup.' >&2
+      status=1
+    fi
     sudo -n userdel --remove codexia >/dev/null || status=1
+    if getent passwd codexia >/dev/null || [[ -e "$fixture_home" ]]; then
+      echo 'Disposable account or home remains after cleanup.' >&2
+      status=1
+    fi
   fi
   if [[ -n "$environment_generator" ]]; then sudo -n rm -f -- "$environment_generator" || status=1; fi
   if [[ -n "$manager_dropin" ]]; then
