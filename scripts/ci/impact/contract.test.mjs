@@ -80,13 +80,15 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
 });
 
-test('the certified graph covers every declared obligation within the twenty-job cap', () => {
-  assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
+test('the certified graph covers every declared obligation within the twenty-two-job cap', () => {
+  assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification and selected deployment fixtures at twenty-two jobs');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'deployment_cutover', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
-  assert.ok(VERIFICATION_GROUPS['unit-core'].includes('db-contract'));
+  assert.deepEqual(VERIFICATION_GROUPS['unit-db'], ['db-contract']);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-api'], ['unit-api']);
+  assert.equal(requiresWorkspacePreparation(['db-contract']), true);
   assert.ok(VERIFICATION_TASKS.includes('db-contract'));
   assert.match(readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);
   assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5']);
@@ -142,7 +144,7 @@ test('the certified graph covers every declared obligation within the twenty-job
     'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test');
   assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1');
   const authDatabase = apiUnitJob.steps.find(step => step.name === 'Create isolated Better Auth persistence database');
-  assert.equal(authDatabase.if, "matrix.group == 'core'");
+  assert.equal(authDatabase.if, "matrix.group == 'core' || matrix.group == 'api'");
   assert.equal(authDatabase.env.POSTGRES_CONTAINER, '${{ job.services.postgres.id }}');
   assert.match(authDatabase.run, /createdb -U codexia codexia_auth_test/u);
   const modelJobConfig = fullModelWorkflow.jobs['full-model-oci'];
@@ -195,7 +197,7 @@ test('OpenAPI changes also select the Desktop Web client regeneration check', ()
   assert.ok(plan.tasks.includes('unit-http-contract'));
   assert.ok(plan.tasks.includes('unit-app'));
 });
-test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
+test('browser jobs start from plan while exact producer restore gates execution; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {
     group: 'verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}',
     'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
@@ -203,7 +205,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'deployment_cutover', 'biome'].includes(id))) {
-    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
+    assert.deepEqual(job.needs, ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
     assert.equal(job.strategy['fail-fast'], false, id);
@@ -292,6 +294,8 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.match(restore.run, /profile-artifact\.mjs restore/);
   assert.equal(browser.permissions['actions'], 'read');
   assert.match(restore.run,/\$CODEXIA_CI_PROFILE_RECEIPT/);
+  assert.ok(browser.steps.indexOf(restore) < runnerIndex);
+  assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
   assert.equal(restore.env.CODEXIA_CI_PROFILE_RECEIPT, browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RECEIPT);
   assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
   assert.ok(browser.steps.indexOf(restore) < runnerIndex);

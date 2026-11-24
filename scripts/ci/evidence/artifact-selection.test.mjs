@@ -10,7 +10,7 @@ import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { assertPlanEvidence } from './validation.mjs';
 import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './artifact-selection.mjs';
 import { collectGitHubArrayPages, collectGitHubPages } from '../../release/components/policy.mjs';
-import { listProducerArtifacts } from './producer-artifact.mjs';
+import { listProducerArtifacts, waitForProducerJob } from './producer-artifact.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const runId = '40127302099';
@@ -219,4 +219,34 @@ test('partial rerun resolves a carried-over producer to its original execution a
   assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
   assert.equal(resolved[2].conclusion, 'failure');
   await assert.rejects(resolveProducerJobAttempts([carried], run, async () => ({total_count:0,jobs:[]}), ['build-core']), /history unavailable/u);
+});
+
+test('early browser waits only for its exact same-profile successful producer', async () => {
+  let clock=0,reads=0;
+  const run={id:Number(runId),head_sha:sourceSha,status:'in_progress',run_attempt:2};
+  const pending={...job('build-core','2026-10-24T19:49:00Z','2026-10-24T20:05:00Z'),status:'in_progress',conclusion:null};
+  const other={...job('build-full','2026-10-24T19:49:00Z','2026-10-24T20:05:00Z'),conclusion:'failure'};
+  const result=await waitForProducerJob({read:async()=>({run,jobs:[other,...(++reads===1?[]:[reads===2?pending:{...pending,status:'completed',conclusion:'success'}])]}),
+    runId,sourceSha,producerJob:'build-core',expectedAttempt:2,timeoutMs:5000,now:()=>clock,pause:async ms=>{clock+=ms;}});
+  assert.equal(reads,3);
+  assert.equal(result.waitMs,3000);
+  assert.equal(result.jobs.find(j=>j.name==='build-core').conclusion,'success');
+});
+
+test('producer wait rejects terminal failure, foreign identity, ambiguity, changed attempt and timeout', async () => {
+  const run={id:Number(runId),head_sha:sourceSha,status:'in_progress',run_attempt:2};
+  const success=job('build-core','2026-10-24T19:49:00Z','2026-10-24T20:05:00Z');
+  for(const [r,jobs,error] of [
+    [run,[{...success,conclusion:'failure'}],/producer failed/iu],
+    [run,[{...success,head_sha:'b'.repeat(40)}],/source mismatch/iu],
+    [run,[{...success,run_id:1}],/run mismatch/iu],
+    [run,[success,success],/Ambiguous/iu],
+    [{...run,run_attempt:3},[success],/attempt changed/iu],
+    [{...run,status:'completed'},[],/completed without/iu],
+  ]) await assert.rejects(waitForProducerJob({read:async()=>({run:r,jobs}),runId,sourceSha,producerJob:'build-core',expectedAttempt:2,
+    timeoutMs:5000,pause:async()=>{throw Error('terminal state must not wait');}}),error);
+  let clock=0;
+  await assert.rejects(waitForProducerJob({read:async()=>({run,jobs:[]}),runId,sourceSha,producerJob:'build-core',expectedAttempt:2,
+    timeoutMs:1500,now:()=>clock,pause:async ms=>{clock+=ms;}}),/Timed out/u);
+  assert.equal(clock,1500);
 });

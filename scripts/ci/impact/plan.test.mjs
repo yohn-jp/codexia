@@ -27,7 +27,7 @@ test('browser cache has a single trusted main-push writer without changing test 
   assert.equal(restore.uses, 'actions/cache/restore@v6.1.0');
   assert.equal(saves.length, 1, 'Only one browser cache writer is permitted');
   const save = saves[0];
-  assert.equal(save.if, "success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'core-reference' && steps.dependencies.outputs.cache-hit != 'true'");
+  assert.equal(save.if, "success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'full-reference' && steps.dependencies.outputs.cache-hit != 'true'");
   assert.equal(save['continue-on-error'], true, 'Cache availability must not change verification results');
   assert.equal(save.with.path, restore.with.path);
   assert.equal(save.with.key, '${{ steps.dependencies.outputs.cache-primary-key }}');
@@ -38,7 +38,7 @@ test('browser cache has a single trusted main-push writer without changing test 
   const { createVerificationPlan } = await import('./plan.mjs');
   const main = createVerificationPlan({ files: ['docs/authoring.md'], event: 'push',
     sha: 'a'.repeat(40), base: 'b'.repeat(40) });
-  assert.ok(main.groups.includes('browser-core-reference'), 'Full main verification always has the cache writer');
+  assert.ok(main.groups.includes('browser-full-reference'), 'Full main verification always has the cache writer');
 });
 
 test('host dependencies are restore-only in Verify and cache mutation is scoped to trusted events', () => {
@@ -64,9 +64,10 @@ test('host dependencies are restore-only in Verify and cache mutation is scoped 
   assert.ok(cleanup.steps.every(step => !step.uses), 'Privileged cleanup must not checkout or run PR-controlled code');
   assert.match(cleanup.steps[0].run, /--ref "refs\/pull\/\$PR_NUMBER\/merge"/u);
   assert.equal(cleanup.steps[0].env.PR_NUMBER, '${{ github.event.pull_request.number }}');
-  assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture'/u);
+  assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture' && matrix\.group != 'db'/u);
   assert.equal(workflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
-  assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture'");
+  assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture' && matrix.group != 'api' && matrix.group != 'db'");
+  assert.equal(workflow.jobs.browser.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
   for (const name of ['plan', 'certification']) {
     const steps = workflow.jobs[name].steps;
     const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
@@ -177,7 +178,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
     const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
     assert.deepEqual(selected.tasks, requirementRegister
       ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
-    assert.deepEqual(selected.groups, requirementRegister ? ['unit-core', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+    assert.deepEqual(selected.groups, requirementRegister ? ['unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 
