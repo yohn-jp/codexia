@@ -1,4 +1,4 @@
-import { compare, snapshot } from './build.mjs';
+import { compare, comparisonBase, snapshot } from './build.mjs';
 import { button, h } from './dom.mjs';
 import { back, begin, choices, replay, share, step, trace, visit } from './model.mjs';
 
@@ -45,7 +45,7 @@ function showCompare(active) {
   compareTab.setAttribute('aria-pressed', String(active));
   if (!active || compared) return;
   compared = true;
-  if (compare) compare(comparePanel, { snapshot });
+  if (compare) compare(comparePanel, { snapshot, left: comparisonBase, rightSnapshot: comparisonBase ? snapshot : null });
   else comparePanel.append(h('h2', {}, '比較'), h('p', {}, 'この生成物には比較の提供データがありません。'));
 }
 

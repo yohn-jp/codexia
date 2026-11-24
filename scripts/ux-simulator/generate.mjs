@@ -19,7 +19,7 @@ const coreModules = ['authority.mjs', 'design.mjs', 'execution.mjs', 'generate.m
 const browserModules = ['browser.mjs', 'dom.mjs', 'model.mjs', 'style.css'];
 const compareModules = ['compare/browser.mjs', 'compare/model.mjs', 'compare/style.css'];
 
-export async function generate({ output, sourceSha, repositoryRoot = root, observe = false }) {
+export async function generate({ output, sourceSha, repositoryRoot = root, observe = false, comparisonBase }) {
   if (!shaPattern.test(sourceSha ?? '') || !output) throw new Error('Expected --output and --source-sha (40 hex)');
   const authority = createSource(repositoryRoot);
   const canonical = createSource(repositoryRoot);
@@ -38,9 +38,21 @@ export async function generate({ output, sourceSha, repositoryRoot = root, obser
   if (compare) {
     for (const path of compareModules) outputs.set(path, readFileSync(join(here, path)));
   }
+  if (compare && comparisonBase) {
+    const manifest = JSON.parse(readFileSync(join(comparisonBase, 'manifest.json'), 'utf8'));
+    const raw = readFileSync(join(comparisonBase, 'snapshot.json'), 'utf8');
+    if (manifest.repository !== repository || manifest.schemaVersion !== schemaVersion || manifest.sourceSha === sourceSha
+      || !shaPattern.test(manifest.sourceSha ?? '') || digest(raw) !== manifest.outputs?.['snapshot.json']) {
+      throw new Error('Invalid verified comparison base');
+    }
+    outputs.set('compare/base.mjs', 'export default ' + JSON.stringify({ manifest, raw }) + ';\n');
+  }
   outputs.set('snapshot.json', json(snapshot));
   outputs.set('build.mjs', (compare ? 'export { renderCompare as compare } from "./compare/browser.mjs";'
-    : 'export const compare = null;') + '\nexport const snapshot = ' + json(snapshot).trimEnd() + ';\n');
+    : 'export const compare = null;')
+    + (outputs.has('compare/base.mjs') ? '\nexport { default as comparisonBase } from "./compare/base.mjs";'
+      : '\nexport const comparisonBase = null;')
+    + '\nexport const snapshot = ' + json(snapshot).trimEnd() + ';\n');
   outputs.set('index.html', html(compare));
   for (const path of [...coreModules, ...browserModules, ...(compare ? compareModules : [])]) {
     generator.read('scripts/ux-simulator/' + path);
@@ -95,6 +107,6 @@ function html(compare) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { output: { type: 'string' }, 'source-sha': { type: 'string' }, observe: { type: 'boolean' } } });
-  await generate({ output: values.output, sourceSha: values['source-sha'], observe: values.observe });
+  const { values } = parseArgs({ options: { output: { type: 'string' }, 'source-sha': { type: 'string' }, observe: { type: 'boolean' }, 'comparison-base': { type: 'string' } } });
+  await generate({ output: values.output, sourceSha: values['source-sha'], observe: values.observe, comparisonBase: values['comparison-base'] });
 }

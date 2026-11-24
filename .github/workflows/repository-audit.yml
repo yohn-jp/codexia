@@ -10,6 +10,17 @@ on:
       - 'scripts/graphify-pages/**'
       - 'scripts/architecture-diagrams/**'
       - 'scripts/pages-ui/**'
+      - 'scripts/ux-simulator/**'
+      - 'scripts/ci/impact/plan.mjs'
+      - 'scripts/ci/impact/plan.test.mjs'
+      - 'scripts/ci/evidence/task-inputs.mjs'
+      - 'scripts/ci/evidence/task-inputs.test.mjs'
+      - 'app/src/**'
+      - 'modules/**'
+      - 'ios/**'
+      - 'packages/api/src/**'
+      - 'packages/core/src/**'
+      - 'tests/**'
       - 'scripts/pages-api/**'
       - 'packages/http-contract/**'
       - 'pnpm-lock.yaml'
@@ -21,6 +32,17 @@ on:
       - 'docs/design/ADMIN-SCREEN-FLOW.md'
       - 'docs/design/SCREEN-STATE-ATLAS.md'
       - 'docs/design/SCREEN-CONTROL-CATALOG.md'
+      - 'docs/design/UX-SIMULATOR-CONTRACT.md'
+      - 'docs/design/UX-CONTRACT.md'
+      - 'docs/design/INTERACTION-CONTRACT.md'
+      - 'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md'
+      - 'docs/design/MOBILE-AUTHORING.md'
+      - 'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md'
+      - 'docs/architecture/API-CONTRACT.md'
+      - 'docs/architecture/BACKUP-CONSOLE-CONTRACT.md'
+      - 'docs/requirements/REQUIREMENT-REGISTER.md'
+      - 'docs/requirements/STRICTDOC-TRACEABILITY.md'
+      - 'app/DESIGN.md'
       - 'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md'
       - 'docs/verification/ARCHITECTURE-ATLAS.md'
       - 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md'
@@ -317,10 +339,35 @@ jobs:
       - name: Generate static Scalar OpenAPI reference
         run: node scripts/pages-api/pack.mjs "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)"
       - name: Assemble the integrated Pages artifact
+        env:
+          UX_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
           SITE="$RUNNER_TEMP/audit-site"
+          compare=()
+          if [[ "$UX_BASE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+            git grep -q -F 'const schemaVersion = 2;' "$UX_BASE_SHA" -- scripts/ux-simulator/generate.mjs &&
+            git cat-file -e "$UX_BASE_SHA:scripts/ux-simulator/adapters/ios.mjs"; then
+            base="$RUNNER_TEMP/ux-base-source"
+            base_artifact="$RUNNER_TEMP/ux-base-artifact"
+            git worktree add --detach "$base" "$UX_BASE_SHA"
+            baseline_observation=()
+            if test -f "$base/scripts/ux-simulator/adapters/desktop.mjs" &&
+              test -f "$base/scripts/ux-simulator/execution.mjs" &&
+              cmp -s "$base/pnpm-lock.yaml" pnpm-lock.yaml; then
+              ln -s "$GITHUB_WORKSPACE/app/node_modules" "$base/app/node_modules"
+              baseline_observation+=(--observe)
+            fi
+            (
+              cd "$base"
+              node scripts/ux-simulator/generate.mjs --output "$base_artifact" --source-sha "$UX_BASE_SHA" "${baseline_observation[@]}"
+              node "$GITHUB_WORKSPACE/scripts/audit/ux-artifact.mjs" verify "$base_artifact" "$UX_BASE_SHA"
+            )
+            compare=(--comparison-base "$base_artifact")
+          fi
+          node scripts/ux-simulator/generate.mjs --output "$SITE/ux" --source-sha "$(git rev-parse HEAD)" --observe "${compare[@]}"
           node scripts/audit/portal.mjs generate "$SITE" "$(git rev-parse HEAD)" "$PAGES_ORIGIN"
           node scripts/pages-ui/navigation.mjs "$SITE"
+          node scripts/audit/ux-artifact.mjs seal "$SITE/ux" "$(git rev-parse HEAD)"
           node scripts/audit/portal.mjs finalize "$SITE" "$PAGES_ORIGIN"
       - name: Verify generated Pages in Chromium
         env:
@@ -331,6 +378,9 @@ jobs:
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core"
           node scripts/verification/artifacts/pages-smoke.mjs "$RUNNER_TEMP/audit-site" \
             "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM" "$PAGES_SCREENSHOTS"
+          node scripts/ux-simulator/projection.browser-test.mjs \
+            "$CODEXIA_AUDIT_TOOL_DIR/node_modules/playwright-core" "$CODEXIA_E2E_CHROMIUM" \
+            "$RUNNER_TEMP/audit-site" "$PAGES_SCREENSHOTS"
           CODEXIA_PAGES_SITE="$RUNNER_TEMP/audit-site" node --test scripts/audit/specifications.browser.mjs
       - name: Verify manifests, links and public artifact scope
         run: node scripts/audit/portal.mjs verify "$RUNNER_TEMP/audit-site" "$PAGES_ORIGIN"

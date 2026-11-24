@@ -24,13 +24,37 @@ export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
   'docs/requirements/STRICTDOC-TRACEABILITY.md',
   'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
 ]);
+export const UX_PROJECTION_DOCUMENTS = Object.freeze([
+  'docs/design/UX-SIMULATOR-CONTRACT.md',
+  'docs/design/SCREEN-CONTROL-CATALOG.md',
+  'docs/design/SCREEN-STATE-ATLAS.md',
+  'docs/design/USER-SCREEN-FLOW.md',
+  'docs/design/ADMIN-SCREEN-FLOW.md',
+  'docs/design/UX-CONTRACT.md',
+  'docs/design/INTERACTION-CONTRACT.md',
+  'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md',
+  'docs/design/MOBILE-AUTHORING.md',
+  'app/DESIGN.md',
+  'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
+  'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
+  'docs/architecture/API-CONTRACT.md',
+  'docs/architecture/BACKUP-CONSOLE-CONTRACT.md',
+  'docs/requirements/REQUIREMENT-REGISTER.md',
+  'docs/requirements/STRICTDOC-TRACEABILITY.md',
+]);
 const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
 const requirementsTraceDocuments = new Set(REQUIREMENTS_TRACE_DOCUMENTS);
+const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
 
 export function isNonExecutableDocumentation(file) {
   if (rootVerificationDocuments.has(file)) return false;
   return file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' ||
     /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
+}
+export function isTaskInputDocument(file, task) {
+  if (!isNonExecutableDocumentation(file)) return true;
+  if (task === 'requirements-trace' && requirementsTraceDocuments.has(file)) return true;
+  return task === 'unit-root' && uxProjectionDocuments.has(file);
 }
 const DB_CONTRACT_TOOLCHAIN = JSON.parse(readFileSync(new URL('../../../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url), 'utf8'));
 const POSTGRES_CI_IMAGE = DB_CONTRACT_TOOLCHAIN.postgresImage;
@@ -186,8 +210,7 @@ export function captureTaskInputSource({ root, sha, runtime }) {
 
   return (task, invocations = taskInvocation(task, runtime.execPath)) => {
     const group = taskGroup(task);
-    const executable = tree.filter(({ file }) => !isNonExecutableDocumentation(file) ||
-      (task === 'requirements-trace' && requirementsTraceDocuments.has(file)));
+    const executable = tree.filter(({ file }) => isTaskInputDocument(file, task));
     const source = sha256(entries(executable));
     const tests = sha256(entries(executable.filter(({ file }) => testFilePattern.test(file))));
     const dependencies = sha256(entries(executable.filter(({ file }) => dependencyPath(file))));

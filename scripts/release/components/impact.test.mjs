@@ -76,6 +76,16 @@ test('lifecycle-only changes do not request a backend production release', () =>
     assert.equal(componentReleaseAffected('backend', [path]), false, path);
   }
 });
+test('UX projection changes do not select frontend or backend production releases', () => {
+  for (const component of ['frontend', 'backend']) {
+    for (const path of [
+      'scripts/ux-simulator/generate.mjs',
+      'scripts/ux-simulator/compare/browser.mjs',
+      'scripts/audit/ux-artifact.mjs',
+      'docs/design/UX-SIMULATOR-CONTRACT.md',
+    ]) assert.equal(componentReleaseAffected(component, [path]), false, `${component}: ${path}`);
+  }
+});
 test('malformed release impact input cannot suppress release verification', () => {
   for (const files of [[], ['../secret'], ['bad\\\\name'], [123], null]) {
     assert.throws(() => componentReleaseAffected('frontend', files));
