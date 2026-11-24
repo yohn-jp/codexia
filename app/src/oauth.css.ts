@@ -1,0 +1,45 @@
+import './oauth-theme.css';
+import { globalStyle } from '@vanilla-extract/css';
+
+globalStyle(':root', {
+  fontFamily: 'var(--manuscript-sans)',
+  lineHeight: '1.5',
+  color: 'var(--ink)',
+  background: 'var(--page-bg)',
+  fontSynthesis: 'none',
+  textRendering: 'optimizeLegibility',
+});
+globalStyle('*', { boxSizing: 'border-box' });
+globalStyle('html, body, #root', { minWidth: '320px', minHeight: '100%', margin: '0' });
+globalStyle('#root', { display: 'flow-root' });
+globalStyle('body', { minHeight: '100vh', color: 'var(--ink)', background: 'var(--page-bg)' });
+globalStyle('button', {
+  minHeight: '2.75rem',
+  padding: '0.55rem 0.9rem',
+  border: '1px solid var(--input-border)',
+  borderRadius: '0.4rem',
+  color: 'var(--button-foreground)',
+  background: 'var(--accent)',
+  cursor: 'pointer',
+  font: 'inherit',
+});
+globalStyle('button:hover:not(:disabled)', { background: 'var(--accent-strong)' });
+globalStyle('button:disabled', { opacity: '0.55', cursor: 'not-allowed' });
+globalStyle('button:focus-visible, a:focus-visible', { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' });
+globalStyle('a', { color: 'var(--accent-strong)' });
+globalStyle('.loading', { margin: '3rem auto', color: 'var(--muted)', textAlign: 'center' });
+globalStyle('.eyebrow', { margin: '0', color: 'var(--muted)', fontSize: '0.84rem', overflowWrap: 'anywhere' });
+globalStyle('.pg-entry', { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'clamp(1rem, 4vw, 4rem)' });
+globalStyle('.pg-login', {
+  width: 'min(100%, 30rem)',
+  display: 'grid',
+  gap: '0.8rem',
+  padding: 'clamp(1.2rem, 4vw, 2rem)',
+  border: '1px solid var(--line)',
+  borderRadius: '0.8rem',
+  background: 'var(--paper)',
+  boxShadow: '0 1rem 3rem var(--focus-shadow)',
+});
+globalStyle('.pg-login h1', { margin: '0' });
+globalStyle('.pg-login p', { margin: '0.2rem 0', color: 'var(--muted)' });
+globalStyle('.pg-login a', { color: 'var(--accent-strong)' });

@@ -1,4 +1,4 @@
-import '../../styles.css';
+import '../styles.css';
 import '../console/console.css';
 import { createRoot } from 'react-dom/client';
 import { ConsoleSetup } from '../console/ConsoleSetup';

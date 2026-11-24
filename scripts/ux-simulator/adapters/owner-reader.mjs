@@ -16,7 +16,9 @@ function publicControl(source) {
   const sceneHandler = sourceAt(source, publishing, 'onClick={() => void openScene(item.id)}');
   const label = sourceAt(source, publishing, '読み取り専用の共有です。期限:');
   const readerBinding = sourceAt(source, shell, 'onChange={onThemeChange}');
-  const launcherBinding = sourceAt(source, launcher, 'onThemeChange={(next) => {');
+  const launcherText = source.read(launcher);
+  const launcherBindingText = launcherText.match(/onThemeChange=\{\s*(?:\(\s*next\s*\)|next)\s*=>\s*\{/u)?.[0];
+  const launcherBinding = launcherBindingText && sourceAt(source, launcher, launcherBindingText);
   if (!themeHandler || !sceneHandler || !label || !readerBinding || !launcherBinding) return null;
   return {
     id: 'PUB-01.A', platform: 'reader', source: sourceRef(sceneHandler), label: themeLabel,
@@ -25,7 +27,9 @@ function publicControl(source) {
 }
 
 export function projectReader(source) {
-  const appRoute = sourceAt(source, launcher, 'const isReader = window.location.pathname.startsWith("/r/");');
+  const launcherText = source.exists(launcher) ? source.read(launcher) : '';
+  const appRouteText = launcherText.match(/const isReader\s*=\s*window\.location\.pathname\.startsWith\((['"])\/r\/\1\);/u)?.[0];
+  const appRoute = appRouteText && sourceAt(source, launcher, appRouteText);
   const component = sourceAt(source, shell, 'export function PublicModuleView(');
   const apiRoute = sourceAt(source, server, 'function isPublicReaderPath(pathname: string): boolean {');
   const shareMount = sourceAt(source, publishing, 'async mountPublic(viewId: string, element: HTMLElement, request: Request): Promise<() => void> {');

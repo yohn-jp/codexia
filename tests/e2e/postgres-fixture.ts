@@ -54,27 +54,50 @@ export async function openManuscriptScene(page: Page, scene: Pick<FixtureDocumen
 }
 export async function replaceManuscript(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
-  // Let CodeMirror handle the selection as an editor command before typing.
-  await editor.click();
+  const normalized = normalizeManuscriptNewlines(text);
+  await clickManuscriptEnd(editor);
   await editor.press("ControlOrMeta+a");
-  if (text) await page.keyboard.insertText(text);
+  if (normalized) await page.keyboard.insertText(normalized);
   else await editor.press("Backspace");
-  await expect.poll(() => readManuscriptMarkdown(page)).toBe(text);
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(normalized);
 }
 
 export async function appendManuscript(page: Page, text: string): Promise<void> {
-  await manuscriptEditor(page).evaluate((element) => {
-    const lastLine = [...element.querySelectorAll(".cm-line")].at(-1);
-    const selection = element.ownerDocument.getSelection();
-    if (!lastLine || !selection) throw new Error("The visible manuscript must have a selectable final line");
-    (element as HTMLElement).focus();
+  const editor = manuscriptEditor(page);
+  const previous = await readManuscriptMarkdown(page);
+  const normalized = normalizeManuscriptNewlines(text);
+  await clickManuscriptEnd(editor);
+  if (normalized) await page.keyboard.insertText(normalized);
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + normalized);
+}
+
+function normalizeManuscriptNewlines(text: string): string {
+  return text.replace(/\r\n?/gu, "\n");
+}
+
+async function clickManuscriptEnd(editor: Locator): Promise<void> {
+  const position = await editor.evaluate((element) => {
+    const lines = element.querySelectorAll(".cm-line");
+    const lastLine = lines.item(lines.length - 1);
+    if (!lastLine) return null;
+
+    const walker = element.ownerDocument.createTreeWalker(lastLine, NodeFilter.SHOW_TEXT);
+    let lastText: Text | null = null;
+    while (walker.nextNode()) lastText = walker.currentNode as Text;
+    if (!lastText?.length) return null;
+
     const range = element.ownerDocument.createRange();
-    range.selectNodeContents(lastLine);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
+    range.setStart(lastText, lastText.length - 1);
+    range.setEnd(lastText, lastText.length);
+    const textRect = range.getBoundingClientRect();
+    const editorRect = element.getBoundingClientRect();
+    return {
+      x: Math.max(1, Math.min(editorRect.width - 1, textRect.right - editorRect.left + 1)),
+      y: Math.max(1, Math.min(editorRect.height - 1, textRect.top - editorRect.top + textRect.height / 2)),
+    };
   });
-  await page.keyboard.insertText(text);
+  if (position) await editor.click({ position });
+  else await editor.click();
 }
 
 export async function fillDraft(page: Page, text: string): Promise<void> {

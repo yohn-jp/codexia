@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, type InboxItem, type JobEvent, type PublicJob } from '../api';
+import { buttonSize } from './button.css';
 
 type StreamState = 'connected' | 'reconnecting' | 'unavailable';
 
@@ -84,17 +85,17 @@ function formatResult(result: unknown): string {
 }
 
 function JobRecord({ job }: { job: PublicJob }) {
-  const hasProgress = typeof job.progress === 'number';
+  const progress = job.progress;
   return (
     <li>
       <strong>{job.type}</strong>
       <span className={`durability-badge${job.status === 'error' ? '' : ' is-current'}`}>{statusLabel(job.status)}</span>
       <small>{formatWhen(job.updatedAt)}</small>
       {job.status === 'running' || job.status === 'queued' ? (
-        hasProgress ? (
+        typeof progress === 'number' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <progress max={1} value={job.progress!} aria-label={`${job.type} の進行状況`} />
-            <span>{Math.round(job.progress! * 100)}%</span>
+            <progress max={1} value={progress} aria-label={`${job.type} の進行状況`} />
+            <span>{Math.round(progress * 100)}%</span>
           </div>
         ) : (
           <span className="eyebrow">進行状況はありません</span>
@@ -276,7 +277,8 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         setStreamState('connected');
         setStreamError(null);
         void refresh();
-        await readJobEventStream(response.body!, controller.signal, onJobEvent);
+        if (!response.body) throw new Error('Job event stream response has no body');
+        await readJobEventStream(response.body, controller.signal, onJobEvent);
         if (!cancelled && !controller.signal.aborted) {
           if (Date.now() - connectedAt >= 10_000) attempts = 0;
           setStreamState('reconnecting');
@@ -340,7 +342,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
     <>
       <button
         type="button"
-        className="quiet-button compact-button"
+        className={`quiet-button ${buttonSize({ size: 'compact' })}`}
         onClick={() => {
           setOpen(true);
           void refresh();
@@ -378,7 +380,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
           <button
             type="button"
             data-ux-control="JOB-01.A"
-            className="quiet-button compact-button"
+            className={`quiet-button ${buttonSize({ size: 'compact' })}`}
             onClick={() => void refresh()}
             disabled={loading}
           >
@@ -444,7 +446,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
                     {!item.read ? (
                       <button
                         type="button"
-                        className="quiet-button compact-button"
+                        className={`quiet-button ${buttonSize({ size: 'compact' })}`}
                         onClick={() => void markRead(item.id)}
                         disabled={!canWrite || busyInboxAction !== null}
                       >
@@ -461,13 +463,13 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginTop: '1rem' }}>
           <button
             type="button"
-            className="quiet-button compact-button"
+            className={`quiet-button ${buttonSize({ size: 'compact' })}`}
             onClick={() => void markAllRead()}
             disabled={!canWrite || unreadCount === 0 || busyInboxAction !== null}
           >
             すべて既読
           </button>
-          <button type="button" className="compact-button" onClick={() => dialogRef.current?.close()}>
+          <button type="button" className={buttonSize({ size: 'compact' })} onClick={() => dialogRef.current?.close()}>
             閉じる
           </button>
         </div>
