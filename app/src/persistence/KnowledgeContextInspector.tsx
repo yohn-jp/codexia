@@ -448,7 +448,7 @@ export function KnowledgeContextInspector({
               <input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} />
               統合元を退役し、参照を統合先に移すことを確認しました。
             </label>
-            <button type="button" disabled={busy || !mergeConfirm || mergePreview.conflicts.length > 0} onClick={() => void mutate(async () => {
+            <button type="button" data-ux-control="KNO-02.C" disabled={busy || !mergeConfirm || mergePreview.conflicts.length > 0} onClick={() => void mutate(async () => {
               const result = await api.applyPersistenceMerge(projectId, node.id, mergeTarget, mergePreview.projectVersion, mergePreview.previewDigest);
               onMerge(result.target, result.source);
               setMergePreview(null);

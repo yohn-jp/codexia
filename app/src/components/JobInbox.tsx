@@ -346,7 +346,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
           <h2 id="job-inbox-title" style={{ margin: 0 }}>受信箱とジョブ履歴</h2>
-          <button type="button" className="quiet-button compact-button" onClick={() => void refresh()} disabled={loading}>
+          <button type="button" data-ux-control="JOB-01.A" className="quiet-button compact-button" onClick={() => void refresh()} disabled={loading}>
             更新
           </button>
         </div>

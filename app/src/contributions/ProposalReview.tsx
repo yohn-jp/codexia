@@ -301,7 +301,7 @@ export function ProposalReview({
                   <button type="button" onClick={() => void approve(record)} disabled={!canWrite || Boolean(busyId) || completed || unacceptedPayloadMissing}>
                     {!canWrite ? "閲覧専用" : busyId === record.proposal.id ? "承認内容を保存中…" : unacceptedPayloadMissing ? "未承認分を回復できません" : completed ? "PostgreSQL Revision 完了" : needsApproval ? status?.payloadComplete === false ? "元の提案を照合して承認" : "承認して PostgreSQL Revision" : "承認済みを PostgreSQL Revision"}
                   </button>
-                  <button type="button" className="quiet-button" onClick={() => void dismiss(record)} disabled={Boolean(busyId) || unacceptedPayloadMissing || (status?.approvedOperationIds.length ?? 0) > 0 || (status?.applications.length ?? 0) > 0}>
+                  <button type="button" data-ux-control="REV-02.B" className="quiet-button" onClick={() => void dismiss(record)} disabled={Boolean(busyId) || unacceptedPayloadMissing || (status?.approvedOperationIds.length ?? 0) > 0 || (status?.applications.length ?? 0) > 0}>
                     このブラウザーの一覧から隠す
                   </button>
                 </div>

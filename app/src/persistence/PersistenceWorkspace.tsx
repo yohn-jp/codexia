@@ -2477,7 +2477,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
           {(projects.length > 0 || projectId) && <label htmlFor="pg-project">作品</label>}
-          {(projects.length > 0 || projectId) && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
+          {(projects.length > 0 || projectId) && <select id="pg-project" data-ux-control="LIB-01.A" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
             {projectId && !projects.some((item) => item.id === projectId) && <option value={projectId} disabled>指定した作品を取得できません ({projectId})</option>}
             {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select>}
@@ -2488,7 +2488,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           {projectPageReady && <p>読み込み済みの作品: {projects.length}</p>}
           <details className="pg-library-create">
             <summary>作品を作成</summary>
-            <form onSubmit={(event) => void createProject(event)}>
+            <form data-ux-control="LIB-01.B" onSubmit={(event) => void createProject(event)}>
               <label htmlFor="pg-project-title">作品名</label>
               <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
               <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
@@ -2497,11 +2497,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           <details>
             <summary>作品のエクスポート・インポート</summary>
             <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
-            {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
+            {project && <button type="button" data-ux-control="LIB-01.D" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
               選択中の作品をJSONでエクスポート
             </button>}
             <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
-            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+            <input id="pg-work-import" data-ux-control="LIB-01.C" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
               onChange={(event) => void importPortableWork(event)} />
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
             {workTransferStatus && <p role="status">{workTransferStatus}</p>}
@@ -2531,7 +2531,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           {outlineError && <p className="pg-alert" role="alert">{outlineError}</p>}
           {!outlineError && documents.length >= 999 && <p>現在の作品構成上限に達しています。文書を追加できません。</p>}
           <label className="pg-outline-search" htmlFor="pg-outline-search">構成を検索</label>
-          <input id="pg-outline-search" value={outlineQuery} onChange={(event) => setOutlineQuery(event.target.value)} placeholder="文書名を検索" />
+          <input id="pg-outline-search" data-ux-control="OUT-01.A" value={outlineQuery} onChange={(event) => setOutlineQuery(event.target.value)} placeholder="文書名を検索" />
           {project && <nav className="pg-outline-breadcrumb" aria-label="構成の階層">
             <button type="button" onClick={() => setOutlineZoomRoot(null)} aria-current={outlineZoomRoot ? undefined : "page"}>全体</button>
             {zoomAncestors.map((ancestor) => <span key={ancestor.id}><span aria-hidden="true"> › </span><button type="button" onClick={() => setOutlineZoomRoot(ancestor.id)}>{ancestor.title}</button></span>)}
@@ -2587,7 +2587,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           />}
           <details className="pg-library-create-document">
             <summary>巻・章・シーンを追加</summary>
-            <form onSubmit={(event) => void createDocument(event)}>
+            <form data-ux-control="OUT-01.C" onSubmit={(event) => void createDocument(event)}>
               <label htmlFor="pg-document-title">文書名</label>
               <input id="pg-document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={256} required placeholder="章・シーン名" />
               <label htmlFor="pg-document-kind">種類</label><select id="pg-document-kind" value={documentKind} onChange={(event) => setDocumentKind(event.target.value)}><option value="volume">巻</option><option value="chapter">章</option><option value="scene">シーン</option><option value="note">ノート</option></select>
@@ -2600,8 +2600,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             </form>
           </details>
           {active && <details><summary>選択文書の構成を変更</summary>
-            <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
-            <form onSubmit={(event) => { event.preventDefault(); if (moveTargetAvailable) void editStructure({ parentId: moveParent || null }); }}>
+            <form data-ux-control="OUT-01.D" onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
+            <form data-ux-control="OUT-01.D" onSubmit={(event) => { event.preventDefault(); if (moveTargetAvailable) void editStructure({ parentId: moveParent || null }); }}>
               <label htmlFor="pg-move">移動先</label>
               <select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}>
                 <option value="">作品の直下</option>
@@ -2610,8 +2610,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               </select>
               <button type="submit" disabled={!moveTargetAvailable}>文書を移動</button>
             </form>
-            <form onSubmit={(event) => { event.preventDefault(); void editStructure({ orderKey: String(orderRank).padStart(8, "0") }); }}><label htmlFor="pg-order">並び順</label><input id="pg-order" type="number" min="0" max="99999999" value={orderRank} onChange={(event) => setOrderRank(Number(event.target.value))} /><button type="submit">並び順を変更</button></form>
-            <button type="button" onClick={() => { if (window.confirm(`「${active.document.title}」を削除しますか？保存済みRevisionは保持されます。`)) void editStructure({}, true); }}>文書を削除</button>
+            <form data-ux-control="OUT-01.D" onSubmit={(event) => { event.preventDefault(); void editStructure({ orderKey: String(orderRank).padStart(8, "0") }); }}><label htmlFor="pg-order">並び順</label><input id="pg-order" type="number" min="0" max="99999999" value={orderRank} onChange={(event) => setOrderRank(Number(event.target.value))} /><button type="submit">並び順を変更</button></form>
+            <button type="button" data-ux-control="OUT-01.E" onClick={() => { if (window.confirm(`「${active.document.title}」を削除しますか？保存済みRevisionは保持されます。`)) void editStructure({}, true); }}>文書を削除</button>
           </details>}
         </section>}
       </aside>);
@@ -2667,7 +2667,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </div>
           {active.error && <div className="pg-alert" role="alert">
             <p>{active.error}</p>
-            {active.dirty && active.recovery === "failed" && <button type="button" disabled={protectingDraft || sessionBlocked}
+            {active.dirty && active.recovery === "failed" && <button type="button" data-ux-control="REC-01.A" disabled={protectingDraft || sessionBlocked}
               onClick={() => void retryDraftProtection()}>{protectingDraft ? "下書きを再保護中…" : "下書きを再保護"}</button>}
           </div>}
           {evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id && <div className="pg-alert" role="alert">
@@ -2675,10 +2675,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
-            <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving" || saveMachineBusy}>
+            <button type="button" data-ux-control="WRT-01.A" data-ux-control-alias="REC-01.B" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving" || saveMachineBusy}>
               {active.save === "failed" && pendingSaveForDisplay ? "保存結果を確認して再試行" : active.save === "failed" ? "作品への保存を再試行" : "今すぐ保存"}
             </button>
-            <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
+            <button type="button" data-ux-control="WRT-01.B" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
             <details className="pg-editor-command-menu">
               <summary>その他</summary>
               <div>
@@ -2692,14 +2692,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
                     setPageError(error instanceof Error ? error.message : "変換を確定してください。");
                   }
                 }}>印刷</button>
-                <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
-                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved" || evidencePendingForActive || Boolean(evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id)}>選択範囲をText Anchorにする</button>
+                <button type="button" data-ux-control="WRT-02.A" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
+                <button type="button" data-ux-control="WRT-01.C" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved" || evidencePendingForActive || Boolean(evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id)}>選択範囲をText Anchorにする</button>
               </div>
             </details>
             <details className="pg-editor-display-menu">
               <summary>表示と書式</summary>
               <div>
-                <label>組版<select aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
+                <label>組版<select data-ux-control="WRT-01.D" aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
                 <label>文字サイズ<input aria-label="原稿の文字サイズ" type="number" min="14" max="24" value={typography.fontSize} onChange={(event) => { const next = { ...typography, fontSize: Math.max(14, Math.min(24, Number(event.target.value))) }; setTypography(next); storeTypographySettings(next); }} /></label>
                 {reading && <label>組方向<select aria-label="組方向" value={readingDirection} onChange={(event) => setReadingDirection(event.target.value as "horizontal" | "vertical")}><option value="horizontal">横書き</option><option value="vertical">縦書き</option></select></label>}
                 {!reading && <div className="pg-editor-symbol-menu" aria-label="書式記号">{WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}</div>}
@@ -2762,7 +2762,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               <div><h4>PostgreSQL最新版</h4><pre>{active.remoteConflict.markdown}</pre></div>
               <div><h4>回復Draft</h4><pre>{active.markdown}</pre></div>
             </div>
-            <button type="button" onClick={adoptRecoveredDraft}>比較後、この回復Draftを最新版へ適用</button>
+            <button type="button" data-ux-control="REC-01.C" onClick={adoptRecoveredDraft}>比較後、この回復Draftを最新版へ適用</button>
             <button type="button" onClick={() => void useDatabaseRevision()}>回復Draftを破棄してPostgreSQL最新版を開く</button>
           </section>}
 
@@ -2772,7 +2772,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
               {revision.id !== active.revision.id && <RevisionDifference previous={revision} current={active.revision} />}
-              {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
+              {revision.id !== active.revision.id && <button type="button" data-ux-control="WRT-02.B" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
               </article>)}
             {revisionPageError && <p role="alert">{revisionPageError}</p>}
             {revisionPageLoading && <p role="status">古いRevision履歴を読み込んでいます。</p>}
@@ -2786,7 +2786,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           <h2>作品内の知識</h2>
         <details className="pg-knowledge-tools">
           <summary>知識候補を追加・根拠に指定</summary>
-          <form onSubmit={(event) => void createKnowledge(event)}>
+          <form data-ux-control="KNO-01.B" onSubmit={(event) => void createKnowledge(event)}>
             <label htmlFor="pg-knowledge-name">Knowledge候補を追加</label>
             <input id="pg-knowledge-name" value={knowledgeName} onChange={(event) => setKnowledgeName(event.target.value)} maxLength={512} required disabled={knowledgeCreatePending || knowledgeCreateUncertain?.projectId === projectId} placeholder="人物・場所・用語" />
             <label htmlFor="pg-knowledge-type">種類</label>
@@ -2811,7 +2811,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           <search aria-label="Knowledgeを検索・絞り込み">
             <form onSubmit={(event) => event.preventDefault()}>
               <label htmlFor="pg-knowledge-search">名前または別名で検索</label>
-              <input id="pg-knowledge-search" type="search" maxLength={128} value={knowledgeQuery} onChange={event => setKnowledgeQuery(event.target.value)} placeholder="名前・別名" />
+              <input id="pg-knowledge-search" data-ux-control="KNO-01.A" type="search" maxLength={128} value={knowledgeQuery} onChange={event => setKnowledgeQuery(event.target.value)} placeholder="名前・別名" />
               <label htmlFor="pg-knowledge-filter-type">種類で絞り込み</label>
               <select id="pg-knowledge-filter-type" value={knowledgeTypeFilter} onChange={event => setKnowledgeTypeFilter(event.target.value)}>
                 <option value="">すべての種類</option><option value="person">人物</option><option value="place">場所</option><option value="event">出来事</option><option value="setting">設定</option><option value="term">用語</option>
@@ -2886,7 +2886,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {anchor.candidates?.map((candidate) => <p key={candidate.id}>候補: {candidate.label}</p>)}
               {anchor.status === "current" && selectedNode && <div className="pg-link-actions">
                 <button type="button" onClick={() => void linkKnowledge(anchor.id, "proposed")}>候補としてリンク</button>
-                <button type="button" disabled={selectedNode.status !== "confirmed"} onClick={() => void linkKnowledge(anchor.id, "confirmed")}>Knowledgeリンクを確定</button>
+                <button type="button" data-ux-control="KNO-02.B" disabled={selectedNode.status !== "confirmed"} onClick={() => void linkKnowledge(anchor.id, "confirmed")}>Knowledgeリンクを確定</button>
               </div>}
             </li>)}
           </ul>}
