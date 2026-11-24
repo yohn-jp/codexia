@@ -20,6 +20,10 @@
     mode: '0700'
 
 - name: Initialize a verified new setup installation without issuing the grant
+  environment:
+    CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin | default('') }}"
+    CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id | default('') }}"
+    CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | default([]) | join(',') }}"
   ansible.builtin.command:
     argv:
       - "{{ home }}/.local/bin/codexia-owner-setup"

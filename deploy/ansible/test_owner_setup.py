@@ -37,7 +37,13 @@ class OwnerSetupTests(unittest.TestCase):
         self.executable("podman", r'''#!/bin/bash
 set -eu
 case "$1" in
-    exec) case "${*: -1}" in *pg_database*) printf '%s\n' '123:456' ;; *) printf '%s\n' "${GRANT_LIVE:-t}" ;; esac ;;
+    exec)
+        if [[ "$2" == codexia-api ]]; then
+            echo probe >>"$TRACE"
+            exit "${PROBE_STATUS:-0}"
+        fi
+        case "${*: -1}" in *pg_database*) printf '%s\n' '123:456' ;; *) printf '%s\n' "${GRANT_LIVE:-t}" ;; esac
+        ;;
     run)
         case "${*: -1}" in
             --describe) printf '%s\n' "$DESCRIPTION" ;;
@@ -87,6 +93,36 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("start", self.trace.read_text())
         self.assertFalse(self.unit.exists())
+
+    def test_setup_readiness_verification_precedes_tunnel_start(self):
+        self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})
+        self.private_file(self.state / "owner-setup.age", "encrypted-fixture")
+        self.environment["PROBE_STATUS"] = "1"
+        result = self.run_setup("--converge", "OBSERVE_ONLY", "age1fixture")
+        self.assertNotEqual(result.returncode, 0)
+        commands = self.trace.read_text().splitlines()
+        self.assertEqual(commands[-3:], ["--user start codexia-api.service", "probe", "--user stop codexia-api.service"])
+        self.assertNotIn("--user start codexia-tunnel.service", commands)
+
+    def test_staged_public_config_must_match_certified_frontend(self):
+        self.environment.update({
+            "CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN": "https://setup.example.test",
+            "CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID": "fixture-web",
+            "CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS": (
+                "https://setup.example.test/desktop,https://setup.example.test/mobile"
+            ),
+            "DESCRIPTION": json.dumps({"state": "SETUP_PENDING", "grantId": OWNER}),
+        })
+        self.private_file(self.runtime, self.runtime.read_text() + "CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios\n")
+        self.private_file(self.state / "owner-setup.age", "encrypted-fixture")
+        result = self.run_setup("--converge", "OBSERVE_ONLY", "age1fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("differs from the certified frontend", result.stderr)
+        self.assertFalse(self.trace.exists())
+        self.private_file(self.config / "owner-setup.env",
+                          "CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS=https://setup.example.test/mobile,https://setup.example.test/desktop\n")
+        result = self.run_setup("--converge", "OBSERVE_ONLY", "age1fixture")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_expired_grant_and_interrupted_reissue_stop_even_with_an_envelope(self):
         self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})

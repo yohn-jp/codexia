@@ -181,7 +181,7 @@ async function planObservation({ bootstrapMode } = {}) {
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
-      const { admitBootstrap } = await import('../bootstrap/admission.mjs');
+      const { admitBootstrap, ownerSetupFrontendBindings } = await import('../bootstrap/admission.mjs');
       const { plan } = result;
       if (bootstrapMode !== 'bootstrap') {
         assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
@@ -209,6 +209,9 @@ async function planObservation({ bootstrapMode } = {}) {
         codexia_owner_setup_install_intent: admission.installIntent,
         codexia_owner_setup_approved: false,
       } : { codexia_owner_setup_operation: bootstrapMode };
+      if (admission.installIntent || admission.route === 'R5') {
+        Object.assign(overrides, ownerSetupFrontendBindings(candidateFrontend.identity.oauthConfigIdentity, edge.origin));
+      }
       await writeFile(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/admission.json'),
         JSON.stringify(overrides) + '\n', { mode: 0o600, flag: 'wx' });
       console.log('Protected operation admitted for ' + admission.route);

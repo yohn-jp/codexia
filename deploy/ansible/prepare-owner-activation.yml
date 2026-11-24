@@ -20,6 +20,10 @@
           - codexia_owner_setup_approved is sameas true
           - codexia_owner_setup_operation in owner_setup_operations
           - codexia_auth_bootstrap_image is match('^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_owner_setup_expected_origin is match('^https://[^/]+$')
+          - codexia_owner_setup_expected_web_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
+          - codexia_owner_setup_expected_web_redirect_uris is sequence and codexia_owner_setup_expected_web_redirect_uris is not string
+          - codexia_owner_setup_expected_web_redirect_uris | length > 0
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_edge_approved | default(false) is sameas true
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
         fail_msg: Owner handoff requires the pinned rootless account, certified Full image and protected enrollment approval.
@@ -34,6 +38,9 @@
         XDG_STATE_HOME: "{{ owner_setup_home }}/.local/state"
         XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+        CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin }}"
+        CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id }}"
+        CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | join(',') }}"
       ansible.builtin.command:
         argv: "{{ [owner_setup_home + '/.local/bin/codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"
         expand_argument_vars: false

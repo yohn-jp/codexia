@@ -71,6 +71,18 @@
         fail_msg: An unfinished coordinated cutover must be recovered before ordinary convergence.
       when: codexia_stage in ['bootstrap', 'host', 'secrets', 'base', 'auth-runtime']
 
+    - name: Require the certified browser client before fresh install convergence
+      ansible.builtin.assert:
+        that:
+          - codexia_public_origin == codexia_owner_setup_expected_origin
+          - (codexia_oauth_owner_client_ids.split(',') | first) == codexia_owner_setup_expected_web_client_id
+          - (codexia_owner_setup_web_redirect_uris | unique | sort) == (codexia_owner_setup_expected_web_redirect_uris | sort)
+        fail_msg: Browser setup origin, Web client or callback list differs from the certified frontend.
+      when:
+        - codexia_stage == 'bootstrap'
+        - codexia_bootstrap_stages is defined
+        - codexia_owner_setup_install_intent | default(false)
+
     - name: Converge the rootless host account and dependencies
       ansible.builtin.include_tasks: host.yml
       when: >-

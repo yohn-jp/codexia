@@ -32,6 +32,21 @@ private_file "$runtime" && private_file "$setup_env" && private_file "$setup_uni
   die 'Protected owner setup inputs are missing'
 grep -Fxq "Image=$image" "$setup_unit" || die 'The reviewed Full image does not match the staged setup'
 
+# The protected controller supplies these from the verified frontend proof.
+expected_origin="${CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN:-}"
+expected_web_client="${CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID:-}"
+expected_redirects="${CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS:-}"
+if [[ -n "$expected_origin$expected_web_client$expected_redirects" ]]; then
+  origin="$(sed -n 's/^CODEXIA_PUBLIC_ORIGIN=//p' "$runtime")"
+  clients="$(sed -n 's/^CODEXIA_OAUTH_OWNER_CLIENT_IDS=//p' "$runtime")"
+  redirects="$(sed -n 's/^CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS=//p' "$setup_env")"
+  [[ -n "$expected_origin" && "$origin" == "$expected_origin" &&
+     -n "$expected_web_client" && ! "$clients" =~ [[:cntrl:]] && "${clients%%,*}" == "$expected_web_client" &&
+     -n "$expected_redirects" && ! "$redirects" =~ [[:cntrl:]] &&
+     "$(tr ',' '\n' <<<"$redirects" | LC_ALL=C sort -u)" == "$(tr ',' '\n' <<<"$expected_redirects" | LC_ALL=C sort -u)" ]] ||
+    die 'Staged owner setup origin, client or redirect configuration differs from the certified frontend'
+fi
+
 run_image() {
   podman run --rm --pull=missing --read-only --network codexia-data \
     --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
@@ -80,6 +95,28 @@ assert_tunnel_stopped() {
   active="$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" || status=$?
   [[ ( "$status" == 0 || "$status" == 4 ) && "$active" == inactive ]] ||
     die 'Activation preparation requires a stopped setup Tunnel'
+}
+
+verify_setup_api() {
+  timeout 30s podman exec codexia-api node --input-type=module -e '
+    import { setTimeout as delay } from "node:timers/promises";
+    const get = path => fetch("http://127.0.0.1:3000" + path, { signal: AbortSignal.timeout(1500) });
+    let ready = false;
+    for (let attempt = 0; attempt < 15 && !ready; attempt++) {
+      try {
+        const response = await get("/health/ready");
+        ready = response.ok && (await response.json()).status === "ready";
+      } catch { /* The Quadlet may still be starting. */ }
+      if (!ready) await delay(500);
+    }
+    if (!ready) process.exit(1);
+    const setup = await get("/api/auth/codexia/setup/status");
+    if (!setup.ok || !["setup-pending", "owner-enrolled"].includes((await setup.json()).state)) process.exit(1);
+    for (const path of ["/api/session", "/api/auth/oauth2/authorize", "/mcp"]) {
+      const response = await get(path);
+      if (response.status !== 403 || (await response.json()).code !== "SETUP_ONLY") process.exit(1);
+    }
+  ' >/dev/null 2>&1
 }
 
 write_marker() {
@@ -161,6 +198,10 @@ case "$operation" in
     fi
     systemctl --user daemon-reload
     systemctl --user start codexia-api.service
+    if ! verify_setup_api; then
+      systemctl --user stop codexia-api.service
+      die 'The setup-only API did not prove readiness and disabled application routes'
+    fi
     systemctl --user start codexia-tunnel.service
     printf '%s\n' 'Setup-only API and Tunnel started. Check the approved browser origin before delivering the encrypted grant.'
     ;;

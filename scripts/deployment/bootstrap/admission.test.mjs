@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
-import { admitBootstrap } from './admission.mjs';
+import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
+import { admitBootstrap, ownerSetupFrontendBindings } from './admission.mjs';
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
@@ -75,4 +76,22 @@ test('R5 separates enrollment start from preparation, and rejects existing owner
   assert.throws(() => admitBootstrap({
     ...fixture({ H: 'ready', D: 'compatible', A: 'ready' }), mode: 'owner-setup',
   }), /route/);
+});
+
+test('owner setup uses the exact certified browser origin, client and return URIs', () => {
+  const origin = 'https://example.invalid';
+  const identity = frontendOAuthConfigIdentity({
+    VITE_CODEXIA_OAUTH_ISSUER: origin + '/api/auth',
+    VITE_CODEXIA_OAUTH_CLIENT_ID: 'codexia-web',
+    VITE_CODEXIA_API_AUDIENCE: origin + '/api',
+    VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: origin + '/desktop/',
+    VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: origin + '/mobile/',
+  });
+  assert.deepEqual(ownerSetupFrontendBindings(identity, origin), {
+    codexia_owner_setup_expected_origin: origin,
+    codexia_owner_setup_expected_web_client_id: 'codexia-web',
+    codexia_owner_setup_expected_web_redirect_uris: [origin + '/desktop/', origin + '/mobile/'],
+  });
+  assert.throws(() => ownerSetupFrontendBindings(identity, 'https://another.invalid'), /origin and audience/);
+  assert.throws(() => ownerSetupFrontendBindings(undefined, origin), /origin and audience/);
 });

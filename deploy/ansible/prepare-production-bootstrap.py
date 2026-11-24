@@ -146,7 +146,7 @@ def inventory_vars(path: Path, host: str, user: str, operation: str) -> dict:
         raise InvalidBootstrapInput("Private inventory host may declare only the pinned host and user")
     if host_config["ansible_host"] != host or host_config["ansible_user"] != user:
         raise InvalidBootstrapInput("Private inventory host/user differ from independently pinned bootstrap target")
-    if any(not isinstance(key, str) or not key.startswith("codexia_") or key in CONTROLLER_VARS
+    if any(not isinstance(key, str) or not key.startswith("codexia_") or key in CONTROLLER_VARS or key.startswith("codexia_owner_setup_expected_")
            for key in vars_):
         raise InvalidBootstrapInput("Private inventory cannot set connection, stage, or protected controller inputs")
     if vars_.get("codexia_service_user") != "codexia" or vars_.get("codexia_service_home") != "/home/codexia":
