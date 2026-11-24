@@ -11,6 +11,9 @@ import { browserServerProfile } from "./browser-server-profile";
 
 export type Shell = "desktop" | "mobile";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
+export interface AuthorBrowserFixture extends BetterAuthFixture {
+  preparedEntryUrl(shell: Shell): string | null;
+}
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -59,9 +62,10 @@ export function buildAuthorBrowserAssets(
   profile: string,
   assets: string,
   frontendSource?: string,
+  preparedAuthorEntries = false,
 ): void {
   const command = frontendSource ? "pnpm" : process.execPath;
-  const args = frontendSource ? ["build:frontend"] : ["app/scripts/build-views.mjs"];
+  const args = frontendSource ? ["build:frontend"] : [preparedAuthorEntries ? "tests/e2e/build-prepared-author-views.mjs" : "app/scripts/build-views.mjs"];
   const started = performance.now();
   const build = spawnSync(command, args, {
     cwd: frontendSource ?? root,
@@ -89,13 +93,14 @@ export function buildAuthorBrowserAssets(
   }
 }
 
-export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort, apiHostname, frontendSource }: {
+export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort, apiHostname, frontendSource, preparedAuthorEntries = false }: {
   databaseUrl: string;
   profile: string;
   apiPort?: number;
   apiHostname?: "localhost" | "127.0.0.1";
   frontendSource?: string;
-}): Promise<BetterAuthFixture> {
+  preparedAuthorEntries?: boolean;
+}): Promise<AuthorBrowserFixture> {
   const stateDirectory = await mkdtemp(join(tmpdir(), "codexia-author-browser-"));
   let server: BetterAuthFixture | undefined;
   const close = async () => {
@@ -114,8 +119,21 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
       appProfile: await browserServerProfile(profile, join(stateDirectory, "module-cache")),
     });
     observePhase("api-db-auth-bootstrap", started, profile);
-    buildAuthorBrowserAssets(server, profile, assets, frontendSource);
-    return { ...server, close };
+    const usePreparedEntries = preparedAuthorEntries && !frontendSource;
+    buildAuthorBrowserAssets(server, profile, assets, frontendSource, usePreparedEntries);
+    const entries = new Map<Shell, string>();
+    if (usePreparedEntries) {
+      for (const shell of ["desktop", "mobile"] as const) {
+        const names = readdirSync(join(assets, shell, "assets")).filter(name => /^prepared-author-[A-Za-z0-9_-]+\.js$/u.test(name));
+        if (names.length !== 1) throw new Error("Expected exactly one isolated prepared author entry");
+        const path = `/${shell}/assets/${names[0]}`;
+        if (readFileSync(join(assets, shell, "index.html"), "utf8").includes(path)) {
+          throw new Error("Ordinary author HTML must not execute the prepared entry");
+        }
+        entries.set(shell, new URL(path, server.apiOrigin).href);
+      }
+    }
+    return { ...server, close, preparedEntryUrl: shell => entries.get(shell) ?? null };
   } catch (error) {
     await close();
     throw error;

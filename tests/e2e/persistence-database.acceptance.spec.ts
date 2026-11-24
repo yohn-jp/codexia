@@ -6,6 +6,9 @@ import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
+// Build the extra entry once for this spec, not once per test or worker transition.
+test.use({ preparedAuthorEntries: true });
+
 preparedAuthorTest("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page, authorizeAuthor }) => {
   const original = "Before.";
   const appendedText = " After local quota failure.";
@@ -76,7 +79,7 @@ preparedAuthorTest("mixed line endings preserve source offsets for edits and sel
 });
 
 preparedAuthorTest("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page, authorizeAuthor }) => {
-  // Each document navigation starts a fresh OAuth transaction because the access token lives in page memory.
+  // Each document navigation creates a fresh runtime; restore the real test-scoped token through the isolated entry.
   test.setTimeout(180_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
