@@ -243,30 +243,82 @@ export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX
   });
 }
 
-export async function extractJsonEntry(bytes, filename) {
-  assert.ok(['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json'].includes(filename), 'Invalid evidence filename');
-  const profile = filename === 'profile-build.json';
+const TRACE_REPORT_ENTRY = 'requirements-trace/strictdoc/trace-report.json';
+
+async function extractJsonEntries(bytes, filenames) {
+  const permitted = ['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json', TRACE_REPORT_ENTRY];
+  assert.ok(filenames.every(filename => permitted.includes(filename)), 'Invalid evidence filename');
+  const profile = filenames.includes('profile-build.json');
   const maxArchive = profile ? MAX_ASSET_ARCHIVE : MAX_ARCHIVE;
   const maxJson = profile ? MAX_ASSET_ARCHIVE : MAX_JSON;
-  // Report archives can also contain compressed diagnostics, such as the
-  // requirements-trace site. Keep the JSON limit independent of their size.
+  // Diagnostic files still receive ZIP integrity checks but are not materialized.
   const maxUncompressed = MAX_ASSET_BYTES;
   return withArtifactZip(bytes, {maxArchive, maxUncompressed, maxEntries: 0xfffe}, async (entries, readEntry) => {
-    const selected = entries.find(entry => entry.pathname === filename && !entry.isDirectory);
-    assert.ok(selected, 'Missing required JSON entry');
-
-    const chunks = [];
+    const selected = new Map(filenames.map(filename => [filename, []]));
+    const seen = new Set();
     for (const item of entries) {
-      if (item === selected) {
+      const chunks = !item.isDirectory && selected.get(item.pathname);
+      if (chunks) {
         await readEntry(item.entry, maxJson, chunk => chunks.push(chunk));
+        seen.add(item.pathname);
       } else {
         await readEntry(item.entry, maxUncompressed);
       }
     }
-    const json = Buffer.concat(chunks);
-    JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(json));
-    return json;
+    assert.equal(seen.size, selected.size, 'Missing required JSON entry');
+    return filenames.map(filename => {
+      const json = Buffer.concat(selected.get(filename));
+      JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(json));
+      return json;
+    });
   });
+}
+
+export async function extractJsonEntry(bytes, filename) {
+  const [json] = await extractJsonEntries(bytes, [filename]);
+  return json;
+}
+
+export function assertTraceArtifact(trace, group, identity, repository) {
+  const task = 'requirements-trace';
+  const url = `https://github.com/${repository}/actions/runs/${identity.runId}`;
+  assert.equal(group.group, 'types-trace', 'Trace evidence producer group mismatch');
+  assert.equal(group.sha, identity.sourceSha, 'Trace evidence group source mismatch');
+  assert.equal(String(group.workflowRunId), identity.runId, 'Trace evidence group run mismatch');
+  assert.ok(Number.isSafeInteger(group.workflowAttempt) && group.workflowAttempt > 0, 'Invalid trace evidence attempt');
+  assert.equal(group.workflowJob, 'types', 'Trace evidence producer job mismatch');
+  assert.equal(trace.source?.sourceSha, identity.sourceSha, 'Trace report source mismatch');
+  assert.equal(trace.source?.worktreeClean, true, 'Trace report must come from a clean checkout');
+  const execution = trace.execution;
+  assert.deepEqual({
+    status: execution?.status, repository: execution?.repository, sourceSha: execution?.sourceSha,
+    runId: execution?.runId, runAttempt: execution?.runAttempt, job: execution?.job, task: execution?.task, runUrl: execution?.runUrl,
+  }, {
+    status: 'IN_PROGRESS', repository, sourceSha: identity.sourceSha, runId: identity.runId,
+    runAttempt: group.workflowAttempt, job: group.workflowJob, task, runUrl: url,
+  }, 'Trace report execution identity mismatch');
+  assert.ok(Array.isArray(trace.caseExecutions) && Array.isArray(trace.requiredCaseIds) && trace.requiredCaseIds.length > 0,
+    'Trace report lacks case execution evidence');
+  const results = new Map(trace.caseExecutions.map(({ testId, result }) => [testId, result]));
+  assert.equal(results.size, trace.caseExecutions.length, 'Trace report contains duplicate TEST IDs');
+  for (const testId of trace.requiredCaseIds) {
+    assert.equal(results.get(testId), 'PASSED', `Required trace case did not pass: ${testId}`);
+  }
+  assert.ok(Array.isArray(trace.obligationTrace?.rows), 'Trace report lacks obligation mappings');
+  for (const row of trace.obligationTrace.rows) {
+    assert.notEqual(row.status, 'VERIFIED', 'Trace execution cannot certify a product obligation');
+    for (const run of row.exactRuns) {
+      assert.ok(row.testIds.includes(run.testId) && results.get(run.testId) === 'PASSED',
+        `Obligation run has no passing case execution: ${run.testId}`);
+      assert.deepEqual({
+        repository: run.repository, sourceSha: run.sourceSha, runId: run.runId, attempt: run.attempt,
+        job: run.job, task: run.task, url: run.url, result: run.result,
+      }, {
+        repository, sourceSha: identity.sourceSha, runId: identity.runId, attempt: group.workflowAttempt,
+        job: group.workflowJob, task, url, result: 'PASS',
+      }, 'Obligation exact-run reference mismatch');
+    }
+  }
 }
 
 export async function downloadSelectedArtifacts({ inventory, ids, identity, kind, directory, repository, token, request }) {
@@ -274,7 +326,9 @@ export async function downloadSelectedArtifacts({ inventory, ids, identity, kind
   const filename = kind === 'plan' ? 'ci-plan.json' : 'report.json';
   for (const artifact of selected) {
     const bytes = await downloadArtifact(artifact, repository, token, request);
-    const json = await extractJsonEntry(bytes, filename);
+    const hasTrace = kind === 'evidence' && artifact.name === 'ci-evidence-types-trace';
+    const [json, trace] = await extractJsonEntries(bytes, hasTrace ? [filename, TRACE_REPORT_ENTRY] : [filename]);
+    if (hasTrace) assertTraceArtifact(JSON.parse(trace), JSON.parse(json), identity, repository);
     const destination = kind === 'plan' ? directory : path.join(directory, artifact.name);
     await mkdir(destination, { recursive: true });
     await writeFile(path.join(destination, filename), json, { flag: 'wx', mode: 0o600 });

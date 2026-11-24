@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downloadArtifact, extractArtifactFiles, extractJsonEntry, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
+import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -50,12 +50,17 @@ test('certification materializes only the selected plan and reports for one or m
   const { downloadSelectedArtifacts } = await import('./download-artifacts.mjs');
 
   const archives = new Map();
-  async function fixture(id, name, filename, data) {
+  async function fixture(id, name, filename, data, entries = {}) {
     const directory = path.join(root, String(id));
     await mkdir(directory);
     await writeFile(path.join(directory, filename), JSON.stringify(data));
     await writeFile(path.join(directory, 'diagnostic.txt'), 'available in the original artifact only');
-    execFileSync('zip', ['-q', 'fixture.zip', filename, 'diagnostic.txt'], { cwd: directory });
+    for (const [entry, payload] of Object.entries(entries)) {
+      const target = path.join(directory, entry);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, JSON.stringify(payload));
+    }
+    execFileSync('zip', ['-q', 'fixture.zip', filename, 'diagnostic.txt', ...Object.keys(entries)], { cwd: directory });
     const archive = await readFile(path.join(directory, 'fixture.zip'));
     archives.set(id, archive);
     return { ...artifact, id, name, size_in_bytes: archive.length, digest: `sha256:${createHash('sha256').update(archive).digest('hex')}` };
@@ -65,9 +70,20 @@ test('certification materializes only the selected plan and reports for one or m
   const selectedReport = await fixture(2, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 2 });
   const olderReport = await fixture(9, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 1 });
   const retainedReport = await fixture(3, 'ci-evidence-unit-core', 'report.json', { group: 'unit-core', workflowAttempt: 1 });
+  const traceGroup = { group: 'types-trace', sha: identity.sourceSha, workflowRunId: 123, workflowAttempt: 2, workflowJob: 'types' };
+  const trace = {
+    source: { sourceSha: identity.sourceSha, worktreeClean: true },
+    execution: { status: 'IN_PROGRESS', repository: 'owner/repo', sourceSha: identity.sourceSha, runId: '123',
+      runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/owner/repo/actions/runs/123' },
+    requiredCaseIds: ['TEST-TRC-01-001'], caseExecutions: [{ testId: 'TEST-TRC-01-001', result: 'PASSED' }],
+    obligationTrace: { rows: [] },
+  };
+  const tracePath = 'requirements-trace/strictdoc/trace-report.json';
+  const selectedTrace = await fixture(4, 'ci-evidence-types-trace', 'report.json', traceGroup, { [tracePath]: trace });
+  const missingTrace = await fixture(5, 'ci-evidence-types-trace', 'report.json', traceGroup);
   const requestedIds = [];
   const options = {
-    inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport] },
+    inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport, selectedTrace, missingTrace] },
     identity, repository: 'owner/repo', token: 'fixture-token',
     async request(url) {
       const { hostname, pathname } = new URL(url);
@@ -97,7 +113,33 @@ test('certification materializes only the selected plan and reports for one or m
         { group, workflowAttempt: group === 'unit-core' ? 1 : 2 });
     }
   }
-  assert.deepEqual(requestedIds, [1, 2, 2, 3]);
+  const traceDirectory = path.join(root, 'evidence-trace');
+  await downloadSelectedArtifacts({ ...options, ids: [4], kind: 'evidence', directory: traceDirectory });
+  assert.deepEqual(await readdir(path.join(traceDirectory, selectedTrace.name)), ['report.json']);
+  await assert.rejects(downloadSelectedArtifacts({ ...options, ids: [5], kind: 'evidence', directory: traceDirectory }),
+    /Missing required JSON entry/);
+  assert.deepEqual(requestedIds, [1, 2, 2, 3, 4, 5]);
+});
+
+test('trace proof rejects stale, foreign or skipped nested evidence in the selected artifact', () => {
+  const repository = 'owner/repo';
+  const group = { group: 'types-trace', sha: identity.sourceSha, workflowRunId: 123, workflowAttempt: 2, workflowJob: 'types' };
+  const execution = { status: 'IN_PROGRESS', repository, sourceSha: identity.sourceSha, runId: '123',
+    runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/owner/repo/actions/runs/123' };
+  const testId = 'TEST-TRC-01-001';
+  const run = { testId, repository, sourceSha: identity.sourceSha, runId: '123', attempt: 2,
+    job: 'types', task: 'requirements-trace', url: execution.runUrl, result: 'PASS' };
+  const report = { source: { sourceSha: identity.sourceSha, worktreeClean: true }, execution,
+    requiredCaseIds: [testId], caseExecutions: [{ testId, result: 'PASSED' }],
+    obligationTrace: { rows: [{ testIds: [testId], exactRuns: [run] }] } };
+  assert.doesNotThrow(() => assertTraceArtifact(report, group, identity, repository));
+  for (const altered of [
+    { ...report, execution: { ...execution, repository: 'foreign/repo' } },
+    { ...report, execution: { ...execution, runAttempt: 1 } },
+    { ...report, source: { ...report.source, sourceSha: 'b'.repeat(40) } },
+    { ...report, caseExecutions: [{ testId, result: 'SKIPPED' }] },
+    { ...report, obligationTrace: { rows: [{ testIds: [testId], exactRuns: [{ ...run, attempt: 1 }] }] } },
+  ]) assert.throws(() => assertTraceArtifact(altered, group, identity, repository));
 });
 
 test('extracts only one requested JSON entry and rejects missing or malformed JSON', async (t) => {
