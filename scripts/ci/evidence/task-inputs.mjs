@@ -56,15 +56,15 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   'deploy/ansible/restore-drill.yml',
   'deploy/backup/backup.sh',
   'deploy/backup/s3_transfer.py',
+  'packages/http-contract/openapi/codexia.openapi.yaml',
   'packages/http-contract/src/source-dispatcher-inventory.mjs',
+  'packages/http-contract/test/fixtures/admitted-routes.json',
+  'packages/persistence-postgres/tests/db-contract/catalog-contract.json',
 ]);
 const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
-  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
-    file.startsWith('packages/http-contract/openapi/') ||
-    file.startsWith('packages/http-contract/test/fixtures/') ||
-    file === 'packages/persistence-postgres/tests/db-contract/catalog-contract.json';
+  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file);
 }
 
 export function isNonExecutableDocumentation(file) {

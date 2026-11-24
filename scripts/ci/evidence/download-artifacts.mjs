@@ -307,6 +307,9 @@ export function assertTraceArtifact(trace, group, identity, repository) {
   assert.ok(Array.isArray(trace.obligationTrace?.rows), 'Trace report lacks obligation mappings');
   for (const row of trace.obligationTrace.rows) {
     assert.notEqual(row.status, 'VERIFIED', 'Trace execution cannot certify a product obligation');
+    assert.ok(row.testIds.every(testId => results.has(testId)), 'Obligation refers to an unknown case execution');
+    const passedIds = row.testIds.filter(testId => results.get(testId) === 'PASSED').sort();
+    assert.deepEqual(row.exactRuns.map(run => run.testId).sort(), passedIds, 'Obligation exact-run cases do not match observed passes');
     for (const run of row.exactRuns) {
       assert.ok(row.testIds.includes(run.testId) && results.get(run.testId) === 'PASSED',
         `Obligation run has no passing case execution: ${run.testId}`);

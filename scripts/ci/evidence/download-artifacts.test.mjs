@@ -139,6 +139,7 @@ test('trace proof rejects stale, foreign or skipped nested evidence in the selec
     { ...report, source: { ...report.source, sourceSha: 'b'.repeat(40) } },
     { ...report, caseExecutions: [{ testId, result: 'SKIPPED' }] },
     { ...report, obligationTrace: { rows: [{ testIds: [testId], exactRuns: [{ ...run, attempt: 1 }] }] } },
+    { ...report, obligationTrace: { rows: [{ testIds: [testId], exactRuns: [] }] } },
   ]) assert.throws(() => assertTraceArtifact(altered, group, identity, repository));
 });
 
