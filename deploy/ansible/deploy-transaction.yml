@@ -390,6 +390,7 @@
       require_tunnel={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
+      first_activation={{ (codexia_expected_first_activation | default(none)) | to_json | quote }}
       admitted_container={{ (codexia_current_api_observation.stdout if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_sha256={{ (codexia_admitted_api_unit_sha256 if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_image={{ (codexia_current_api_unit_images[0] if codexia_current_container_exists.rc == 0 else '') | quote }}
@@ -460,6 +461,55 @@
       else
         bash -c {{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/require-clean-api-target.sh') | quote }} ||
           stale_admission 'first activation requires a clean API target'
+      fi
+      if [[ "$first_activation" != null ]]; then
+        [[ "$had_unit" == false ]] || stale_admission 'approved first activation found an existing API'
+        first_binding="$(node - "$first_activation" <<'NODE'
+      const { hostId, clusterId, databaseOid, settingsSha256, ownerBindingSha256, notBeforeMs, notAfterMs } = JSON.parse(process.argv[2]);
+      const hash = /^[a-f0-9]{64}$/u;
+      const now = Date.now();
+      if (!hash.test(hostId) || !hash.test(settingsSha256) || !/^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) ||
+          !/^[1-9][0-9]{0,19}$/u.test(clusterId) || !/^[1-9][0-9]{0,9}$/u.test(databaseOid) ||
+          !Number.isSafeInteger(notBeforeMs) || !Number.isSafeInteger(notAfterMs) || now < notBeforeMs || now > notAfterMs) process.exit(1);
+      process.stdout.write([hostId, settingsSha256, clusterId, databaseOid, ownerBindingSha256].join(' '));
+      NODE
+        )" || stale_admission 'first activation evidence is invalid or outside its window'
+        read -r approved_host approved_settings approved_cluster approved_database approved_owner <<< "$first_binding"
+        machine_id="$(cat /etc/machine-id)" || stale_admission 'the first activation host identity could not be read'
+        [[ "$(printf '%s' "$machine_id" | sha256sum)" == "$approved_host  -" ]] ||
+          stale_admission 'the first activation host identity changed'
+        for marker in owner-setup.installation owner-setup.promoted; do
+          path="$state_dir/$marker"
+          [[ -f "$path" && ! -L "$path" && -O "$path" && "$(stat -c %a -- "$path")" == 600 ]] ||
+            stale_admission 'prepared owner markers are unavailable'
+        done
+        [[ "$(cat -- "$state_dir/owner-setup.installation")" == "$approved_cluster" ]] ||
+          stale_admission 'the prepared owner installation marker changed'
+        promotion="$(cat -- "$state_dir/owner-setup.promoted")"
+        [[ "$promotion" == activation-ready ||
+           ( -z "$promotion" && ! -e "$state_dir/owner-setup.intent" && ! -L "$state_dir/owner-setup.intent" ) ]] ||
+          stale_admission 'the owner activation readiness marker changed'
+        live_runtime={{ (home + '/.config/codexia-auth/runtime.env') | quote }}
+        [[ "$auth_settings_digest" == "$approved_settings" && -f "$live_runtime" && ! -L "$live_runtime" && -O "$live_runtime" &&
+           "$(stat -c %a -- "$live_runtime")" == 600 &&
+           "$(sha256sum < "$live_runtime")" == "$approved_settings  -" ]] ||
+          stale_admission 'the prepared first activation settings changed'
+        first_database="$(podman exec -i codexia-db sh -ec '
+          export PGPASSWORD="$(cat /run/secrets/admin-password)"
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000"
+          exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia
+        ' <<'SQL'
+      SELECT system_identifier || ' ' || (SELECT oid FROM pg_database WHERE datname=current_database()) ||
+        ' sha256:' || encode(sha256(convert_to(setup.owner_id::text,'UTF8')),'hex')
+      FROM pg_control_system() CROSS JOIN codexia_auth.owner_setup setup
+      WHERE setup.id='first-owner' AND setup.consumed_at IS NOT NULL
+        AND (SELECT count(*) FROM codexia_auth."user") = 1
+        AND EXISTS (SELECT FROM codexia_auth."user" u JOIN codexia_auth."passkey" p ON p."userId"=u.id
+          WHERE u.id=setup.owner_id);
+      SQL
+        )" || stale_admission 'the prepared first activation database or owner could not be verified'
+        [[ "$first_database" == "$approved_cluster $approved_database $approved_owner" ]] ||
+          stale_admission 'the prepared first activation database or owner changed'
       fi
       release_present=false
       if [[ -e "$release_state" || -L "$release_state" ]]; then

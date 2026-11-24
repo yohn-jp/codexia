@@ -64,6 +64,12 @@ variable "origin_service" {
   }
 }
 
+variable "manage_frontend_worker" {
+  type        = bool
+  description = "Manage the canonical private Worker resource for a new site, independently of release versions and deployments."
+  default     = false
+}
+
 variable "frontend_route_enabled" {
   type        = bool
   description = "Enable only the explicit UI routes after Access and routing acceptance; false leaves UI on the retained origin during rollback."

@@ -1,5 +1,6 @@
 ---
 - name: Recover interrupted deployment before preparing target state
+  when: codexia_expected_first_activation is not defined
   ansible.builtin.command:
     argv: [bash, -s]
     stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/push-deployment-recover.sh') }}"

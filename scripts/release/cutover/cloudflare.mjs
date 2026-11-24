@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { assertBackendIdentity, assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
+import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import { assertProbeDenied, IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
 const readConfig = async name => JSON.parse(await readFile(new URL(`../../../deploy/cloudflare/${name}.json`, import.meta.url), 'utf8'));
@@ -18,15 +19,19 @@ const [identities, routes, protocols, setup] = await Promise.all([
   readConfig('owner-setup'),
 ]);
 const worker = 'codexia-frontend';
+const publicationControls = ['_headers', '_redirects'];
+const frontendAssets = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
 const phase = 'http_request_firewall_custom';
 const identityPaths = Object.values(identities).map(({ path }) => path);
 const protocolPaths = Object.values(protocols).map(({ path }) => path);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const hexId = /^[a-f0-9]{32}$/u;
+const workerIdPattern = /^[a-zA-Z0-9_-]{1,128}$/u;
 const fenceRef = 'codexia-epoch-cutover';
 const fenceDescription = 'Codexia maintenance fence';
 export const FENCE_RESPONSE = Object.freeze({ status_code: 403, content_type: 'text/plain', content: fenceDescription });
 const api = 'https://api.cloudflare.com/client/v4';
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 export function ownerSetupArtifactTag(digest) {
   assert.ok(typeof digest === 'string' && /^[a-f0-9]{64}$/u.test(digest), 'Owner setup artifact digest is invalid');
@@ -69,6 +74,11 @@ function candidateTag(artifactDigest) {
   return `cutover-${artifactDigest.slice(7)}`;
 }
 
+async function readCertifiedPublicationControls(directory = frontendAssets) {
+  return Object.fromEntries(await Promise.all(publicationControls.map(async name =>
+    [name, sha256(await readRegularFile(join(directory, name), { encoding: null }))])));
+}
+
 async function runWranglerUpload({ accountId, workerToken, tag }) {
   const output = await mkdtemp(join(tmpdir(), 'codexia-cutover-wrangler-'));
   const outputFile = join(output, 'versions.ndjson');
@@ -91,6 +101,43 @@ async function runWranglerUpload({ accountId, workerToken, tag }) {
     throw new Error('Wrangler candidate upload could not be verified');
   } finally {
     await rm(output, { recursive: true, force: true });
+  }
+}
+
+async function runInitialWorkerUpload({ accountId, workerId, workerToken, tag, initialControls }) {
+  const scratch = await mkdtemp(join(tmpdir(), 'codexia-first-worker-version-'));
+  const root = fileURLToPath(new URL('../../../', import.meta.url));
+  const infra = join(root, 'deploy/cloudflare/terraform');
+  const assets = join(root, 'app/dist');
+  try {
+    const config = JSON.parse(await readFile(join(root, 'edge/frontend/wrangler.jsonc'), 'utf8'));
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/u.test(config.compatibility_date), 'Invalid frontend compatibility date');
+    await Promise.all([
+      ...['versions.tf', '.terraform.lock.hcl'].map(name => copyFile(join(infra, name), join(scratch, name))),
+      copyFile(join(infra, 'initial-frontend-version/main.tf'), join(scratch, 'main.tf')),
+      ...publicationControls.map(name => copyFile(join(assets, name), join(scratch, name))),
+      cp(assets, join(scratch, 'assets'), { recursive: true,
+        filter: source => publicationControls.every(name => source !== join(assets, name)) }),
+      writeFile(join(scratch, 'candidate.auto.tfvars.json'), JSON.stringify({ account_id: accountId,
+        worker_id: workerId, tag, compatibility_date: config.compatibility_date }), { mode: 0o600, flag: 'wx' }),
+    ]);
+    assert.deepEqual(await readCertifiedPublicationControls(scratch), initialControls,
+      'Initial Worker publication controls changed before upload');
+    const run = (...args) => promisify(execFile)('terraform', args, {
+      cwd: scratch, timeout: 10 * 60_000,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_IN_AUTOMATION: '1',
+        CLOUDFLARE_API_TOKEN: workerToken },
+    });
+    await run('init', '-backend=false', '-input=false', '-lockfile=readonly', '-no-color');
+    await run('apply', '-input=false', '-auto-approve', '-no-color');
+    const { stdout } = await run('output', '-raw', 'version_id');
+    const versionId = stdout.trim();
+    assert.ok(uuid.test(versionId), 'Invalid staged first Worker version UUID');
+    return versionId;
+  } catch {
+    throw new Error('The initial Worker candidate upload could not be verified');
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
   }
 }
 
@@ -127,11 +174,10 @@ function assertPolicyIds(policies, expected) {
 }
 
 function assertCutoverBackendIdentity(identity) {
-  assert.ok(identity?.apiEpoch === 1 || identity?.apiEpoch === 2, 'Live backend API epoch is missing or invalid for cutover');
-  if (identity.apiEpoch === 2) return assertBackendIdentity(identity);
+  assert.ok(Number.isSafeInteger(identity?.apiEpoch) && identity.apiEpoch > 0, 'Live backend API epoch is missing or invalid for cutover');
   assert.ok(identity.name === 'codexia' && identity.profile === 'full' &&
     typeof identity.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(identity.version),
-  'Live epoch 1 backend identity is invalid');
+  'Live Full backend identity is invalid');
   return identity;
 }
 
@@ -139,7 +185,8 @@ export function createCloudflareCutover({
   origin, accountId, zoneId, tunnelId, fenceRuleId, acceptance = [],
   authorPolicyId, ciPolicyId, tunnelTeamName, publicProtocolEnabled,
   readToken, workerToken, fenceToken, accessEnv = process.env, fetchImpl = fetch,
-  uploadVersion = runWranglerUpload,
+  uploadVersion = runWranglerUpload, uploadInitialVersion = runInitialWorkerUpload,
+  readInitialWorkerControls = readCertifiedPublicationControls,
 }) {
   const target = parseOrigin(origin);
   assert.ok(hexId.test(accountId) && hexId.test(zoneId) && uuid.test(tunnelId) && hexId.test(fenceRuleId),
@@ -148,6 +195,7 @@ export function createCloudflareCutover({
   const accountPath = `/accounts/${accountId}`;
   const zonePath = `/zones/${zoneId}`;
   const workerPath = `${accountPath}/workers/scripts/${worker}`;
+  const workerResource = `${accountPath}/workers/workers/${worker}`;
   const setupWorkerPath = `${accountPath}/workers/scripts/${setup.worker}`;
 
   async function request(label, path, { method = 'GET', token = readToken, body } = {}) {
@@ -202,16 +250,28 @@ export function createCloudflareCutover({
     return { id: latest.id, versionId: latest.versions[0].version_id, createdAt: new Date(timestamp).toISOString() };
   }
 
-  async function assertPrivateWorker(path = workerPath) {
-    const settings = await result('Worker subdomain settings', `${path}/subdomain`);
-    assert.ok(settings.enabled === false && settings.previews_enabled === false, 'Worker subdomain and preview URLs must be disabled');
+  function assertPrivateWorker(settings) {
+    assert.ok(settings?.enabled === false && settings?.previews_enabled === false, 'Worker subdomain and preview URLs must be disabled');
   }
 
-  async function readVersion(versionId, path = workerPath) {
+  async function assertPrivateSetupWorker() {
+    assertPrivateWorker(await result('Owner setup Worker subdomain settings', `${setupWorkerPath}/subdomain`));
+  }
+
+  async function readVersion(versionId, path, { includeModules = false } = {}) {
     assert.ok(typeof versionId === 'string' && uuid.test(versionId), 'Worker version UUID is invalid');
-    const version = await result('Worker version', `${path}/versions/${versionId}`);
+    const version = await result('Worker version', `${path}/versions/${versionId}${includeModules ? '?include=modules' : ''}`);
     assert.ok(version.id === versionId, 'Cloudflare did not confirm the exact Worker version UUID');
     return version;
+  }
+
+  async function readNormalVersion(versionId, { initialWorkerId, includeModules = false } = {}) {
+    const resource = await result('Normal Worker resource', workerResource);
+    assert.ok(resource.name === worker && typeof resource.id === 'string' && workerIdPattern.test(resource.id) &&
+      (!initialWorkerId || resource.id === initialWorkerId), 'Normal Worker resource identity changed');
+    assertPrivateWorker(resource.subdomain);
+    return readVersion(versionId, `${accountPath}/workers/workers/${resource.id}`,
+      { includeModules });
   }
 
   async function observeFence() {
@@ -244,32 +304,66 @@ export function createCloudflareCutover({
     return observed;
   }
 
-  async function assertStaged({ versionId, artifactDigest }) {
+  async function assertWorkerArtifact({ versionId, artifactDigest, initialWorkerId, initialControls }) {
     const tag = candidateTag(artifactDigest);
-    const [version, deployment] = await Promise.all([readVersion(versionId), observeDeployment(), assertPrivateWorker()]);
+    const version = await readNormalVersion(versionId, { initialWorkerId, includeModules: initialControls !== undefined });
     assert.ok(version.annotations?.['workers/tag'] === tag, 'Candidate Worker version tag does not match the verified frontend archive');
-    assert.ok(version.metadata?.hasPreview !== true && versionId !== deployment.versionId,
-      'Candidate Worker version must be staged without live traffic or a public preview');
+    assert.ok(Array.isArray(version.urls) && version.urls.length === 0, 'Candidate Worker must not have a public preview');
+    if (initialControls !== undefined) {
+      const settings = version.assets?.config;
+      assert.ok(initialControls && Object.keys(initialControls).length === publicationControls.length &&
+        settings?.html_handling === 'none' && settings.not_found_handling === 'none' && !version.main_module &&
+        Array.isArray(version.modules) && version.modules.length === publicationControls.length,
+      'Initial Worker version must contain only static assets and the certified publication controls');
+      for (const name of publicationControls) {
+        const module = version.modules.find(entry => entry.name === name && entry.content_type === 'text/plain');
+        assert.ok(typeof module?.content_base64 === 'string' &&
+          sha256(Buffer.from(module.content_base64, 'base64')) === initialControls[name],
+          'Initial Worker publication controls differ from the certified archive');
+      }
+    }
     return { versionId, tag };
+  }
+
+  async function assertStaged(input) {
+    const [staged, deployment] = await Promise.all([assertWorkerArtifact(input), observeDeployment({ allowAbsent: true })]);
+    assert.notEqual(staged.versionId, deployment?.versionId, 'Candidate Worker must be staged without live traffic');
+    return staged;
   }
 
   async function stage({ previousVersionId, artifactDigest }) {
     const tag = candidateTag(artifactDigest);
-    const [before] = await Promise.all([observeDeployment(), readVersion(previousVersionId), assertPrivateWorker()]);
-    assert.ok(before.versionId === previousVersionId, 'Active Worker version changed before candidate upload');
+    const initial = previousVersionId === null ? await observeIngress({ lifecycle: true }) : null;
+    if (initial) {
+      assert.ok(initial.workerId && initial.routesReady && initial.workerNeverDeployed &&
+        initial.deployment === null, 'Prepare the unused private Worker and canonical routes before the initial candidate upload');
+    }
+    const [before] = initial ? [initial.deployment] : await Promise.all([observeDeployment({ allowAbsent: true }),
+      readNormalVersion(previousVersionId)]);
+    assert.ok((before?.versionId ?? null) === previousVersionId, 'Active Worker version changed before candidate upload');
     assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
       'Missing Cloudflare credential for candidate upload');
-    const versionId = await uploadVersion({ accountId, workerToken, tag });
-    const [staged, after] = await Promise.all([assertStaged({ versionId, artifactDigest }), observeDeployment()]);
+    const initialControls = initial ? await readInitialWorkerControls() : undefined;
+    const versionId = initial ? await uploadInitialVersion({ accountId, workerId: initial.workerId, workerToken, tag, initialControls })
+      : await uploadVersion({ accountId, workerToken, tag });
+    const [staged, after] = await Promise.all([
+      assertStaged({ versionId, artifactDigest, initialWorkerId: initial?.workerId, initialControls }),
+      observeDeployment({ allowAbsent: true }),
+    ]);
     assert.deepEqual(after, before, 'Active Worker deployment changed during candidate upload');
-    return staged;
+    if (initial) {
+      const latest = await observeIngress({ lifecycle: true });
+      assert.ok(latest.ingressDigest === initial.ingressDigest && latest.workerNeverDeployed && latest.deployment === null,
+        'Initial Worker or ingress changed during candidate upload');
+    }
+    return initial ? { ...staged, initialControls } : staged;
   }
 
   async function deploy({ fromVersionId, toVersionId }) {
     assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence must be active before switching the Worker');
-    const [before] = await Promise.all([observeDeployment(), readVersion(toVersionId), assertPrivateWorker()]);
-    if (before.versionId === toVersionId) return before;
-    assert.ok(uuid.test(fromVersionId) && before.versionId === fromVersionId, 'Cloudflare has an unexpected live Worker version');
+    const [before] = await Promise.all([observeDeployment({ allowAbsent: true }), readNormalVersion(toVersionId)]);
+    if (before?.versionId === toVersionId) return before;
+    assert.ok((fromVersionId === null || uuid.test(fromVersionId)) && (before?.versionId ?? null) === fromVersionId, 'Cloudflare has an unexpected live Worker version');
     try {
       await result('Worker deployment update', `${workerPath}/deployments`, {
         method: 'POST', token: workerToken,
@@ -335,7 +429,7 @@ export function createCloudflareCutover({
   async function observeOwnerSetup(artifactDigest) {
     const tag = ownerSetupArtifactTag(artifactDigest);
     const [deployment] = await Promise.all([
-      observeDeployment({ path: setupWorkerPath }), assertPrivateWorker(setupWorkerPath),
+      observeDeployment({ path: setupWorkerPath }), assertPrivateSetupWorker(),
     ]);
     const version = await readVersion(deployment.versionId, setupWorkerPath);
     assert.ok(version.annotations?.['workers/tag'] === tag && version.metadata?.hasPreview !== true,
@@ -354,14 +448,17 @@ export function createCloudflareCutover({
     // Positive absence requires an authenticated inventory, not a 404, failed
     // identity probe, or denied token. Strict cutover calls retain their
     // existing requirement for a deployed Worker.
-    let scriptPresent = true;
-    let setupScriptPresent = false;
-    if (lifecycle) {
-      const scripts = await list('Worker script inventory', `${accountPath}/workers/scripts`);
-      assert.ok(scripts.every(item => typeof item?.id === 'string' && item.id.length > 0) &&
-        new Set(scripts.map(item => item.id)).size === scripts.length, 'Worker script inventory is ambiguous');
-      scriptPresent = scripts.some(item => item.id === worker);
-      setupScriptPresent = scripts.some(item => item.id === setup.worker);
+    const workers = await list('Worker inventory', `${accountPath}/workers/workers`);
+    assert.ok(workers.every(item => typeof item?.id === 'string' && workerIdPattern.test(item.id) &&
+      typeof item.name === 'string' && item.name.length > 0) &&
+      new Set(workers.map(item => item.id)).size === workers.length &&
+      new Set(workers.map(item => item.name)).size === workers.length, 'Worker inventory is ambiguous');
+    const normalWorker = workers.find(item => item.name === worker);
+    const scriptPresent = normalWorker !== undefined;
+    const setupScriptPresent = workers.some(item => item.name === setup.worker);
+    assert.ok(lifecycle || scriptPresent, 'Expected an existing normal Worker');
+    if (normalWorker) {
+      assertPrivateWorker(normalWorker.subdomain);
     }
     const [dns, workerRoutes, domains, applications, tunnel, deployment, fence] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
@@ -374,8 +471,8 @@ export function createCloudflareCutover({
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
       scriptPresent ? observeDeployment({ allowAbsent: lifecycle }) : null, observeFence(),
-      scriptPresent ? assertPrivateWorker() : null, assertNoFenceSkippingIpRules(),
-      setupScriptPresent ? assertPrivateWorker(setupWorkerPath) : null,
+      assertNoFenceSkippingIpRules(),
+      setupScriptPresent ? assertPrivateSetupWorker() : null,
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
@@ -385,13 +482,15 @@ export function createCloudflareCutover({
     const setupAttached = relevantRoutes.some(route => route.script === setup.worker);
     assert.ok(!setupAttached || (lifecycle && setupScriptPresent && !publicProtocolEnabled && !fence.enabled),
       'Owner setup ingress requires the protected limited topology with public protocols disabled');
-    const routePlan = setupAttached ? [
-      ...setup.routes.map(path => ({ pattern: host + path, script: setup.worker })),
-      ...(deployment ? [{ pattern: host + identities.frontend.path, script: worker }] : []),
-    ] : lifecycle && deployment === null ? [] : [
+    const canonicalRoutes = [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
       ...routes.originRoutes.map(path => ({ pattern: host + path, script: null })),
     ];
+    const routePlan = setupAttached ? [
+      ...setup.routes.map(path => ({ pattern: host + path, script: setup.worker })),
+      ...(deployment ? [{ pattern: host + identities.frontend.path, script: worker }] : []),
+    ] : lifecycle && deployment === null && relevantRoutes.length === 0 ? [] : canonicalRoutes;
+    assert.ok(setupAttached || scriptPresent || routePlan.length === 0, 'Normal frontend routes require an existing Worker');
     assert.deepEqual(relevantRoutes.map(route => ({ pattern: route.pattern, script: route.script ?? null }))
       .sort((a, b) => a.pattern.localeCompare(b.pattern)), routePlan.sort((a, b) => a.pattern.localeCompare(b.pattern)),
     'Worker routes expose alternate ingress or differ from the canonical routing contract');
@@ -440,14 +539,17 @@ export function createCloudflareCutover({
     }
     assert.ok(!ingress.at(-1).hostname && !ingress.at(-1).path && ingress.at(-1).service === 'http_status:404',
       'Cloudflare Tunnel must end with an unconditional 404');
-    const topology = { dns: dns[0].id, workerRoutes: routePlan,
+    const workerId = normalWorker?.id ?? null;
+    const topology = { dns: dns[0].id, workerId, workerRoutes: routePlan,
       access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
       fence: { rulesetId: fence.rulesetId, ruleId: fence.ruleId, expression },
       ...(ownerSetup ? { ownerSetup } : {}),
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
     return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest,
-      ...(lifecycle ? { scriptPresent, setupScriptPresent, ownerSetup, publicProtocolEnabled } : {}) };
+      ...(lifecycle ? { scriptPresent, workerId, workerNeverDeployed: normalWorker?.deployed_on === null,
+        routesReady: !setupAttached && scriptPresent && routePlan.length > 0,
+        setupScriptPresent, ownerSetup, publicProtocolEnabled } : {}) };
   }
 
   async function assertOwnerSetupDetached() {
@@ -456,14 +558,15 @@ export function createCloudflareCutover({
     return ingress;
   }
 
-  async function observe() {
+  async function observe({ allowLegacyBackend = false } = {}) {
     const { origin: liveOrigin, clientId, clientSecret } = readFrontendReleaseConfiguration(accessEnv);
     assert.ok(liveOrigin.origin === target.origin,
       'Protected identity origin differs from the pinned Cloudflare hostname');
     const [ingress, live] = await Promise.all([
       observeIngress(),
       probeScopedIdentityAccess({ origin: liveOrigin, credentials: { clientId, clientSecret }, fetchImpl, checkBoundary: true,
-        validateBackend: assertCutoverBackendIdentity, validateFrontend: assertFrontendIdentity }),
+        validateBackend: allowLegacyBackend ? assertCutoverBackendIdentity : assertBackendIdentity,
+        validateFrontend: assertFrontendIdentity }),
     ]);
     const after = await observeDeployment();
     assert.deepEqual(ingress.deployment, after, 'Active Worker deployment changed during protected identity observation');
@@ -522,6 +625,7 @@ export function createCloudflareCutover({
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, fence: () => setFence(true),
-    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, assertOwnerSetupDetached, observeOwnerSetup };
+  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
+    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, assertOwnerSetupDetached, observeOwnerSetup,
+    readInitialWorkerControls };
 }

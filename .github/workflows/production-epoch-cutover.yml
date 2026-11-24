@@ -1,4 +1,4 @@
-name: Coordinated API epoch maintenance
+name: Coordinated production pair maintenance
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: Reviewed maintenance phase
         required: true
         type: choice
-        options: [preflight, stage, checkpoint, apply, promote, recover-quiesce, recover, finish, abort-fence]
+        options: [stage, advance, recover, reconcile]
       request:
         description: Digest-only phase request JSON. Never include credentials or private evidence.
         default: '{}'
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   maintenance:
-    name: Protected coordinated API epoch maintenance
+    name: Protected coordinated production pair maintenance
     if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -80,7 +80,7 @@ jobs:
                 codexia_service_home: /home/codexia
           EOF_INVENTORY
       - uses: docker/login-action@v4.8.0
-        if: inputs.operation == 'preflight' || inputs.operation == 'stage'
+        if: inputs.operation == 'stage' || inputs.operation == 'advance'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -88,20 +88,32 @@ jobs:
       - name: Install the pinned Wrangler used by the frontend release
         if: inputs.operation == 'stage'
         run: npm ci --prefix edge/frontend
+      - name: Install pinned Terraform for staging the first version of a prepared Worker
+        if: >-
+          inputs.operation == 'stage' &&
+          fromJSON(inputs.request).deployment.plan.observation.state.F == 'absent'
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
       - name: Execute and verify the selected maintenance phase
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_CUTOVER_OPERATION: ${{ inputs.operation }}
           CODEXIA_CUTOVER_INPUT: ${{ inputs.request }}
-          CODEXIA_CUTOVER_RECOVERY_RECEIPT: ${{ inputs.operation == 'apply' && secrets.CODEXIA_CUTOVER_RECOVERY_RECEIPT || '' }}
+          CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.target.outputs.host }}
+          CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
+          CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
+          CODEXIA_CUTOVER_PRESERVATION: ${{ (inputs.operation == 'stage' || inputs.operation == 'advance') && secrets.CODEXIA_CUTOVER_PRESERVATION || '' }}
+          CODEXIA_CUTOVER_RECOVERY_RECEIPT: ${{ inputs.operation == 'advance' && secrets.CODEXIA_CUTOVER_RECOVERY_RECEIPT || '' }}
           CODEXIA_CUTOVER_RESTORE_RECEIPT: ${{ inputs.operation == 'recover' && secrets.CODEXIA_CUTOVER_RESTORE_RECEIPT || '' }}
-          CODEXIA_CUTOVER_ACCEPTANCE: ${{ (inputs.operation == 'finish' || inputs.operation == 'abort-fence') && secrets.CODEXIA_CUTOVER_ACCEPTANCE || '' }}
+          CODEXIA_CUTOVER_ACCEPTANCE: ${{ inputs.operation != 'stage' && secrets.CODEXIA_CUTOVER_ACCEPTANCE || '' }}
           CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
           CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
-          CODEXIA_CUTOVER_WORKER_TOKEN: ${{ inputs.operation != 'preflight' && secrets.CODEXIA_CUTOVER_WORKER_TOKEN || '' }}
-          CODEXIA_CUTOVER_FENCE_TOKEN: ${{ inputs.operation != 'preflight' && secrets.CODEXIA_CUTOVER_FENCE_TOKEN || '' }}
+          CODEXIA_CUTOVER_WORKER_TOKEN: ${{ inputs.operation != 'reconcile' && secrets.CODEXIA_CUTOVER_WORKER_TOKEN || '' }}
+          CODEXIA_CUTOVER_FENCE_TOKEN: ${{ inputs.operation != 'stage' && secrets.CODEXIA_CUTOVER_FENCE_TOKEN || '' }}
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
@@ -114,7 +126,7 @@ jobs:
           VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/deployment/cutover/run.mjs
-      - name: Retain redacted phase evidence for Issue 168
+      - name: Retain redacted phase evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:

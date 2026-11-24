@@ -106,11 +106,21 @@ jobs:
         run: |
           set -euo pipefail
           terraform fmt -check -recursive
+          validate_configuration() {
+            terraform validate
+            stage_dir="$(mktemp -d "$RUNNER_TEMP/codexia-first-version-validate.XXXXXX")"
+            cp versions.tf .terraform.lock.hcl initial-frontend-version/main.tf "$stage_dir/"
+            mkdir "$stage_dir/assets"
+            touch "$stage_dir/_headers" "$stage_dir/_redirects"
+            terraform -chdir="$stage_dir" init -backend=false -lockfile=readonly -plugin-dir="$PWD/.terraform/providers"
+            terraform -chdir="$stage_dir" validate
+            rm -rf -- "$stage_dir"
+          }
           # The Registry's release signature URL can return GitHub 504.
           # Keep real provider-schema validation: fall back to the official
           # GitHub API release asset and verify its pinned publisher digest.
           if terraform init -backend=false; then
-            terraform validate
+            validate_configuration
             exit 0
           fi
           provider_dir="$(mktemp -d)"
@@ -127,4 +137,4 @@ jobs:
           mkdir -p "$plugin_path"
           unzip -oq "$archive" -d "$plugin_path"
           terraform init -backend=false -plugin-dir="$provider_dir"
-          terraform validate
+          validate_configuration

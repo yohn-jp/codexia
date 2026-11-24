@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { buildFenceExpression, createCloudflareCutover, FENCE_RESPONSE } from './cloudflare.mjs';
 
@@ -11,8 +12,12 @@ const tunnelId = '10000000-0000-4000-8000-000000000000';
 const oldVersion = '10000000-0000-4000-8000-000000000001';
 const newVersion = '10000000-0000-4000-8000-000000000002';
 const deploymentId = '10000000-0000-4000-8000-000000000003';
+const workerId = 'e'.repeat(32);
+const ownerSetupWorkerId = 'f'.repeat(32);
 const artifactDigest = 'sha256:' + 'e'.repeat(64);
 const workerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-frontend`;
+const workerResource = `/client/v4/accounts/${accountId}/workers/workers/codexia-frontend`;
+const workerResourceById = `/client/v4/accounts/${accountId}/workers/workers/${workerId}`;
 const setupWorkerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-owner-setup`;
 const accountPath = `/client/v4/accounts/${accountId}`;
 const zonePath = `/client/v4/zones/${zoneId}`;
@@ -28,11 +33,15 @@ const apps = ['', '/api/version', '/desktop/update-identity.json'].map((path, in
   aud: String(index).repeat(64),
   type: 'self_hosted',
 }));
+const controls = { _headers: 'certified headers', _redirects: 'certified redirects' };
+const controlsSha256 = Object.fromEntries(Object.entries(controls).map(([name, content]) =>
+  [name, createHash('sha256').update(content).digest('hex')]));
 
 function fixture() {
   const writes = [];
   const state = { enabled: false, preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false, ipAllow: false,
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
+    workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
     setupRoutes: false, setupPreview: false, setupAlias: false, setupTag: null, setupExposed: false,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
@@ -51,6 +60,12 @@ function fixture() {
     readToken: 'read-secret', workerToken: 'worker-secret', fenceToken: 'waf-secret',
     accessEnv: { CODEXIA_PUBLIC_ORIGIN: origin, CODEXIA_ACCESS_CLIENT_ID: 'identity-id', CODEXIA_ACCESS_CLIENT_SECRET: 'identity-secret' },
     uploadVersion: async ({ tag }) => {
+      state.uploadTag = tag;
+      return newVersion;
+    },
+    readInitialWorkerControls: async () => controlsSha256,
+    uploadInitialVersion: async ({ workerId: targetWorker, tag, initialControls }) => {
+      state.initialUpload = { targetWorker, tag, initialControls };
       state.uploadTag = tag;
       return newVersion;
     },
@@ -76,11 +91,13 @@ function fixture() {
       } else {
         assert.equal(init.headers.Authorization, 'Bearer read-secret');
       }
-      if (path === accountPath + '/workers/scripts') {
+      if (path === accountPath + '/workers/workers') {
         if (state.inventoryDenied) return new Response('Denied', { status: 403 });
         return apiResponse([
-          ...(!state.scriptAbsent ? [{ id: 'codexia-frontend' }] : []),
-          ...(state.setupTag ? [{ id: 'codexia-owner-setup' }] : []),
+          ...(!state.scriptAbsent ? [{ id: state.workerId, name: 'codexia-frontend',
+            deployed_on: state.activeVersion || state.previousDeploymentEvidence ? '2026-11-23T12:00:00Z' : null,
+            subdomain: { enabled: false, previews_enabled: state.preview } }] : []),
+          ...(state.setupTag ? [{ id: ownerSetupWorkerId, name: 'codexia-owner-setup' }] : []),
         ]);
       }
       if (path === workerPath + '/deployments') {
@@ -89,13 +106,22 @@ function fixture() {
           if (state.replyLost) throw new Error('connection reset');
         }
         const deployment = { id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage', versions: [{ version_id: state.activeVersion, percentage: 100 }] };
-        return apiResponse(method === 'GET' ? { deployments: [deployment] } : deployment);
+        return apiResponse(method === 'GET' ? { deployments: state.activeVersion === null ? [] : [deployment] } : deployment);
       }
-      if (path === workerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.preview });
-      if (path === workerPath + '/versions/' + newVersion) {
-        return apiResponse({ id: newVersion, metadata: { hasPreview: false }, annotations: { 'workers/tag': state.uploadTag } });
+      if (path === workerResource) {
+        return apiResponse({ id: state.workerId, name: 'codexia-frontend', subdomain: { enabled: false, previews_enabled: state.preview } });
       }
-      if (path === workerPath + '/versions/' + oldVersion) return apiResponse({ id: oldVersion });
+      if (path.startsWith(workerResource + '/versions/')) return new Response('Worker ID required', { status: 404 });
+      if (path === workerResourceById + '/versions/' + newVersion) {
+        const includeModules = target.searchParams.get('include') === 'modules';
+        return apiResponse({ id: newVersion, urls: [], annotations: { 'workers/tag': state.uploadTag },
+          ...(includeModules ? { assets: { config: { html_handling: 'none', not_found_handling: 'none' } },
+            modules: Object.entries(controls).map(([name, content]) => ({ name, content_type: 'text/plain',
+              content_base64: Buffer.from(state.controlsChanged && name === '_headers' ? 'altered' : content).toString('base64') })),
+          } : {}),
+        });
+      }
+      if (path === workerResourceById + '/versions/' + oldVersion) return apiResponse({ id: oldVersion, urls: [] });
       if (path === setupWorkerPath + '/deployments') return apiResponse({ deployments: [{
         id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage',
         versions: [{ version_id: newVersion, percentage: 100 }],
@@ -159,6 +185,7 @@ test('lifecycle observes only the exact certified limited owner setup without a 
   const request = { backendExpected: false, ownerSetupArtifactDigest: artifactDigest.slice(7) };
   const result = await client.observeLifecycle(request);
   assert.equal(result.frontendState, 'absent');
+  assert.equal(result.routesReady, false);
   assert.equal(result.publicProtocolEnabled, false);
   assert.deepEqual(result.ownerSetup, { deploymentId, versionId: newVersion, artifactDigest: request.ownerSetupArtifactDigest });
   await assert.rejects(client.observeLifecycle({ ...request, ownerSetupArtifactDigest: 'a'.repeat(64) }), /setup.*artifact/iu);
@@ -195,6 +222,46 @@ test('upload binds archive digest to a version while the old version stays the o
   assert.deepEqual(writes, []);
   state.uploadTag = 'unexpected-artifact';
   await assert.rejects(client.assertStaged({ versionId: newVersion, artifactDigest }), /tag/u);
+});
+
+test('first activation stages a version with no deployment and promotes only behind the fence', async () => {
+  const { client, state, writes } = fixture();
+  state.scriptAbsent = true;
+  state.activeVersion = null;
+  state.backendAbsent = true;
+  const missing = await client.observeLifecycle({ backendExpected: false });
+  assert.equal(missing.workerId, null);
+  assert.equal(missing.routesReady, false);
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /unused private Worker/u);
+  assert.equal(state.initialUpload, null);
+  state.scriptAbsent = false; // A separately approved infrastructure apply creates the worker and its canonical routes.
+  const pending = await client.observeLifecycle({ backendExpected: false });
+  assert.equal(pending.frontendState, 'absent');
+  assert.equal(pending.workerId, workerId);
+  assert.equal(pending.routesReady, true);
+  state.previousDeploymentEvidence = true;
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /unused private Worker/u);
+  assert.equal(state.initialUpload, null);
+  state.previousDeploymentEvidence = false;
+  state.controlsChanged = true;
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /certified archive/u);
+  state.controlsChanged = false;
+  const staged = await client.stage({ previousVersionId: null, artifactDigest });
+  assert.equal(staged.versionId, newVersion);
+  assert.deepEqual(staged.initialControls, controlsSha256);
+  assert.deepEqual(state.initialUpload, { targetWorker: workerId, tag: 'cutover-' + artifactDigest.slice(7), initialControls: controlsSha256 });
+  const expected = { versionId: newVersion, artifactDigest, initialControls: await client.readInitialWorkerControls() };
+  assert.equal((await client.assertStaged(expected)).versionId, newVersion);
+  state.controlsChanged = true;
+  await assert.rejects(client.assertStaged(expected), /certified archive/u);
+  await assert.rejects(client.assertWorkerArtifact(expected), /certified archive/u);
+  state.controlsChanged = false;
+  assert.equal(state.activeVersion, null);
+  await assert.rejects(client.deploy({ fromVersionId: null, toVersionId: newVersion }), /fence/u);
+  await client.fence();
+  assert.equal((await client.deploy({ fromVersionId: null, toVersionId: newVersion })).versionId, newVersion);
+  assert.equal((await client.observeIngress({ lifecycle: true })).ingressDigest, pending.ingressDigest);
+  assert.equal(writes.filter(entry => entry.method === 'POST').length, 1);
 });
 
 test('candidate upload fails before using the upload credential when previews are enabled', async () => {
@@ -252,15 +319,16 @@ test('fence removal proves the dedicated block response is absent and the applic
   assert.equal((await client.verifyUnfenced()).status, 403);
 });
 
-test('protected observation binds the old wire identity and keeps epoch 2 OAuth admission strict', async () => {
+test('protected observation allows a reviewed legacy identity and otherwise requires standalone OAuth', async () => {
   const { client, state } = fixture();
-  assert.equal((await client.observe()).backend.apiEpoch, 1);
+  assert.equal((await client.observe({ allowLegacyBackend: true })).backend.apiEpoch, 1);
   state.publicEpoch = undefined;
-  await assert.rejects(client.observe(), /epoch is missing/u);
+  await assert.rejects(client.observe({ allowLegacyBackend: true }), /epoch is missing/u);
   state.publicEpoch = 2;
   await assert.rejects(client.observe(), /standalone OAuth/u);
   state.publicAuth = ['oauth-owner', 'oauth-mcp'];
-  assert.equal((await client.observe()).backend.apiEpoch, 2);
+  state.publicEpoch = 46;
+  assert.equal((await client.observe()).backend.apiEpoch, 46);
 });
 
 test('lifecycle inventory distinguishes confirmed empty deployment from denied observations without writes', async () => {

@@ -5,13 +5,16 @@ umask 077
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.."
 
 readonly prior_source=c9d0b5f82576f78491c4f98c62309b3835de7562
-readonly candidate_source=${EPOCH_FIXTURE_SOURCE_SHA:?Exact operation source is required}
+readonly operation_source=${EPOCH_FIXTURE_SOURCE_SHA:?Exact operation source is required}
+readonly candidate_source=${EPOCH_FIXTURE_CANDIDATE_SHA:-$operation_source}
 readonly fixture_home=/home/codexia
 readonly report_dir=${RUNNER_TEMP:?}/codexia-epoch-cutover-evidence
 readonly fixture_tag="localhost/codexia-epoch-cutover-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 
 [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]]
-[[ "$candidate_source" =~ ^[0-9a-f]{40}$ && "$(git rev-parse HEAD)" == "$candidate_source" ]]
+[[ "$operation_source" =~ ^[0-9a-f]{40}$ && "$(git rev-parse HEAD)" == "$operation_source" ]]
+[[ "$candidate_source" =~ ^[0-9a-f]{40}$ ]]
+git merge-base --is-ancestor "$candidate_source" "$operation_source"
 if getent passwd codexia >/dev/null || getent group codexia >/dev/null || [[ -e "$fixture_home" || -L "$fixture_home" ]]; then
   echo 'The fixture requires a fresh codexia service account.' >&2
   exit 1
@@ -88,7 +91,7 @@ cleanup() {
   fi
   rm -rf -- "$work" || status=1
   docker image rm "$fixture_tag:prior" "$fixture_tag:candidate" >/dev/null 2>&1
-  jq -n --arg sourceSha "$candidate_source" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+  jq -n --arg sourceSha "$operation_source" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
     --argjson exitCode "$status" '{sourceSha:$sourceSha,runId:$runId,runAttempt:$runAttempt,exitCode:$exitCode,status:(if $exitCode == 0 then "PASS" else "FAIL" end)}' \
     > "$report_dir/outcome.json" || status=1
   exit "$status"
@@ -107,7 +110,7 @@ build_full() {
 }
 
 # This reviewed historical checkout is the direct parent of the epoch 2 declaration.
-# It preserves the same Better Auth schema as the current packaged backend.
+# It preserves the same Better Auth schema as the approved conversion target.
 build_full "$prior_source" prior 1.0.0
 build_full "$candidate_source" candidate 2.0.0
 
@@ -149,7 +152,7 @@ grep -Fxq "XDG_RUNTIME_DIR=/run/user/$fixture_uid" <<< "$manager_environment"
 [[ "$(run_as_codexia podman info --format '{{.Host.Security.Rootless}}')" == true ]]
 
 run_as_codexia mkdir -m 0700 "$fixture_home/fixture"
-git archive "$candidate_source" deploy/ansible deploy/backup deploy/postgres deploy/quadlet \
+git archive "$operation_source" deploy/ansible deploy/backup deploy/postgres deploy/quadlet \
   scripts/verification/runtime/better-auth-fixture.sh scripts/deployment/lifecycle/auth-oidc.mjs \
   scripts/release/backend/image-inspection.mjs scripts/release/backend/update-identity.mjs \
   scripts/release/components/version.mjs |

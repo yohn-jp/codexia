@@ -179,16 +179,38 @@ assert_restore_resource_absent(){
   podman "$kind" exists "$resource" || status=$?
   [[ "$status" == 1 ]] || die 'Isolated restore resource name is already in use or cannot be inspected'
 }
-rehearse_restore_maintenance(){
-  local candidate="$1" database="$2" history_volume="$3" status=0
+verify_drill_candidate(){
+  local candidate="$1" database="$2" ledger="$3"
   local -a run=(podman run --rm --pull=never --read-only --cap-drop all --security-opt no-new-privileges --entrypoint node)
   [[ "$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$database")" == none ]] || die 'Restored database must be isolated from all networks'
   "${run[@]}" --network none "$candidate" --input-type=module -e '
     import { readFileSync } from "node:fs";
+    const expectedLedger = process.argv[1];
     const identity = JSON.parse(readFileSync("/app/update-identity.json", "utf8"));
-    if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full") process.exit(1);
-  ' || die 'Maintenance rehearsal requires the reviewed Full backend image loaded locally'
+    if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full" ||
+        (expectedLedger && identity.migrationFingerprint !== expectedLedger)) process.exit(1);
+  ' "$ledger" || die 'Isolated verification requires the reviewed Full backend image loaded locally'
+  [[ -n "$ledger" ]] || return 0
 
+  podman exec -i "$database" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d codexia <<'SQL'
+CREATE ROLE codexia_ledger_verifier LOGIN NOINHERIT;
+ALTER ROLE codexia_ledger_verifier SET default_transaction_read_only = on;
+GRANT USAGE ON SCHEMA public TO codexia_ledger_verifier;
+GRANT SELECT ON public.codexia_schema_migrations TO codexia_ledger_verifier;
+SQL
+  local actual
+  actual="$("${run[@]}" --network "container:$database" \
+    --env 'CODEXIA_DATABASE_URL=postgres://codexia_ledger_verifier@127.0.0.1:5432/codexia?options=-c%20default_transaction_read_only%3Don' \
+    "$candidate" --input-type=module -e '
+      import { verifyPostgresSchema } from "@codexia/persistence-postgres";
+      console.log(await verifyPostgresSchema(process.env.CODEXIA_DATABASE_URL));
+    ')" || die 'Restored PostgreSQL migration ledger did not verify against the candidate'
+  [[ "$actual" == "$ledger" ]] || die 'Restored PostgreSQL migration ledger differs from the reviewed candidate'
+}
+
+rehearse_snapshot_history(){
+  local candidate="$1" database="$2" history_volume="$3" status=0
+  local -a run=(podman run --rm --pull=never --read-only --cap-drop all --security-opt no-new-privileges --entrypoint node)
   podman exec -i "$database" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d codexia <<'SQL'
 CREATE ROLE codexia_preflight LOGIN NOINHERIT;
 ALTER ROLE codexia_preflight SET default_transaction_read_only = on;
@@ -234,11 +256,23 @@ case "${1:-}" in
     printf '{"databaseFingerprint":"%s","historyFingerprint":"%s"}\n' "$database_hash" "$history_hash"
     ;;
   drill)
-    [[ ( $# == 4 || $# == 6 ) && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved [--candidate-full-image IMAGE@sha256:DIGEST]'
-    candidate=
-    if [[ $# == 6 ]]; then
+    [[ ( $# == 4 || $# == 6 || $# == 8 || $# == 10 ) && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] ||
+      die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved [--candidate-full-image IMAGE@sha256:DIGEST [--candidate-ledger sha256:DIGEST [--migration snapshot-history-v2]]]'
+    candidate=; ledger=; migration=
+    if [[ $# -ge 6 ]]; then
       [[ "$5" == --candidate-full-image && "$6" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || die 'Use a digest-pinned reviewed Full backend image'
       candidate="$6"
+    fi
+    if [[ $# -ge 8 ]]; then
+      [[ "$7" == --candidate-ledger && "$8" =~ ^sha256:[a-f0-9]{64}$ ]] || die 'Use a digest-pinned candidate migration ledger'
+      ledger="$8"
+    fi
+    if [[ $# == 10 ]]; then
+      [[ "$9" == --migration && "${10}" == snapshot-history-v2 ]] || die 'Unknown isolated migration rehearsal'
+      migration="${10}"
+    elif [[ $# == 6 ]]; then
+      # Preserve the previously reviewed standalone rehearsal invocation.
+      migration=snapshot-history-v2
     fi
     backup_directory "$2" read
     identity_mode="$(stat -Lc '%a' -- "$3")"
@@ -343,7 +377,8 @@ case "${1:-}" in
       -ec 'chmod 0700 /history; chown 1000:1000 /history'
     [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
-    if [[ -n "$candidate" ]]; then rehearse_restore_maintenance "$candidate" "$db" "$history"; fi
+    if [[ -n "$candidate" ]]; then verify_drill_candidate "$candidate" "$db" "$ledger"; fi
+    if [[ "$migration" == snapshot-history-v2 ]]; then rehearse_snapshot_history "$candidate" "$db" "$history"; fi
     cleanup_restore_resources
     trap - EXIT
     [[ "$(validate_artifact "$dir")" == "$artifact_hash" ]] || die 'Backup artifact changed during the restore drill'
@@ -351,7 +386,8 @@ case "${1:-}" in
     printf 'Verified checksum manifest sha256: %s\n' "$artifact_hash"
     printf 'Verified database logical sha256: %s\n' "${fields[1]}"
     printf 'Verified history logical sha256: %s\n' "${fields[2]}"
-    if [[ -n "$candidate" ]]; then printf 'Isolated maintenance rehearsal verified: %s\n' "$candidate"; fi
+    if [[ -n "$ledger" ]]; then printf 'Isolated candidate ledger verified: %s\n' "$ledger"; fi
+    if [[ -n "$migration" ]]; then printf 'Isolated maintenance rehearsal verified: %s\n' "$candidate"; fi
     ;;
   *) die 'Use backup-locked or the explicitly approved drill';;
 esac

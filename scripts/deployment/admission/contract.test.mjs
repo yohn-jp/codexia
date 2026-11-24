@@ -148,6 +148,27 @@ test('the convergence step forwards the certified identity, private certificate 
       codexia_database_initialization_approved: databaseApproved,
     });
   }
+
+  rmSync(invocation, { force: true });
+  const manual = {
+    ...admitted, CODEXIA_MANUAL_ACTIVATION: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'true',
+    GITHUB_SHA: 'd'.repeat(40), GITHUB_REPOSITORY: 'yohn-jp/codexia',
+  };
+  writeFileSync(path.join(bin, 'gh'), '#!/bin/bash\nprintf "%s\\n" "$GITHUB_SHA"\n', { mode: 0o700 });
+  let result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: manual, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(invocation), false, 'manual invocation needs the verified R6 receipt');
+  const binding = {
+    hostId: 'a'.repeat(64), clusterId: '123', databaseOid: '456', settingsSha256: 'b'.repeat(64),
+    ownerBindingSha256: 'sha256:' + 'c'.repeat(64), notBeforeMs: 1, notAfterMs: 2,
+  };
+  writeFileSync(path.join(directory, 'codexia-first-activation.json'), JSON.stringify(binding), { mode: 0o600 });
+  result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: manual, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const vars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
+  assert.deepEqual(vars.codexia_expected_first_activation, binding);
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
@@ -198,6 +219,34 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'].cmd, /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
   assert.match(transaction['ansible.builtin.shell'].cmd, /current_image.*candidate_image/su, 'same-digest application must be idempotent');
   assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
+});
+
+test('manual first Backend activation uses protected admission and the existing deployment transaction', () => {
+  assert.equal(handoff.on.workflow_dispatch.inputs.approval_phrase.required, true);
+  const verify = handoff.jobs['verify-handoff'];
+  const deploy = handoff.jobs['deploy-production'];
+  assert.equal(verify.environment, undefined);
+  assert.equal(verify.permissions['id-token'], undefined);
+  assert.match(deploy.if, /github\.ref == 'refs\/heads\/main'/u);
+  assert.match(deploy.if, /inputs\.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND'/u);
+  assert.equal(deploy.concurrency.group, 'codexia-production');
+  const checkout = deploy.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  assert.match(checkout.with.ref, /github\.event_name == 'workflow_dispatch' && github\.sha/u);
+  const admit = deploy.steps.find(step => step.name === 'Reverify the R6 plan after entering the production queue');
+  const apply = deploy.steps.find(step => step.name === 'Converge certified backend digest');
+  assert.ok(deploy.steps.indexOf(admit) < deploy.steps.indexOf(apply));
+  assert.doesNotMatch(JSON.stringify(admit), /CUTOVER_(WORKER|FENCE)_TOKEN/u);
+  assert.match(apply.run, /codexia_expected_first_activation/u);
+  assert.match(apply.run, /deploy\/ansible\/site\.yml/u);
+
+  const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'].cmd;
+  const lock = shell.indexOf('flock --exclusive --nonblock 9');
+  const binding = shell.indexOf('the prepared first activation database or owner changed');
+  assert.ok(lock >= 0 && binding > lock && binding < shell.indexOf('backup-locked'));
+  const prepare = parse(readFileSync(new URL('../../../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
+  assert.equal(prepare.find(task => task.name === 'Recover interrupted deployment before preparing target state').when,
+    'codexia_expected_first_activation is not defined');
 });
 
 test('rollback clears candidate start-limit failures before restarting the prior API', () => {

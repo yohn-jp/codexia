@@ -32,7 +32,7 @@ class ObserveDatabaseTests(unittest.TestCase):
             self.assertEqual(self.observe()["state"], "unknown")
 
     def test_missing_database_and_legacy_writer(self):
-        cluster = {"clusterId": "123", "appExists": True, "rolesValid": True}
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
         ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
         with patch.object(observer, "command", return_value=(0, "true")):
             with patch.object(observer, "json_sql", return_value={**cluster, "appExists": False}):
@@ -43,6 +43,7 @@ class ObserveDatabaseTests(unittest.TestCase):
                 result = self.observe(writer={"authMode": "legacy"})
                 self.assertEqual(result["authState"], "legacy")
                 self.assertEqual(result["ledger"], ledger)
+                self.assertEqual(result["databaseOid"], "456")
 
     def test_unrecognized_objects_do_not_establish_pristine_database(self):
         with patch.object(observer, "command", return_value=(0, "true")):

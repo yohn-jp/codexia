@@ -202,8 +202,8 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
 // Revalidate the first mutation admission after acquiring the production queue
 // and host lock. Subsequent checkpoint validation is owned by the executor;
 // a changed source is never treated as a retry of this initial snapshot.
-export function assertDeploymentPlanApproval({ plan, planSha256, approval, current,
-  now = new Date(), maxAgeMs = 5 * 60_000 }) {
+export function assertDeploymentPlanBinding({ plan, planSha256, approval,
+  now = new Date(), maxAgeMs = 5 * 60_000, recover = false }) {
   const evidenceReady = value => value?.candidateRoute !== 'R0' && Array.isArray(value?.blockers) &&
     value.blockers.every(reason => reason === 'approval-required');
   requireCondition(plan?.format === 'codexia-deployment-plan/v1' && evidenceReady(plan) &&
@@ -215,12 +215,20 @@ export function assertDeploymentPlanApproval({ plan, planSha256, approval, curre
   // The original plan must have been correctly generated from its own evidence.
   const expected = createDeploymentPlan({ ...plan, now: new Date(plan.observation.observedAt), maxAgeMs });
   requireCondition(expected.planSha256 === planSha256, 'Deployment plan does not match route contract');
+  if (plan.window !== null) requireCondition(timestamp(plan.window.notBefore) <= now.getTime() &&
+    (recover || now.getTime() <= timestamp(plan.window.notAfter)), 'Outside approved deployment window');
+  return planSha256;
+}
+
+export function assertDeploymentPlanApproval({ plan, planSha256, approval, current,
+  now = new Date(), maxAgeMs = 5 * 60_000 }) {
+  assertDeploymentPlanBinding({ plan, planSha256, approval, now, maxAgeMs });
   const refreshed = createDeploymentPlan({ ...current, now, maxAgeMs });
-  requireCondition(evidenceReady(refreshed.plan) &&
+  const evidenceReady = refreshed.plan.candidateRoute !== 'R0' &&
+    refreshed.plan.blockers.every(reason => reason === 'approval-required');
+  requireCondition(evidenceReady &&
     isDeepStrictEqual({ ...plan, observation: { ...plan.observation, observedAt: null } },
       { ...refreshed.plan, observation: { ...refreshed.plan.observation, observedAt: null } }),
   'Deployment source, candidate, intent or evidence changed after approval');
-  if (plan.window !== null) requireCondition(timestamp(plan.window.notBefore) <= now.getTime() &&
-    now.getTime() <= timestamp(plan.window.notAfter), 'Outside approved deployment window');
   return planSha256;
 }

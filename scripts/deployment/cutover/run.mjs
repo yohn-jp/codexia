@@ -1,325 +1,302 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
-import { verifyCutoverFrontendArtifact } from '../../verification/artifacts/frontend.mjs';
+import { assertFrontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { createCloudflareCutover } from '../../release/cutover/cloudflare.mjs';
-import { verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
 import { validateEpochCutoverRecoveryReceipt } from '../recovery/epoch-cutover.mjs';
-import { assertFunctionalAcceptance, assertMaintenanceApproval, assertPairedObservation, digestEvidence } from './coordinator.mjs';
+import { planFromObservations, publicFrontendEvidence } from '../preflight/observe.mjs';
+import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
+import { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } from '../preflight/run.mjs';
+import { assertPairedObservation, digestEvidence } from './coordinator.mjs';
+import { approvedMigration } from './transitions.mjs';
+import { readPreservationEvidence } from './preservation.mjs';
+import { advancePair, verifyReactivationWindow } from './execute.mjs';
 
 const env = process.env;
 const run = promisify(execFile);
 const rawHash = /^[a-f0-9]{64}$/u;
-const origin = env.CODEXIA_PUBLIC_ORIGIN && new URL(env.CODEXIA_PUBLIC_ORIGIN).origin;
+const planFormat = 'codexia-pair-cutover/v1';
+const backupFields = ['checksumManifestSha256', 'databaseFingerprint', 'historyFingerprint'];
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function ansible(scratch, playbook, vars, outputKey) {
+async function ansible(scratch, inventory, playbook, vars, outputKey) {
   const output = await mkdtemp(join(scratch, 'phase-'));
   const outFile = join(output, 'result.json');
   const varsFile = join(output, 'vars.json');
   await writeFile(varsFile, JSON.stringify({ ...vars, [outputKey]: outFile }), { mode: 0o600, flag: 'wx' });
   try {
-    await run('ansible-playbook', ['-i', join(env.RUNNER_TEMP, 'codexia-cutover-inventory.yml'),
-      'deploy/ansible/' + playbook, '--extra-vars', '@' + varsFile], { timeout: 20 * 60_000 });
+    await run('ansible-playbook', ['-i', inventory, 'deploy/ansible/' + playbook, '--extra-vars', '@' + varsFile],
+      { timeout: 20 * 60_000 });
     return JSON.parse(await readFile(outFile, 'utf8'));
   } catch {
     throw new Error('Pinned Ansible target did not complete ' + (vars.cutover_operation || 'read-only observation'));
   }
 }
 
-function hostInput(plan, approval) {
+function assertPairRoute(plan) {
+  requireCondition(plan?.candidateRoute === 'R6'
+    ? plan.observation.state.M === 'ready' && plan.observation.state.H === 'ready' &&
+      plan.observation.state.D === 'compatible' && plan.observation.state.A === 'ready' &&
+      plan.observation.state.B === 'absent' && ['absent', 'incompatible'].includes(plan.observation.state.F) &&
+      plan.observation.state.T === 'none'
+    : ['R3', 'R7'].includes(plan?.candidateRoute) && plan.candidateSystem === 'cutover' &&
+      ['compatible', 'incompatible'].includes(plan.observation.state.B),
+  'The approved plan does not select a supported pair activation or cutover');
+  if (plan.candidateRoute === 'R6') {
+    requireCondition(env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true' &&
+      env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true', 'First activation and database use need their protected approvals');
+  }
+}
+
+function hostInput(plan, planSha256) {
+  const { environment, prior, candidate, deployment } = plan;
   return {
-    planSha256: approval, notAfter: plan.window?.notAfter, sourceHostId: plan.environment.hostId,
-    databaseSystemIdentifier: plan.environment.clusterId,
-    priorImage: plan.prior.image, priorIdentity: plan.prior.identity,
-    priorUnitSha256: plan.prior.unitSha256, priorContainerId: plan.prior.containerId,
-    priorSettingsSha256: plan.prior.settingsSha256,
-    candidateImage: plan.candidate.image, candidateIdentity: plan.candidate.identity,
-    candidateUnitSha256: plan.candidate.unitSha256, settingsSha256: plan.prior.settingsSha256,
+    planSha256, notAfter: deployment.plan.window.notAfter, sourceHostId: environment.hostId,
+    databaseSystemIdentifier: environment.clusterId, ownerBindingSha256: environment.ownerBindingSha256,
+    priorImage: prior.image, priorIdentity: prior.identity, priorUnitSha256: prior.unitSha256,
+    priorContainerId: prior.containerId, candidateImage: candidate.image, candidateIdentity: candidate.identity,
+    candidateUnitSha256: candidate.unitSha256, settingsSha256: environment.settingsSha256,
+    migration: approvedMigration(deployment.plan.transition)?.handler ?? null,
   };
 }
 
-function recoveryBinding(plan, checkpoint) {
-  const { checksumManifestSha256, databaseFingerprint, historyFingerprint } = checkpoint;
-  requireCondition([checksumManifestSha256, databaseFingerprint, historyFingerprint].every(value => rawHash.test(value ?? '')),
-    'Fresh host checkpoint did not report verified backup fingerprints');
+function recoveryBinding(plan, planSha256, checkpoint, window) {
+  requireCondition(backupFields.every(key => rawHash.test(checkpoint[key] ?? '')),
+    'Host checkpoint did not report verified backup fingerprints');
   return {
-    environment: 'codexia-production', hostname: new URL(plan.environment.origin).hostname, sourceHostId: plan.environment.hostId,
-    databaseSystemIdentifier: plan.environment.clusterId, maintenanceWindowId: plan.window.id,
+    planSha256, migration: approvedMigration(plan.deployment.plan.transition)?.handler ?? null,
+    environment: 'codexia-production', hostname: new URL(plan.environment.origin).hostname,
+    sourceHostId: plan.environment.hostId, databaseSystemIdentifier: plan.environment.clusterId,
+    maintenanceWindowId: window.id,
     priorImage: plan.prior.image, candidateImage: plan.candidate.image,
-    priorMigrationFingerprint: plan.prior.identity.migrationFingerprint,
+    priorMigrationFingerprint: plan.prior.identity?.migrationFingerprint ?? null,
     candidateMigrationFingerprint: plan.candidate.identity.migrationFingerprint,
-    checksumManifestSha256, databaseFingerprint, historyFingerprint,
+    ...Object.fromEntries(backupFields.map(key => [key, checkpoint[key]])),
   };
 }
 
-const diagnostic = new Set();
-function step(label) {
-  diagnostic.add(label);
+function restoreRequest(planSha256, journal) {
+  if (!journal.requiresRestore) return {};
+  if (!env.CODEXIA_CUTOVER_RESTORE_RECEIPT) return null;
+  const receipt = JSON.parse(env.CODEXIA_CUTOVER_RESTORE_RECEIPT);
+  requireCondition(receipt?.format === 'codexia-cutover-restoration/v1' && receipt.planSha256 === planSha256 &&
+    backupFields.every(key => rawHash.test(receipt[key] ?? '') && receipt[key] === journal[key]) &&
+    rawHash.test(receipt.procedureEvidenceSha256 ?? ''), 'Recovery needs exact protected restoration evidence');
+  const restored = Date.parse(receipt.verifiedAt);
+  requireCondition(restored >= Date.parse(journal.recoveryStartedAt) && restored <= Date.now(),
+    'Restoration evidence is stale or in the future');
+  return { ...Object.fromEntries(backupFields.map(key => [key, receipt[key]])), restoreReceiptSha256: digestEvidence(receipt) };
 }
 
-async function execute(operation, input, scratch) {
-  const edge = createCloudflareCutover({
-    origin, ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET),
+function pairInputs(deployment, artifacts, retained, current, references) {
+  const { host, network, candidateBackend, candidateFrontend } = current;
+  const writer = host.backend.writer;
+  requireCondition(host.backend.state === 'running' || host.backend.state === 'absent', 'Source API slot is not verified');
+  requireCondition(network.scriptPresent && network.routesReady, 'Prepare the canonical private Worker and routes using Cloudflare infrastructure before cutover');
+  const environment = {
+    origin: network.origin, ingressDigest: network.ingressDigest, hostId: host.hostId,
+    clusterId: host.database.clusterId, ownerBindingSha256: host.database.ownerBindingSha256,
+    settingsSha256: writer?.settingsSha256?.slice(7) ?? host.database.settingsSha256,
+    ingressReviewSha256: retained.ingressReviewSha256,
+  };
+  const prior = {
+    image: writer?.image ?? null, identity: writer?.identity ?? null,
+    frontend: publicFrontendEvidence(network.frontend), workerVersion: network.deployment?.versionId ?? null,
+    containerId: writer?.containerId ?? null, unitSha256: writer?.quadletSha256?.slice(7) ?? null,
+    protocol: network.backend?.standaloneOAuth === false ? 'legacy' : 'standalone',
+    archiveSha256: network.deployment ? retained.priorArchiveSha256 : null,
+  };
+  requireCondition(rawHash.test(environment.ingressReviewSha256 ?? '') &&
+    rawHash.test(environment.settingsSha256 ?? '') &&
+    /^sha256:[a-f0-9]{64}$/u.test(environment.ownerBindingSha256 ?? '') &&
+    (prior.workerVersion === null || rawHash.test(prior.archiveSha256 ?? '')),
+  'Independent ingress review, owner settings and retained prior archive evidence are required');
+  const candidate = {
+    image: candidateBackend.image, identity: candidateBackend.identity,
+    frontend: publicFrontendEvidence(candidateFrontend.identity),
+    frontendArtifact: { artifactDigest: candidateFrontend.artifactDigest },
+    ...(current.initialControls ? { initialControls: current.initialControls } : {}),
+    unitSha256: references?.candidate.unitSha256 ?? null,
+    workerVersion: references?.candidate.workerVersion ?? null,
+  };
+  return { format: planFormat, deployment, artifacts, environment, prior, candidate };
+}
+
+export function assertReactivationObservation({ host, current, original, target, candidate, certified }) {
+  requireCondition(host.M === 'ready' && host.H === 'ready' &&
+    host.transaction?.phase === 'safe-stopped' && host.backend.state === 'absent' &&
+    host.database.authState === 'ready' &&
+    ['hostId', 'hostPinSha256', 'databaseSha256', 'authSha256'].every(key =>
+      current.observation.binding[key] === original[key]) &&
+    isDeepStrictEqual(current.target, target) && certified.image === candidate.image &&
+    isDeepStrictEqual(certified.identity, candidate.identity),
+  'First activation retry no longer matches its ready host, prepared owner, database or certified candidate');
+}
+
+// The protected lifecycle caller supplies the approved Preflight envelope and
+// artifact references. All mutations share the production queue and host journal.
+export async function executePairCutover(operation, input, scratch, {
+  createEdge = createCloudflareCutover, runAnsible = ansible,
+  readHost = readLifecycleHost, readCandidate = readLifecycleCandidate,
+} = {}) {
+  requireCondition(['stage', 'advance', 'recover', 'reconcile'].includes(operation), 'Unknown maintenance operation');
+  requireCondition(env.CODEXIA_EPOCH_CUTOVER_PAUSED === 'true', 'Ordinary production releases and bootstrap must be paused');
+  const origin = new URL(env.CODEXIA_PUBLIC_ORIGIN).origin;
+  const inventory = join(env.RUNNER_TEMP, 'codexia-cutover-inventory.yml');
+  const edge = createEdge({
+    ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET), origin,
     accessEnv: env, readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
     workerToken: env.CODEXIA_CUTOVER_WORKER_TOKEN, fenceToken: env.CODEXIA_CUTOVER_FENCE_TOKEN,
   });
-  const observeHost = () => ansible(scratch, 'cutover-observe.yml', {}, 'codexia_cutover_observation_file');
-  const host = (action, request) => ansible(scratch, 'cutover-host.yml', {
-    cutover_operation: action, cutover_request: request,
-  }, 'cutover_output_file');
-  const observePair = async () => {
-    const [network, machine] = await Promise.all([edge.observe(), observeHost()]);
-    return { edge: network, host: machine };
+  const host = (action, request) => runAnsible(scratch, inventory, 'cutover-host.yml',
+    { cutover_operation: action, cutover_request: request }, 'cutover_output_file');
+  const initialObservation = async (deployment, artifacts) => {
+    const preflight = parsePreflightRequest(JSON.stringify({ ...artifacts, intent: deployment.plan.intent,
+      window: deployment.plan.window }));
+    const [{ host, hostPinSha256 }, releases] = await Promise.all([
+      readHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
+      readCandidate(preflight),
+    ]);
+    const network = await edge.observeLifecycle({ backendExpected: host.backend.state === 'running' });
+    if (deployment.plan.candidateRoute === 'R6') {
+      requireCondition(network.ownerSetup === null && preflight.priorBackendPublisherRunId === undefined,
+        'First pair activation requires detached owner setup and no prior Backend release');
+    }
+    const { plan } = planFromObservations({ host, edge: network, hostPinSha256, ...releases,
+      intent: preflight.intent, window: preflight.window,
+      preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
+    assertDeploymentPlanApproval({ ...deployment, current: plan });
+    requireCondition(!network.fence.enabled, 'Unexpected maintenance fence before admission');
+    const initialControls = network.deployment === null && network.scriptPresent && network.routesReady
+      ? await edge.readInitialWorkerControls() : null;
+    return { host, network, ...releases, initialControls };
   };
 
-  if (operation === 'preflight' || operation === 'stage') {
-    step('observe protected public and rootless host identities and topology');
-    const observed = await observePair();
-    const environment = {
-      origin, ingressDigest: observed.edge.ingressDigest, hostId: observed.host.hostId,
-      clusterId: observed.host.database.clusterId, ownerBindingSha256: observed.host.writer.ownerBindingSha256,
-    };
-    const prior = {
-      image: observed.host.writer.image, identity: observed.host.writer.identity, frontend: observed.edge.frontend,
-      workerVersion: observed.edge.deployment.versionId, containerId: observed.host.writer.containerId,
-      unitSha256: observed.host.writer.quadletSha256?.replace(/^sha256:/u, ''),
-      settingsSha256: observed.host.writer.settingsSha256?.replace(/^sha256:/u, ''),
-    };
-    const assertBaseline = () => {
-      assertPairedObservation({ ...observed, pinned: prior, environment });
-      requireCondition(prior.identity.apiEpoch === 1 && prior.identity.persistenceFormat === 1 && !observed.edge.fence.enabled,
-        'A verified, unfenced Full epoch 1 baseline is required');
-    };
-    const verifyPriorPublication = async () => {
-      step('verify the installed Full image publication certificate');
-      const publication = await verifyCutoverBackendPublication(input.priorBackendPublisherRunId);
-      requireCondition(publication.fullCertificate.image === prior.image &&
-        isDeepStrictEqual(publication.fullCertificate.identity, prior.identity),
-      'Installed Full release differs from its authenticated publication certificate');
-      return { backendPublisherRunId: publication.publisherRunId, backendCertificateSha256: digestEvidence(publication.fullCertificate) };
-    };
-    if (operation === 'preflight') {
-      try {
-        assertBaseline();
-        return { operation, ready: true, ...observed, environment, priorPublication: await verifyPriorPublication() };
-      } catch {
-        return { operation, ready: false, ...observed, environment, rejectedDuring: [...diagnostic].at(-1) };
-      }
-    }
-    assertBaseline();
-    requireCondition(rawHash.test(input.priorArchiveSha256 ?? ''), 'Retained prior frontend archive digest is required');
-    prior.archiveSha256 = input.priorArchiveSha256;
-    requireCondition(rawHash.test(input.ingressReviewSha256 ?? ''), 'Independent review of alternate ingress is required');
-    environment.ingressReviewSha256 = input.ingressReviewSha256;
-    requireCondition(typeof input.window?.id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(input.window.id) &&
-      ['notBefore', 'notAfter'].every(key => new Date(input.window[key]).toISOString() === input.window[key]) &&
-      Date.parse(input.window.notAfter) > Math.max(Date.now(), Date.parse(input.window.notBefore)), 'Invalid approved window');
-
-    Object.assign(prior, await verifyPriorPublication());
-    step('verify certified Full image and exact frontend archive');
-    const [backend, frontend] = await Promise.all([
-      verifyCutoverBackendPublication(input.backendPublisherRunId), verifyCutoverFrontendArtifact(input.frontend),
+  if (operation === 'stage') {
+    const { deployment, artifacts, ingressReviewSha256, priorArchiveSha256 } = input;
+    assertPairRoute(deployment?.plan);
+    const current = await initialObservation(deployment, artifacts);
+    const plan = pairInputs(deployment, artifacts, { ingressReviewSha256, priorArchiveSha256 }, current);
+    const changeAxes = deployment.plan.observation.changeAxes;
+    requireCondition(deployment.plan.requiresPreservation === changeAxes.includes('backend'),
+      'Preservation and installed Backend replacement disagree');
+    const stageBackend = changeAxes.includes('backend');
+    const stageFrontend = changeAxes.includes('frontend');
+    assertDeploymentPlanBinding(deployment);
+    const [stagedBackend, stagedFrontend] = await Promise.all([
+      stageBackend ? host('stage', hostInput(plan, deployment.planSha256)) : { candidateUnitSha256: plan.prior.unitSha256 },
+      stageFrontend ? edge.stage({ previousVersionId: plan.prior.workerVersion,
+        artifactDigest: 'sha256:' + plan.candidate.frontendArtifact.artifactDigest }) : { versionId: plan.prior.workerVersion },
     ]);
-    const { identity, image } = backend.fullCertificate;
-    requireCondition(identity.profile === 'full' && identity.apiEpoch === 2 && identity.persistenceFormat === 2 &&
-      identity.migrationFingerprint === prior.identity.migrationFingerprint,
-    'Candidate has an unsupported API epoch, persistence format or database migration ledger change');
-    const candidate = { image, identity, frontend: frontend.identity, frontendArtifact: frontend,
-      backendPublisherRunId: backend.publisherRunId, backendCertificateSha256: digestEvidence(backend.fullCertificate) };
-
-    step('stage backend on the host and upload the static Worker at zero percent');
-    const [stagedHost, stagedWorker] = await Promise.all([
-      host('stage', hostInput({ environment, prior, candidate })),
-      edge.stage({ previousVersionId: prior.workerVersion, artifactDigest: 'sha256:' + frontend.artifactDigest }),
-    ]);
-    candidate.unitSha256 = stagedHost.candidateUnitSha256;
-    candidate.workerVersion = stagedWorker.versionId;
-    const plan = { format: 'codexia-epoch-cutover-plan/v1', observedAt: observed.edge.observedAt,
-      environment, prior, candidate, window: input.window };
-    const planSha256 = digestEvidence(plan);
-    assertMaintenanceApproval(plan, planSha256, { now: new Date(plan.window.notBefore) });
-    return { operation, planSha256, plan };
+    requireCondition(isDeepStrictEqual(stagedFrontend.initialControls ?? null, current.initialControls),
+      'The staged first Worker version differs from the certified publication controls');
+    plan.candidate.unitSha256 = stagedBackend.candidateUnitSha256;
+    plan.candidate.workerVersion = stagedFrontend.versionId;
+    return { status: 'staged', plan, planSha256: digestEvidence(plan) };
   }
 
-  const { plan, approval } = input;
-  if (operation === 'finish') {
-    requireCondition(['candidate', 'prior'].includes(input.outcome), 'Explicit release outcome is required');
+  const { plan, approval: planSha256, reactivation } = input;
+  requireCondition(plan?.format === planFormat && rawHash.test(planSha256 ?? '') && digestEvidence(plan) === planSha256 &&
+    plan.environment.origin === origin, 'Maintenance approval does not match the staged plan and origin');
+  const { deployment, prior, candidate } = plan;
+  assertPairRoute(deployment.plan);
+  if (prior.workerVersion === null) {
+    const controls = candidate.initialControls;
+    requireCondition(controls && Object.keys(controls).length === 2 &&
+      ['_headers', '_redirects'].every(name => rawHash.test(controls[name] ?? '')),
+    'First Worker activation requires certified publication controls');
   }
-  const outcome = input.outcome;
-  const recovering = operation === 'abort-fence' || operation.startsWith('recover') || (operation === 'finish' && outcome === 'prior');
-  const verifyApproval = () => assertMaintenanceApproval(plan, approval, { recovery: recovering });
-  verifyApproval();
-  requireCondition(env.CODEXIA_EPOCH_CUTOVER_PAUSED === 'true', 'Both ordinary production releases must be paused');
-  const request = hostInput(plan, approval);
+  requireCondition(reactivation === undefined || (reactivation && prior.image === null && operation !== 'recover'),
+    'A renewed window is available only for first activation advance or reconciliation');
+  const verifyApproval = ({ opening } = {}) => {
+    const recovering = operation !== 'advance' && opening !== 'candidate';
+    assertDeploymentPlanBinding({ ...deployment, recover: Boolean(reactivation) || recovering });
+    return reactivation ? verifyReactivationWindow(reactivation, planSha256, { recovering }) : null;
+  };
+  const renewal = verifyApproval();
+  requireCondition(!reactivation || reactivation.window.id !== deployment.plan.window.id,
+    'A renewed activation window must have a distinct ID');
+  const request = { ...hostInput(plan, planSha256), reactivationWindow: renewal };
   const verifyIngress = async () => {
-    const observation = await edge.observeIngress();
-    requireCondition(observation.origin === plan.environment.origin &&
-      observation.ingressDigest === plan.environment.ingressDigest, 'Reviewed ingress topology changed');
-    requireCondition([plan.prior.workerVersion, plan.candidate.workerVersion].includes(observation.deployment.versionId),
+    const observation = await edge.observeIngress({ lifecycle: true });
+    requireCondition(observation.origin === origin && observation.ingressDigest === plan.environment.ingressDigest &&
+      observation.scriptPresent && observation.routesReady && observation.ownerSetup === null,
+    'Reviewed ingress topology changed');
+    requireCondition([prior.workerVersion, candidate.workerVersion].includes(observation.deployment?.versionId ?? null),
       'Active Worker is outside the approved maintenance pair');
     return observation;
   };
-
-  step('observe the pinned ingress and selected Worker');
-  const ingress = await verifyIngress();
-  if (operation === 'checkpoint') {
-    requireCondition(ingress.deployment.versionId === plan.prior.workerVersion, 'Prior Worker must remain at 100 percent');
-    await edge.assertStaged({ versionId: plan.candidate.workerVersion,
-      artifactDigest: 'sha256:' + plan.candidate.frontendArtifact.artifactDigest });
-    if (!ingress.fence.enabled) {
-      const pair = await observePair();
-      assertPairedObservation({ ...pair, pinned: plan.prior, environment: plan.environment });
-      step('install the hostname fence');
-      verifyApproval();
-      await edge.fence();
-    }
-    step('verify closed public ingress and checkpoint the stopped writer');
-    await edge.verifyFenced();
-    verifyApproval();
-    const checkpoint = await host('checkpoint', request);
-    return { operation, checkpoint, binding: recoveryBinding(plan, checkpoint) };
-  }
-
-  if (operation === 'abort-fence') {
-    step('reconcile a fence created before any durable host change');
-    const journal = await host('observe', request);
-    requireCondition((journal.phase === null || journal.phase === 'finished') &&
-      journal.planSha256 !== approval && journal.priorContainerId === plan.prior.containerId &&
-      journal.priorUnitSha256 === plan.prior.unitSha256, 'The approved cutover must be recovered from its host journal');
-    if (ingress.fence.enabled) await edge.verifyFenced();
-    const pair = await observePair();
-    assertPairedObservation({ ...pair, pinned: plan.prior, environment: plan.environment });
-    const acceptance = JSON.parse(env.CODEXIA_CUTOVER_ACCEPTANCE);
-    assertFunctionalAcceptance(acceptance, { planSha256: approval, outcome: 'prior', origin, image: plan.prior.image,
-      workerVersion: plan.prior.workerVersion }, { since: plan.window.notBefore });
-    try {
-      verifyApproval();
-      if (ingress.fence.enabled) await edge.unfence();
-      await edge.verifyUnfenced();
-      assertPairedObservation({ ...await observePair(), pinned: plan.prior, environment: plan.environment });
-    } catch {
-      await edge.fence();
-      await edge.verifyFenced();
-      throw new Error('Prior ingress verification failed');
-    }
-    return { operation, planSha256: approval, workerVersion: plan.prior.workerVersion,
-      backendImage: plan.prior.image, acceptanceSha256: digestEvidence(acceptance) };
-  }
-
-  if (operation === 'finish' && !ingress.fence.enabled) {
-    // The protected job may have disconnected after reopening and before committing the host journal.
-    step('confirm the prior reopen and finish the durable host transaction');
-  } else {
-    step('prove public ingress remains fenced before any host or Worker change');
-    requireCondition(ingress.fence.enabled, 'The reviewed public fence must already be enabled');
-    await edge.verifyFenced();
-  }
-
-  if (operation === 'apply') {
-    step('admit the independent restore proof and convert the stopped writer');
-    const checkpoint = await host('observe', request);
-    requireCondition(checkpoint.planSha256 === approval, 'Host checkpoint does not match the approved plan');
-    const binding = recoveryBinding(plan, checkpoint);
-    const receipt = JSON.parse(env.CODEXIA_CUTOVER_RECOVERY_RECEIPT);
-    validateEpochCutoverRecoveryReceipt(receipt, binding, plan.window);
-    verifyApproval();
-    return { operation, host: await host('apply', { ...request, ...binding, recoveryReceiptSha256: digestEvidence(receipt) }) };
-  }
-
-  if (operation === 'promote' || operation === 'recover') {
-    const target = operation === 'promote' ? 'candidate' : 'prior';
-    if (target === 'prior') {
-      step('prove the old data and secrets are recoverable before restarting the old writer');
-      const stopped = await host('observe', request);
-      requireCondition(stopped.planSha256 === approval, 'Host recovery does not match the approved plan');
-      if (stopped.requiresRestore) {
-        const restore = JSON.parse(env.CODEXIA_CUTOVER_RESTORE_RECEIPT);
-        const fields = ['checksumManifestSha256', 'databaseFingerprint', 'historyFingerprint'];
-        requireCondition(restore?.format === 'codexia-cutover-restoration/v1' &&
-          restore.planSha256 === approval && fields.every(key => rawHash.test(restore[key] ?? '') && restore[key] === stopped[key]) &&
-          rawHash.test(restore.procedureEvidenceSha256 ?? ''), 'Recovery needs exact protected restoration evidence');
-        const restored = Date.parse(restore.verifiedAt);
-        requireCondition(restored >= Date.parse(stopped.recoveryStartedAt ?? stopped.phaseChangedAt) &&
-          restored <= Date.now(), 'Restoration evidence is stale or in the future');
-        await host('recover', { ...request, ...Object.fromEntries(fields.map(key => [key, restore[key]])),
-          restoreReceiptSha256: digestEvidence(restore) });
-      } else {
-        await host('recover', request);
+  const verifyPair = async outcome => {
+    const [network, machine] = await Promise.all([edge.observe({ allowLegacyBackend: plan[outcome].protocol === 'legacy' }),
+      runAnsible(scratch, inventory, 'cutover-observe.yml', {}, 'codexia_cutover_observation_file')]);
+    const edgeEvidence = { ...network, frontend: publicFrontendEvidence(network.frontend) };
+    if (outcome === 'candidate') {
+      assertFrontendOAuthConfigIdentity(network.frontend, env);
+      if (prior.workerVersion !== candidate.workerVersion) {
+        await edge.assertWorkerArtifact({ versionId: candidate.workerVersion,
+          artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest,
+          ...(candidate.initialControls ? { initialControls: candidate.initialControls } : {}) });
       }
     }
-    step('open only the canonical Tunnel behind the fence and select the paired Worker');
-    verifyApproval();
-    const state = await host('open-tunnel', { ...request, outcome: target });
-    if (target === 'candidate' && ingress.deployment.versionId !== plan.candidate.workerVersion) {
-      await edge.assertStaged({ versionId: plan.candidate.workerVersion,
-        artifactDigest: 'sha256:' + plan.candidate.frontendArtifact.artifactDigest });
-    }
-    verifyApproval();
-    const deployment = await edge.deploy({ fromVersionId: plan[target === 'candidate' ? 'prior' : 'candidate'].workerVersion,
-      toVersionId: plan[target].workerVersion });
-    const pair = await observePair();
-    assertPairedObservation({ ...pair, pinned: plan[target], environment: plan.environment });
-    return { operation, phaseChangedAt: state.phaseChangedAt, deployment, ...pair };
-  }
-
-  if (operation === 'recover-quiesce') {
-    step('stop the writer and Tunnel for an independently approved restore');
-    const state = await host('recover-quiesce', request);
-    await edge.deploy({ fromVersionId: plan.candidate.workerVersion, toVersionId: plan.prior.workerVersion });
-    return { operation, host: state };
-  }
-
-  if (operation === 'finish') {
-    step('bind functional acceptance to the fresh paired deployment');
-    const journal = await host('observe', request);
-    requireCondition(journal.planSha256 === approval && (journal.phase === outcome + '-tunnel' ||
-      (journal.phase === 'finished' && journal.outcome === outcome)),
-      'The approved pair has not been activated behind the fence');
-    const pinned = plan[outcome];
-    const observation = await observePair();
-    assertPairedObservation({ ...observation, pinned, environment: plan.environment });
-    const acceptance = JSON.parse(env.CODEXIA_CUTOVER_ACCEPTANCE);
-    const since = new Date(Math.max(Date.parse(journal.phaseChangedAt),
-      Date.parse(observation.edge.deployment.createdAt))).toISOString();
-    assertFunctionalAcceptance(acceptance, { planSha256: approval, outcome, origin, image: pinned.image,
-      workerVersion: pinned.workerVersion }, { since });
-    try {
-      verifyApproval();
-      if (ingress.fence.enabled) await edge.unfence();
-      await edge.verifyUnfenced();
-      const after = await observePair();
-      assertPairedObservation({ ...after, pinned, environment: plan.environment });
-      step('commit the verified release pair on the host');
-      return { operation, outcome, host: await host('finish', { ...request, outcome }), planSha256: approval,
-        workerVersion: pinned.workerVersion, backendImage: pinned.image, acceptanceSha256: digestEvidence(acceptance) };
-    } catch {
-      await edge.fence();
-      await edge.verifyFenced();
-      throw new Error('Post-release ingress checks failed');
-    }
-  }
-
-  throw new Error('Unknown maintenance operation');
+    assertPairedObservation({ edge: edgeEvidence, host: machine, pinned: plan[outcome], environment: plan.environment });
+    return { edge: edgeEvidence, host: machine };
+  };
+  return advancePair({ plan, planSha256, request, host, edge, operation, verifyApproval, verifyIngress, verifyPair,
+    admitFresh: async () => {
+      const current = await initialObservation(deployment, plan.artifacts);
+      const refreshed = pairInputs(deployment, plan.artifacts, {
+        ingressReviewSha256: plan.environment.ingressReviewSha256, priorArchiveSha256: prior.archiveSha256,
+      }, current, plan);
+      requireCondition(isDeepStrictEqual(refreshed, plan), 'Staged pair no longer matches fresh certified release and host evidence');
+    },
+    revalidateActivation: async () => {
+      const artifacts = parsePreflightRequest(JSON.stringify({ ...plan.artifacts, intent: deployment.plan.intent,
+        window: deployment.plan.window }));
+      const [{ host, hostPinSha256 }, releases] = await Promise.all([
+        readHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
+        readCandidate(artifacts),
+      ]);
+      const { plan: refreshed } = planFromObservations({ host, edge: null, hostPinSha256, ...releases,
+        intent: artifacts.intent, window: artifacts.window });
+      assertReactivationObservation({ host, current: refreshed, original: deployment.plan.observation.binding,
+        target: deployment.plan.target, candidate, certified: releases.candidateBackend });
+    },
+    checkpointProof: checkpoint => {
+      if (!deployment.plan.requiresPreservation) return { request: {} };
+      const window = reactivation?.window ?? deployment.plan.window;
+      const binding = recoveryBinding(plan, planSha256, checkpoint, window);
+      if (!env.CODEXIA_CUTOVER_RECOVERY_RECEIPT) return { request: null, binding };
+      const receipt = JSON.parse(env.CODEXIA_CUTOVER_RECOVERY_RECEIPT);
+      if (checkpoint.reactivationStartedAt &&
+          Date.parse(receipt.verifiedAt) < Date.parse(checkpoint.reactivationStartedAt)) {
+        return { request: null, binding };
+      }
+      validateEpochCutoverRecoveryReceipt(receipt, binding, window);
+      return { request: { ...binding, recoveryReceiptSha256: digestEvidence(receipt) } };
+    },
+    restoreProof: checkpoint => prior.image === null ? {} : restoreRequest(planSha256, checkpoint),
+    acceptance: env.CODEXIA_CUTOVER_ACCEPTANCE ? JSON.parse(env.CODEXIA_CUTOVER_ACCEPTANCE) : null,
+  });
 }
 
-const operation = env.CODEXIA_CUTOVER_OPERATION;
-const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-cutover-'));
-try {
-  const input = JSON.parse(env.CODEXIA_CUTOVER_INPUT || '{}');
-  const evidence = await execute(operation, input, scratch);
-  await writeFile(join(env.RUNNER_TEMP, 'codexia-cutover-evidence.json'), JSON.stringify(evidence, null, 2) + '\n',
-    { mode: 0o600, flag: 'wx' });
-  console.log('Coordinated epoch maintenance reported evidence for ' + operation);
-  if (operation === 'preflight' && !evidence.ready) process.exitCode = 1;
-} catch {
-  const phase = [...diagnostic].at(-1);
-  console.error('Coordinated epoch maintenance stopped during ' + (phase || 'protected input validation'));
-  process.exitCode = 1;
-} finally {
-  await rm(scratch, { recursive: true, force: true });
+async function main() {
+  const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-cutover-'));
+  try {
+    const evidence = await executePairCutover(env.CODEXIA_CUTOVER_OPERATION, JSON.parse(env.CODEXIA_CUTOVER_INPUT || '{}'), scratch);
+    await writeFile(join(env.RUNNER_TEMP, 'codexia-cutover-evidence.json'), JSON.stringify(evidence, null, 2) + '\n',
+      { mode: 0o600, flag: 'wx' });
+    console.log('Coordinated maintenance checkpoint: ' + evidence.status);
+  } catch {
+    console.error('Coordinated maintenance stopped. Check the pinned host journal, ingress state and protected evidence before resuming.');
+    process.exitCode = 1;
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 }
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();

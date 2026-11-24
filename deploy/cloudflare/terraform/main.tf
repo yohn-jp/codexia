@@ -177,12 +177,29 @@ resource "cloudflare_zero_trust_access_application" "public_protocol" {
   ]
 }
 
+# A new site can prepare the production Worker resource before it has a release.
+resource "cloudflare_worker" "frontend" {
+  count      = var.manage_frontend_worker ? 1 : 0
+  account_id = var.account_id
+  name       = "codexia-frontend"
+  subdomain = {
+    enabled          = false
+    previews_enabled = false
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # Scriptless exclusions win over the static catch-all, including query-string URLs.
 resource "cloudflare_workers_route" "frontend" {
   for_each = var.frontend_route_enabled && !var.owner_setup_route_enabled ? toset(local.ui_routes) : toset([])
   zone_id  = var.zone_id
   pattern  = "${var.app_hostname}${each.value}"
   script   = "codexia-frontend"
+
+  depends_on = [cloudflare_worker.frontend]
 }
 
 resource "cloudflare_workers_route" "origin" {

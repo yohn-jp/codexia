@@ -89,8 +89,8 @@ def observe_transaction(state_dir):
     for name, expected, phases in (
         ("deploy-transaction.json", "codexia-deploy-transaction/v1", ("pending", "committed")),
         ("cutover-transaction.json", "codexia-cutover-host/v1",
-         ("intent", "checkpointed", "converting", "candidate-ready", "candidate-tunnel",
-          "recovering", "prior-ready", "prior-tunnel")),
+         ("intent", "quiescing", "checkpointed", "converting", "activating", "candidate-ready", "candidate-tunnel",
+          "candidate-publishing", "recovering", "safe-stopped", "prior-ready", "prior-tunnel", "prior-publishing")),
     ):
         path = state_dir / name
         if metadata(path) is None:
@@ -147,7 +147,8 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         'version', version, 'checksum', btrim(checksum)) ORDER BY version COLLATE "C"), '[]'::json)
         FROM public.codexia_schema_migrations;""")
     require(isinstance(ledger, list) and len(ledger) > 0 and len(ledger) <= 1000)
-    result = {"state": "initialized", "clusterId": cluster["clusterId"], "ledger": ledger,
+    require(re.fullmatch(r"[1-9][0-9]{0,9}", cluster["databaseOid"]))
+    result = {"state": "initialized", "clusterId": cluster["clusterId"], "databaseOid": cluster["databaseOid"], "ledger": ledger,
               "authState": "unknown", "authSchemaSha256": None, "ownerBindingSha256": None}
     if not db["authExists"]:
         result["authState"] = "legacy" if writer and writer.get("authMode") == "legacy" else "absent"
@@ -156,7 +157,6 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
                     "owner-setup.installation", "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending"))):
             intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
             if intent is not None:
-                result["databaseOid"] = intent["databaseOid"]
                 result["bootstrapIntent"] = intent
         return result
     # Use the owning auth-schema catalog query supplied by the checked-out source.
@@ -181,7 +181,6 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     if has_marker:
         require(stat.S_IMODE(marker_info.st_mode) == 0o600 and private_text(marker).strip() == cluster["clusterId"])
     if intent is not None:
-        result["databaseOid"] = intent["databaseOid"]
         result["setupImage"] = intent["image"]
     else:
         # Earlier setup operations wrote the installation marker only after

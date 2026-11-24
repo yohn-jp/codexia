@@ -6,7 +6,7 @@
 
 The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job rechecks the certified backend against current main inside the deployment queue, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for the declared VM, verifies the live UI epoch and Access boundary, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
-The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the service identity, data, secrets, backup destination and rollback prerequisites are verified and the selected activation/update is explicitly approved. During coordinated maintenance, ordinary release mutation remains paused; a bootstrap or first-install approval is not authorization to replace an existing installation. The push path is the sole backend activation path.
+The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the service identity, data, secrets, backup destination and rollback prerequisites are verified and the selected activation/update is explicitly approved. During coordinated maintenance, ordinary release mutation remains paused. Both the publication-triggered and manual Backend deployment handoffs use the same Ansible transaction.
 
 ## Protected inputs
 
@@ -68,7 +68,15 @@ Run the following command from the prepared control node. The `bootstrap` operat
 ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=bootstrap
 ```
 
-Complete the selected enrollment procedure and its activation preparation. Browser enrollment uses the setup-only service to register the owner and prepare runtime activation. The legacy procedure prepares the normal runtime by reapplying the inventory with the recorded owner ID. Run the protected deployment with both first-activation approvals. If the handoff for the current certificate already ran while deployment was disabled, rerun its production job with the prepared environment while the certificate is valid.
+Complete the selected enrollment procedure and its activation preparation. Browser enrollment uses the setup-only service to register the owner and prepare runtime activation. The legacy procedure prepares the normal runtime by reapplying the inventory with the recorded owner ID.
+
+For a prepared owner, open [Production Access Preflight](../../.github/workflows/production-preflight.yml) in lifecycle mode with the runtime management identity and the selected certified Backend and Frontend references. Review the R6 plan, its maintenance window and preservation evidence. When Preflight reports a clean API slot and a compatible deployed Frontend, manually dispatch [Codexia Backend Deployment](../../.github/workflows/backend-deployment-handoff.yml) from main with both first-activation approvals. Enter `ACTIVATE_CODEXIA_BACKEND` and supply the JSON request with these fields.
+
+- `deployment.plan` and `deployment.planSha256` contain the reviewed Preflight plan and digest.
+- `deployment.approval` contains that digest as `planSha256` and the approved `grants` array `["first-install","database-use","publication"]`.
+- `artifacts` contains the same `backendPublisherRunId` and `frontend` artifact reference used by Preflight.
+
+The protected job uses the existing production queue, Access checks and Backend deployment transaction. It reverifies both certified artifacts, the live deployment and the independent preservation reference from the production Environment. Before applying the candidate it rechecks the host, logical database and prepared owner under the shared host lock. Use [coordinated pair activation](#coordinated-pair-activation-and-cutover) when the deployed Frontend is missing or incompatible.
 
 Ansible verifies the staged private settings and protected Podman secrets, takes the encrypted backup, and verifies the owner, registered clients, API resources and introspection credentials before installing the candidate. The API repeats the client and credential checks on startup.
 
@@ -102,32 +110,11 @@ Run `--check` again and require exit 0. Complete the applicable PostgreSQL maint
 
 On the [isolated recovery host](BACKUP.md#rehearse-a-reviewed-full-candidate), verify the check, apply and recheck sequence against a restored backup copy. If activation fails and the prior release cannot read the converted history, restore the history from the encrypted pre-change backup before restarting it. Restore the pre-change PostgreSQL backup when the prior release requires it.
 
-## Coordinated API epoch cutover
+## Coordinated pair activation and cutover
 
-Use the [protected epoch maintenance workflow](EPOCH-CUTOVER.md) for the supported in-place 1 → 2 transition when the installed release already has a verified Better Auth owner.
+Use [protected pair maintenance](EPOCH-CUTOVER.md) to activate a first pair or apply a registered incompatible release transition. When both components are already compatible, use the ordinary release lanes. First-install and database-use approvals apply to a clean, owner-prepared API slot. Changes to an installed release use the maintenance and recovery approvals.
 
-The standalone OAuth cutover pairs the epoch 2 Full backend with the epoch 2 static frontend and moves installations on persistence format 1 to format 2. The normal frontend workflow requires an already compatible live backend. The backend workflow requires an already compatible live UI and refuses an epoch, persistence-format or migration-fingerprint change to an installed API. Neither ordinary workflow implements the public ingress fence, paired activation or cross-component recovery. The same admission deadlock occurs when neither component has been deployed. Keep the ordinary gates in place and follow the [normative initial pair activation and cutover contract](DEPLOYMENT-LIFECYCLE.md#初回協調配備と非互換切替) with separate approval and protection. First-install approvals apply only to an absent API and must never be used to replace an existing installation.
-
-If the old installation requires first-owner registration for the new epoch, provision a separate clean target and complete [owner enrollment](../../deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser) there before its first API activation. Cover the transfer and verification of the old manuscript database and history in the maintenance plan. Preserve the enrolled owner, OAuth clients and auth secrets on the target when transferring application data. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).
-
-**Pin and stage both releases.** Record the certified Full image digest and certificate, the verified frontend archive digest and producer identity, and the frontend's approved public OAuth configuration. Use the [existing artifact check](../../.github/workflows/frontend-release.yml) to verify the exact frontend archive before using its extracted `app/dist`. Retain the prior backend digest, private authentication configuration, frontend archive and active Worker version ID. From the verified checkout, a separately authorized production operator can use the pinned Wrangler with the existing Worker credentials. `deployments status` records the active version and traffic allocation. `versions upload` returns the candidate UUID without switching traffic.
-
-```sh
-npm ci --prefix edge/frontend
-edge/frontend/node_modules/.bin/wrangler deployments status --json --config edge/frontend/wrangler.jsonc
-edge/frontend/node_modules/.bin/wrangler versions upload --config edge/frontend/wrangler.jsonc
-```
-
-**Rehearse the conversion and recovery off the VM.** On the isolated recovery host, use the verified encrypted PostgreSQL and private history backup, the external recovery identity file and the exact Full image already loaded by digest. Set the shell variables below to those three reviewed inputs. Preserve the backup checksum-manifest digest, candidate image digest and successful [rehearsal receipt](BACKUP.md#rehearse-a-reviewed-full-candidate). Confirm recovery of the prior PostgreSQL roles, Podman secrets and authentication configuration separately.
-
-```sh
-bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
-  --candidate-full-image "$certified_full_image"
-```
-
-**Fence, quiesce and activate.** Pause both ordinary deployment paths. Have the zone owner fence the entire public application hostname, covering the static Worker and Tunnel routes, including any enabled OAuth/MCP paths that bypass the parent Access application. Allow only the exact GETs for `/api/version` and `/desktop/update-identity.json` under their existing Access policies and approved, restricted functional acceptance. Verify that ordinary traffic is blocked before stopping the writer. Under the host lock, stop the Tunnel and old writer and retain a verified encrypted pre-change backup off the VM. Complete the approved history and PostgreSQL maintenance with the certified image and require the applicable maintenance checks to return 0. Start the certified backend. Restore Tunnel connectivity behind the fence and switch the candidate Worker UUID to 100%. Verify the running backend digest and readiness on the host, both live Full/epoch 2 identities, the exact deployed frontend identity, owner sign-in, and the authorized and denied paths for the approved public configuration. Reopen ingress only after both components and their access controls pass.
-
-**Keep the fence on failure.** Restore the retained Worker version to 100%, the prior backend digest and its authentication configuration, and the verified pre-change database and history when the prior release cannot read the converted state. Verify the restored identities, readiness, access controls and data before reopening ingress or resuming ordinary releases.
+The retained in-place persistence format 1 to 2 migration requires an existing Better Auth owner and an unchanged SQL ledger. An old authentication installation that needs a new owner uses a separately approved clean target and registered data transfer. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).
 
 ## Acceptance order
 
