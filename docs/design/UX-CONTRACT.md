@@ -8,7 +8,7 @@
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
-**Desktop WebはReact/CodeMirror、インストール型iOSはSwiftUI（編集面はUIKit/TextKit 2）**を採用する。Mobile React/Ionic/Capacitor WebView執筆は廃止対象であり、Mobile Web/PWA向けUIや狭幅React画面の検証を要求しない。クライアント間でReact部品・ローカル状態実装を共通化しない。共有するのはCore/API契約と保存・Revision・認可の意味論である。実装詳細は[iOS SwiftUI](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。既存実装が移行済みという意味ではない。
+**Desktop WebはWindows Chromium（Chrome/Edge）上のReact/CodeMirror、インストール型iOSはSwiftUI（編集面はUIKit/TextKit 2）**を採用する。Mobile React/Ionic/Capacitor WebView執筆は廃止対象であり、Mobile Web/PWA向けUIや狭幅React画面の検証を要求しない。クライアント間でReact部品・ローカル状態実装を共通化しない。共有するのはCore/API契約と保存・Revision・認可の意味論である。実装詳細は[iOS SwiftUI](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。既存実装が移行済みという意味ではない。
 
 配色、余白、画面割り、ナビゲーション、パネルの初期配置は本書の範囲で改善できる。プリセットを固定モードへ縮退させたり、対応済みの執筆・閲覧機能を見た目のために削除してはならない。
 
@@ -196,7 +196,7 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 | S-A13 | Desktopのresize/zoom、iOSアプリ復帰・端末間で同一作品を開く | UI共通化なしでRevisionとローカルdraftの独立性を保持 | S-09,11 |
 | S-A14 | 長い構成名、多数scene、背景処理、遅い保存、空状態、zoom | 原稿優先、操作場所が動かず、入力反応と完了時間を分離して測定 | S-01,12,13 |
 
-Desktop Webは1440／1920を基本にブラウザーのzoom/リサイズとアクセシビリティを検証する。Mobile React 320／375／390／430 CSS pxとemulated Mobile WebKitの製品受入は撤廃する。iOSはSimulatorと物理iPhoneで画面サイズ・Dynamic Type・IME・keyboard・VoiceOver・長文を検証する。Webの/console・公開readerの必要なアクセシビリティ検証まで免除するものではない。
+Desktop WebはWindows Chromiumを対象とし、1440／1920を基本にブラウザーのzoom/リサイズとアクセシビリティを検証する。Mobile React 320／375／390／430 CSS pxとemulated Mobile WebKitの製品受入は撤廃する。iOSはSimulatorと物理iPhoneで画面サイズ・Dynamic Type・IME・keyboard・VoiceOver・長文を検証する。Webの/console・公開readerの必要なアクセシビリティ検証まで免除するものではない。旧Mobileの移行ゲート、公開reader/外部認証の独立契約および実Windows受入は [E2E execution](../verification/E2E-EXECUTION.md) に従う。
 
 検証は **視覚・情報階層／操作・accessibility／入力・保存・認可** の別gateで報告する。fixtureで失敗状態を再現することと、正規Core／journal／PostgreSQLを通した保存の成功は別の証拠。テストは生成した作品・隔離browserで行い、作者の実原稿や本番remoteへ書き込まない。
 
