@@ -47,12 +47,14 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@better-auth/core` | `1.7.26` | API・Better Auth | **連動**: Better Auth本体と同期 |
 | `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
 | `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
+| `oauth4webapi` | `3.8.9` | app・Web公開クライアントのDiscovery、PKCE、認可応答およびトークン交換 | **既存採用**: 実行時依存とpeer依存を持たないESM。更新時はBetter Authとの認証フローをChromiumとWebKitで実行し、Core/Fullのビルドと依存閉包を検証 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
 | `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
 | `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
 | `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
-| `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
+| `jsonc-parser` | `3.3.1` | API・起動時のMCPクライアント別project割当を厳格JSONとして解析し、同一オブジェクト内の重複キーを検出 | **新規採用**: APIの実行時依存。更新時は構文エラー、コメント、末尾カンマ、エスケープ表記を含む重複キーの拒否を検証 |
+| `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力（API起動時のMCP project割当を含む）、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
 ### Web UI・ルーター・エディター
@@ -107,10 +109,16 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `yaml` | `^2.9.1` / HTTP contract `2.9.1` | Core・Contracts・modules等、HTTP contractとDesktop Web生成時のOpenAPI解析 | **既存採用**: YAML境界で既存を再利用。最新版と既存運用の互換性は別途照合 |
-| `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持。CI Artifactの不信頼ZIP**読取**は別の選定ライブラリで扱う |
+| `jszip` | `^3.10.2` | Publishing・EPUBのZIP**生成** | **既存採用**: 保持 |
 | `lindera-wasm-nodejs-ipadic` | `2.0.0` | NLP・形態素解析 | **要検証**: WASM・辞書・Node実行環境の受入条件を確認 |
 | `@huggingface/transformers` | `4.3.2`（直接指定、Catalog対象外） | NLP/Semantic・推論 | **制約**: NLPエンジンの実行時バージョン識別がmanifestの直接依存文字列を使用するため、`catalog:`への変更で実際のバージョン識別が壊れる。実行時メタデータを正本にする修正が受入されるまで直接指定を保持。Optional Full profile専用でCore-onlyを汚染せず、`sharp`の修正版overrideを維持 |
 | `@huggingface/transformers>sharp` | `0.35.5`（workspace override） | pnpm transitive override | **連動**: native依存の修正済みリリースを強制する既存の安全対策。安全性を再検証せず解除しない |
+
+### CI Artifact
+
+| パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
+| --- | --- | --- | --- |
+| `@zip.js/zip.js` | `2.25.0` | `scripts/ci/evidence`・不信頼なCI ArtifactのZIP読取 | **CI専用**: BSD-3-Clause。Node 24に対応し、peer依存なし。更新時は厳格な形式検査、CRC、重複・重なり、パス・ファイル種別、実展開量の拒否条件と、認定・promotionの証拠検証を確認 |
 
 ### ネイティブ・エッジ
 

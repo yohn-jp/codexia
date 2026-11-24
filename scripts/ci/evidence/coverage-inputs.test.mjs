@@ -54,4 +54,12 @@ test('coverage closure changes when a declared test input changes and is stable 
   await writeFile(path.join(root, 'pnpm-lock.yaml'), 'changed dependency lock\n');
   const changedDependencies = await captureCoverageInputClosure(input);
   assert.notEqual(changedDependencies.dependencies, changedImageIdentity.dependencies, 'changed lockfile must invalidate coverage proof');
+  await writeFile(path.join(root, 'scripts/ci/evidence/package.json'), '{"dependencies":{"@zip.js/zip.js":"2.25.1"}}\n');
+  const changedArtifactManifest = await captureCoverageInputClosure(input);
+  assert.notEqual(changedArtifactManifest.dependencies, changedDependencies.dependencies,
+    'changing the artifact parser package must invalidate coverage proof');
+  await writeFile(path.join(root, 'scripts/ci/evidence/download-artifacts.mjs'), 'changed artifact parser\n');
+  const changedArtifactParser = await captureCoverageInputClosure(input);
+  assert.notEqual(changedArtifactParser.source, changedArtifactManifest.source,
+    'changing the artifact parser implementation must invalidate coverage proof');
 });

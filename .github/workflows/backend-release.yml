@@ -42,6 +42,7 @@ on:
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
+      - scripts/ci/evidence/package.json
       - scripts/verification/artifacts/backend*.mjs
       - scripts/release/backend/resolve-promotion*.mjs
       - scripts/deployment/handoff/verify-promotion.mjs
@@ -128,6 +129,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Verify completed source and select changed backend paths
         id: gate
         env:
@@ -168,6 +171,8 @@ jobs:
           node-version: '24.22.3'
       - uses: docker/setup-buildx-action@v4.4.1
         if: github.event_name == 'workflow_run'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Resolve exact tested backend promotion or select main build
         id: resolve
         env:
@@ -270,6 +275,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Require complete exact-source main verification
         id: freshness
         env:

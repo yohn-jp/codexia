@@ -84,9 +84,11 @@ flowchart LR
 ```
 
 - **一つのデプロイ制御プレーン:** GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet。VM 上の polling updater、pull timer、別のリリース選択器、MCP によるデプロイは設けない。
-- VMの最小前提はAnsibleからのSSH到達と権限付きの構成変更。OSの適合性は`inspect`/`bootstrap`で検証する。初期導入では新規DBと既存DBの復旧を分け、Ansibleは256-bitの登録キー発行を管理するがownerを作成しない。本人はWorkersの`/console/setup`でPasskey登録を行い、保護された本番`deploy`の承認は別操作とする。今ある`bootstrap`はhost/secrets/base/auth-runtimeの構成収束まで実装済みであり、setup-only公開APIとコンソール登録UIは未実装。
+- VMの最小前提はAnsibleからのSSH到達と権限付きの構成変更。OSの適合性は`inspect`/`bootstrap`で検証する。初期導入では新規DBと既存DBの復旧を分け、Ansibleは256-bitの登録キー発行を管理するがownerを作成しない。本人はWorkersの`/console/setup`でPasskey登録を行い、保護された本番`deploy`の承認は別操作とする。`bootstrap`の構成収束、setup-only API、本人登録と本番activationは個別の段階であり、全経路の実装・受入を一括して完了扱いしない。
 - 通常更新は **DB migration fingerprint、persistence format、API epoch、Full profile、認証スキーマ互換性** を検証し、互換なイメージのみ自動適用できる。互換でないものは承認済み別手順に隔離する。
 - 変更前バックアップ、host lock、停止、適用、health、失敗時の既知良好イメージへの復帰を一つのトランザクションとして扱う。コンテナーだけを戻してデータ変更が巻き戻ったと主張しない。
+
+全Deploymentの状態分類・経路選択、完全新規pair activation、非互換切替、復旧・共通排他の正本は [本番Deploymentライフサイクル](../deployment/DEPLOYMENT-LIFECYCLE.md)。通常の独立releaseの互換性チェックを緩和せず、保護された協調経路で不足する片側を有効化する。
 
 手順と実行状況の区別は [初期デプロイ遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md) および [アップデート遷移](../deployment/UPDATE-FLOW.md)。公開ルート・証明書・CI は [デプロイ概要](../deployment/README.md) と [CI/CD](../verification/CI-CD.md)。
 

@@ -3,6 +3,7 @@ packages:
   - modules/*
   - app
   - profiles/*
+  - scripts/ci/evidence
 catalogs:
   # Types and test/build-only dependencies remain in devDependencies.
   development:
