@@ -114,6 +114,9 @@ try {
       if (screenshots) await page.screenshot({ path: join(screenshots, 'ux-observed-' + width + '.png') });
     }
     const saveObservation = snapshot.observed.scenarios.find(({ id }) => id === 'observed-save-receipt');
+    if (site && snapshot.observed.screens.some(({ id, platform }) => id === 'WRT-01' && platform === 'desktop')) {
+      assert.ok(saveObservation, 'Assembled Pages must contain canonical Desktop execution evidence');
+    }
     if (saveObservation) {
       await page.goto(link('desktop', saveObservation.id, 'start', 'observed'));
       await assertHeading('idle');

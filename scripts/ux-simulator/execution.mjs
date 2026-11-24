@@ -53,7 +53,7 @@ export async function captureSaveEvidence(source, repositoryRoot, sourceSha, obs
           id: 'executed-save.' + previous.state + '.' + current + '.' + transitions.length,
           platform, screen, from: previous.id, to: currentId, event: event.event.type,
           source: codeLocation, method: 'trace',
-          evidence: { ...expectation, sourceSha, outcome: 'passed' },
+          evidence: { expectation, sourceSha, method: 'isolated-canonical-actor', outcome: 'passed' },
           context: { operationId: event.snapshot.context.operationId ?? null, receiptId: event.snapshot.context.receiptId ?? null },
         });
       }

@@ -197,7 +197,7 @@ function readout() {
     h('dt', {}, '条件・結果'), h('dd', {}, selected?.condition ?? '根拠が明示する場合のみ表示'),
     h('dt', {}, '根拠'), h('dd', {}, ref(item?.source ?? flow.source)),
     selected?.evidence && h('dt', {}, '実行試験'),
-    selected?.evidence && h('dd', {}, ref(selected.evidence, '正規試験の期待値')),
+    selected?.evidence && h('dd', {}, ref(selected.evidence.expectation, '正規試験の期待値')),
     selected?.context?.operationId && h('dt', {}, '操作 ID'),
     selected?.context?.operationId && h('dd', {}, selected.context.operationId),
     selected?.context?.receiptId && h('dt', {}, 'Receipt ID'),
