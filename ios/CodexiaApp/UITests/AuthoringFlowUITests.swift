@@ -1,16 +1,28 @@
 import XCTest
 
 final class AuthoringFlowUITests: XCTestCase {
-    private func fixtureButton(_ count: Int, in app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "identifier == %@", "CTRL-OUT-01.B.fixture.\(count)")).firstMatch
-    }
-
     private func openFixture(_ app: XCUIApplication) {
+        app.launchArguments += ["--codexia-fixture-editor"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         app.buttons["サンプル作品"].tap()
         app.buttons["構成と原稿"].tap()
-        fixtureButton(10_000, in: app).tap()
+        app.buttons["CTRL-OUT-01.B.fixture.10000"].tap()
+    }
+
+    func testSignedOutShellOffersSystemAccountEntryWithoutClaimingAuthoringIsReady() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["ライブラリ"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["account.signIn"].exists)
+        XCTAssertTrue(app.buttons["account.entry"].exists)
+        XCTAssertFalse(app.buttons["サンプル作品"].exists)
+
+        app.buttons["account.entry"].tap()
+        XCTAssertTrue(app.navigationBars["アカウント"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["原稿の保存と編集機能は準備中です。利用できない機能を使用可能として表示しません。"].exists)
     }
 
     private func menuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
@@ -35,7 +47,7 @@ final class AuthoringFlowUITests: XCTestCase {
         // Copy leaves a full-document selection. Reopen the same sample so the
         // Paste gesture starts in a fresh editor while retaining the app clipboard.
         app.buttons["戻る"].tap()
-        let sample = fixtureButton(10_000, in: app)
+        let sample = app.buttons["CTRL-OUT-01.B.fixture.10000"]
         XCTAssertTrue(sample.waitForExistence(timeout: 10))
         sample.tap()
         XCTAssertTrue(editor.waitForExistence(timeout: 15))
