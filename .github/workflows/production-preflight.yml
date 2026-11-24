@@ -147,8 +147,7 @@ jobs:
           SSH_USER: ${{ inputs.management == 'runtime' && 'codexia' || steps.bootstrap.outputs.user }}
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
           echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
           cat > "$RUNNER_TEMP/codexia-preflight-inventory.yml" <<EOF_INVENTORY
           all:

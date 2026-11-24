@@ -1,22 +1,12 @@
 name: Experiment StrictDoc prebuilt CI runtime
+# Frozen pending retirement. Keep this historical definition inert.
 on:
-  pull_request:
-    paths:
-      - .github/docker/strictdoc-ci.Dockerfile
-      - .github/workflows/strictdoc-runtime-experiment.yml
-      - scripts/strictdoc/requirements.lock.txt
-  push:
-    branches: [main]
-    paths:
-      - .github/docker/strictdoc-ci.Dockerfile
-      - .github/workflows/strictdoc-runtime-experiment.yml
-      - scripts/strictdoc/requirements.lock.txt
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   build-smoke:
-    if: github.event_name == 'pull_request'
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -41,12 +31,11 @@ jobs:
           docker image inspect --format 'StrictDoc runtime uncompressed bytes: {{.Size}}' codexia-strictdoc-ci:experiment >> "$GITHUB_STEP_SUMMARY"
 
   publish:
-    if: github.event_name != 'pull_request'
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:

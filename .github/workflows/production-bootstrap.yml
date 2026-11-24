@@ -39,6 +39,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - .github/workflows/production-bootstrap.yml
       - deploy/ansible/prepare-production-bootstrap.py
       - deploy/ansible/test_production_bootstrap.py
@@ -69,8 +70,7 @@ jobs:
       - name: Install pinned Ansible Python dependencies
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
       - name: Verify protected controller inputs and Ansible syntax
         run: |
           set -euo pipefail
@@ -215,8 +215,7 @@ jobs:
       - name: Install the pinned Ansible control environment
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
           echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
       - name: Prepare private inventory, exact secret inputs, pinned SSH identity, and run-scoped approvals
         id: control

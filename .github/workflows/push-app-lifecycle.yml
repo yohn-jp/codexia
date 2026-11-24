@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - Dockerfile.backend
       - .dockerignore
       - Dockerfile.backend.dockerignore
@@ -205,7 +206,7 @@ jobs:
             record_unavailable 'runner could not install required disposable host and SSHFS capabilities'
             exit 78
           fi
-          if ! python3 -m venv "$RUNNER_TEMP/codexia-ansible" >>"$setup_log" 2>&1 || ! "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt mitogen==0.3.55 >>"$setup_log" 2>&1; then
+          if ! bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt mitogen==0.3.55 >>"$setup_log" 2>&1; then
             record_unavailable 'runner could not provision the Ansible deployment capability'
             exit 78
           fi

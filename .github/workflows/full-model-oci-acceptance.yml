@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - .dockerignore
       - .github/workflows/full-model-oci-acceptance.yml
       - Dockerfile
@@ -143,8 +144,7 @@ jobs:
           HF_HOME: ${{ runner.temp }}/huggingface-home
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/huggingface-cli"
-          "$RUNNER_TEMP/huggingface-cli/bin/pip" install --disable-pip-version-check --no-input 'huggingface_hub==0.36.0'
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/huggingface-cli" 'huggingface_hub==0.36.0'
           mkdir -p "$CODEXIA_P13_MODEL_CACHE" "$HF_HOME"
 
           while IFS=$'\t' read -r model revision _; do

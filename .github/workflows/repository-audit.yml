@@ -2,6 +2,7 @@ name: Repository Audit Pages
 on:
   pull_request:
     paths:
+      - scripts/shared/python-env.sh
       - 'scripts/audit/**'
       - 'scripts/strictdoc/**'
       - 'docs/requirements/**'
@@ -223,7 +224,7 @@ jobs:
           corepack enable
           corepack pnpm@12.21.0 --version
           pnpm install --frozen-lockfile
-          bash scripts/strictdoc/install.sh "$RUNNER_TEMP/strictdoc" scripts/strictdoc/requirements.lock.txt
+          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/strictdoc" -r scripts/strictdoc/requirements.lock.txt
       - name: Detect the installed Chromium browser
         run: |
           CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)"
@@ -244,17 +245,17 @@ jobs:
         env:
           GRAPHIFY_BACKEND: none
         run: |
-          python -m pip install --disable-pip-version-check --no-cache-dir 'graphifyy[sql,terraform]==0.9.115'
+          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql,terraform]==0.9.115'
           excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*')
           exclude_args=()
           for pattern in "${excludes[@]}"; do
             exclude_args+=(--exclude "$pattern")
           done
-          timeout 600s graphify extract . --code-only \
+          timeout 600s "$RUNNER_TEMP/graphify/bin/graphify" extract . --code-only \
             --out "$RUNNER_TEMP/graphify-out" \
             --max-workers 2 "${exclude_args[@]}"
-          timeout 120s graphify cluster-only "$RUNNER_TEMP/graphify-out" --no-label
-          python scripts/graphify-pages/candidates.py \
+          timeout 120s "$RUNNER_TEMP/graphify/bin/graphify" cluster-only "$RUNNER_TEMP/graphify-out" --no-label
+          "$RUNNER_TEMP/graphify/bin/python" scripts/graphify-pages/candidates.py \
             "$RUNNER_TEMP/graphify-out/graphify-out/candidates.json" "${exclude_args[@]}"
           node scripts/graphify-pages/pack.mjs \
             "$RUNNER_TEMP/graphify-out/graphify-out" "$RUNNER_TEMP/site" "$(git rev-parse HEAD)" \

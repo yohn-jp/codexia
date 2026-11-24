@@ -3,6 +3,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/backup/**
       - deploy/ansible/deploy.yml
       - deploy/ansible/restore-drill.yml
@@ -13,6 +14,7 @@ on:
   push:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/backup/**
       - deploy/ansible/deploy.yml
       - deploy/ansible/restore-drill.yml
