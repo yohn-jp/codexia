@@ -129,6 +129,11 @@ export function decoratePage(html, { pagePath, page }) {
   return withHeader.replace(/<\/body\s*>/i, `<script src="${jsPath}" defer></script>\n</body>`);
 }
 
+export function decorateUxPage(html, sha) {
+  const pagePath = 'ux/index.html';
+  return decoratePage(html, { pagePath, page: { ...CORE_PAGES.get(pagePath), sha } });
+}
+
 async function readSourceSha(siteRoot, pagePath, page) {
   if (page.sha) return page.sha;
   const candidates = page.id === 'graph'

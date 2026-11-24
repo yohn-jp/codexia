@@ -5,6 +5,7 @@ import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdtempSync,
 import { join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { decorateUxPage } from '../pages-ui/navigation.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const SHA = /^[a-f0-9]{40}$/u;
@@ -248,6 +249,18 @@ function verifyRegeneration(snapshotBytes, manifest, snapshot) {
     execFileSync(process.execPath, command, { cwd: root, timeout: 90_000, stdio: ['ignore', 'pipe', 'pipe'] });
     assert.equal(digest(readFileSync(join(scratch, 'snapshot.json'))), digest(snapshotBytes),
       'Projection does not reproduce from its declared canonical sources and execution');
+    const regenerated = JSON.parse(readFileSync(join(scratch, 'manifest.json'), 'utf8')).outputs;
+    const extra = Object.hasOwn(manifest.outputs, 'compare/base.mjs') ? ['compare/base.mjs'] : [];
+    assert.deepEqual(Object.keys(manifest.outputs).sort(), [...Object.keys(regenerated), ...extra].sort(),
+      'UX output inventory does not match canonical generation');
+    for (const [path, hash] of Object.entries(regenerated)) {
+      if (path === 'build.mjs' || path === 'index.html') continue;
+      assert.equal(manifest.outputs[path], hash, 'UX asset does not reproduce from its canonical source: ' + path);
+    }
+    const raw = readFileSync(join(scratch, 'index.html'), 'utf8');
+    assert.ok(manifest.outputs['index.html'] === digest(raw)
+      || manifest.outputs['index.html'] === digest(decorateUxPage(raw, manifest.sourceSha)),
+    'UX page differs from its canonical generation and navigation');
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

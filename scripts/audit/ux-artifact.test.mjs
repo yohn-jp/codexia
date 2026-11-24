@@ -45,6 +45,18 @@ test('generated UX projection is source-bound and cannot assert product verifica
   writeFileSync(browserPath, originalBrowser);
   writeFileSync(metadata, sealed);
 
+  const assetPath = join(uxDir, 'browser.mjs');
+  const asset = readFileSync(assetPath, 'utf8');
+  const changedAsset = asset + '\nvoid 0;\n';
+  const changedMetadata = JSON.parse(sealed);
+  changedMetadata.outputs['browser.mjs'] = digest(changedAsset);
+  changedMetadata.inputs.asset = digest(JSON.stringify(changedMetadata.outputs));
+  writeFileSync(assetPath, changedAsset);
+  writeFileSync(metadata, JSON.stringify(changedMetadata));
+  assert.throws(() => inspectUxArtifact(uxDir), /asset does not reproduce/u);
+  writeFileSync(assetPath, asset);
+  writeFileSync(metadata, sealed);
+
   const manifestPath = join(uxDir, 'manifest.json');
   const forged = JSON.parse(readFileSync(manifestPath, 'utf8'));
   forged.evidence.productVerified = 'passed';
