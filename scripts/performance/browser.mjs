@@ -226,6 +226,9 @@ try {
       { sceneId: scenes[index % Math.min(3, scenes.length)].id, documentBytes: scenes[index % Math.min(3, scenes.length)].bytes });
   }
   await settleFiniteRequests();
+  // The init script starts a fresh probe on every document navigation. Keep
+  // authoring-workload metrics separate from the subsequent warm login.
+  report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
   startupSample = 'warm';
   await phase('browser.startup.warm-login-ready', async () => {
     await page.goto(`${base}/desktop/`);
@@ -237,7 +240,7 @@ try {
   startupSample = null;
   await settleFiniteRequests();
   report.storageEstimate = await page.evaluate(() => navigator.storage.estimate());
-  report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
+  report.warmLoginBrowserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
   report.server = await stats();
   if (report.server.counts.gitProcesses > 0) throw new Error('PostgreSQL browser workload invoked Git at runtime');
   report.browserRuntime = await browserRuntime();
@@ -251,7 +254,11 @@ try {
   report.status = 'failed';
   report.error = { message: error.message, stack: error.stack };
   if (page && !page.isClosed()) {
-    report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    if (report.browserMetrics === undefined) {
+      report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    } else {
+      report.warmLoginBrowserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    }
     report.server = await stats().catch(() => null);
     if (cdp) {
       try { const { profile } = await cdp.send('Profiler.stop'); await writeFile(`${output}.cpuprofile`, JSON.stringify(profile)); } catch { /* browser may already be closed */ }
