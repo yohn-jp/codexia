@@ -57,19 +57,13 @@ jobs:
         run: |
           docker build -f .github/docker/strictdoc-ci.Dockerfile -t strictdoc-benchmark .
           docker run --rm strictdoc-benchmark sh -ec 'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright'
+      - name: Install pinned Dagger CLI
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.11"
       - name: Dagger cold runtime build and tool smoke
-        uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: "v0.21.11"
-          workdir: ${{ runner.temp }}/strictdoc-context
-          shell: >-
-            host | directory . | docker-build --dockerfile=.github/docker/strictdoc-ci.Dockerfile |
-            with-exec sh,-ec,'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright; echo PASS' | stdout
+        working-directory: ${{ runner.temp }}/strictdoc-context
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/benchmark/dagger-strictdoc.sh"
       - name: Dagger warm runtime build and tool smoke
-        uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: "v0.21.11"
-          workdir: ${{ runner.temp }}/strictdoc-context
-          shell: >-
-            host | directory . | docker-build --dockerfile=.github/docker/strictdoc-ci.Dockerfile |
-            with-exec sh,-ec,'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright; echo PASS' | stdout
+        working-directory: ${{ runner.temp }}/strictdoc-context
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/benchmark/dagger-strictdoc.sh"
