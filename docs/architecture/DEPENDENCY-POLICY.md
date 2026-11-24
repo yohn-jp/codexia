@@ -26,7 +26,7 @@
 
 ### Pythonパッケージ管理
 
-**Python依存管理の標準は [uv](https://github.com/astral-sh/uv) とする。** 既存のPython実行版・仮想環境・依存宣言・lockfileを正本として維持し、実行時の未固定版解決やハッシュ検証の弱体化を認めない。uv自身も検証済み公式releaseの版と配布SHA-256を固定する。新規導入および既存経路の移行は対象の実際の検証・配備契約を満たした上で行い、既存のOS管理パッケージや保護されたホストの運用を無検証に変更しない。CIのキャッシュ採否とStrictDocの実行条件は[CI/CD正本](../verification/CI-CD.md)に従う。
+**Python依存管理の標準は [uv](https://github.com/astral-sh/uv) とする。** 既存のPython実行版・仮想環境・依存宣言・lockfileを正本として維持し、実行時の未固定版解決やハッシュ検証の弱体化を認めない。uv自身も検証済み公式releaseの版と配布SHA-256を固定する。Pythonパッケージを導入する有効なCI・配備コントローラ・バックアップ運用経路は、共通の [`scripts/shared/python-env.sh`](../../scripts/shared/python-env.sh) からuvを使用する。OS管理パッケージやホストの既存Python処理は対象外とし、保護された実機を移行検証のために変更しない。既存のroot権限境界・バックアップのハッシュ固定と再インストール契約を維持する。凍結済みの旧StrictDoc OCI実験は例外として履歴を保持するが、再構築・公開・利用を禁止し、廃止予定とする。CIのキャッシュ採否とStrictDocの実行条件は[CI/CD正本](../verification/CI-CD.md)に従う。
 
 ### pnpm Catalog と依存の実行区分
 
