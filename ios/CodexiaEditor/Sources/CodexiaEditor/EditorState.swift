@@ -31,6 +31,9 @@ public struct EditorState {
         self.text = text
     }
 
+    /// Stable identity for this in-memory editing session; a reopened document gets a new value.
+    var sessionID: UUID { session }
+
     public var snapshot: Snapshot {
         Snapshot(session: session, documentID: documentID, version: version, text: text)
     }

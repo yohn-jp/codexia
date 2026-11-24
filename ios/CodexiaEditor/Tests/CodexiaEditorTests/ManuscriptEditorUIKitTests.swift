@@ -147,5 +147,67 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         XCTAssertEqual(box.state.text, "新しい原稿")
         XCTAssertEqual(view.text, "新しい原稿")
     }
+
+    func testDocumentReplacementWaitsForEditingToEndWithoutCrossingBindings() {
+        let oldBox = Box()
+        let newBox = Box()
+        newBox.state = EditorState(documentID: "b", text: "別の原稿")
+        let oldBinding = Binding(get: { oldBox.state }, set: { oldBox.state = $0 })
+        let newBinding = Binding(get: { newBox.state }, set: { newBox.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: oldBinding)
+        let view = ManuscriptEditor.makeTextView(text: oldBox.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        defer { window.isHidden = true }
+
+        XCTAssertFalse(coordinator.prepareForUpdate(with: newBinding, in: view))
+        view.insertText("入力中")
+        coordinator.textViewDidChange(view)
+
+        XCTAssertEqual(oldBox.state.text, "原稿入力中")
+        XCTAssertEqual(newBox.state.text, "別の原稿")
+        XCTAssertEqual(coordinator.documentID, "a")
+
+        view.resignFirstResponder()
+
+        XCTAssertEqual(coordinator.documentID, "b")
+        XCTAssertEqual(view.text, "別の原稿")
+        XCTAssertEqual(newBox.state.text, "別の原稿")
+    }
+
+    func testReopenedSameDocumentWaitsForEditingToEnd() {
+        let oldBox = Box()
+        let newBox = Box()
+        newBox.state = EditorState(documentID: "a", text: "再読込した原稿")
+        let oldBinding = Binding(get: { oldBox.state }, set: { oldBox.state = $0 })
+        let newBinding = Binding(get: { newBox.state }, set: { newBox.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: oldBinding)
+        let view = ManuscriptEditor.makeTextView(text: oldBox.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        defer { window.isHidden = true }
+
+        XCTAssertFalse(coordinator.prepareForUpdate(with: newBinding, in: view))
+        view.insertText("旧セッションの入力")
+        coordinator.textViewDidChange(view)
+
+        XCTAssertEqual(oldBox.state.text, "原稿旧セッションの入力")
+        XCTAssertEqual(newBox.state.text, "再読込した原稿")
+        XCTAssertNotEqual(coordinator.sessionID, newBox.state.sessionID)
+
+        view.resignFirstResponder()
+
+        XCTAssertEqual(coordinator.sessionID, newBox.state.sessionID)
+        XCTAssertEqual(view.text, "再読込した原稿")
+        XCTAssertEqual(newBox.state.text, "再読込した原稿")
+    }
 }
 #endif

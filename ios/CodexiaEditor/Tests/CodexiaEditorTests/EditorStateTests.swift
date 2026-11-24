@@ -36,6 +36,15 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(state.text, "second")
     }
 
+    func testResponseCannotOverwriteReopenedSessionForSameDocument() {
+        var state = EditorState(documentID: "a", text: "first session")
+        let request = state.beginRemoteRequest()
+        state = EditorState(documentID: "a", text: "reopened session")
+
+        XCTAssertFalse(state.applyRemote("late first-session response", for: request))
+        XCTAssertEqual(state.text, "reopened session")
+    }
+
     func testCompositionBlocksLeavingWithoutChangingCommittedText() {
         var state = EditorState(documentID: "a", text: "original")
         state.setComposing(true)
