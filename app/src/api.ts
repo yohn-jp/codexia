@@ -537,7 +537,7 @@ export const api = {
     }, { request, ...(signal ? { signal } : {}) });
     // Preserve this domain invariant until the authoritative OpenAPI schema
     // expresses it; all wire fields are validated by the generated schema.
-    if (result.documents.some(document => document.version < 1)) {
+    if (result.documents.some(document => document.version < 0)) {
       throw new ApiError("The server returned an invalid response", 502, "INVALID_RESPONSE");
     }
     if (result.documents.length >= limit) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");

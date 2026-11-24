@@ -70,11 +70,15 @@ test("the generated document list URL preserves Desktop queries and the response
   ]);
   assert.equal(getPersistenceDocumentsGetUrl(projectId, { limit: 1000, parentId }), requestedUrls[2]);
 
+  respond = () => Response.json({ documents: [{ ...document, createdAt: "not-an-OpenAPI-date" }] });
+  await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 502, code: "INVALID_RESPONSE" });
   respond = () => Response.json({ documents: [{ ...document, version: -1 }] });
   await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 502, code: "INVALID_RESPONSE" });
+  respond = () => Response.json({ documents: [{ ...document, version: 0 }] });
+  assert.deepEqual(await api.persistenceDocuments(projectId, parentId, controller.signal), { documents: [{ ...document, version: 0 }] });
   respond = () => Response.json({ error: "Invalid query", code: "INVALID_QUERY" }, { status: 400 });
   await assert.rejects(api.persistenceDocuments(projectId, parentId, controller.signal), { status: 400, code: "INVALID_QUERY" });
-  assert.equal(requestedUrls.length, 5);
+  assert.equal(requestedUrls.length, 7);
 });
 
 test("generated Text Anchor creation preserves the authored request and response invariants", async (t) => {
