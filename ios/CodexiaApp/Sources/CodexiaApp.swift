@@ -272,6 +272,20 @@ private final class AccountSession: ObservableObject {
         } catch { return .atRisk }
     }
 
+    func conflictHead(_ prepared: PreparedProjectSession, documentID: String) async throws -> LoadedSceneDocument {
+        try await withPreparedCoordinator(prepared) { _ in
+            try await loadDocument(projectID: prepared.projectID, documentID: documentID)
+        }
+    }
+
+    func resolveConflict(_ prepared: PreparedProjectSession, operationID: String, snapshot: EditorState.Snapshot,
+                         head: LoadedSceneDocument) async throws {
+        try await withPreparedCoordinator(prepared) { coordinator in
+            _ = try await coordinator.resolveConflict(documentID: head.id, expectedOperationID: operationID,
+                snapshot: snapshot, currentRevisionID: head.revisionID, currentText: head.text)
+        }
+    }
+
     private func withTransport<T>(_ operation: (APITransport) async throws -> T) async throws -> T {
         guard let session, let config, !closingSession else { throw OAuthError.sessionBusy }
         activeSessionOperations += 1
@@ -430,6 +444,7 @@ private struct NativeDeepLink: Equatable {
 private struct LibraryView: View {
     @StateObject private var account = AccountSession()
     @State private var path: [String] = []
+    @State private var visibleAuthorID: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -444,7 +459,16 @@ private struct LibraryView: View {
             account.pendingProjectID = nil
         }
         .onChange(of: account.status) { _, status in
-            if status.isSignedIn { Task { await account.resolvePendingDeepLink() } }
+            switch status {
+            case .signedOut:
+                path = []
+                visibleAuthorID = nil
+            case .signedIn(let subject):
+                if let visibleAuthorID, visibleAuthorID != subject { path = [] }
+                visibleAuthorID = subject
+            default:
+                break
+            }
         }
         .task { await account.restoreSession() }
         .onOpenURL { url in account.receive(url) }
@@ -603,13 +627,13 @@ private struct ProjectScreen: View {
         .task { await model.load() }
         .navigationDestination(isPresented: Binding(
             get: { selectedEditorRoute != nil },
-            set: { if !$0, model.editorCanLeave { selectedEditorRoute = nil } }
+            set: { if !$0, model.editorCanLeave { closeEditor() } }
         )) {
             if let route = selectedEditorRoute {
                 if let editor = model.makeEditor(route: route) {
                     ProductEditorScreen(
                         model: editor,
-                        onLeave: { selectedEditorRoute = nil },
+                        onLeave: closeEditor,
                         onCanLeaveChanged: model.updateEditorLeaveState
                     )
                 } else {
@@ -617,6 +641,11 @@ private struct ProjectScreen: View {
                 }
             }
         }
+    }
+
+    private func closeEditor() {
+        selectedEditorRoute = nil
+        model.closeEditor()
     }
 }
 
@@ -639,6 +668,7 @@ private final class ProjectContentsModel: ObservableObject {
     private let projectID: String
     private let account: AccountSession
     private var editor: ProductEditorModel?
+    private var openingScene = false
 
     init(projectID: String, account: AccountSession) {
         self.projectID = projectID
@@ -648,13 +678,17 @@ private final class ProjectContentsModel: ObservableObject {
     func load() async {
         do {
             let documents = try await account.loadProjectDocuments(projectID: projectID)
-            let chapterDocs = documents.filter { $0.kind == "chapter" }
             let sceneDocs = documents.filter { $0.kind == "scene" }
-            let chapterByID = Dictionary(uniqueKeysWithValues: chapterDocs.map { ($0.id, $0) })
+            let documentByID = Dictionary(uniqueKeysWithValues: documents.map { ($0.id, $0) })
             let grouped = Dictionary(grouping: sceneDocs) { $0.parentId ?? "root" }
-            chapters = grouped.keys.sorted().compactMap { parentID in
+            func order(_ id: String) -> (String, String, String) {
+                let chapter = documentByID[id]
+                let volumeOrder = chapter?.parentId.flatMap { documentByID[$0]?.orderKey } ?? ""
+                return (volumeOrder, chapter?.orderKey ?? "", id)
+            }
+            chapters = grouped.keys.sorted { order($0) < order($1) }.compactMap { parentID in
                 guard let scenes = grouped[parentID] else { return nil }
-                let title = chapterByID[parentID]?.title ?? "原稿"
+                let title = documentByID[parentID]?.title ?? "原稿"
                 return ProjectChapter(
                     id: parentID,
                     title: title,
@@ -671,21 +705,31 @@ private final class ProjectContentsModel: ObservableObject {
     }
 
     func open(_ scene: ProjectScene, onOpen: @escaping (LoadedEditorRoute) -> Void) async {
+        guard !openingScene, editor == nil else { return }
+        openingScene = true
+        defer { openingScene = false }
         do {
             let prepared = try await account.prepareCoordinator(projectID: projectID)
             let document = try await account.loadDocument(projectID: projectID, documentID: scene.id)
-            onOpen(LoadedEditorRoute(document: document, prepared: prepared))
+            try Task.checkCancellation()
+            let route = LoadedEditorRoute(document: document, prepared: prepared)
+            editor = ProductEditorModel(route: route, account: account)
+            editorCanLeave = false
+            onOpen(route)
+        } catch is CancellationError {
+            return
         } catch {
             message = "原稿を読み込めませんでした。構成から再度開いてください。"
         }
     }
 
     func makeEditor(route: LoadedEditorRoute) -> ProductEditorModel? {
-        if let editor, editor.documentID == route.document.id { return editor }
-        let editor = ProductEditorModel(route: route, account: account)
-        self.editor = editor
-        editorCanLeave = false
-        return editor
+        editor?.documentID == route.document.id ? editor : nil
+    }
+
+    func closeEditor() {
+        editor = nil
+        editorCanLeave = true
     }
 
     func updateEditorLeaveState(_ canLeave: Bool) {
@@ -736,7 +780,7 @@ private final class ProductEditorModel: ObservableObject {
             )
             baseRevisionID = latest.baseRevisionID
             baseText = latest.baseText
-            pendingState = latest.state
+            pendingState = records.first(where: { $0.state == .conflict })?.state ?? latest.state
             canReconcile = records.contains { $0.state == .unknown || $0.state == .inFlight }
             saveMessage = Self.recoveryMessage(records: records)
         } catch {
@@ -756,13 +800,15 @@ private final class ProductEditorModel: ObservableObject {
             current.markProtected(snapshot)
             state = current
         }
-        pendingState = .protected
-        saveMessage = "端末に保護済み。サーバーへの保存は未確認です。"
+        if pendingState != .conflict {
+            pendingState = .protected
+            if state.canLeave { saveMessage = "端末に保護済み。サーバーへの保存は未確認です。" }
+        }
     }
 
     func scheduleProtection() {
         protectionTask?.cancel()
-        guard !state.isComposing else { return }
+        guard !state.isComposing, !state.canLeave else { return }
         let snapshot = state.snapshot
         protectionTask = Task { @MainActor in
             do {
@@ -829,7 +875,9 @@ private final class ProductEditorModel: ObservableObject {
                 saveMessage = "サーバーに保存済み。revisionを確認しました。"
             } else {
                 pendingState = .protected
-                saveMessage = "送信済みのrevisionを確認しました。より新しい入力は端末に保護され、未送信です。"
+                saveMessage = state.canLeave
+                    ? "送信済みのRevisionを確認しました。後続の入力は端末に保護され、未送信です。"
+                    : "送信済みのRevisionを確認しました。後続の入力は端末に未保護です。"
             }
             canReconcile = false
         case .pending:
@@ -874,6 +922,53 @@ private final class ProductEditorModel: ObservableObject {
 
     func cancelPendingProtection() { protectionTask?.cancel() }
 
+    func loadConflictComparison() async {
+        guard pendingState == .conflict else { return }
+        do {
+            let head = try await account.conflictHead(prepared, documentID: documentID)
+            conflictRemoteText = head.text
+            conflictRevisionID = head.revisionID
+        } catch {
+            conflictRemoteText = nil
+            conflictRevisionID = nil
+            saveMessage = "現行のRevisionを取得できませんでした。下書きは端末に保持されています。"
+        }
+    }
+
+    func acceptConflictResolution() async -> Bool {
+        guard !saveIsInFlight, !state.isComposing, let displayedRevision = conflictRevisionID else { return false }
+        saveIsInFlight = true
+        defer { saveIsInFlight = false }
+        protectionTask?.cancel()
+        let snapshot = state.snapshot
+        do {
+            let records = try await account.records(prepared, documentID: documentID)
+            guard let conflict = records.first(where: { $0.state == .conflict }) else { return false }
+            let head = try await account.conflictHead(prepared, documentID: documentID)
+            guard head.revisionID == displayedRevision, state.isCurrent(snapshot), !state.isComposing else {
+                conflictRemoteText = head.text
+                conflictRevisionID = head.revisionID
+                saveMessage = "本文またはサーバーのRevisionが変わりました。もう一度比較してください。"
+                return false
+            }
+            try await account.resolveConflict(prepared, operationID: conflict.operationID, snapshot: snapshot, head: head)
+            baseRevisionID = head.revisionID
+            baseText = head.text
+            var current = state
+            current.markProtected(snapshot)
+            state = current
+            pendingState = .protected
+            canReconcile = false
+            conflictRemoteText = nil
+            conflictRevisionID = nil
+            saveMessage = "解決後の本文を端末に保護しました。サーバーへの保存を実行してください。"
+            return true
+        } catch {
+            saveMessage = "競合の解決内容を端末へ保護できませんでした。"
+            return false
+        }
+    }
+
     func registerNavigationGuard() -> UUID {
         account.registerActiveEditorGuard { [weak self] in
             guard let self else { throw ProductAPIError.editorUnavailable }
@@ -885,7 +980,7 @@ private final class ProductEditorModel: ObservableObject {
 
     private func refreshJournalState() async {
         guard let records = try? await account.records(prepared, documentID: documentID) else { return }
-        pendingState = records.last?.state
+        pendingState = records.first(where: { $0.state == .conflict })?.state ?? records.last?.state
         canReconcile = records.contains { $0.state == .unknown || $0.state == .inFlight }
     }
 
@@ -893,6 +988,9 @@ private final class ProductEditorModel: ObservableObject {
         guard let latest = records.last else { return "" }
         if records.contains(where: { $0.state == .unknown || $0.state == .inFlight }) {
             return "端末の下書きを復元しました。送信結果を照合してください。"
+        }
+        if records.contains(where: { $0.state == .conflict }) {
+            return "Revision競合の下書きを復元しました。現行本文と比較してください。"
         }
         return switch latest.state {
         case .protected: "端末に保護済み。サーバーへの保存は未確認です。"
@@ -965,11 +1063,17 @@ private struct ProductEditorScreen: View {
                             .textSelection(.enabled)
                     }
                     Section {
-                        Text("競合を自動で統合したり再送したりしません。内容を比較してから、対応する編集操作を行ってください。")
+                        Text("必要な変更を原稿へ反映してから、比較したRevisionを基準に解決後の本文を端末に保護できます。")
                             .foregroundStyle(.secondary)
+                        Button("解決後の本文を端末に保護") {
+                            Task { if await model.acceptConflictResolution() { showingConflict = false } }
+                        }
+                        .disabled(model.conflictRevisionID == nil || model.saveIsInFlight)
+                        Text(model.saveMessage).font(.caption)
                     }
                 }
                 .navigationTitle("revision競合")
+                .task { await model.loadConflictComparison() }
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { showingConflict = false } } }
             }
         }

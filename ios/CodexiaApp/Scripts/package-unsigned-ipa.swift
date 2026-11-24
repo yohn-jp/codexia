@@ -84,10 +84,17 @@ func main() throws {
     try require(bundleID == "jp.yohn.codexia", "Unexpected bundle identifier: \(bundleID)")
     try require(minimumOS == "27.0", "Expected minimum iOS 27.0, found \(minimumOS)")
     try require(platformName == "iphoneos", "Expected an iPhoneOS device archive, found \(platformName)")
-    try require(platformVersion == "27.0", "Expected iOS SDK 27.0, found \(platformVersion)")
+    try require(platformVersion.hasPrefix("27."), "Expected iOS SDK 27.x, found \(platformVersion)")
     try require(FileManager.default.fileExists(atPath: executable.path), "The app executable is missing")
     let architectures = try run("/usr/bin/lipo", ["-archs", executable.path]).split(separator: " ").map(String.init)
     try require(architectures == ["arm64"], "Expected an ARM64-only executable, found \(architectures)")
+    let buildVersion = try run("/usr/bin/xcrun", ["vtool", "-show-build", executable.path])
+    try require(buildVersion.range(of: #"(?m)^\s*platform IOS\s*$"#, options: .regularExpression) != nil,
+                "The Mach-O platform is not iOS")
+    try require(buildVersion.range(of: #"(?m)^\s*minos 27\.0\s*$"#, options: .regularExpression) != nil,
+                "The Mach-O minimum iOS version is not 27.0")
+    let loadCommands = try run("/usr/bin/otool", ["-l", executable.path])
+    try require(!loadCommands.contains("LC_CODE_SIGNATURE"), "The executable contains a code signature or entitlements")
     if let appFiles = FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil) {
         for case let file as URL in appFiles {
             let name = file.lastPathComponent
@@ -110,11 +117,12 @@ func main() throws {
     let payload = temporary.appendingPathComponent("Payload", isDirectory: true)
     try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
     try FileManager.default.copyItem(at: app, to: payload.appendingPathComponent(app.lastPathComponent))
-    _ = try run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", payload.path, ipa.path])
+    _ = try run("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--keepParent", payload.path, ipa.path])
 
     let entries = try run("/usr/bin/unzip", ["-Z1", ipa.path]).split(separator: "\n").map(String.init)
     let prefix = "Payload/\(app.lastPathComponent)/"
     try require(entries.contains(where: { $0.hasPrefix(prefix) }), "The IPA is missing its Payload app")
+    try require(entries.allSatisfy { $0 == "Payload/" || $0.hasPrefix(prefix) }, "The IPA contains unexpected payload entries")
     try require(!entries.contains(where: { $0.hasSuffix("embedded.mobileprovision") || $0.contains("/_CodeSignature/") || $0.hasSuffix("CodeResources") || $0.hasSuffix("archived-expanded-entitlements.xcent") }), "The IPA contains signing material")
     let packagedInfoData = try runData("/usr/bin/unzip", ["-p", ipa.path, "Payload/\(app.lastPathComponent)/Info.plist"])
     guard let packaged = try PropertyListSerialization.propertyList(from: packagedInfoData, format: nil) as? [String: Any] else {
@@ -122,9 +130,12 @@ func main() throws {
     }
     try require((packaged["CFBundleIdentifier"] as? String) == bundleID, "The packaged bundle identifier changed")
     try require((packaged["DTPlatformName"] as? String) == "iphoneos", "The IPA does not contain an iPhoneOS device build")
-    try require((packaged["DTPlatformVersion"].map { String(describing: $0) }) == "27.0", "The IPA does not target iOS SDK 27.0")
-    let configuration = URLComponents(string: apiOrigin)
-    let configured = configuration?.scheme == "https" && configuration?.host != nil && !oauthClientID.isEmpty && !oauthClientID.contains("placeholder") && apiOrigin != "https://api.example.test"
+    try require(packagedInfoData == infoData, "The packaged device settings changed")
+    let environment = ProcessInfo.processInfo.environment
+    try require(apiOrigin == (environment["EXPECTED_API_ORIGIN"] ?? "")
+                && oauthClientID == (environment["EXPECTED_OAUTH_CLIENT_ID"] ?? ""),
+                "The archived public OAuth configuration does not match the requested build")
+    let configured = !apiOrigin.isEmpty
 
     let manifest: [String: Any] = [
         "artifact": ipa.lastPathComponent,
@@ -137,10 +148,12 @@ func main() throws {
         "platform": platformName,
         "sdk_version": platformVersion,
         "architectures": architectures,
+        "mach_o_build": buildVersion,
         "product_configuration": configured ? "configured" : "unconfigured verification artifact",
         "api_origin": apiOrigin,
         "oauth_client_id": oauthClientID,
         "signing": "unsigned; no embedded provisioning profile or code signature",
+        "signed_entitlements": [],
         "resolved_dependencies_sha256": try fileHash(resolved),
         "ipa_entries": entries,
     ]

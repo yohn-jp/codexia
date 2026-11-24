@@ -131,6 +131,8 @@ jobs:
       - name: Certify native unsigned IPA and archive contents
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_API_ORIGIN: ${{ inputs.api_origin }}
+          EXPECTED_OAUTH_CLIENT_ID: ${{ inputs.oauth_client_id }}
         run: |
           lock=ios/CodexiaApp/CodexiaApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           git ls-files --error-unmatch "$lock" >/dev/null

@@ -41,12 +41,12 @@
   A00000000000000000000031 = {isa = XCBuildConfiguration; buildSettings = {CODEXIA_API_ORIGIN = ""; CODEXIA_OAUTH_CLIENT_ID = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Configuration/Info.plist; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 27.0; CURRENT_PROJECT_VERSION = 1; SWIFT_VERSION = 6.0;}; name = Release;};
   A00000000000000000000032 = {isa = XCBuildConfiguration; buildSettings = {CODEXIA_API_ORIGIN = "https://api.example.test"; CODEXIA_OAUTH_CLIENT_ID = "codexia-ios-placeholder"; PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Configuration/Info.plist; TARGETED_DEVICE_FAMILY = "1,2";}; name = Debug;};
   A00000000000000000000033 = {isa = XCBuildConfiguration; buildSettings = {CODEXIA_API_ORIGIN = ""; CODEXIA_OAUTH_CLIENT_ID = ""; PRODUCT_BUNDLE_IDENTIFIER = jp.yohn.codexia; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Configuration/Info.plist; TARGETED_DEVICE_FAMILY = "1,2";}; name = Release;};
- };
   A00000000000000000000053 = {isa = XCSwiftPackageProductDependency; productName = CodexiaAPI; package = A00000000000000000000057;};
   A00000000000000000000054 = {isa = XCSwiftPackageProductDependency; productName = CodexiaTransport; package = A00000000000000000000057;};
   A00000000000000000000055 = {isa = PBXBuildFile; productRef = A00000000000000000000053;};
   A00000000000000000000056 = {isa = PBXBuildFile; productRef = A00000000000000000000054;};
   A00000000000000000000057 = {isa = XCLocalSwiftPackageReference; relativePath = ../CodexiaTransport;};
+ };
 
  rootObject = A00000000000000000000001;
 }
