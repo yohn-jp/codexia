@@ -4,10 +4,20 @@ import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { UiContribution } from "@codexia/contracts";
 import type { ProjectId } from "@codexia/persistence-contracts";
-import { ApplicationStatus, hasApplicationStatus } from "./ApplicationStatus";
-import { availableModulePanels } from "./AvailableModulePanels";
-import { DocumentInspector } from "./DocumentInspector";
-import { LibraryOutline } from "./LibraryOutline";
+import { endFileScope, setFileScope } from "@vanilla-extract/css/fileScope";
+
+// The Node/tsx SSR test does not run Vite's vanilla-extract transform.
+// Evaluate the real recipe once in its file scope before loading consumers.
+setFileScope("src/components/button.css.ts", "@codexia/app");
+try {
+  await import("../components/button.css");
+} finally {
+  endFileScope();
+}
+const { ApplicationStatus, hasApplicationStatus } = await import("./ApplicationStatus");
+const { availableModulePanels } = await import("./AvailableModulePanels");
+const { DocumentInspector } = await import("./DocumentInspector");
+const { LibraryOutline } = await import("./LibraryOutline");
 
 const tree = {
   title: "Novel",

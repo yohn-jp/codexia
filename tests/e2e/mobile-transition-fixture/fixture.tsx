@@ -6,7 +6,7 @@ import { MobileShell } from "../../../app/src/shells/mobile/MobileShell";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
 import { BrowserJournal, documentKey, journalEntryKey, projectKey, type JournalEntry } from "../../../app/src/storage/journal";
 import { renderDesktopTabsFixture } from "./desktop-tabs";
-import "../../../app/styles.css";
+import "../../../app/src/styles.css";
 
 type GuardOutcome = boolean | "delayed";
 

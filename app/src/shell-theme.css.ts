@@ -1,5 +1,5 @@
 import { createGlobalTheme, createGlobalThemeContract } from "@vanilla-extract/css";
-import { editorialShellTokens, themeTokens, writingShellTokens } from "./theme-tokens";
+import { editorialShellTokens, type themeTokens, writingShellTokens } from "./theme-tokens";
 
 function tokenContract() {
   const contract = Object.fromEntries(Object.keys(editorialShellTokens.light).map(key => [key, null])) as {

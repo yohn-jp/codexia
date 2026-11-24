@@ -6,11 +6,12 @@ const appPackage = new URL("../../../app/package.json", import.meta.url);
 const appRoot = fileURLToPath(new URL("../../../app/", import.meta.url));
 const requireFromApp = createRequire(appPackage);
 const react = requireFromApp("@vitejs/plugin-react").default;
+const { vanillaExtractPlugin } = requireFromApp("@vanilla-extract/vite-plugin");
 const fixtureRoot = fileURLToPath(new URL("./", import.meta.url));
 
 export default {
   root: fixtureRoot,
-  plugins: [react()],
+  plugins: [vanillaExtractPlugin(), react()],
   resolve: {
     dedupe: ["react", "react-dom", "react-router", "react-router-dom"],
     alias: [
