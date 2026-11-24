@@ -34,6 +34,7 @@ export async function withBrowserFixture(task, index, execute) {
   const database = 'codexia_ci_' + randomUUID().replaceAll('-', '');
   const stateDir = await mkdtemp(path.join(tmpdir(), 'codexia-ci-browser-'));
   let control, created = false;
+  const started = performance.now();
   try {
     const settings = browserFixtureSettings(task, index, process.env.CODEXIA_E2E_DATABASE_URL, database, stateDir);
     const require = createRequire(new URL('../../../packages/persistence-postgres/package.json', import.meta.url));
@@ -42,7 +43,7 @@ export async function withBrowserFixture(task, index, execute) {
     await control.connect();
     await control.query(`CREATE DATABASE "${database}"`);
     created = true;
-    console.log(JSON.stringify({ phase: 'browser-fixture', task, database, port: settings.CODEXIA_E2E_PORT }));
+    console.log(JSON.stringify({ phase: 'browser-fixture', task, database, port: settings.CODEXIA_E2E_PORT, durationMs: Math.round(performance.now() - started) }));
     return await execute(settings);
   } finally {
     try {

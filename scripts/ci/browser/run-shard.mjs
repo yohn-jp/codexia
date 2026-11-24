@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildBrowserTestArguments, resolveBrowserShard } from "./shards.mjs";
+import { buildBrowserTestArguments, resolveBrowserShard, resolveBrowserTestCli } from "./shards.mjs";
 import { withBrowserFixture } from "./fixture.mjs";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -72,7 +72,7 @@ async function runShard(shard, prebuilt, fixtureSettings = {}) {
     if (buildStatus !== 0) return buildStatus;
   }
 
-  const testStatus = run("pnpm", buildBrowserTestArguments(shard), env);
+  const testStatus = run(process.execPath, [resolveBrowserTestCli(), ...buildBrowserTestArguments(shard)], env);
   let report;
   try {
     report = JSON.parse(await readFile(coverageFile, "utf8"));

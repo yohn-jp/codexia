@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { buildBrowserTestArguments, resolveBrowserShard, summarizeBrowserCoverage } from "./shards.mjs";
+import { buildBrowserTestArguments, resolveBrowserShard, resolveBrowserTestCli, summarizeBrowserCoverage } from "./shards.mjs";
 
 test("unknown profiles and shards are rejected before a runner starts", () => {
   assert.throws(() => resolveBrowserShard("preview", "core"), /Unknown browser profile/u);
@@ -24,7 +24,7 @@ test("Playwright discovers only the selected spec and browser project", t => {
   ];
   for (const { profile, id, file, project } of cases) {
     const shard = resolveBrowserShard(profile, id);
-    const result = spawnSync("pnpm", [...buildBrowserTestArguments(shard), "--list", "--reporter=json"], {
+    const result = spawnSync(process.execPath, [resolveBrowserTestCli(), ...buildBrowserTestArguments(shard), "--list", "--reporter=json"], {
       cwd: new URL("../../../", import.meta.url), encoding: "utf8", env,
     });
     assert.ifError(result.error);
@@ -41,7 +41,7 @@ test("WebKit discovery retains every unclassified or mixed UI case and excludes 
   const env = { ...process.env, CODEXIA_E2E_TEST_FILE: "ui-v1.acceptance.spec.ts",
     CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
   const discover = (id, selection = []) => {
-    const result = spawnSync("pnpm", [...buildBrowserTestArguments(resolveBrowserShard("full", id)), ...selection, "--list", "--reporter=json"], {
+    const result = spawnSync(process.execPath, [resolveBrowserTestCli(), ...buildBrowserTestArguments(resolveBrowserShard("full", id)), ...selection, "--list", "--reporter=json"], {
       cwd: new URL("../../../", import.meta.url), encoding: "utf8", env,
     });
     assert.ifError(result.error);
@@ -85,4 +85,25 @@ test("coverage rejects an empty shard and incomplete reporter output", () => {
 
 test("coverage rejects statuses it does not understand", () => {
   assert.throws(() => summarizeBrowserCoverage({ expected: 1, outcomes: ["interrupted"] }), /Unknown Playwright outcome/u);
+});
+
+test("the locked direct Playwright CLI discovers the same cases as pnpm exec", () => {
+  const env = { ...process.env, CODEXIA_E2E_TEST_FILE: "", CODEXIA_E2E_COVERAGE_FILE: "",
+    CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
+  for (const id of ["core", "persistence-database", "webkit"]) {
+    const args = [...buildBrowserTestArguments(resolveBrowserShard("full", id)), "--list", "--reporter=json"];
+    const execute = (command, argv) => {
+      const result = spawnSync(command, argv, { cwd: new URL("../../../", import.meta.url), env, encoding: "utf8" });
+      assert.ifError(result.error);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const collect = suite => [...(suite.specs ?? []), ...(suite.suites ?? []).flatMap(collect)];
+      return JSON.parse(result.stdout).suites.flatMap(collect).map(spec => ({
+        title: spec.title, file: spec.file, line: spec.line,
+        projects: spec.tests.map(item => item.projectName),
+      }));
+    };
+    const direct = execute(process.execPath, [resolveBrowserTestCli(), ...args]);
+    assert.ok(direct.length > 0);
+    assert.deepEqual(direct, execute("pnpm", ["exec", "playwright", ...args]));
+  }
 });

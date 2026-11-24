@@ -5,6 +5,17 @@ import { summarizeBrowserCoverage } from "./shards.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
+// Explicit phase steps and fixture/hook timing are observational only;
+// nested durations overlap and must never be summed as elapsed CI time.
+function timingSteps(steps) {
+  return steps.flatMap(step => [
+    ...((step.category === "fixture" || step.category === "hook" ||
+      (step.category === "test.step" && step.title.startsWith("CI phase: ")))
+      ? [{ category: step.category, title: step.title, durationMs: step.duration }] : []),
+    ...timingSteps(step.steps ?? []),
+  ]);
+}
+
 export default class BrowserCoverageReporter {
   constructor({ outputFile }) {
     if (typeof outputFile !== "string" || outputFile.length === 0) {
@@ -56,6 +67,13 @@ export default class BrowserCoverageReporter {
         file: path.relative(root, test.location.file),
         line: test.location.line,
         outcome: outcomes[index],
+        attempts: test.results.map(attempt => ({
+          retry: attempt.retry,
+          workerIndex: attempt.workerIndex,
+          status: attempt.status,
+          durationMs: attempt.duration,
+          phases: timingSteps(attempt.steps),
+        })),
       })),
     };
     await mkdir(path.dirname(this.outputFile), { recursive: true });
