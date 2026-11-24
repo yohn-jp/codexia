@@ -98,4 +98,16 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(snapshot.text, "draft")
         XCTAssertEqual(state.snapshot.text, "draft plus input")
     }
+
+    func testSnapshotSessionCanBeValidatedAfterAsyncProtection() {
+        var state = EditorState(documentID: "a", text: "draft")
+        let snapshot = state.snapshot
+        XCTAssertTrue(state.isCurrent(snapshot))
+
+        state.edit("draft plus input")
+        XCTAssertTrue(state.isCurrent(snapshot), "Later typing remains in the same document session")
+
+        let reopened = EditorState(documentID: "a", text: "new session")
+        XCTAssertFalse(reopened.isCurrent(snapshot))
+    }
 }

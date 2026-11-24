@@ -1,8 +1,8 @@
 import Foundation
 
-/// In-memory editing state. Protection is acknowledged only by a future journal owner.
+/// In-memory editing state. Durable protection is acknowledged by the journal owner.
 public struct EditorState {
-    public struct Snapshot: Equatable {
+    public struct Snapshot: Equatable, Sendable {
         fileprivate let session: UUID
         public let documentID: String
         public let version: UInt64
@@ -38,6 +38,10 @@ public struct EditorState {
         Snapshot(session: session, documentID: documentID, version: version, text: text)
     }
     public var canLeave: Bool { version == protectedVersion && !isComposing }
+
+    public func isCurrent(_ snapshot: Snapshot) -> Bool {
+        snapshot.session == session && snapshot.documentID == documentID
+    }
 
     public mutating func edit(_ text: String) {
         guard !self.text.utf8.elementsEqual(text.utf8) else { return }
