@@ -39,11 +39,16 @@ start="$(now_ms)"
 curl --fail --location --silent --show-error --retry 2 --connect-timeout 10 --max-time 120 \
   "https://github.com/astral-sh/uv/releases/download/$version/uv-$asset.tar.gz" \
   --output "$work/uv.tar.gz"
-if command -v sha256sum >/dev/null; then
-  printf '%s  %s\n' "$sha" "$work/uv.tar.gz" | sha256sum --check
-else
-  printf '%s  %s\n' "$sha" "$work/uv.tar.gz" | shasum -a 256 -c
-fi
+"$python_bin" - "$work/uv.tar.gz" "$sha" <<'PY'
+import hashlib
+import sys
+
+with open(sys.argv[1], "rb") as archive:
+    actual = hashlib.file_digest(archive, "sha256").hexdigest()
+if actual != sys.argv[2]:
+    raise SystemExit("uv release checksum mismatch")
+print("uv release SHA-256 verified")
+PY
 tar -xzf "$work/uv.tar.gz" -C "$work"
 uv="$work/uv-$asset/uv"
 "$uv" --version
