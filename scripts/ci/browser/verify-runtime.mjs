@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 process.chdir(root);
 
 // Derive browser requirements from the canonical CI task inventory.
-// The WebKit group also contains Chromium UI/auth tasks.
+// The transitional WebKit group also contains Chromium UI tasks.
 const browserGroup = process.env.CODEXIA_CI_BROWSER_GROUP;
 const { projects, imageDigest: expectedImageDigest } = browserRuntimeRequirements(`browser-${browserGroup}`);
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");

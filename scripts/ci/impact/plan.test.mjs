@@ -458,7 +458,8 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
   for (const profile of ['core', 'full']) {
     assert.ok(selected.tasks.includes(`build-${profile}`));
     assert.ok(selected.tasks.includes(`browser-${profile}-oauth-web`));
-    assert.ok(selected.groups.includes(`browser-${profile}-webkit`));
+    assert.ok(selected.groups.includes(`browser-${profile}-reference`));
+    assert.ok(!selected.groups.includes(`browser-${profile}-webkit`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
 });

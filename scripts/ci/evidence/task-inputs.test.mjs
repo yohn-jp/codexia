@@ -189,12 +189,14 @@ test('browser input proofs bind the lane image for both browsers in the shared W
   const original = captureTaskInputSource(inputs);
   const changed = captureWithChangedWebKitImage(inputs);
   for (const profile of ['core', 'full']) {
-    for (const shard of ['ui-v1', 'oauth-web', 'webkit']) {
+    for (const shard of ['ui-v1', 'webkit']) {
       const task = `browser-${profile}-${shard}`;
       assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed multi-browser image`);
     }
-    const writing = `browser-${profile}-core`;
-    assert.equal(changed(writing).environment, original(writing).environment, `${writing} uses the unchanged Chromium-only image`);
+    for (const shard of ['core', 'oauth-web', 'auth-recovery', 'passkey-bootstrap']) {
+      const task = `browser-${profile}-${shard}`;
+      assert.equal(changed(task).environment, original(task).environment, `${task} uses the unchanged Chromium-only image`);
+    }
   }
 });
 

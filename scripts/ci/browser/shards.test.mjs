@@ -40,22 +40,26 @@ test("Playwright discovers only the selected spec and browser project", t => {
 test("WebKit discovery retains every unclassified or mixed UI case and excludes only reviewed Desktop cases", () => {
   const env = { ...process.env, CODEXIA_E2E_TEST_FILE: "ui-v1.acceptance.spec.ts",
     CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
-  const discover = (id) => {
-    const result = spawnSync("pnpm", [...buildBrowserTestArguments(resolveBrowserShard("full", id)), "--list", "--reporter=json"], {
+  const discover = (id, selection = []) => {
+    const result = spawnSync("pnpm", [...buildBrowserTestArguments(resolveBrowserShard("full", id)), ...selection, "--list", "--reporter=json"], {
       cwd: new URL("../../../", import.meta.url), encoding: "utf8", env,
     });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const { suites } = JSON.parse(result.stdout);
     const collect = (suite) => [...(suite.specs ?? []), ...(suite.suites ?? []).flatMap(collect)];
-    return suites.flatMap(collect).map(spec => ({ title: spec.title, line: spec.line, tags: spec.tags ?? [] }));
+    return suites.flatMap(collect).map(spec => ({ title: spec.title, line: spec.line }));
   };
   const chromium = discover("ui-v1");
   const webkit = discover("webkit");
-  const desktop = chromium.filter(spec => spec.tags.includes("@author-desktop"));
+  const desktop = discover("ui-v1", ["--grep", "@author-desktop"]);
   assert.ok(desktop.length > 0, "The reviewed Desktop cases must remain in Chromium");
   const identity = spec => JSON.stringify([spec.line, spec.title]);
-  assert.deepEqual(webkit.map(identity).sort(), chromium.filter(spec => !spec.tags.includes("@author-desktop")).map(identity).sort());
+  const desktopIds = new Set(desktop.map(identity));
+  assert.ok(desktopIds.size < chromium.length, "Desktop selection must not absorb the entire UI suite");
+  assert.ok(desktop.every(spec => chromium.some(all => identity(all) === identity(spec))));
+  assert.deepEqual(webkit.map(identity).sort(), chromium.filter(spec => !desktopIds.has(identity(spec))).map(identity).sort());
+  assert.ok(desktop.some(spec => spec.title.includes("keyboard select-all replacement")), "Desktop input proof must remain in Chromium");
   assert.ok(webkit.some(spec => spec.title.includes("Mobile reader")), "Legacy Mobile reader proof must remain");
   assert.ok(webkit.some(spec => spec.title.includes("guarded shell switches")), "Mixed shell proof must remain");
 });
