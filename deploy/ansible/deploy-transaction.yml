@@ -403,6 +403,8 @@
         echo "Stale deployment admission: $1; rerun admission against the active release" >&2
         exit 1
       }
+      [[ ! -e "$state_dir/cutover-transaction.json" && ! -L "$state_dir/cutover-transaction.json" ]] ||
+        stale_admission 'coordinated API epoch maintenance is pending'
       [[ ! -e "$transaction_intent" && ! -L "$transaction_intent" ]] || stale_admission 'a deployment transaction needs recovery'
       if ! podman volume exists codexia-history; then
         echo 'Deployment base runtime requires the rootless history volume' >&2

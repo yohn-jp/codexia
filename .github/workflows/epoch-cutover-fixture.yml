@@ -1,0 +1,141 @@
+name: Verify coordinated API epoch cutover
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/epoch-cutover-fixture.yml
+      - .github/workflows/production-epoch-cutover.yml
+      - docs/deployment/PUSH-DEPLOYMENT.md
+      - docs/deployment/BACKUP.md
+      - docs/deployment/UPDATE-FLOW.md
+      - docs/deployment/IAC.md
+      - deploy/ansible/**
+      - deploy/backup/**
+      - deploy/backend/**
+      - deploy/quadlet/**
+      - deploy/postgres/**
+      - deploy/*compatibility.json
+      - Dockerfile.backend
+      - .dockerignore
+      - profiles/**
+      - packages/**
+      - modules/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - scripts/build/packaging/**
+      - scripts/deployment/**
+      - scripts/ci/evidence/**
+      - .github/workflows/production-bootstrap.yml
+      - scripts/release/backend/update-identity*.mjs
+      - scripts/release/cutover/**
+      - scripts/verification/runtime/better-auth-fixture.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: epoch-cutover-fixture-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  cutover-contract:
+    name: Verify cutover authorization, coordinator, Cloudflare mock and host recovery contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - name: Run coordinator, Cloudflare mock and recovery receipt tests
+        id: node-contract
+        run: |
+          node --test scripts/deployment/cutover/*.test.mjs scripts/release/cutover/*.test.mjs scripts/deployment/recovery/epoch-cutover.test.mjs 2>&1 |
+            tee "$RUNNER_TEMP/epoch-cutover-node.log"
+      - name: Run the host observation contract
+        id: observe-contract
+        run: bash deploy/ansible/test-cutover-observe.sh 2>&1 | tee "$RUNNER_TEMP/epoch-cutover-observe.log"
+      - name: Run the host transaction contract
+        id: host-contract
+        run: python3 -B deploy/ansible/test_cutover_host.py 2>&1 | tee "$RUNNER_TEMP/epoch-cutover-host.log"
+      - name: Check the fixture shell syntax
+        id: syntax-contract
+        run: |
+          (bash -n deploy/ansible/test-epoch-cutover-fixture.sh && bash -n deploy/ansible/epoch-cutover-rootless-fixture.sh) 2>&1 |
+            tee "$RUNNER_TEMP/epoch-cutover-syntax.log"
+      - name: Annotate failed contract with bounded diagnostics
+        if: failure()
+        env:
+          NODE_OUTCOME: ${{ steps.node-contract.outcome }}
+          OBSERVE_OUTCOME: ${{ steps.observe-contract.outcome }}
+          HOST_OUTCOME: ${{ steps.host-contract.outcome }}
+          SYNTAX_OUTCOME: ${{ steps.syntax-contract.outcome }}
+        run: |
+          for contract in node observe host syntax; do
+            outcome=${contract^^}_OUTCOME
+            if [[ "${!outcome}" != failure ]]; then continue; fi
+            detail=$(tail -n 12 "$RUNNER_TEMP/epoch-cutover-$contract.log" | cut -c1-180)
+            detail=${detail//%/%25}
+            detail=${detail//$'\r'/%0D}
+            detail=${detail//$'\n'/%0A}
+            printf '::error title=Epoch cutover %s contract::%s\n' "$contract" "${detail:-The command exited without diagnostic output.}"
+          done
+
+  rootless-postgres:
+    name: Verify epoch 1 → 2 and recovery on disposable rootless PostgreSQL 17
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Initialize run-bound fixture outcome
+        env:
+          EPOCH_FIXTURE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          evidence="$RUNNER_TEMP/codexia-epoch-cutover-evidence"
+          mkdir -p "$evidence"
+          jq -n --arg sourceSha "$EPOCH_FIXTURE_SOURCE_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            '{sourceSha:$sourceSha,runId:$runId,runAttempt:$runAttempt,status:"NOT_CHECKED"}' > "$evidence/outcome.json"
+      - name: Install disposable host capabilities
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            age podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session jq
+      - name: Build exact Full images and exercise the host cutover
+        env:
+          EPOCH_FIXTURE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/epoch-cutover-rootless.log"
+          if bash deploy/ansible/test-epoch-cutover-fixture.sh 2>&1 | tee "$log"; then exit 0; fi
+          detail=$(tail -n 12 "$log" | cut -c1-180)
+          detail=${detail//%/%25}
+          detail=${detail//$'\r'/%0D}
+          detail=${detail//$'\n'/%0A}
+          printf '::error title=Epoch cutover rootless fixture::%s\n' "${detail:-The command exited without diagnostic output.}"
+          exit 1
+      - name: Upload source- and run-bound fixture observations
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: epoch-cutover-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-epoch-cutover-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14

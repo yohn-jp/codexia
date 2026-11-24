@@ -7,7 +7,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
 import { buildComponentReleaseRecord } from '../components/record-model.mjs';
-import { assertFrontendPromotionArtifactEvidence } from '../../verification/artifacts/frontend.mjs';
+import { assertFrontendPromotionArtifactEvidence, verifyCutoverFrontendArtifact } from '../../verification/artifacts/frontend.mjs';
 
 test('verified PR artifact digest and identity flow through extraction into a main-bound release record', async t => {
   const dir=await mkdtemp(path.join(tmpdir(),'codexia-frontend-promotion-handoff-'));
@@ -45,4 +45,12 @@ test('verified PR artifact digest and identity flow through extraction into a ma
   assert.equal(release.metadata.producer.sourceSha,sourceSha);
   assert.equal(release.metadata.producer.artifactDigest,archiveDigest);
   assert.equal(await readFile(path.join(output,'desktop','update-identity.json'),'utf8'),JSON.stringify(identity));
+});
+
+
+test('epoch cutover rejects a frontend without approved public OAuth settings before artifact access', async () => {
+  await assert.rejects(verifyCutoverFrontendArtifact({}, {
+    env: { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REF: 'refs/heads/main' },
+    fetchImpl: () => { assert.fail('An unconfigured cutover must not access an artifact'); },
+  }), /approved public frontend OAuth configuration/u);
 });

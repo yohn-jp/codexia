@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from '../../release/components/version.mjs';
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from '../../ci/evidence/download-artifacts.mjs';
-import { assertFrontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
+import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../../build/frontend/oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from '../../release/components/policy.mjs';
 import { assertFrontendIdentity } from '../../release/frontend/verify-compatibility.mjs';
 import { verifyReusableMainProof } from '../../ci/certification/reuse-merged-pr.mjs';
@@ -420,6 +420,61 @@ async function writePromotionOutputs(file,output){
   }
   await appendFile(file,entries.map(([key,value])=>key+'='+String(value).replace(/[\r\n]/gu,' ')+'\n').join(''));
   return output;
+}
+
+/** Read the independently built main archive when ordinary deployment is paused. */
+export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch } = {}) {
+  assert.equal(env.GITHUB_REPOSITORY, repository, 'Cutover frontend repository mismatch');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover frontend verification requires main');
+  assert.ok(readFrontendOAuthConfig(env), 'Cutover requires the approved public frontend OAuth configuration');
+  const id = positiveInteger(input.artifactId, 'Frontend artifact ID');
+  const runId = positiveInteger(input.runId, 'Frontend producer run ID');
+  const verifyRunId = positiveInteger(input.verifyRunId, 'Frontend Verify run ID');
+  const token = env.GH_TOKEN;
+  assert.ok(token, 'Actions read token is required');
+  const request = endpoint => githubJson(apiBase + '/actions/' + endpoint, token, fetchImpl);
+  const [run, artifact, verifyRun, jobs, verifyJobs] = await Promise.all([
+    request('runs/' + runId),
+    request('artifacts/' + id),
+    request('runs/' + verifyRunId),
+    apiPages(request, 'runs/' + runId + '/jobs?filter=latest', 'jobs'),
+    apiPages(request, 'runs/' + verifyRunId + '/jobs?filter=latest', 'jobs'),
+  ]);
+  assert.equal(run.path, '.github/workflows/frontend-release.yml', 'Unexpected frontend producer workflow');
+  assert.equal(run.repository?.id, currentRepositoryId(env), 'Frontend producer repository mismatch');
+  assert.equal(run.head_repository?.id, currentRepositoryId(env), 'Frontend producer source repository mismatch');
+  assert.equal(run.status, 'completed', 'Frontend producer has not completed');
+  assert.equal(verifyRun.path, '.github/workflows/verify.yml', 'Unexpected Verify workflow');
+  assert.equal(verifyRun.repository?.id, currentRepositoryId(env), 'Frontend Verify repository mismatch');
+  assert.equal(verifyRun.head_repository?.id, currentRepositoryId(env), 'Frontend Verify source repository mismatch');
+  assert.equal(verifyRun.id, verifyRunId, 'Frontend Verify run ID mismatch');
+  const sourceSha = run.head_sha;
+  assert.match(sourceSha ?? '', shaPattern, 'Frontend producer source SHA is invalid');
+  verifiedSourceRun([verifyRun], sourceSha);
+  assertVerificationJobs(verifyJobs);
+  execFileSync('git', ['merge-base', '--is-ancestor', sourceSha, 'HEAD'], { stdio: 'ignore' });
+  const producerJobs = jobs.filter(job => job?.name === 'Build and verify UI assets');
+  assert.equal(producerJobs.length, 1, 'Frontend producer job is ambiguous');
+  const attempt = positiveInteger(producerJobs[0].run_attempt, 'Frontend producer attempt');
+  const producerAttemptJobs = await apiPages(request, 'runs/' + runId + '/attempts/' + attempt + '/jobs', 'jobs');
+  assert.equal(artifact.expired, false, 'Frontend archive is expired');
+  assert.equal(artifact.workflow_run?.id, runId, 'Frontend archive belongs to another run');
+  assert.equal(artifact.workflow_run?.head_sha, sourceSha, 'Frontend archive belongs to another source');
+  assertFrontendArtifactEvidence(run, artifact, jobs, {
+    sourceSha, workflowSha: sourceSha, artifactId: id, runId, producerAttempt: attempt,
+    currentAttempt: run.run_attempt, event: 'workflow_run', artifactDigest: input.artifactDigest,
+    artifactName: 'codexia-frontend-' + sourceSha + '-attempt-' + attempt,
+  }, producerAttemptJobs);
+  const bytes = await downloadArtifact(artifact, repository, token, fetchImpl, { maxArchive: MAX_ASSET_ARCHIVE });
+  const destination = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
+  await extractArtifactFiles(bytes, destination, { maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES });
+  const identity = assertFrontendIdentity(JSON.parse(readFileSync(path.join(destination, 'desktop/update-identity.json'), 'utf8')));
+  assertFrontendOAuthConfigIdentity(identity, env);
+  assert.equal(identity.version, readComponentVersion('frontend', String(run.run_number)), 'Frontend version differs from the producer');
+  assert.equal(identity.sourceSha, sourceSha, 'Frontend archive source differs from the producer');
+  assert.equal(identity.profile, 'full', 'Cutover requires a Full frontend');
+  assert.equal(identity.apiEpoch, 2, 'Cutover requires frontend API epoch 2');
+  return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId };
 }
 
 /** @param {{env?:NodeJS.ProcessEnv,fetchImpl?:typeof fetch}} options */
