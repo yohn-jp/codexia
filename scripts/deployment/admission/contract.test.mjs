@@ -144,8 +144,8 @@ test('the convergence step forwards the certified identity, private certificate 
       codexia_deployed_ui_epoch: 17,
       codexia_backup_destination: '/fixture/backups',
       codexia_backup_recipient: 'age1fixture',
-      codexia_initial_install_approved: installApproved,
-      codexia_database_initialization_approved: databaseApproved,
+      codexia_initial_install_approved: false,
+      codexia_database_initialization_approved: false,
     });
   }
 
@@ -169,6 +169,8 @@ test('the convergence step forwards the certified identity, private certificate 
   assert.equal(result.status, 0, result.stderr);
   const vars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
   assert.deepEqual(vars.codexia_expected_first_activation, binding);
+  assert.equal(vars.codexia_initial_install_approved, true);
+  assert.equal(vars.codexia_database_initialization_approved, true);
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
@@ -361,6 +363,7 @@ test('first activation verifies the initialized database after backup under both
   assert.deepEqual(approval['ansible.builtin.assert'].that, [
     'codexia_initial_install_approved | default(false) | bool',
     'codexia_database_initialization_approved | default(false) | bool',
+    '(codexia_lifecycle_fixture | default(false) | bool) or (codexia_expected_first_activation | default(none)) is mapping',
   ]);
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;

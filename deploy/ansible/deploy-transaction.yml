@@ -272,7 +272,8 @@
     that:
       - codexia_initial_install_approved | default(false) | bool
       - codexia_database_initialization_approved | default(false) | bool
-    fail_msg: A fresh activation requires a separately initialized and verified database plus explicit approval.
+      - (codexia_lifecycle_fixture | default(false) | bool) or (codexia_expected_first_activation | default(none)) is mapping
+    fail_msg: A fresh production activation requires the approved R6 plan and a separately initialized and verified database plus explicit approval.
   when: codexia_current_container_exists.rc == 1
 
 - name: Inspect staged Better Auth runtime settings without following links
@@ -462,19 +463,30 @@
         bash -c {{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/require-clean-api-target.sh') | quote }} ||
           stale_admission 'first activation requires a clean API target'
       fi
+      # Only the isolated, run-bound lifecycle fixture can omit an R6 plan.
+      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null ]]; then
+        stale_admission 'first activation requires an approved R6 plan'
+      fi
+      first_activation_window_current(){
+        [[ "$first_activation" != null ]] || return 0
+        local now
+        now="$(date +%s%3N)" || return 1
+        [[ "$now" =~ ^[1-9][0-9]{0,15}$ ]] || return 1
+        (( now >= approved_not_before && now <= approved_not_after ))
+      }
       if [[ "$first_activation" != null ]]; then
         [[ "$had_unit" == false ]] || stale_admission 'approved first activation found an existing API'
         first_binding="$(node - "$first_activation" <<'NODE'
       const { hostId, clusterId, databaseOid, settingsSha256, ownerBindingSha256, notBeforeMs, notAfterMs } = JSON.parse(process.argv[2]);
       const hash = /^[a-f0-9]{64}$/u;
-      const now = Date.now();
       if (!hash.test(hostId) || !hash.test(settingsSha256) || !/^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) ||
           !/^[1-9][0-9]{0,19}$/u.test(clusterId) || !/^[1-9][0-9]{0,9}$/u.test(databaseOid) ||
-          !Number.isSafeInteger(notBeforeMs) || !Number.isSafeInteger(notAfterMs) || now < notBeforeMs || now > notAfterMs) process.exit(1);
-      process.stdout.write([hostId, settingsSha256, clusterId, databaseOid, ownerBindingSha256].join(' '));
+          !Number.isSafeInteger(notBeforeMs) || !Number.isSafeInteger(notAfterMs) || notBeforeMs <= 0 || notBeforeMs >= notAfterMs) process.exit(1);
+      process.stdout.write([hostId, settingsSha256, clusterId, databaseOid, ownerBindingSha256, notBeforeMs, notAfterMs].join(' '));
       NODE
         )" || stale_admission 'first activation evidence is invalid or outside its window'
-        read -r approved_host approved_settings approved_cluster approved_database approved_owner <<< "$first_binding"
+        read -r approved_host approved_settings approved_cluster approved_database approved_owner approved_not_before approved_not_after <<< "$first_binding"
+        first_activation_window_current || stale_admission 'first activation evidence is outside its window'
         machine_id="$(cat /etc/machine-id)" || stale_admission 'the first activation host identity could not be read'
         [[ "$(printf '%s' "$machine_id" | sha256sum)" == "$approved_host  -" ]] ||
           stale_admission 'the first activation host identity changed'
@@ -674,6 +686,12 @@
         fi
         return "$restore_status"
       }
+      require_activation_window_or_restore(){
+        if first_activation_window_current; then return 0; fi
+        restore_previous || echo 'First activation rollback failed after window expiry' >&2
+        echo 'First activation approval window expired before publication; deployment stopped' >&2
+        exit 1
+      }
       if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
         echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
@@ -708,6 +726,7 @@
           exit 1
         fi
       fi
+      require_activation_window_or_restore
       if ! install -m 0644 "$candidate_unit" "$active_unit" ||
          ! systemctl --user daemon-reload ||
          ! systemctl --user start codexia-api.service; then
@@ -729,6 +748,7 @@
         exit 1
       fi
       if [[ "$tunnel_present" == true ]]; then
+        require_activation_window_or_restore
         if ! systemctl --user start codexia-tunnel.service; then
           restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
           echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2
@@ -780,6 +800,7 @@
       Deployment transaction failed during
       {{ 'host lock admission' if 'Another Codexia deployment or backup holds the host lock' in (codexia_deploy_transaction.stderr | default('')) else
          'first activation requires a clean API target' if 'first activation requires a clean API target' in (codexia_deploy_transaction.stderr | default('')) else
+         'first activation approval window expired' if 'First activation approval window expired before publication' in (codexia_deploy_transaction.stderr | default('')) else
          'stale admission' if 'Stale deployment admission' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth settings snapshot' if 'Better Auth settings snapshot is invalid' in (codexia_deploy_transaction.stderr | default('')) else
          'Better Auth migration' if 'Better Auth migrations failed' in (codexia_deploy_transaction.stderr | default('')) else

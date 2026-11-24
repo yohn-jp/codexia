@@ -297,6 +297,7 @@ jobs:
           import { readFileSync } from 'node:fs';
           import { join } from 'node:path';
           const env = process.env;
+          const manual = env.CODEXIA_MANUAL_ACTIVATION === 'true';
           const vars = {
             codexia_image: env.CODEXIA_CERTIFIED_FULL_IMAGE,
             codexia_source_sha: env.CODEXIA_SOURCE_SHA,
@@ -306,10 +307,10 @@ jobs:
             codexia_deployment_certificate_file: env.CODEXIA_DEPLOYMENT_CERTIFICATE_FILE,
             codexia_backup_destination: env.CODEXIA_BACKUP_DESTINATION,
             codexia_backup_recipient: env.CODEXIA_BACKUP_AGE_RECIPIENT,
-            codexia_initial_install_approved: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
-            codexia_database_initialization_approved: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+            codexia_initial_install_approved: manual && env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
+            codexia_database_initialization_approved: manual && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
           };
-          if (env.CODEXIA_MANUAL_ACTIVATION === 'true') {
+          if (manual) {
             vars.codexia_expected_first_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), 'utf8'));
           }
           process.stdout.write(JSON.stringify(vars));
