@@ -1,5 +1,5 @@
 import { compare, comparisonBase, snapshot } from './build.mjs';
-import { button, h } from './dom.mjs';
+import { button, h, replace } from './dom.mjs';
 import { back, begin, choices, replay, share, step, trace, visit } from './model.mjs';
 
 const root = document.querySelector('#simulator');
@@ -152,7 +152,7 @@ function paintStage() {
   const graphStates = state.projection === 'expected'
     ? graph.states.filter(({ id, platforms }) => id.startsWith(flow.id + '/') && (!platforms || platforms.includes(state.platform)))
     : graph.states.filter(({ id, platform, screen }) => platform === state.platform && (screen === screenId || id === state.at));
-  stage.replaceChildren(
+  replace(stage,
     h('p', { class: 'ux-source' }, [labels[state.platform], modeLabels[state.projection], flow.label].join(' · ')),
     h('div', { class: 'ux-wireframe', 'data-form': variant },
       heading,
@@ -210,7 +210,7 @@ function paintInspector() {
     inspectorBody.replaceChildren(h('p', {}, 'カタログから経路を選んでください。'));
     return;
   }
-  inspectorBody.replaceChildren(
+  replace(inspectorBody,
     readout(),
     selectedControl && h('section', { class: 'ux-selected-control' }, h('h3', {}, selectedControl.id),
       h('p', {}, selectedControl.label), h('p', {}, selectedControl.prerequisite ?? selectedControl.handler ?? '条件未抽出'),

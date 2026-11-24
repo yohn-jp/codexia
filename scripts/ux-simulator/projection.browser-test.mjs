@@ -57,6 +57,22 @@ try {
     const fits = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.goto(link('desktop', 'atlas-entry-01'));
     await assertHeading('Web /desktop/');
+    const readability = await stage.evaluate((stage) => {
+      const luminance = (color) => {
+        const rgb = color.match(/[^(), ]+/g).slice(1, 4).map(Number).map((value) => value / 255);
+        const linear = rgb.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+      };
+      const heading = stage.querySelector('[data-current-state]');
+      const foreground = luminance(getComputedStyle(heading).color);
+      const background = luminance(getComputedStyle(heading.parentElement).backgroundColor);
+      const nodes = document.createTreeWalker(document.querySelector('.ux-layout'), NodeFilter.SHOW_TEXT);
+      let stray = false;
+      while (nodes.nextNode()) stray ||= /^(?:undefined|null)$/.test(nodes.currentNode.textContent.trim());
+      return { ratio: (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05), stray };
+    });
+    assert.ok(readability.ratio >= 4.5, 'UX wireframe heading must retain contrast under the Pages shell');
+    assert.equal(readability.stray, false, 'Absent projection data must not render as text');
     await button('APIと認証を照合').focus();
     await page.keyboard.press('Enter');
     await assertHeading('APIと認証を照合');
