@@ -46,10 +46,11 @@ public struct AuthoringView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            Text(isProtecting ? "保護中…" : state.canLeave ? "未編集" : "未保護 — この端末にも保存されていません")
+            Text(protectionStatus)
                 .font(.caption)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
+                .accessibilityIdentifier("editor.protection-status")
             ManuscriptEditor(state: $state)
         }
         .navigationTitle("原稿")
@@ -117,6 +118,17 @@ public struct AuthoringView: View {
                 message: "保存機能はまだ利用できません。この画面を離れると入力内容が失われる可能性があります。"
             )
         }
+    }
+
+    private var protectionStatus: String {
+        if isProtecting { return "端末に保護中…" }
+        if state.isComposing { return "日本語入力中 — この端末には未保護です" }
+        if state.hasLocalEdits {
+            return state.canLeave
+                ? "端末に保護済み — サーバー未確定"
+                : "未保護 — この端末にも保存されていません"
+        }
+        return "保存済み"
     }
 
     private func protectCurrentSnapshot(thenLeave: Bool) {

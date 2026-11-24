@@ -86,8 +86,12 @@ public struct ManuscriptEditor: UIViewRepresentable {
             textView.setContentOffset(.zero, animated: false)
         }
 
-        private func synchronize(_ textView: UITextView) {
+        @discardableResult
+        private func synchronize(_ textView: UITextView) -> Bool {
             var current = state.wrappedValue
+            // A SwiftUI binding can keep the same storage location while its
+            // value is replaced. Never write the old TextView into that new session.
+            guard current.documentID == documentID, current.sessionID == sessionID else { return false }
             if textView.markedTextRange != nil {
                 current.setComposing(true)
             } else {
@@ -95,6 +99,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
                 current.setComposing(false)
             }
             state.wrappedValue = current
+            return true
         }
 
         public func textViewDidChange(_ textView: UITextView) { synchronize(textView) }
@@ -105,12 +110,20 @@ public struct ManuscriptEditor: UIViewRepresentable {
         }
         public func textViewDidBeginEditing(_ textView: UITextView) {
             var current = state.wrappedValue
+            guard current.documentID == documentID, current.sessionID == sessionID else { return }
             current.setFocused(true)
             state.wrappedValue = current
         }
         public func textViewDidEndEditing(_ textView: UITextView) {
-            synchronize(textView)
+            guard synchronize(textView) else {
+                finishDeferredReplacement(in: textView)
+                return
+            }
             var current = state.wrappedValue
+            guard current.documentID == documentID, current.sessionID == sessionID else {
+                finishDeferredReplacement(in: textView)
+                return
+            }
             current.setFocused(false)
             // Install a deferred response before focus can return to this view.
             if textView.markedTextRange == nil, !textView.text.utf8.elementsEqual(current.text.utf8) {

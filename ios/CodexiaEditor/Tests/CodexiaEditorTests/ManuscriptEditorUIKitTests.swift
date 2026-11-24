@@ -280,5 +280,37 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         XCTAssertEqual(view.text, "再読込した原稿")
         XCTAssertEqual(newBox.state.text, "再読込した原稿")
     }
+
+    func testReusedBindingCannotWriteOldTextIntoReplacementSession() {
+        for replacementDocumentID in ["b", "a"] {
+            let box = Box()
+            let binding = Binding(get: { box.state }, set: { box.state = $0 })
+            let coordinator = ManuscriptEditor.Coordinator(state: binding)
+            let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+            let window = UIWindow(frame: UIScreen.main.bounds)
+            let controller = UIViewController()
+            window.rootViewController = controller
+            controller.view.addSubview(view)
+            window.makeKeyAndVisible()
+            XCTAssertTrue(view.becomeFirstResponder())
+
+            let replacement = EditorState(documentID: replacementDocumentID, text: "新しいセッション")
+            box.state = replacement
+            XCTAssertFalse(coordinator.prepareForUpdate(with: binding, in: view))
+
+            view.insertText("古い入力")
+            coordinator.textViewDidChange(view)
+            XCTAssertEqual(box.state.text, "新しいセッション")
+            XCTAssertEqual(box.state.sessionID, replacement.sessionID)
+
+            view.resignFirstResponder()
+
+            XCTAssertEqual(coordinator.documentID, replacementDocumentID)
+            XCTAssertEqual(coordinator.sessionID, replacement.sessionID)
+            XCTAssertEqual(view.text, "新しいセッション")
+            XCTAssertEqual(box.state.text, "新しいセッション")
+            window.isHidden = true
+        }
+    }
 }
 #endif
