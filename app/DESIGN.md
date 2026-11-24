@@ -73,6 +73,16 @@ Desktop WritingはQuiet Page。他作業は必要面だけ（常時3面にしな
 
 選択・状態は色以外でも示す。保存・復旧はUX contract準拠。Focusは**3px solid outline、2px offset**、3:1以上、隠さない。
 
+## CSS implementation
+
+Desktop Reactの静的スタイルは [採用技術契約](../docs/architecture/DEPENDENCY-POLICY.md) のvanilla-extractを正本とする。既存CSSの段階移行中も恒久的な二重定義を増やさない。
+
+- 色・余白・文字・状態など共有される意味は既存の型付きsemantic tokenで管理し、同じ設計知識を部品ごとに再定義しない。意味の異なる偶然同じ値は無理に共通化しない。未決定の見た目をlintの都合で確定しない。
+- 局所的な静的スタイルは `style`、意味のある離散的なvariantsは `recipe` を用いる。共有部品のスタイルを再利用する。グローバルなテーマ・基礎スタイル・外部ライブラリの契約等、局所クラスで表現できない境界にのみ `globalStyle` を使う。既存セレクター互換のための移行時の利用は共通化の対象とし、恒久的な拡張先にしない。
+- 静的なJSXインラインスタイルは局所スタイルへ移す。作者の組版設定、実測したパネル幅など実行時にしか決まらない値は、型付きCSS変数または必要な動的スタイルで扱う。CSPを緩和しない。
+- Modern Web GuidanceのCSS・アクセシビリティ指針を使用する。原稿の縦書きとリサイズを踏まえ、意図に合う論理プロパティ、局所スコープ、低い詳細度、ブラウザー標準のセレクターを優先する。例外は意味・互換性に基づき、ライブラリ提供の内部セレクターやリセットを無条件に禁止しない。
+- 静的に強制できる規約は [Biome品質ゲート](../docs/architecture/DEPENDENCY-POLICY.md#biome品質ゲートの正本) で扱う。型付きスタイルの参照はTypeScript、テーマ・表示・操作・性能は実ブラウザー検証でも確認する。ソース行数の削減そのものを目的にしない。
+
 ## Brand icon
 
 The approved Codexia mark represents an **open leather-bound manuscript and a rising writing quill**. It must read as literature and writing even at a 16px favicon size; tiny versions shall retain only strong, aligned book and quill silhouettes instead of shrinking ornamental detail indiscriminately. Use separately optically adjusted masters for 16px, 24px, 32–40px, 41–96px, and 97px-and-above presentations. Small sizes require intentional pixel-grid placement, while larger variants can restore paper, binding and feather details. Maintain light, dark and single-color palettes and usable contrast. The icon does not replace accessible text or convey state by color alone.

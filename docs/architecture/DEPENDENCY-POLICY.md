@@ -97,6 +97,12 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 
 `@biomejs/biome`をJS/TS系のLint・Formatter・import整理の正本とし、同じ責務のESLint／Prettierや独自フォーマット検査を並行運用しない。`biome ci`を非破壊の必須検査とし、LintのみのSARIFをGitHub Code ScanningへCodeQLと**独立したcategory**で送信する。Formatter違反はCIの合否で扱う。CodeQL、TypeScript、契約テスト、アーキテクチャ検査の責務は変更しない。
 
+**JS/TS/JSXおよび対象となるCSSの静的品質検査はBiomeに一本化する。** 公式の安定ルール・技術ドメイン・設定overrideを優先し、標準機能で表現できない必須の設計制約に限って公式GritQL例または最小限のGritQL pluginを用いる。同じ責務のStylelint、ESLint、独自TypeScript ASTリンターを別基盤として追加しない。SwiftUI、TypeScript型検査、CodeQL、実行時検証、アーキテクチャ検査の責務は独立する。
+
+- ルール選定では正確性、セキュリティ、アクセシビリティ、責務境界、型安全性、保守性を優先する。単なる記述の短縮や個人の好みを強制しない。公式の全安定ルールを試験対象とし、採用技術と一般的なベストプラクティスに合致する標準ルールは原則として全て導入する。既存違反の有無だけで恒久的な不採用にしない。非採用技術の専用ルール、主観的な記法の好み、既存契約と相反する制約は対象外とし、正当な適用範囲を選ぶ。nurseryは既定で採用しない。カスタムルールの導入は標準ルールの選定と分離する。意図的な相反ルールを同時に強制しない。
+- 採用する必須ルールはエラーとして非破壊CIで強制する。既存違反の機械的な一括抑制や無関係な全ファイルの整形を避け、修正または適用範囲・理由・解除条件を明示する。必要な例外は最小のルールとスコープに限定する。
+- Desktop Webの実装は [Design System](../../app/DESIGN.md) とプロジェクトに固定した [Modern Web Guidance](../../.agents/skills/modern-web-guidance/SKILL.md) を参照する。ガイドの要求のうち静的に判定できるものをBiomeに投影し、実画面・ブラウザー互換性・性能・操作結果は既存検証で確認する。製品のWindows Chromium対象契約を超える互換性要求や新規UI基盤を導入しない。
+
 [CI/CD正本](../verification/CI-CD.md)の必須タスク・証拠・release gateを守り、Lintの成功が欠落・スキップしたセキュリティ検査の代替証拠にならないようにする。
 
 ### 今回の確定済み追加採用ターゲット

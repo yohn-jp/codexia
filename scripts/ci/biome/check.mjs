@@ -38,3 +38,22 @@ for (const run of sarif.runs) {
 const ciStatus = execute(['ci', ...scope]);
 assert.equal(ciStatus, 0, 'Biome CI detected a format, lint or import issue');
 assert.equal(lintStatus, 0, 'Biome lint failed even though the combined check passed');
+
+// A config-only PR otherwise has no changed application files to check.
+// Reuse Biome itself to verify every explicitly enforced root rule on its
+// entire existing source scope. The ordinary changed-file gate stays intact.
+if (execFileSync('git', ['diff', '--name-only', base, sha, '--', 'biome.json'], { encoding: 'utf8' }).trim()) {
+  const config = JSON.parse(readFileSync('biome.json', 'utf8'));
+  const required = Object.entries(config.linter.rules).flatMap(([group, rules]) =>
+    rules && typeof rules === 'object'
+      ? Object.entries(rules)
+        .filter(([, setting]) => setting === 'error' || setting?.level === 'error')
+        .map(([rule]) => group + '/' + rule)
+      : [],
+  );
+  if (required.length) {
+    console.log('Full-scope configured error rules: ' + required.join(', '));
+    const policyStatus = execute(['lint', ...scope.slice(3), ...required.map(rule => '--only=' + rule), '--error-on-warnings']);
+    assert.equal(policyStatus, 0, 'Full-scope Biome rule enforcement failed');
+  }
+}
