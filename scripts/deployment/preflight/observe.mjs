@@ -154,7 +154,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       hostId: host?.hostId ?? null, databaseSha256: hash(host?.database),
       authSha256: hash(host?.database ? { state: host.database.authState, schema: host.database.authSchemaSha256 ?? null,
         owner: host.database.ownerBindingSha256 ?? null, settings: host.database.settingsSha256 ?? null } : null),
-      backendSha256: hash(host?.backend), frontendSha256: hash(edge ? {
+      backendSha256: hash(host ? { observed: host.backend, publication: hash(priorBackend) } : null), frontendSha256: hash(edge ? {
         state: edge.frontendState, deployment: edge.deployment, identity: publicFrontendEvidence(edge.frontend) } : null),
       ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest, fence: edge.fence } : null),
       transactionSha256: host ? digestEvidence(host.transaction) : null,

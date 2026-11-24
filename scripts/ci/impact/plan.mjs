@@ -170,6 +170,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/production-preflight.yml',
   'deploy/ansible/preflight-observe.py',
   'deploy/ansible/preflight-observe.yml',
+  'deploy/ansible/test_preflight_observe.py',
   'deploy/ansible/prepare-deploy-ssh.sh',
   'scripts/deployment/preflight/observe.mjs',
   'scripts/deployment/preflight/run.mjs',

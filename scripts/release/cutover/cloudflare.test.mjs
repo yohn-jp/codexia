@@ -31,6 +31,7 @@ const apps = ['', '/api/version', '/desktop/update-identity.json'].map((path, in
 function fixture() {
   const writes = [];
   const state = { enabled: false, preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false, ipAllow: false,
+    scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
     id: fenceRuleId,
@@ -56,9 +57,11 @@ function fixture() {
       const method = init.method ?? 'GET';
       if (target.origin === origin) {
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/api/version') {
+          if (state.backendAbsent) return new Response('Unavailable', { status: 502 });
           return Response.json({ name: 'codexia', profile: 'full', version: '1.0.0', apiEpoch: state.publicEpoch, auth: state.publicAuth });
         }
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/desktop/update-identity.json') {
+          if (state.frontendDenied) return new Response('Denied', { status: 403 });
           return Response.json({ format: 'codexia-frontend-identity/v1', version: '1.0.0', profile: 'full', sourceSha: 'f'.repeat(40), apiEpoch: 1 });
         }
         return new Response(state.enabled ? FENCE_RESPONSE.content : 'Cloudflare Access denied', { status: 403 });
@@ -69,6 +72,10 @@ function fixture() {
         writes.push({ path, method, auth: init.headers.Authorization, body: JSON.parse(init.body) });
       } else {
         assert.equal(init.headers.Authorization, 'Bearer read-secret');
+      }
+      if (path === accountPath + '/workers/scripts') {
+        if (state.inventoryDenied) return new Response('Denied', { status: 403 });
+        return apiResponse(state.scriptAbsent ? [] : [{ id: 'codexia-frontend' }]);
       }
       if (path === workerPath + '/deployments') {
         if (method === 'POST') {
@@ -88,6 +95,7 @@ function fixture() {
       }
       if (path === zonePath + '/dns_records') return apiResponse([{ id: 'f'.repeat(32), name: hostname, proxied: true, type: 'CNAME', content: tunnelId + '.cfargotunnel.com' }]);
       if (path === zonePath + '/workers/routes') {
+        if (state.scriptAbsent) return apiResponse([]);
         const routes = [{ pattern: hostname + '/*', script: 'codexia-frontend' },
           ...['/api*', '/health*', '/mcp*', '/.well-known/*'].map(route => ({ pattern: hostname + route, script: null }))];
         if (state.alias) routes.push({ pattern: 'alias.example.com/*', script: 'codexia-frontend' });
@@ -204,4 +212,30 @@ test('protected observation binds the old wire identity and keeps epoch 2 OAuth 
   await assert.rejects(client.observe(), /standalone OAuth/u);
   state.publicAuth = ['oauth-owner', 'oauth-mcp'];
   assert.equal((await client.observe()).backend.apiEpoch, 2);
+});
+
+test('lifecycle inventory distinguishes confirmed empty deployment from denied observations without writes', async () => {
+  const { client, state, writes } = fixture();
+  state.scriptAbsent = true;
+  state.backendAbsent = true;
+  const absent = await client.observeLifecycle({ backendExpected: false });
+  assert.equal(absent.frontendState, 'absent');
+  assert.equal(absent.deployment, null);
+  assert.equal(absent.backend, null);
+  state.inventoryDenied = true;
+  await assert.rejects(client.observeLifecycle({ backendExpected: false }));
+  state.inventoryDenied = false;
+  state.backendAbsent = false;
+  await assert.rejects(client.observeLifecycle({ backendExpected: false }), /contradicts/);
+  assert.deepEqual(writes, []);
+});
+
+test('lifecycle observation preserves legacy backend identity and does not infer absence from a denied frontend probe', async () => {
+  const { client, state, writes } = fixture();
+  state.frontendDenied = true;
+  const observed = await client.observeLifecycle({ backendExpected: true });
+  assert.equal(observed.frontendState, 'unknown');
+  assert.equal(observed.backend.apiEpoch, 1);
+  assert.equal(observed.backend.standaloneOAuth, false);
+  assert.deepEqual(writes, []);
 });
