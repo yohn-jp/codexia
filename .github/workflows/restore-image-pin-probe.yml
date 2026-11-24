@@ -1,0 +1,23 @@
+name: Resolve isolated restore image pin (temporary)
+on:
+  push:
+    branches: [codex/749-restore-image-pin]
+    paths: [.github/workflows/restore-image-pin-probe.yml]
+permissions:
+  contents: read
+jobs:
+  registry-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Resolve and verify the official Podman image
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository=quay.io/podman/stable
+          docker pull "$repository:latest"
+          pin=$(docker image inspect "$repository:latest" --format '{{json .RepoDigests}}' | jq -er --arg prefix "$repository@sha256:" 'map(select(startswith($prefix))) | if length == 1 then .[0] else error("ambiguous registry digest") end')
+          [[ "$pin" =~ ^quay\.io/podman/stable@sha256:[a-f0-9]{64}$ ]]
+          docker pull "$pin"
+          docker run --rm --network none --entrypoint /usr/bin/podman "$pin" --version
+          printf 'VERIFIED_RESTORE_IMAGE=%s\n' "$pin"
