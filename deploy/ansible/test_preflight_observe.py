@@ -52,6 +52,38 @@ class ObserveDatabaseTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.observe()
 
+    def test_bootstrap_resume_evidence_requires_bound_installation_and_no_auth(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        db = {"ledgerExists": True, "authExists": False, "appRelations": 5}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+
+            def observe_initialized(**kwargs):
+                with patch.object(observer, "command", return_value=(0, "true")), \
+                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger]):
+                    return self.observe(directory=directory, **kwargs)
+
+            self.assertNotIn("bootstrapIntent", observe_initialized())
+            intent.write_text(f"123:456:{image}\n")
+            intent.chmod(0o600)
+            result = observe_initialized()
+            self.assertEqual(result["authState"], "absent")
+            self.assertEqual(result["databaseOid"], "456")
+            self.assertEqual(result["bootstrapIntent"], {"clusterId": "123", "databaseOid": "456", "image": image})
+            self.assertEqual(result["ledger"], ledger)
+            self.assertNotIn("bootstrapIntent", observe_initialized(writer={"authMode": "legacy"}))
+            handoff = directory / "owner-setup.age"
+            handoff.write_text("fixture-ciphertext")
+            self.assertNotIn("bootstrapIntent", observe_initialized())
+            handoff.unlink()
+            for cluster_id, database_oid in [("321", "456"), ("123", "654")]:
+                intent.write_text(f"{cluster_id}:{database_oid}:{image}\n")
+                with self.subTest(cluster=cluster_id, database=database_oid), self.assertRaises(ValueError):
+                    observe_initialized()
+
     def test_sql_forces_read_only_and_never_exports_password(self):
         with patch.object(observer, "command", return_value=(0, "ok")) as command:
             self.assertEqual(observer.sql("codexia", "SELECT 1;"), "ok")

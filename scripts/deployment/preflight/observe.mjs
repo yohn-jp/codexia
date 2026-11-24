@@ -157,8 +157,20 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   const times = [host, edge].filter(value => value != null)
     .map(value => assertFreshObservationTime(value.observedAt, { now }));
   const observedAt = times.length ? new Date(Math.min(...times)).toISOString() : now.toISOString();
+  const database = host?.database;
+  const bootstrapIntent = database?.bootstrapIntent;
+  const bootstrapResume = intent === 'install' && state.H === 'ready' && state.D === 'compatible' &&
+    state.A === 'absent' && state.B === 'absent' && state.T === 'none' && bootstrapIntent &&
+    typeof database.clusterId === 'string' && /^[1-9][0-9]{0,19}$/u.test(database.clusterId) &&
+    typeof database.databaseOid === 'string' && /^[1-9][0-9]{0,9}$/u.test(database.databaseOid) &&
+    bootstrapIntent.clusterId === database.clusterId && bootstrapIntent.databaseOid === database.databaseOid &&
+    bootstrapIntent.image === targetIdentity.image;
   const observation = {
     state, observedAt, frontendAdmission, changeAxes: [...new Set(changeAxes)],
+    ...(bootstrapResume ? { bootstrapResume: {
+      clusterId: database.clusterId, databaseOid: database.databaseOid, image: targetIdentity.image,
+      migrationFingerprint: targetIdentity.backend.migrationFingerprint,
+    } } : {}),
     binding: {
       environment: 'codexia-production', hostPinSha256,
       hostId: host?.hostId ?? null, databaseSha256: hash(host?.database),

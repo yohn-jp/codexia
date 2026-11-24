@@ -65,6 +65,16 @@ def sql(database, query):
 def json_sql(database, query):
     return json.loads(sql(database, query))
 
+def read_owner_installation_intent(path, cluster):
+    info = metadata(path)
+    if info is None:
+        return None
+    require(stat.S_IMODE(info.st_mode) == 0o600)
+    system_id, database_oid, image = private_text(path).removesuffix("\n").split(":", 2)
+    require(system_id == cluster["clusterId"] and database_oid == cluster["databaseOid"]
+            and re.fullmatch(r"[1-9][0-9]{0,9}", database_oid) and re.fullmatch(FULL_IMAGE, image))
+    return {"clusterId": system_id, "databaseOid": database_oid, "image": image}
+
 
 def user_exists(name):
     try:
@@ -141,6 +151,13 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
               "authState": "unknown", "authSchemaSha256": None, "ownerBindingSha256": None}
     if not db["authExists"]:
         result["authState"] = "legacy" if writer and writer.get("authMode") == "legacy" else "absent"
+        if (writer is None and not containers.get("codexia-api")
+                and all(metadata(state_dir / name) is None for name in (
+                    "owner-setup.installation", "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending"))):
+            intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
+            if intent is not None:
+                result["databaseOid"] = intent["databaseOid"]
+                result["bootstrapIntent"] = intent
         return result
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
@@ -155,21 +172,16 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
                              "/app/node_modules/@codexia/api/dist/verify-auth-clients.js"], (0, 1))
         result["authState"] = "ready" if status == 0 else "unknown"
         return result
-    intent = state_dir / "owner-setup.intent"
-    intent_info = metadata(intent)
+    intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
     marker = state_dir / "owner-setup.installation"
     has_marker = metadata(marker) is not None
-    if intent_info is None and not has_marker:
+    if intent is None and not has_marker:
         return result  # Existing schema alone is not a fresh-install authorization.
     if has_marker:
         require(private_text(marker).strip() == cluster["clusterId"])
-    if intent_info is not None:
-        require(stat.S_IMODE(intent_info.st_mode) == 0o600)
-        system_id, database_oid, image = private_text(intent).strip().split(":", 2)
-        require(system_id == cluster["clusterId"] and database_oid == cluster["databaseOid"]
-                and re.fullmatch(r"[1-9][0-9]{0,9}", database_oid) and re.fullmatch(FULL_IMAGE, image))
-        result["databaseOid"] = database_oid
-        result["setupImage"] = image
+    if intent is not None:
+        result["databaseOid"] = intent["databaseOid"]
+        result["setupImage"] = intent["image"]
     else:
         # Earlier setup operations wrote the installation marker only after
         # migration. An existing grant can resume with the exact staged unit.
@@ -198,7 +210,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner';""")
     require(isinstance(owner, dict))
     promoted = metadata(state_dir / "owner-setup.promoted") is not None
-    if not promoted and not owner["hasGrant"] and owner["pristine"] and intent_info is not None:
+    if not promoted and not owner["hasGrant"] and owner["pristine"] and intent is not None:
         require(metadata(state_dir / "owner-setup.age") is None)
         result["authState"] = "pending"
     elif owner["grant"] and not owner["consumed"] and owner["ownerCount"] == 0 and not promoted:

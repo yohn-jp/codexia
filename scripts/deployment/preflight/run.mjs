@@ -208,6 +208,9 @@ async function planObservation({ bootstrapMode } = {}) {
         codexia_bootstrap_stages: admission.stages,
         codexia_owner_setup_install_intent: admission.installIntent,
         codexia_owner_setup_approved: false,
+        ...(plan.observation.bootstrapResume ? {
+          codexia_expected_bootstrap_resume: plan.observation.bootstrapResume,
+        } : {}),
       } : { codexia_owner_setup_operation: bootstrapMode };
       if (admission.installIntent || admission.route === 'R5') {
         Object.assign(overrides, ownerSetupFrontendBindings(candidateFrontend.identity.oauthConfigIdentity, edge.origin));

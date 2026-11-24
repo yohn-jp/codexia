@@ -3,6 +3,20 @@
   ansible.builtin.set_fact:
     owner_setup_requested: "{{ (codexia_owner_setup_install_intent | default(false)) or (codexia_owner_setup_approved | default(false)) }}"
 
+- name: Pin protected bootstrap resumption to the selected Full image
+  when: codexia_expected_bootstrap_resume is defined
+  ansible.builtin.assert:
+    that:
+      - codexia_owner_setup_install_intent is sameas true
+      - not (codexia_owner_setup_approved | default(false))
+      - codexia_database_initialization_approved | default(false) is sameas true
+      - codexia_expected_bootstrap_resume is mapping
+      - codexia_expected_bootstrap_resume.image == codexia_auth_bootstrap_image
+      - codexia_expected_bootstrap_resume.clusterId is match('^[1-9][0-9]{0,19}$')
+      - codexia_expected_bootstrap_resume.databaseOid is match('^[1-9][0-9]{0,9}$')
+      - codexia_expected_bootstrap_resume.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+    fail_msg: Resuming an approved installation requires its exact database, image and application ledger.
+
 - name: Require explicit Better Auth runtime provisioning on the codexia service identity
   ansible.builtin.assert:
     that:
@@ -279,6 +293,28 @@
     that: owner_setup_existing_installation.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length > 0
     fail_msg: An initialized database without approved installation evidence is outside first-owner setup.
 
+- name: Restrict resume to the approved initialized application with no Auth schema
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists and not codexia_auth_database_state_value.schemaExists
+  ansible.builtin.assert:
+    that: codexia_expected_bootstrap_resume is defined
+    fail_msg: An interrupted initial bootstrap requires fresh Preflight admission for the application ledger.
+
+- name: Bind the observed installation and exact ledger before Auth secret or schema changes
+  when: codexia_expected_bootstrap_resume is defined
+  vars:
+    resume: "{{ codexia_expected_bootstrap_resume }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
+      - verify-bootstrap-resume
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - "{{ resume.image }}"
+      - "{{ resume.clusterId }}:{{ resume.databaseOid }}"
+      - "{{ resume.migrationFingerprint }}"
+    expand_argument_vars: false
+  changed_when: false
+  no_log: true
+
 - name: Refuse to adopt an existing auth schema with an unknown owner or missing login role
   ansible.builtin.assert:
     that:
@@ -369,8 +405,13 @@
   no_log: true
 
 - name: Create or verify the least-privilege auth role and schema under the shared deployment lock
+  vars:
+    resume: "{{ codexia_expected_bootstrap_resume | default({}) }}"
   ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", converge, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+    argv: >-
+      {{ [home + '/.local/bin/codexia-auth-runtime-bootstrap', 'converge',
+          home + '/.local/state/codexia-deploy/host.lock']
+          + ([resume.image, resume.clusterId + ':' + resume.databaseOid, resume.migrationFingerprint] if resume else []) }}
     stdin: "{{ codexia_auth_database_password_b64 }}"
     stdin_add_newline: true
     expand_argument_vars: false

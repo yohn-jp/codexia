@@ -25,6 +25,7 @@ export function admitBootstrap({ mode, plan, planSha256, current, topology,
     assert.equal(state.A, expected, 'Observed owner state does not admit this operation');
     return { route, stages: [], installIntent: false };
   }
+  if (plan.observation.bootstrapResume) return { route, stages: ['auth-runtime'], installIntent: true };
   const needsHost = topology?.hostReady !== true;
   const needsSecrets = ['codexia-tunnel-token', 'codexia-postgres-admin-password', 'codexia-postgres-app-password']
     .some(secret => topology?.secrets?.[secret] !== true);

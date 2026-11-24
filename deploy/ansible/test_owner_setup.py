@@ -1,4 +1,5 @@
 """Exercise the owner setup host checkpoints without production credentials."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ import unittest
 IMAGE = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
 OWNER = "048058ad-f594-4fe4-bf67-f5793f99f0ce"
 SCRIPT = Path(__file__).with_name("owner-setup.sh")
+AUTH_BOOTSTRAP = Path(__file__).with_name("provision-auth-database.sh")
+LEDGER = "sha256:" + "b" * 64
 
 
 class OwnerSetupTests(unittest.TestCase):
@@ -74,6 +77,53 @@ esac
     def run_setup(self, operation, *args):
         return subprocess.run(["bash", str(SCRIPT), operation, IMAGE, *args], env=self.environment,
                               text=True, capture_output=True, check=False)
+
+    def test_locked_application_resume_rejects_changed_binding_or_ledger(self):
+        self.executable("podman", r'''#!/bin/bash
+set -eu
+case "$1" in
+    exec)
+        query=$(cat)
+        [[ "$query" == *pg_control_system* && "$query" == *codexia_auth* &&
+           "$query" == *codexia_schema_migrations* && "$query" == *"NOT EXISTS"* ]] || exit 72
+        printf '%s\n' "${LIVE_DATABASE:-123:456}"
+        ;;
+    run)
+        [[ "${*: -2:1}" == require-ledger && "${*: -1}" == "$LEDGER" ]] || exit 73
+        echo ledger >>"$TRACE"
+        exit "${LEDGER_STATUS:-0}"
+        ;;
+    *) exit 74 ;;
+esac
+''')
+        (self.state / "owner-setup.installation").unlink()
+        intent = self.state / "owner-setup.intent"
+        self.private_file(intent, f"123:456:{IMAGE}\n")
+        self.environment["LEDGER"] = LEDGER
+        lock = self.state / "host.lock"
+
+        def verify():
+            return subprocess.run(
+                ["bash", str(AUTH_BOOTSTRAP), "verify-bootstrap-resume", str(lock), IMAGE, "123:456", LEDGER],
+                env=self.environment, text=True, capture_output=True, check=False,
+            )
+
+        with lock.open("w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertNotEqual(verify().returncode, 0)
+            self.assertFalse(self.trace.exists())
+        self.environment["LIVE_DATABASE"] = "123:654"
+        result = verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("current database", result.stderr)
+        self.assertEqual(self.trace.read_text().splitlines(), ["clean"])
+        self.environment["LIVE_DATABASE"] = "123:456"
+        self.environment["LEDGER_STATUS"] = "1"
+        self.assertNotEqual(verify().returncode, 0)
+        self.assertIn("ledger", self.trace.read_text())
+        self.environment["LEDGER_STATUS"] = "0"
+        result = verify()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_initialized_schema_with_matching_intent_can_issue_only_first_grant(self):
         self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")

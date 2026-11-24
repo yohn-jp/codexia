@@ -50,7 +50,7 @@ MAIN_SHA = re.compile(r"[a-f0-9]{40}\Z")
 RUN_NUMBER = re.compile(r"[1-9][0-9]*\Z")
 MUTATING_MODES = frozenset({"bootstrap", "owner-setup", "prepare-activation"})
 CONTROLLER_VARS = frozenset({
-    "codexia_stage", "codexia_bootstrap_stages", "codexia_auth_bootstrap_image",
+    "codexia_stage", "codexia_bootstrap_stages", "codexia_auth_bootstrap_image", "codexia_expected_bootstrap_resume",
     "codexia_owner_setup_install_intent", "codexia_owner_setup_operation", "codexia_database_initialization_approved",
     "codexia_recreate_missing_app_database_approved", "codexia_initial_install_approved",
 })
