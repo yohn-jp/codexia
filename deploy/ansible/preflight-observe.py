@@ -145,7 +145,12 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     result["authSchemaSha256"] = "sha256:" + hashlib.sha256(
         json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     if writer and writer.get("authMode") == "better-auth":
-        result.update(authState="ready", ownerBindingSha256=writer["ownerBindingSha256"])
+        result["ownerBindingSha256"] = writer["ownerBindingSha256"]
+        # Reuse the existing read-only Better Auth schema/client verifier in the
+        # already running API container. Never start a setup or candidate image.
+        status, _ = command(["podman", "exec", writer["containerId"], "node",
+                             "/app/node_modules/@codexia/api/dist/verify-auth-clients.js"], (0, 1))
+        result["authState"] = "ready" if status == 0 else "unknown"
         return result
     marker = state_dir / "owner-setup.installation"
     if metadata(marker) is None:

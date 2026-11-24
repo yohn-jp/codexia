@@ -46,8 +46,54 @@ jobs:
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/release/frontend/verify-compatibility.mjs preflight
 
+  lifecycle-candidate:
+    name: Verify certified candidate pair before observing the production host
+    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: codexia-production
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen evidence-reader dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Read certified source and candidate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
+          CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
+        run: node scripts/deployment/preflight/run.mjs candidate
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: lifecycle-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-lifecycle-candidate.json
+          if-no-files-found: error
+          retention-days: 14
+
   lifecycle-host:
     name: Observe the pinned production host without mutation
+    needs: lifecycle-candidate
     if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -116,16 +162,14 @@ jobs:
           retention-days: 14
 
   lifecycle-plan:
-    name: Verify certified candidate pair and compute the read-only lifecycle plan
-    needs: lifecycle-host
+    name: Compute the read-only lifecycle plan from fresh host and certified candidate evidence
+    needs: [lifecycle-candidate, lifecycle-host]
     if: always() && !cancelled() && github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: codexia-production
     permissions:
       contents: read
-      actions: read
-      packages: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -142,28 +186,20 @@ jobs:
         with:
           name: lifecycle-host-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}
-      - uses: docker/login-action@v4.8.0
-        if: needs.lifecycle-host.result == 'success'
+      - uses: actions/download-artifact@v8.0.2
+        if: needs.lifecycle-candidate.result == 'success'
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          name: lifecycle-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}
       - name: Compute the lifecycle plan without deployment credentials
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
           CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
           CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
-          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
-          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
-          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/deployment/preflight/run.mjs plan
       - name: Retain redacted evidence, including a safe stop
         if: always()

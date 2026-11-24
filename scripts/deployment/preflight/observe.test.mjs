@@ -135,3 +135,16 @@ test('unknown edge, contradictory identity, orphan fence, unverified publication
   stale.host.observedAt = '2026-11-23T23:00:00.000Z';
   assert.throws(() => planFromObservations(stale), /Stale/);
 });
+
+test('candidate pair must be Full, epoch compatible and carry an approved schema and archive identity', () => {
+  for (const change of [
+    f => { f.candidateFrontend.identity = { ...f.candidateFrontend.identity, apiEpoch: 3 }; },
+    f => { f.candidateBackend.identity = { ...f.candidateBackend.identity, profile: 'core' }; },
+    f => { f.authSchemas = []; },
+    f => { f.candidateFrontend.artifactDigest = 'unverified'; },
+  ]) {
+    const f = fixture();
+    change(f);
+    assert.throws(() => planFromObservations(f));
+  }
+});

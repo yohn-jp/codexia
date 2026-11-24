@@ -109,39 +109,51 @@ async function certifiedAuthSchemas(sourceSha) {
   return values;
 }
 
+async function candidateObservation() {
+  const binding = runBinding();
+  const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
+  const main = await mainSource();
+  const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
+  const candidateBackend = backend.fullCertificate;
+  const authSchemas = await certifiedAuthSchemas(candidateBackend.verifiedMainSha);
+  const candidateFrontend = await verifyCutoverFrontendArtifact(request.frontend, {
+    expectedEpoch: candidateBackend.identity.apiEpoch,
+  });
+  const gitSync = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
+  assert.ok(selectReleaseSource('backend', candidateBackend.verifiedMainSha, main, gitSync, null).affected);
+  assert.ok(selectReleaseSource('frontend', candidateFrontend.identity.sourceSha, main, gitSync, null).affected);
+  let priorBackend = null;
+  if (request.priorBackendPublisherRunId === request.backendPublisherRunId) priorBackend = candidateBackend;
+  else if (request.priorBackendPublisherRunId) {
+    try {
+      priorBackend = (await verifyCutoverBackendPublication(request.priorBackendPublisherRunId)).fullCertificate;
+    } catch { /* normalized plan retains the unverified-source blocker */ }
+  }
+  await mainSource();
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-candidate.json'),
+    JSON.stringify({ ...binding, requestSha256: digestEvidence(request), candidateBackend,
+      candidateFrontend, authSchemas, priorBackend }) + '\n', { mode: 0o600, flag: 'wx' });
+}
+
 async function planObservation() {
   const binding = runBinding();
   let stage = 'request';
   try {
     const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
-    const main = await mainSource();
+    await mainSource();
+    stage = 'candidate-evidence';
+    const candidate = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-candidate.json'), 'utf8'));
+    for (const [key, value] of Object.entries(binding)) assert.equal(candidate[key], value);
+    assert.equal(candidate.requestSha256, digestEvidence(request));
+    const { candidateBackend, candidateFrontend, authSchemas } = candidate;
     stage = 'host-evidence';
     const receipt = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'), 'utf8'));
     for (const [key, value] of Object.entries(binding)) assert.equal(receipt[key], value);
     assert.ok(rawHash.test(receipt.hostPinSha256));
     const host = receipt.host;
     assert.equal(host.format, 'codexia-lifecycle-host/v1');
-    stage = 'certified-backend';
-    const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
-    const candidateBackend = backend.fullCertificate;
-    const authSchemas = await certifiedAuthSchemas(candidateBackend.verifiedMainSha);
-    stage = 'certified-frontend';
-    const candidateFrontend = await verifyCutoverFrontendArtifact(request.frontend, {
-      expectedEpoch: candidateBackend.identity.apiEpoch,
-    });
-    const gitSync = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
-    assert.ok(selectReleaseSource('backend', candidateBackend.verifiedMainSha, main, gitSync, null).affected);
-    assert.ok(selectReleaseSource('frontend', candidateFrontend.identity.sourceSha, main, gitSync, null).affected);
-    stage = 'installed-publication';
-    let priorBackend = null;
-    if (host.backend?.state === 'running') {
-      if (host.backend.writer.image === candidateBackend.image) priorBackend = candidateBackend;
-      else if (request.priorBackendPublisherRunId) {
-        try {
-          priorBackend = (await verifyCutoverBackendPublication(request.priorBackendPublisherRunId)).fullCertificate;
-        } catch { /* normalized plan retains the unverified-source blocker */ }
-      }
-    }
+    const priorBackend = host.backend?.state === 'running' && host.backend.writer.image === candidateBackend.image
+      ? candidateBackend : candidate.priorBackend;
     stage = 'edge-observation';
     const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
     assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId','fenceRuleId',
@@ -176,7 +188,8 @@ async function planObservation() {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
-    if (process.argv[2] === 'host') await hostObservation();
+    if (process.argv[2] === 'candidate') await candidateObservation();
+    else if (process.argv[2] === 'host') await hostObservation();
     else if (process.argv[2] === 'plan') await planObservation();
     else throw new Error('Unknown lifecycle preflight operation');
   } catch {
