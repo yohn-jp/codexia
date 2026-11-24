@@ -32,7 +32,19 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "correctness": {
+        "noNestedComponentDefinitions": "error",
+        "noReactPropAssignments": "error"
+      },
+      "performance": {
+        "noSyncScripts": "error"
+      },
+      "suspicious": {
+        "noDocumentCookie": "error",
+        "noDuplicatedSpreadProps": "error",
+        "noUnknownAttribute": "error"
+      }
     }
   },
   "assist": {

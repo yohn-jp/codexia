@@ -2,7 +2,7 @@
 // An exact-source, read-only Biome quality task. Lint SARIF is not a formatter/security report.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const plan = JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8'));
@@ -39,55 +39,21 @@ const ciStatus = execute(['ci', ...scope]);
 assert.equal(ciStatus, 0, 'Biome CI detected a format, lint or import issue');
 assert.equal(lintStatus, 0, 'Biome lint failed even though the combined check passed');
 
-// EXPERIMENT ONLY (#846). Remove this integration before the PR is ready.
-// The canonical changed-file check and its uploaded SARIF above remain unchanged.
-const trialConfigPath = path.resolve('.biome-all-audit-' + process.pid + '.json');
-const candidateConfig = JSON.parse(readFileSync('biome.json', 'utf8'));
-candidateConfig.linter.rules.preset = 'all';
-const trialResults = { sha, biome: execFileSync('biome', ['--version'], { encoding: 'utf8' }).trim(), scope: scope.slice(3), rounds: [], rules: {} };
-function trialScan(name, configPath, round) {
-  const report = path.join(output, 'trial-' + name + '-' + round + '.sarif');
-  const started = performance.now();
-  const status = execute(['lint', '--config-path=' + configPath, ...scope.slice(3), '--max-diagnostics=none', '--reporter=sarif', '--reporter-file=' + report]);
-  const elapsedMs = Math.round(performance.now() - started);
-  assert.ok(status === 0 || status === 1, 'Unexpected trial exit: ' + status);
-  assert.ok(existsSync(report), 'Missing trial report: ' + name);
-  const result = JSON.parse(readFileSync(report, 'utf8'));
-  assert.equal(result.version, '2.1.0');
-  assert.ok(result.runs?.length, 'Missing trial tool runs: ' + name);
-  const counts = {};
-  const samples = {};
-  for (const run of result.runs) {
-    assert.equal(run.tool?.driver?.name, 'Biome');
-    for (const finding of run.results ?? []) {
-      const rule = finding.ruleId ?? '(missing ruleId)';
-      const key = rule + ' ' + (finding.level ?? 'unspecified');
-      counts[key] = (counts[key] ?? 0) + 1;
-      const loc = finding.locations?.[0]?.physicalLocation;
-      if (!samples[key]) samples[key] = { uri: loc?.artifactLocation?.uri, line: loc?.region?.startLine, message: finding.message?.text?.slice(0, 180) };
-    }
+// A config-only PR otherwise has no changed application files to check.
+// Reuse Biome itself to verify every explicitly enforced root rule on its
+// entire existing source scope. The ordinary changed-file gate stays intact.
+if (execFileSync('git', ['diff', '--name-only', base, sha, '--', 'biome.json'], { encoding: 'utf8' }).trim()) {
+  const config = JSON.parse(readFileSync('biome.json', 'utf8'));
+  const required = Object.entries(config.linter.rules).flatMap(([group, rules]) =>
+    rules && typeof rules === 'object'
+      ? Object.entries(rules)
+        .filter(([, setting]) => setting === 'error' || setting?.level === 'error')
+        .map(([rule]) => group + '/' + rule)
+      : [],
+  );
+  if (required.length) {
+    console.log('Full-scope configured error rules: ' + required.join(', '));
+    const policyStatus = execute(['lint', ...scope.slice(3), ...required.map(rule => '--only=' + rule), '--error-on-warnings']);
+    assert.equal(policyStatus, 0, 'Full-scope Biome rule enforcement failed');
   }
-  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
-  assert.ok(status === 0 || total > 0, 'Trial failed without diagnostics: ' + name);
-  if (!trialResults.rules[name]) trialResults.rules[name] = { counts, samples };
-  if (round !== 1) rmSync(report);
-  const summary = { name, round, status, elapsedMs, total };
-  trialResults.rounds.push(summary);
-  console.log('BIOME_TRIAL_ROUND ' + JSON.stringify(summary));
-}
-writeFileSync(trialConfigPath, JSON.stringify(candidateConfig), { flag: 'wx' });
-try {
-  for (let round = 1; round <= 3; round++) {
-    const modes = [['recommended', path.resolve('biome.json')], ['all', trialConfigPath]];
-    if (round === 2) modes.reverse();
-    for (const [name, configPath] of modes) trialScan(name, configPath, round);
-  }
-  writeFileSync(path.join(output, 'biome-trial-summary.json'), JSON.stringify(trialResults, null, 2) + '\n');
-  for (const [name, { counts, samples }] of Object.entries(trialResults.rules)) {
-    for (const [key, count] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
-      console.log('BIOME_TRIAL_RULE ' + JSON.stringify({ name, key, count, sample: samples[key] }));
-    }
-  }
-} finally {
-  rmSync(trialConfigPath);
 }
