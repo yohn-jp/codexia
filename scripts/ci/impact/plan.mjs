@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
-import { ROOT_VERIFICATION_DOCUMENTS, isNonExecutableDocumentation, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
+import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.dockerignore',
@@ -172,7 +172,11 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/audit/export.mjs',
   'scripts/audit/export.test.mjs',
   'scripts/audit/portal.mjs',
+  'scripts/audit/ux-artifact.mjs',
+  'scripts/audit/ux-artifact.test.mjs',
   'scripts/ci/impact/security-admission.test.mjs',
+  'scripts/ci/evidence/task-inputs.mjs',
+  'scripts/ci/evidence/task-inputs.test.mjs',
   'scripts/pages-api/pack.mjs',
   'scripts/pages-api/pack.test.mjs',
   'scripts/pages-api/package-lock.json',
@@ -244,7 +248,8 @@ export function isNativeIosOwnedInput(file) {
 }
 
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
-export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/deployment/cutover/', 'scripts/ios/', 'app/native/']);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/deployment/cutover/', 'scripts/ios/', 'scripts/pages-ui/', 'scripts/ux-simulator/', 'app/native/']);
+const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
 const DB_CONTRACT_SOURCE_PATHS = new Set([
   'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
   'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
@@ -273,6 +278,11 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
+    if (file.startsWith('scripts/ux-simulator/')) {
+      add('unit-root');
+      continue;
+    }
+    if (uxProjectionDocuments.has(file)) add('unit-root');
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;

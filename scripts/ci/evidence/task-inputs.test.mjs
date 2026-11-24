@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
-import { captureTaskInputSource, taskInvocation, taskWorkflowJob } from './task-inputs.mjs';
+import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
 import { createVerificationPlan } from '../impact/plan.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
@@ -304,4 +304,14 @@ await writeFile(path.join(report, 'observed.json'), JSON.stringify({ report, sou
     'Observed execution must match the certified task recipe');
   assert.deepEqual(Object.fromEntries(result.results.map(({ task, status }) => [task, status])),
     { 'requirements-trace': 'passed' });
+});
+
+test('projection authority documents are task inputs only for the simulator root proof', () => {
+  assert.equal(UX_PROJECTION_DOCUMENTS.length, 16);
+  for (const file of UX_PROJECTION_DOCUMENTS) {
+    assert.equal(isNonExecutableDocumentation(file), file !== 'app/DESIGN.md', `${file} keeps its existing CI scope`);
+    assert.equal(isTaskInputDocument(file, 'unit-root'), true, `${file} binds simulator proof`);
+    assert.equal(isTaskInputDocument(file, 'coverage'), file === 'app/DESIGN.md', `${file} keeps its existing product proof scope`);
+  }
+  assert.equal(isTaskInputDocument('docs/design/DEVELOPMENT-PAGES-UX.md', 'unit-root'), false);
 });

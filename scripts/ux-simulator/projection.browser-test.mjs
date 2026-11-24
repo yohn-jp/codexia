@@ -131,6 +131,33 @@ try {
       if (await proof.getAttribute('open') === null) await proof.locator('summary').click();
       assert.match(await proof.innerText(), /synthetic-receipt/);
     }
+    if (Object.hasOwn(manifest.outputs, 'compare/browser.mjs')) {
+      const panel = page.getByRole('region', { name: '版比較' });
+      await page.getByRole('button', { name: '比較', exact: true }).click();
+      await panel.getByRole('button', { name: '設計と実装' }).waitFor();
+      await panel.getByRole('searchbox').fill('CON-32.B');
+      await panel.getByRole('heading', { name: 'CON-32.B', exact: true }).waitFor();
+      await fits();
+      await panel.getByRole('button', { name: '2 版の差分' }).click();
+      if (Object.hasOwn(manifest.outputs, 'compare/base.mjs')) {
+        await panel.getByText(/ビルドで確認済み/).waitFor();
+        await panel.getByText(/このビルドの検証済み投影/).waitFor();
+      } else {
+        await panel.getByText('版差分は利用できません。比較する 2 版の生成物を選択してください。').waitFor();
+      }
+      if (width === 1440) {
+        for (const side of ['比較元', '比較先']) {
+          await panel.getByLabel(side + ' の manifest.json').setInputFiles(join(output, 'manifest.json'));
+          await panel.getByLabel(side + ' の snapshot.json').setInputFiles(join(output, 'snapshot.json'));
+        }
+        await panel.getByText('表示条件に該当する差分はありません。').waitFor();
+        await panel.getByLabel('比較先 の snapshot.json').setInputFiles({
+          name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from('{}'),
+        });
+        await panel.getByText('比較元を利用できません。版、形式、ダイジェストを確認してください。').waitFor();
+      }
+      await page.getByRole('button', { name: '探索', exact: true }).click();
+    }
     await page.goto(link('desktop', 'atlas-entry-01', 'atlas-entry-01/SESSION'));
     await assertHeading('APIと認証を照合');
     const directInspector = page.locator('.ux-inspector');

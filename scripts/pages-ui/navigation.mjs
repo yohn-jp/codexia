@@ -14,6 +14,7 @@ const CORE_PAGES = new Map([
   ['audit/index.html', { id: 'audit', title: 'Source Audit', section: 'Source Audit', mode: 'branch snapshots', source: 'Branch and snapshot materials' }],
   ['ci/index.html', { id: 'ci', title: 'CI Observatory', section: 'CI', mode: 'live public Actions metadata', source: 'GitHub Actions public API' }],
   ['api/index.html', apiReferencePage],
+  ['ux/index.html', { id: 'ux', title: 'UX Simulator', section: 'Design', mode: 'source projections', source: 'Design and implementation projections' }],
   ['security/index.html', { id: 'security', title: 'Code scanning export', section: 'Security', mode: 'authorized on-demand', source: 'GitHub Code scanning API (authorized locally)' }],
   ['graph/index.html', { id: 'graph', title: 'Code Map', section: 'Code Map', mode: 'build snapshot', source: 'Graphify static analysis' }],
   ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'Canonical design documents' }],
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   ['overview', '概要', ''],
   ['architecture', 'Architecture', 'architecture/'],
   ['graph', 'Code Map', 'graph/'],
+  ['ux', 'UX Simulator', 'ux/'],
   ['ci', 'CI', 'ci/'],
   ['api', 'API', 'api/'],
   ['security', 'Security', 'security/'],
@@ -61,7 +63,9 @@ function breadcrumbsFor(pagePath, page) {
 function renderShell(pagePath, page, skipTarget) {
   const nav = NAV_ITEMS.map(([id, label, target]) => {
     const current = page.id === id || ((page.id === 'snapshot' || page.id === 'review') && id === 'audit');
-    const href = target.startsWith('https://') ? target : pathFromPage(pagePath, target);
+    const href = id === 'docs' && page.id === 'ux' && page.sha
+      ? `https://github.com/yohn-jp/codexia/tree/${page.sha}/docs`
+      : target.startsWith('https://') ? target : pathFromPage(pagePath, target);
     return '<li><a href="' + escapeHtml(href) + '"' + (current ? ' aria-current="page"' : '') + '>' + escapeHtml(label) + '</a></li>';
   }).join('');
   const crumbs = breadcrumbsFor(pagePath, page).map(item => item.current
@@ -131,6 +135,8 @@ async function readSourceSha(siteRoot, pagePath, page) {
     ? ['graph/source.json']
     : page.id === 'architecture'
       ? ['architecture/manifest.json']
+      : page.id === 'ux'
+        ? ['ux/manifest.json']
       : [];
   for (const candidate of candidates) {
     try {

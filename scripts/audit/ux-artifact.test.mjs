@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { test } from 'node:test';
+import { generate } from '../ux-simulator/generate.mjs';
+import { inspectUxArtifact, sealUxArtifact } from './ux-artifact.mjs';
+import { decoratePages } from '../pages-ui/navigation.mjs';
+
+test('generated UX projection is source-bound and cannot assert product verification', async (t) => {
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const directory = mkdtempSync(join(tmpdir(), 'codexia-ux-artifact-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const uxDir = join(directory, 'ux');
+  const manifest = await generate({ output: uxDir, sourceSha });
+  assert.equal(manifest.sourceSha, sourceSha);
+  assert.equal(manifest.evidence.productVerified, 'not-evaluated');
+  await decoratePages(directory);
+  assert.equal(sealUxArtifact(uxDir, sourceSha).manifest.sourceSha, sourceSha);
+  assert.equal(inspectUxArtifact(uxDir, { expectedSourceSha: sourceSha }).manifest.status, 'partial');
+
+  const snapshotPath = join(uxDir, 'snapshot.json');
+  const browserPath = join(uxDir, 'build.mjs');
+  const originalSnapshot = readFileSync(snapshotPath, 'utf8');
+  const originalBrowser = readFileSync(browserPath, 'utf8');
+  const metadata = join(uxDir, 'manifest.json');
+  const sealed = readFileSync(metadata, 'utf8');
+  const editedSnapshot = JSON.parse(originalSnapshot);
+  editedSnapshot.expected.transitions[0].event = 'fabricated action';
+  const edited = JSON.stringify(editedSnapshot, null, 2) + '\n';
+  const editedBrowser = originalBrowser.replace(originalSnapshot.trimEnd() + ';\n', edited.trimEnd() + ';\n');
+  const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const editedManifest = JSON.parse(sealed);
+  editedManifest.outputs['snapshot.json'] = digest(edited);
+  editedManifest.inputs.projection = digest(edited);
+  editedManifest.outputs['build.mjs'] = digest(editedBrowser);
+  editedManifest.inputs.asset = digest(JSON.stringify(editedManifest.outputs));
+  writeFileSync(snapshotPath, edited);
+  writeFileSync(browserPath, editedBrowser);
+  writeFileSync(metadata, JSON.stringify(editedManifest));
+  assert.throws(() => inspectUxArtifact(uxDir, { expectedSourceSha: sourceSha }), /does not reproduce/u);
+  writeFileSync(snapshotPath, originalSnapshot);
+  writeFileSync(browserPath, originalBrowser);
+  writeFileSync(metadata, sealed);
+
+  const manifestPath = join(uxDir, 'manifest.json');
+  const forged = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  forged.evidence.productVerified = 'passed';
+  writeFileSync(manifestPath, JSON.stringify(forged));
+  assert.throws(() => inspectUxArtifact(uxDir, { expectedSourceSha: sourceSha }), /cannot assert product acceptance/u);
+
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  const projectionPath = join(uxDir, 'snapshot.json');
+  writeFileSync(projectionPath, readFileSync(projectionPath, 'utf8') + ' ');
+  assert.throws(() => inspectUxArtifact(uxDir, { expectedSourceSha: sourceSha }), /output digest mismatch/u);
+});
