@@ -3,6 +3,26 @@ import CodexiaTransport
 @testable import CodexiaEditor
 
 final class JournalSaveCoordinatorTests: XCTestCase {
+    func testDistantEditsInLongDraftPreserveUnchangedInterior() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://api.example.test")!
+        let coordinator = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        let interior = String(repeating: "稿😀", count: 1_500)
+        let base = "始" + interior + "終"
+        var editor = EditorState(documentID: "document", text: base)
+        editor.edit("先" + interior + "後")
+
+        let draft = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "base", baseText: base)
+
+        let changes = draft.saveRequest.changes
+        XCTAssertEqual(changes.map(\.fromUtf16), [0, 4_501])
+        XCTAssertEqual(changes.map(\.toUtf16), [1, 4_502])
+        XCTAssertEqual(changes.map(\.insert), ["先", "後"])
+    }
+
     func testProtectedSnapshotsSurviveJournalRecreationAndRemainAuthorScoped() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

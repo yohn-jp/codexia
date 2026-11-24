@@ -58,70 +58,75 @@ private enum DocumentChangeBuilder {
             offsets[index + 1] = offsets[index] + (old[index].value > 0xFFFF ? 2 : 1)
         }
         guard old != new else { return [] }
-        if max(old.count, new.count) <= 2_048 {
-            return lcsChanges(old: old, new: new, oldOffsets: offsets)
-        }
-
-        // Bound worst-case memory and time for large manuscripts. The unchanged
-        // prefix and suffix remain outside the replacement span.
         var prefix = 0
         while prefix < min(old.count, new.count), old[prefix] == new[prefix] { prefix += 1 }
         var suffix = 0
         while suffix < old.count - prefix, suffix < new.count - prefix,
               old[old.count - suffix - 1] == new[new.count - suffix - 1] { suffix += 1 }
-        return [.init(fromUtf16: offsets[prefix], toUtf16: offsets[old.count - suffix],
-                      insert: scalarString(new[prefix..<(new.count - suffix)]))]
+        let oldMiddle = old[prefix..<(old.count - suffix)]
+        let newMiddle = new[prefix..<(new.count - suffix)]
+        if !oldMiddle.isEmpty && !newMiddle.isEmpty
+            && (max(oldMiddle.count, newMiddle.count) <= 2_048
+                || withinEditDistance(128, old: oldMiddle, new: newMiddle)) {
+            return changes(old: oldMiddle, new: newMiddle, offsets: offsets)
+        }
+        return [.init(fromUtf16: offsets[prefix], toUtf16: offsets[oldMiddle.endIndex],
+                      insert: scalarString(newMiddle))]
     }
 
-    private static func lcsChanges(old: [Unicode.Scalar], new: [Unicode.Scalar], oldOffsets: [Int32])
-        -> [Components.Schemas.DocumentChange] {
-        let width = new.count + 1
-        var table = [UInt16](repeating: 0, count: (old.count + 1) * width)
-        if !old.isEmpty && !new.isEmpty {
-            for i in old.indices.reversed() {
-                for j in new.indices.reversed() {
-                    let at = i * width + j
-                    if old[i] == new[j] {
-                        table[at] = table[(i + 1) * width + j + 1] + 1
-                    } else {
-                        table[at] = max(table[(i + 1) * width + j], table[i * width + j + 1])
-                    }
+    /// Bound the standard-library diff on large inputs by first finding a
+    /// short insertion/deletion path. Equal interior passages then stay outside
+    /// the encoded hunks even when the manuscript is hundreds of pages long.
+    private static func withinEditDistance(_ limit: Int, old: ArraySlice<Unicode.Scalar>,
+                                           new: ArraySlice<Unicode.Scalar>) -> Bool {
+        guard abs(old.count - new.count) <= limit else { return false }
+        let center = limit + 1
+        var furthest = [Int](repeating: 0, count: center * 2 + 1)
+        for distance in 0...limit {
+            for diagonal in stride(from: -distance, through: distance, by: 2) {
+                let slot = center + diagonal
+                let insertion = diagonal == -distance
+                    || (diagonal != distance && furthest[slot - 1] < furthest[slot + 1])
+                var x = insertion ? furthest[slot + 1] : furthest[slot - 1] + 1
+                var y = x - diagonal
+                while x < old.count, y < new.count, old[old.startIndex + x] == new[new.startIndex + y] {
+                    x += 1
+                    y += 1
                 }
+                furthest[slot] = x
+                if x >= old.count, y >= new.count { return true }
             }
         }
+        return false
+    }
 
+    private static func changes(old: ArraySlice<Unicode.Scalar>, new: ArraySlice<Unicode.Scalar>, offsets: [Int32])
+        -> [Components.Schemas.DocumentChange] {
+        let difference = new.difference(from: old)
+        let removals = Set(difference.removals.map { change in
+            if case .remove(let offset, _, _) = change { return old.startIndex + offset }
+            preconditionFailure("Unexpected insertion in removals")
+        })
+        let insertions = Set(difference.insertions.map { change in
+            if case .insert(let offset, _, _) = change { return new.startIndex + offset }
+            preconditionFailure("Unexpected removal in insertions")
+        })
         var changes: [Components.Schemas.DocumentChange] = []
-        var oldIndex = 0
-        var newIndex = 0
-        var hunkStart: Int?
-        var hunkEnd = 0
-        var inserted: [Unicode.Scalar] = []
-        func flush() {
-            guard let start = hunkStart else { return }
-            changes.append(.init(fromUtf16: oldOffsets[start], toUtf16: oldOffsets[hunkEnd],
-                                 insert: scalarString(inserted[...])))
-            hunkStart = nil
-            hunkEnd = oldIndex
-            inserted.removeAll(keepingCapacity: true)
-        }
-
-        while oldIndex < old.count || newIndex < new.count {
-            if oldIndex < old.count && newIndex < new.count && old[oldIndex] == new[newIndex] {
-                flush()
+        var oldIndex = old.startIndex
+        var newIndex = new.startIndex
+        while oldIndex < old.endIndex || newIndex < new.endIndex {
+            let oldStart = oldIndex
+            let newStart = newIndex
+            while removals.contains(oldIndex) { oldIndex += 1 }
+            while insertions.contains(newIndex) { newIndex += 1 }
+            if oldIndex == oldStart, newIndex == newStart {
                 oldIndex += 1
                 newIndex += 1
-            } else if newIndex == new.count || (oldIndex < old.count
-                && table[(oldIndex + 1) * width + newIndex] >= table[oldIndex * width + newIndex + 1]) {
-                if hunkStart == nil { hunkStart = oldIndex }
-                oldIndex += 1
-                hunkEnd = oldIndex
             } else {
-                if hunkStart == nil { hunkStart = oldIndex; hunkEnd = oldIndex }
-                inserted.append(new[newIndex])
-                newIndex += 1
+                changes.append(.init(fromUtf16: offsets[oldStart], toUtf16: offsets[oldIndex],
+                                     insert: scalarString(new[newStart..<newIndex])))
             }
         }
-        flush()
         return changes
     }
 
@@ -137,6 +142,13 @@ fileprivate enum JournalBegin {
     case nothing
     case pending
     case conflict
+}
+
+private struct DraftCommitReceipt: Encodable {
+    let operationID: String
+    let baseRevisionID: String
+    let revisionID: String
+    let contentSHA256: String
 }
 
 /// Atomic, author/API/project/document scoped storage under Application Support.
@@ -186,8 +198,10 @@ public actor ProtectedDraftJournal {
     fileprivate func release(scope: JournalScope) { activeScopes.remove(scopeKey(scope)) }
 
     fileprivate func write(_ records: [DraftRecord], scope: JournalScope) throws {
-        let url = try fileURL(scope: scope)
-        let data = try encoder.encode(records)
+        try writeProtected(encoder.encode(records), to: fileURL(scope: scope))
+    }
+
+    private func writeProtected(_ data: Data, to url: URL) throws {
         var options: Data.WritingOptions = [.atomic]
         #if os(iOS)
         options.insert(.completeFileProtectionUntilFirstUserAuthentication)
@@ -240,12 +254,20 @@ public actor ProtectedDraftJournal {
         var record = current[index]
         if record.state == .committed || record.state == .conflict { return false }
         if state == .committed, let receipt {
-            guard expectedAuthorID == nil || receipt.revision.authorId == expectedAuthorID else {
+            guard (expectedAuthorID == nil || receipt.revision.authorId == expectedAuthorID),
+                  record.text.utf8.elementsEqual(receipt.revision.markdown.utf8) else {
                 record.state = .unknown
                 current[index] = record
                 try write(current, scope: scope)
                 return false
             }
+            let receiptURL = try fileURL(scope: scope).deletingPathExtension().appendingPathExtension("receipt.json")
+            try writeProtected(encoder.encode(DraftCommitReceipt(
+                operationID: record.operationID,
+                baseRevisionID: record.baseRevisionID,
+                revisionID: receipt.revision.id,
+                contentSHA256: record.contentSHA256
+            )), to: receiptURL)
             current.remove(at: index)
             guard index < current.count, current[index].state == .protected else {
                 try write(current, scope: scope)
@@ -315,6 +337,7 @@ public actor JournalSaveCoordinator {
     private let apiOrigin: String
     private let projectID: String
     private let clientID: String
+    private let expectedReceiptAuthorID: String
     private let journal: ProtectedDraftJournal
     private let api: any APIProtocol
 

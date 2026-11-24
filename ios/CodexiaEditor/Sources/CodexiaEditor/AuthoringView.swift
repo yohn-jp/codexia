@@ -128,7 +128,7 @@ public struct AuthoringView: View {
                 ? "端末に保護済み — サーバー未確定"
                 : "未保護 — この端末にも保存されていません"
         }
-        return "保存済み"
+        return onProtect == nil ? "未編集" : "保存済み"
     }
 
     private func protectCurrentSnapshot(thenLeave: Bool) {
