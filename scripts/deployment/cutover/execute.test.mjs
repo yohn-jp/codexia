@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePair } from './execute.mjs';
+import { advancePair, verifyReactivationWindow } from './execute.mjs';
+import { digestEvidence } from './coordinator.mjs';
 
 const approved = 'a'.repeat(64);
 const timestamp = '2026-11-23T12:00:00.000Z';
@@ -18,14 +19,22 @@ function fixture({ first = false, changeWorker = true } = {}) {
   let outcome;
   let fenced = false;
   let workerVersion = plan.prior.workerVersion;
+  let reactivationStartedAt;
+  let retainedCandidateWorker;
+  let reactivationWindow;
   const cut = {
     operation: 'advance',
     plan, planSha256: approved, request: {},
     async host(action, request) {
-      if (action === 'observe') return { phase, planSha256: owner, outcome, phaseChangedAt: timestamp };
+      if (action === 'observe') return { phase, planSha256: owner, outcome, phaseChangedAt: timestamp, reactivationStartedAt, retainedCandidateWorker, reactivationWindow };
       calls.push(action);
       if (owner && owner !== approved) throw new Error('foreign plan');
       if (action === 'admit') owner = approved;
+      if (action === 'checkpoint' && phase === 'safe-stopped') {
+        reactivationStartedAt = timestamp;
+        retainedCandidateWorker = request.retainedCandidateWorker;
+        reactivationWindow = request.reactivationWindow;
+      }
       outcome = request.outcome ?? outcome;
       phase = { admit: 'intent', checkpoint: 'checkpointed', apply: 'candidate-ready',
         'open-tunnel': outcome + '-tunnel', publishing: outcome + '-publishing', finish: 'finished',
@@ -38,6 +47,7 @@ function fixture({ first = false, changeWorker = true } = {}) {
       async unfence() { assert.match(phase, /-publishing$|^finished$/u); calls.push('unfence'); fenced = false; },
       async verifyFenced() { assert.ok(fenced); },
       async verifyUnfenced() { assert.ok(!fenced); },
+      async assertWorkerArtifact() { assert.equal(workerVersion, 'new'); },
       async assertStaged() { assert.notEqual(workerVersion, 'new'); },
       async deploy({ fromVersionId, toVersionId }) {
         assert.ok(fenced);
@@ -194,4 +204,44 @@ test('recovery rejects a different healthy API at the recorded prior outcome', a
   const before = [...calls];
   await assert.rejects(advancePair({ ...cut, operation: 'recover' }), /prior API identity drifted/u);
   assert.deepEqual(calls, before);
+});
+
+test('first activation restarts from the safe stop behind the existing fence and takes a fresh checkpoint', async () => {
+  const { cut, calls } = fixture({ first: true });
+  cut.independent = true;
+  await advancePair(cut);
+  await advancePair({ ...cut, operation: 'recover' });
+  cut.independent = false;
+  cut.revalidateActivation = async () => { calls.push('revalidate'); };
+  assert.equal((await advancePair(cut)).status, 'awaiting-independent-recovery-proof');
+  assert.deepEqual(calls.slice(-2), ['revalidate', 'checkpoint']);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+  cut.independent = true;
+  accept(cut);
+  assert.equal((await advancePair(cut)).status, 'finished');
+  assert.equal(calls.filter(action => action === 'deploy').length, 1);
+});
+
+test('a renewed first activation window binds the same staged plan, window and protected retry', async () => {
+  const window = { id: 'second-window', notBefore: timestamp, notAfter: '2026-11-23T12:10:00.000Z' };
+  const renewal = { window, approval: digestEvidence({ planSha256: approved, window }) };
+  const options = { now: new Date(timestamp) };
+  const request = verifyReactivationWindow(renewal, approved, options);
+  assert.throws(() => verifyReactivationWindow(renewal, 'f'.repeat(64), options), /Invalid approval/u);
+  assert.throws(() => verifyReactivationWindow(renewal, approved, { now: new Date('2026-11-23T12:11:00.000Z') }), /Outside approved/u);
+
+  const { cut, calls } = fixture({ first: true });
+  await assert.rejects(advancePair({ ...cut, request: { reactivationWindow: request } }), /durable checkpoint/u);
+  assert.deepEqual(calls, []);
+  cut.independent = true;
+  await advancePair(cut);
+  await advancePair({ ...cut, operation: 'recover' });
+  cut.independent = false;
+  const retry = { ...cut, request: { reactivationWindow: request }, revalidateActivation: async () => {} };
+  // The mock response is lost after recording the new checkpoint.
+  cut.failAfter = 'checkpoint';
+  await assert.rejects(advancePair(retry), /connection lost/u);
+  cut.failAfter = null;
+  await assert.rejects(advancePair(cut), /durable checkpoint/u);
+  assert.equal((await advancePair(retry)).status, 'awaiting-independent-recovery-proof');
 });

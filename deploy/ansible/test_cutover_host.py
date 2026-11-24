@@ -86,7 +86,7 @@ elif name == "backup":
     if args[0] == "validate-destination":
         sys.exit(0)
     if args[0] == "validate-artifact":
-        print("b" * 64)
+        print(("d" if Path(args[1]).name == "codexia-retry" else "b") * 64)
         sys.exit(0)
     if not args[args.index("--lock-fd") + 1] == "9" or not Path("/proc/self/fd/9").exists():
         sys.exit(91)
@@ -95,8 +95,9 @@ elif name == "backup":
     if args[0] == "backup-locked":
         if s.get("failBackup"):
             sys.exit(93)
-        print("Encrypted backup committed:", root / "backups/codexia-test")
-        print("Published checksum manifest sha256:", "b" * 64)
+        retry = s.get("retryBackup")
+        print("Encrypted backup committed:", root / "backups" / ("codexia-retry" if retry else "codexia-test"))
+        print("Published checksum manifest sha256:", ("d" if retry else "b") * 64)
     elif args[0] == "fingerprint-locked":
         print(json.dumps({"databaseFingerprint": s["database"], "historyFingerprint": s["history"]}))
     else:
@@ -119,6 +120,8 @@ elif name == "podman":
         print(json.dumps(s["identities"][image_epoch - 1]))
     elif cmd == "inspect":
         fields, target = args[1:]
+        if target == "c" * 64:
+            target = api
         active = s.get(target, True)
         if "Id" in fields:
             print("c" * 64)
@@ -151,6 +154,11 @@ elif name == "podman":
         print(json.dumps([args[-1]]))
     elif cmd == "pull":
         sys.exit(0)
+    elif cmd == "rm":
+        if args != ["--", "c" * 64] or s.get(api) is not False:
+            sys.exit(97)
+        del s[api]
+        save()
     elif cmd == "run":
         if s.get("denyConversion") and any("maintain-" in arg for arg in args):
             sys.exit(99)
@@ -461,11 +469,44 @@ class CutoverHostTest(unittest.TestCase):
         self.assertEqual(self.invoke("recover")["status"], "safe-stopped")
         self.assertEqual(self.invoke("recover")["status"], "safe-stopped")
         self.assertTrue(promoted.exists())
-        self.assertFalse(self.live()["codexia-api"])
+        self.assertNotIn("codexia-api", self.live())
         self.assertFalse(self.live()["codexia-tunnel"])
         self.assertEqual(self.live()["database"], DATABASE)
         self.assertEqual(self.live()["history"], HISTORY)
         self.assertFalse(self.release.exists())
+
+    def test_first_activation_recheckpoints_under_lock_after_recovery(self):
+        self.prepare_first_activation()
+        (self.state / "owner-setup.promoted").touch(mode=0o600)
+        self.checkpoint()
+        self.invoke("apply")
+        self.invoke("recover-quiesce")
+        self.invoke("recover")
+        self.assertIn("durable cutover plan", self.invoke("checkpoint", success=False, planSha256="f" * 64))
+        old = self.journal.read_bytes()
+        self.runtime.write_text(json.dumps(self.live() | {"failBackup": True}))
+        self.invoke("checkpoint", success=False)
+        self.assertEqual(self.journal.read_bytes(), old)
+        self.runtime.write_text(json.dumps(self.live() | {"failBackup": False, "retryBackup": True}))
+        renewal = {"notAfter": self.input["notAfter"], "approval": "c" * 64}
+        checkpoint = self.invoke("checkpoint", retainedCandidateWorker=True, reactivationWindow=renewal)
+        self.assertEqual(checkpoint["status"], "checkpointed")
+        self.assertEqual(checkpoint["checksumManifestSha256"], "d" * 64)
+        self.assertIn("durable activation window", self.invoke("apply", success=False))
+        self.input["reactivationWindow"] = renewal
+        self.assertIn("exact checkpoint backup", self.invoke("apply", success=False))
+        self.input.update(checksumManifestSha256="d" * 64, recoveryReceiptSha256="e" * 64)
+        durable = self.invoke("observe")
+        self.assertTrue(durable["retainedCandidateWorker"])
+        self.assertIn("reactivationStartedAt", durable)
+        self.assertFalse(durable["requiresRestore"])
+        self.invoke("apply")
+        self.invoke("open-tunnel", outcome="candidate")
+        self.invoke("publishing", outcome="candidate")
+        self.invoke("finish", outcome="candidate")
+        self.assertEqual(self.live()["database"], DATABASE)
+        self.assertEqual(self.live()["history"], HISTORY)
+        self.assertTrue((self.state / "owner-setup.promoted").exists())
 
 
 if __name__ == "__main__":

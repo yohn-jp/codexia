@@ -12,7 +12,7 @@ import { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } from
 import { assertPairedObservation, digestEvidence } from './coordinator.mjs';
 import { approvedMigration } from './transitions.mjs';
 import { readPreservationEvidence } from './preservation.mjs';
-import { advancePair } from './execute.mjs';
+import { advancePair, verifyReactivationWindow } from './execute.mjs';
 
 const env = process.env;
 const run = promisify(execFile);
@@ -62,14 +62,14 @@ function hostInput(plan, planSha256) {
   };
 }
 
-function recoveryBinding(plan, planSha256, checkpoint) {
+function recoveryBinding(plan, planSha256, checkpoint, window) {
   requireCondition(backupFields.every(key => rawHash.test(checkpoint[key] ?? '')),
     'Host checkpoint did not report verified backup fingerprints');
   return {
     planSha256, migration: approvedMigration(plan.deployment.plan.transition)?.handler ?? null,
     environment: 'codexia-production', hostname: new URL(plan.environment.origin).hostname,
     sourceHostId: plan.environment.hostId, databaseSystemIdentifier: plan.environment.clusterId,
-    maintenanceWindowId: plan.deployment.plan.window.id,
+    maintenanceWindowId: window.id,
     priorImage: plan.prior.image, candidateImage: plan.candidate.image,
     priorMigrationFingerprint: plan.prior.identity?.migrationFingerprint ?? null,
     candidateMigrationFingerprint: plan.candidate.identity.migrationFingerprint,
@@ -174,16 +174,22 @@ export async function executePairCutover(operation, input, scratch) {
     return { status: 'staged', plan, planSha256: digestEvidence(plan) };
   }
 
-  const { plan, approval: planSha256 } = input;
+  const { plan, approval: planSha256, reactivation } = input;
   requireCondition(plan?.format === planFormat && rawHash.test(planSha256 ?? '') && digestEvidence(plan) === planSha256 &&
     plan.environment.origin === origin, 'Maintenance approval does not match the staged plan and origin');
   const { deployment, prior, candidate } = plan;
   assertPairRoute(deployment.plan);
-  const verifyApproval = ({ opening } = {}) => assertDeploymentPlanBinding({
-    ...deployment, recover: operation !== 'advance' && opening !== 'candidate',
-  });
-  verifyApproval();
-  const request = hostInput(plan, planSha256);
+  requireCondition(reactivation === undefined || (reactivation && prior.image === null && operation !== 'recover'),
+    'A renewed window is available only for first activation advance or reconciliation');
+  const verifyApproval = ({ opening } = {}) => {
+    const recovering = operation !== 'advance' && opening !== 'candidate';
+    assertDeploymentPlanBinding({ ...deployment, recover: Boolean(reactivation) || recovering });
+    return reactivation ? verifyReactivationWindow(reactivation, planSha256, { recovering }) : null;
+  };
+  const renewal = verifyApproval();
+  requireCondition(!reactivation || reactivation.window.id !== deployment.plan.window.id,
+    'A renewed activation window must have a distinct ID');
+  const request = { ...hostInput(plan, planSha256), reactivationWindow: renewal };
   const verifyIngress = async () => {
     const observation = await edge.observeIngress({ lifecycle: true });
     requireCondition(observation.origin === origin && observation.ingressDigest === plan.environment.ingressDigest &&
@@ -214,12 +220,35 @@ export async function executePairCutover(operation, input, scratch) {
       }, current, plan);
       requireCondition(isDeepStrictEqual(refreshed, plan), 'Staged pair no longer matches fresh certified release and host evidence');
     },
+    revalidateActivation: async () => {
+      const artifacts = parsePreflightRequest(JSON.stringify({ ...plan.artifacts, intent: deployment.plan.intent,
+        window: deployment.plan.window }));
+      const [{ host, hostPinSha256 }, releases] = await Promise.all([
+        readLifecycleHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
+        readLifecycleCandidate(artifacts),
+      ]);
+      const { plan: refreshed } = planFromObservations({ host, edge: null, hostPinSha256, ...releases,
+        intent: artifacts.intent, window: artifacts.window });
+      const original = deployment.plan.observation.binding;
+      const current = refreshed.observation.binding;
+      requireCondition(host.transaction?.phase === 'safe-stopped' && host.backend.state === 'absent' &&
+        host.database.authState === 'ready' &&
+        ['hostId', 'hostPinSha256', 'databaseSha256', 'authSha256'].every(key => current[key] === original[key]) &&
+        isDeepStrictEqual(refreshed.target, deployment.plan.target) && releases.candidateBackend.image === candidate.image &&
+        isDeepStrictEqual(releases.candidateBackend.identity, candidate.identity),
+      'First activation retry no longer matches its prepared owner, database or certified candidate');
+    },
     checkpointProof: checkpoint => {
       if (!deployment.plan.requiresPreservation) return { request: {} };
-      const binding = recoveryBinding(plan, planSha256, checkpoint);
+      const window = reactivation?.window ?? deployment.plan.window;
+      const binding = recoveryBinding(plan, planSha256, checkpoint, window);
       if (!env.CODEXIA_CUTOVER_RECOVERY_RECEIPT) return { request: null, binding };
       const receipt = JSON.parse(env.CODEXIA_CUTOVER_RECOVERY_RECEIPT);
-      validateEpochCutoverRecoveryReceipt(receipt, binding, deployment.plan.window);
+      if (checkpoint.reactivationStartedAt &&
+          Date.parse(receipt.verifiedAt) < Date.parse(checkpoint.reactivationStartedAt)) {
+        return { request: null, binding };
+      }
+      validateEpochCutoverRecoveryReceipt(receipt, binding, window);
       return { request: { ...binding, recoveryReceiptSha256: digestEvidence(receipt) } };
     },
     restoreProof: checkpoint => prior.image === null ? {} : restoreRequest(planSha256, checkpoint),

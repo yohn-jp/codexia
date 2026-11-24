@@ -641,9 +641,16 @@ def phase_status(journal):
             **{key: journal[key] for key in ("tunnelOpenedAt",) if key in journal}}
 
 
-def validate_admission(plan):
-    for name in (API, TUNNEL):
-        require(not present(guard_path(name)), "Unexpected persistent cutover service guard")
+def validate_admission(plan, reactivation=False):
+    if reactivation:
+        require(plan["priorImage"] is None and guard_installed(TUNNEL) and
+                (not present(guard_path(API)) or guard_installed(API)),
+                "Reactivation requires the guarded first activation slot")
+        require_inactive(API)
+        require_inactive(TUNNEL)
+    else:
+        for name in (API, TUNNEL):
+            require(not present(guard_path(name)), "Unexpected persistent cutover service guard")
     validate_activation_links()
     candidate = Path(plan["candidateUnit"])
     candidate_settings, candidate_auth_hash = setting_path(candidate, plan["candidateImage"], plan["candidateUnitSha256"])
@@ -704,8 +711,14 @@ def require_retained_pair(plan):
     require(property_of(TUNNEL, "ActiveState") == "active" and running(TUNNEL), "Retained Tunnel is not running")
 
 
-def checkpoint(plan, journal):
-    journal = admit(plan, journal)
+def checkpoint(plan, journal, request):
+    restarting = journal is not None and journal["phase"] == "safe-stopped"
+    if restarting:
+        validate_admission(plan, reactivation=True)
+        if "backupDirectory" in journal:
+            verify_backup(journal)
+    else:
+        journal = admit(plan, journal)
     if not changes_backend(plan):
         require_retained_pair(plan)
         transition(journal, "checkpointed")
@@ -715,7 +728,7 @@ def checkpoint(plan, journal):
         if journal["phase"] == "intent":
             transition(journal, "quiescing")
         quiesce()
-        if journal["phase"] == "quiescing":
+        if journal["phase"] == "quiescing" or restarting:
             destination = Path(os.environ["CODEXIA_BACKUP_DESTINATION"])
             report = backup_command("backup-locked", str(destination), os.environ["CODEXIA_BACKUP_RECIPIENT"],
                                     "--approved", "--lock-file", str(LOCK), "--lock-fd", "9")
@@ -728,6 +741,14 @@ def checkpoint(plan, journal):
                     "Canonical backup did not publish an immutable checkpoint")
             result = {"backupDirectory": str(artifact), "checksumManifestSha256": manifest, **fingerprint()}
             verify_backup(result)
+            if restarting:
+                require_current_window(plan)
+                journal.pop("recoveryStartedAt", None)
+                journal.pop("recoveryReceiptSha256", None)
+                result.update(reactivationWindow=request.get("reactivationWindow"),
+                              retainedCandidateWorker=request.get("retainedCandidateWorker") is True,
+                              reactivationStartedAt=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                              requiresRestore=False)
             transition(journal, "checkpointed", **result)
         verify_backup(journal)
         verified_fingerprints(journal)
@@ -816,12 +837,27 @@ def recover(request, plan, journal):
     if plan["priorImage"] is None:
         require(journal["phase"] in ("recovering", "safe-stopped"), "Quiesce the first activation before safe stop")
         quiesce()
+        require(not present(RELEASE) and not present(API_WANTS), "First activation acquired unexpected installed state")
         if present(ACTIVE_UNIT):
             setting_path(ACTIVE_UNIT, plan["candidateImage"], plan["candidateUnitSha256"])
+        if container_exists(API):
+            container_id = inspect(API, "Id")
+            require(journal["requiresRestore"] and matches(HASH, container_id) and
+                    inspect(container_id, "State.Running") == "false" and
+                    inspect(container_id, "ImageName") == plan["candidateImage"],
+                    "Stopped API container does not match the admitted first activation")
+            require_mount(container_id, "codexia-data", "/data")
+            require_mount(container_id, "codexia-history", "/history")
+            output((*PODMAN, "rm", "--", container_id), "Could not remove the stopped candidate container")
+        require(not container_exists(API), "First activation did not leave a clean API slot")
+        if present(ACTIVE_UNIT):
             ACTIVE_UNIT.unlink()
             fsync_dir(QUADLETS)
             output((*SYSTEMCTL, "daemon-reload"), "Could not reload the clean API slot")
-        require(not present(RELEASE) and not present(API_WANTS), "First activation acquired unexpected installed state")
+        # With the unit and container absent, leave a clean API slot and keep
+        # the Tunnel guard installed for the next protected activation.
+        if present(guard_path(API)):
+            change_guard(API, False)
         if "backupDirectory" in journal:
             verify_backup(journal)
         transition(journal, "safe-stopped")
@@ -946,7 +982,8 @@ def finish(plan, journal, outcome):
         save(RELEASE, {"format": "codexia-push-deployment/v1", "image": image, "previousImage": plan["priorImage"] or "",
                        "identity": identity, "authMode": "better-auth", "authSettingsSha256": auth_hash})
     result = {"status": "finished", "outcome": outcome, "planSha256": plan["planSha256"]}
-    save(TERMINAL, {**result, "plan": plan, "phaseChangedAt": journal["phaseChangedAt"],
+    save(TERMINAL, {**result, "plan": journal["plan"], "phaseChangedAt": journal["phaseChangedAt"],
+                    "reactivationWindow": journal.get("reactivationWindow"),
                     "tunnelOpenedAt": journal["tunnelOpenedAt"]})
     JOURNAL.unlink()
     fsync_dir(STATE)
@@ -970,13 +1007,15 @@ def observe(journal):
     if journal is not None:
         result["planSha256"] = journal["plan"]["planSha256"]
         result.update({key: journal[key] for key in (*BACKUP_FIELDS, "backupDirectory", "requiresRestore", "phaseChangedAt",
-                                                    "recoveryStartedAt", "tunnelOpenedAt")
+                                                    "recoveryStartedAt", "tunnelOpenedAt", "reactivationStartedAt",
+                                                    "reactivationWindow", "retainedCandidateWorker")
                        if key in journal})
     elif present(TERMINAL):
         terminal = data(TERMINAL, private=True)
         if result.get("priorImage") == terminal["plan"][f"{terminal['outcome']}Image"]:
             result.update(phase="finished", planSha256=terminal["planSha256"], outcome=terminal["outcome"],
-                          phaseChangedAt=terminal["phaseChangedAt"], tunnelOpenedAt=terminal.get("tunnelOpenedAt"))
+                          phaseChangedAt=terminal["phaseChangedAt"], tunnelOpenedAt=terminal.get("tunnelOpenedAt"),
+                          reactivationWindow=terminal.get("reactivationWindow"))
     emit(result)
 
 
@@ -1003,20 +1042,34 @@ def main():
         return
     plan = validate_plan(request)
     validate_host(plan)
+    renewal = request.get("reactivationWindow")
+    if renewal is not None:
+        require(isinstance(renewal, dict) and set(renewal) == {"notAfter", "approval"} and
+                matches(HASH, renewal["approval"]) and plan["priorImage"] is None,
+                "Invalid first activation renewal")
+        approved_deadline(renewal)
     if journal is not None:
         require(plan == journal["plan"], "Request does not match the durable cutover plan")
+        if action not in ("recover-quiesce", "recover"):
+            require((action == "checkpoint" and journal["phase"] == "safe-stopped") or
+                    renewal == journal.get("reactivationWindow"), "Request changed the durable activation window")
     elif action == "finish" and present(TERMINAL):
         terminal = data(TERMINAL, private=True)
-        require(terminal["plan"] == plan and terminal["outcome"] == request.get("outcome"),
+        require(terminal["plan"] == plan and terminal["outcome"] == request.get("outcome") and
+                renewal == terminal.get("reactivationWindow"),
                 "Completed cutover did not match the request")
         active_api(plan[f"{terminal['outcome']}Image"], plan[f"{terminal['outcome']}Identity"])
         emit({key: terminal[key] for key in ("status", "outcome", "planSha256")})
         return
+    else:
+        require(renewal is None, "An activation window can only be renewed from a durable safe stop")
+    if renewal is not None:
+        plan = {**plan, "notAfter": renewal["notAfter"]}
     if action == "admit":
         emit(phase_status(admit(plan, journal)))
         return
     if action == "checkpoint":
-        checkpoint(plan, journal)
+        checkpoint(plan, journal, request)
         return
     require(journal is not None, "No matching durable cutover intent exists")
     if action == "apply":
