@@ -12,13 +12,12 @@ WORKDIR /opt/codexia
 
 FROM pnpm-base AS source
 # Fetch the locked external packages before copying frequently changed source.
-# The shared cache mount is usable by both BuildKit and Podman/Buildah.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch --store-dir=/pnpm/store
+# Materialize the locked store in the intermediate layer: a remote layer
+# cache hit must not depend on a cache mount left behind on another runner.
+RUN pnpm fetch --store-dir=/pnpm/store
 COPY . ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
+RUN pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE

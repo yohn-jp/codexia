@@ -48,21 +48,24 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
 }
 
 export function createBuildCommands(profileName, profile, { includeUi = true, includeApi = true } = {}) {
-  const commands = [
-    { command: 'pnpm', args: ['--filter', '@codexia/contracts', 'run', 'build'] },
-    { command: 'pnpm', args: ['--filter', '@codexia/persistence-contracts', 'run', 'build'] },
-    { command: 'pnpm', args: ['--filter', '@codexia/persistence-postgres', 'run', 'build'] },
-    { command: 'pnpm', args: ['--filter', '@codexia/module-runtime', 'run', 'build'] },
+  // A single topologically sorted union avoids rebuilding shared dependencies
+  // for each profile module and again for the API. Keep profile generation and
+  // the profile-specific UI build behind the workspace build barrier.
+  const roots = [
+    '@codexia/contracts', '@codexia/persistence-contracts',
+    '@codexia/persistence-postgres', '@codexia/module-runtime',
+    ...profile.modules.map((id) => `${modulePackagePrefix}${id}...`),
+    ...(includeApi ? ['@codexia/api...'] : []),
   ];
-  if (profile.modules.length) {
-    const filters = profile.modules.flatMap((id) => ['--filter', `${modulePackagePrefix}${id}...`]);
-    commands.push({ command: 'pnpm', args: [...filters, 'run', 'build'] });
-  }
+  const commands = [{
+    command: 'pnpm',
+    args: ['--recursive', '--sort', '--workspace-concurrency=2', '--fail-if-no-match',
+      ...roots.flatMap((name) => ['--filter', name]), 'run', 'build'],
+  }];
   commands.push({ command: process.execPath, args: [path.join(root, 'scripts/build/packaging/profile-build.mjs'), '--profile', profileName] });
   if (includeUi) {
     commands.push({ command: 'pnpm', args: ['--filter', '@codexia/app', 'run', 'build'], env: { CODEXIA_PROFILE: profileName } });
   }
-  if (includeApi) commands.push({ command: 'pnpm', args: ['--filter', '@codexia/api...', 'run', 'build'] });
   return commands;
 }
 

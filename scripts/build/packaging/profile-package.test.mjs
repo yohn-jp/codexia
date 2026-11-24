@@ -79,3 +79,19 @@ test('Full package waits for selected module producers and exact package depende
   assert.ok(moduleBuild.args.includes('@codexia/module-semantic...'));
   assert.ok(moduleBuild.args.includes('@codexia/module-search...'));
 });
+
+// Exercise the observable command boundary: a shared dependency closure is
+// requested once and generation runs only after its producer has completed.
+test('profile packaging requests one topological workspace build before generation', () => {
+  for (const profileName of ['core', 'full']) {
+    const profile = { profile: profileName, modules: profileName === 'full' ? ['story', 'semantic'] : [] };
+    const commands = createBuildCommands(profileName, profile);
+    const producers = commands.filter(({ command, args }) => command === 'pnpm' && args.includes('--recursive'));
+    assert.equal(producers.length, 1);
+    assert.equal(commands[0], producers[0]);
+    assert.ok(producers[0].args.includes('--sort'));
+    assert.ok(producers[0].args.includes('@codexia/api...'));
+    assert.ok(commands[1].args.some(arg => arg.endsWith('profile-build.mjs')));
+    assert.equal(commands[2].env.CODEXIA_PROFILE, profileName);
+  }
+});

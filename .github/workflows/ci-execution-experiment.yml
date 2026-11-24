@@ -1,0 +1,75 @@
+name: Benchmark Nx and Dagger execution candidates
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-execution-experiment.yml
+      - scripts/ci/benchmark/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-execution-experiment-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  nx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: Install frozen product dependencies
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 install --frozen-lockfile
+      - name: Compare pnpm and Nx with verified output equivalence
+        run: bash scripts/ci/benchmark/nx-build.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: nx-candidate-lock-and-output-digests
+          path: ${{ runner.temp }}/nx-candidate
+          retention-days: 2
+          if-no-files-found: error
+  dagger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prepare identical locked StrictDoc build context
+        run: |
+          mkdir -p "$RUNNER_TEMP/strictdoc-context"
+          git archive HEAD .github/docker/strictdoc-ci.Dockerfile scripts/strictdoc/requirements.lock.txt | tar -x -C "$RUNNER_TEMP/strictdoc-context"
+      - name: Docker cold runtime build and tool smoke
+        working-directory: ${{ runner.temp }}/strictdoc-context
+        run: |
+          docker build -f .github/docker/strictdoc-ci.Dockerfile -t strictdoc-benchmark .
+          docker run --rm strictdoc-benchmark sh -ec 'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright'
+      - name: Docker warm runtime build and tool smoke
+        working-directory: ${{ runner.temp }}/strictdoc-context
+        run: |
+          docker build -f .github/docker/strictdoc-ci.Dockerfile -t strictdoc-benchmark .
+          docker run --rm strictdoc-benchmark sh -ec 'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright'
+      - name: Dagger cold runtime build and tool smoke
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.11"
+          workdir: ${{ runner.temp }}/strictdoc-context
+          shell: >-
+            host | directory . | docker-build --dockerfile=.github/docker/strictdoc-ci.Dockerfile |
+            with-exec sh,-ec,'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright; echo PASS' | stdout
+      - name: Dagger warm runtime build and tool smoke
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.11"
+          workdir: ${{ runner.temp }}/strictdoc-context
+          shell: >-
+            host | directory . | docker-build --dockerfile=.github/docker/strictdoc-ci.Dockerfile |
+            with-exec sh,-ec,'test "$(id -u)" -ne 0; test "$(/opt/strictdoc/bin/strictdoc --version)" = 0.32.1; test "$(node --version)" = v24.22.3; test -d /ms-playwright; echo PASS' | stdout

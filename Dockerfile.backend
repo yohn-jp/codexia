@@ -12,22 +12,28 @@ WORKDIR /opt/codexia
 
 FROM pnpm-base AS source
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch --store-dir=/pnpm/store
+# Materialize the locked store in the intermediate layer: a remote layer
+# cache hit must not depend on a cache mount left behind on another runner.
+RUN pnpm fetch --store-dir=/pnpm/store
 COPY . ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
+RUN pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE
-ARG CODEXIA_PRODUCER_REVISION
 ARG CODEXIA_RELEASE_VERSION
 ENV CODEXIA_RELEASE_VERSION=${CODEXIA_RELEASE_VERSION}
 ENV CODEXIA_PROFILE=${PROFILE}
 RUN node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --server-only --out /runtime
+ARG CODEXIA_PRODUCER_REVISION
 RUN node scripts/release/backend/update-identity.mjs build /runtime "${PROFILE}" "${CODEXIA_PRODUCER_REVISION}"
 
 FROM ${NODE_IMAGE} AS backend
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tini \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /data /history \
+ && chmod 0700 /history \
+ && chown node:node /data /history
 ARG PROFILE
 ARG CODEXIA_PRODUCER_REVISION
 ENV NODE_ENV=production \
@@ -44,12 +50,6 @@ ENV NODE_ENV=production \
 LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
 RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 \
  && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$'
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tini \
- && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /data /history \
- && chmod 0700 /history \
- && chown node:node /data /history
 WORKDIR /app
 COPY --chown=node:node --from=build /runtime/ ./
 COPY --chown=node:node --chmod=0755 deploy/backend/start.sh /usr/local/bin/codexia-backend-start
