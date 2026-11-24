@@ -159,7 +159,8 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     if sql("codexia", "SELECT to_regclass('codexia_auth.owner_setup') IS NOT NULL;") != "t":
         return result
     owner = json_sql("codexia", """SELECT json_build_object(
-        'grant', grant_id IS NOT NULL AND expires_at > now() AND revoked_at IS NULL,
+        'grant', grant_id IS NOT NULL AND grant_digest IS NOT NULL
+          AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL,
         'consumed', consumed_at IS NOT NULL,
         'ownerCount', (SELECT count(*) FROM codexia_auth."user"),
         'ownerBinding', CASE WHEN EXISTS (SELECT FROM codexia_auth."user" u
