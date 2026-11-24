@@ -15,7 +15,9 @@ function publicControl(source) {
   const themeLabel = themeSource.match(/aria-label=["']([^"']+)["']/u)?.[1];
   const sceneHandler = sourceAt(source, publishing, 'onClick={() => void openScene(item.id)}');
   const label = sourceAt(source, publishing, '読み取り専用の共有です。期限:');
-  if (!themeHandler || !sceneHandler || !label) return null;
+  const readerBinding = sourceAt(source, shell, 'onChange={onThemeChange}');
+  const launcherBinding = sourceAt(source, launcher, 'onThemeChange={(next) => {');
+  if (!themeHandler || !sceneHandler || !label || !readerBinding || !launcherBinding) return null;
   return {
     id: 'PUB-01.A', platform: 'reader', source: sourceRef(sceneHandler), label: themeLabel,
     role: 'control', handler: [themeHandler.symbol, sceneHandler.symbol].join(' · '), region: 'public-content',
@@ -51,7 +53,7 @@ export function projectReader(source) {
     }),
     transition({
       id: 'public-theme-local-change', platform: 'reader', from: 'PUB-01/content', to: 'PUB-01/content',
-      event: 'ThemeControl.onChange', screen: 'PUB-01', control: control?.id, condition: 'setThemeMode(next)', location: sourceAt(source, launcher, 'setThemeMode(next);'),
+      event: 'ThemeControl.onChange', screen: 'PUB-01', control: control?.id, condition: 'setThemeMode(next)', location: control && sourceAt(source, launcher, 'setThemeMode(next);'),
     }),
   );
   const gaps = records(
