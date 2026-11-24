@@ -8,6 +8,7 @@ import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectN
 
 // Build the extra entry once for this spec, not once per test or worker transition.
 test.use({ preparedAuthorEntries: true });
+preparedAuthorTest.use({ preparedAuthorEntries: true });
 
 preparedAuthorTest("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page, authorizeAuthor }) => {
   const original = "Before.";

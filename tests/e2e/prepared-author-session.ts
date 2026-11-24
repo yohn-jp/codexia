@@ -90,21 +90,29 @@ export const preparedAuthorTest = authorTest.extend({
     const request = await playwright.request.newContext();
     const handoffs = new WeakMap<Page, Handoff>();
     let token: Promise<string> | undefined;
-    const realToken = () => token ??= authorTest.step("CI phase: prepare-test-author-token", () => authorServer.issueOwnerAccessToken());
+    const realToken = () => token ??= authorTest.step("CI phase: prepare-test-author-token", async () => {
+      const started = performance.now();
+      const value = await authorServer.issueOwnerAccessToken();
+      console.log(JSON.stringify({ phase: "prepared-author-token", durationMs: Math.round(performance.now() - started) }));
+      return value;
+    });
     try {
       await use(async (shell, targetPage = page, navigation = {}) => {
         const entry = authorServer.preparedEntryUrl(shell);
         // Cross-version frontend proof and explicit reauthentication keep the ordinary path.
-        if (!entry || navigation.continueCurrentPage) return authorizeAuthor(shell, targetPage, navigation);
+        if (navigation.continueCurrentPage || process.env.CODEXIA_E2E_COMPAT_FRONTEND_SOURCE) return authorizeAuthor(shell, targetPage, navigation);
+        if (!entry) throw new Error("Prepared author entry missing for explicitly opted-in test");
         if (navigation.apiSetupOnly) {
           if (navigation.path || navigation.expectedView) throw new Error("API-only setup cannot request browser navigation");
           return createAuthorSession(request, authorServer.apiOrigin, await realToken());
         }
         const accessToken = await realToken();
+        const started = performance.now();
         await authorTest.step("CI phase: prepared-browser-runtime", () => openPreparedAuthor(
           targetPage, authorServer.apiOrigin, shell, new URL(navigation.path ?? `/${shell}/`, authorServer.apiOrigin),
           entry, accessToken, handoffs, navigation.expectedView,
         ));
+        console.log(JSON.stringify({ phase: "prepared-author-runtime", shell, durationMs: Math.round(performance.now() - started), browserOAuthRequests: 0 }));
         return createAuthorSession(request, authorServer.apiOrigin, accessToken);
       });
     } finally {
