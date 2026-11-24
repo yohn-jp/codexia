@@ -24,6 +24,10 @@
 - **更新の可否は「連動更新」「再現された阻害による一時保留」「更新待ち」「削除・再評価」「制約根拠未確認」に区別する。** 依存している実行環境・peer API・型・生成物を切り離して更新しない。古い版が必要な場合は、再現できる阻害・保持範囲・解除条件を当該PRへ、継続的な採用条件を[台帳](DEPENDENCY-INVENTORY.md)へ記録する。
 - **非JS依存も対象**とする。SwiftPMのexact、Ansibleの`==`、GitHub Actions、OCIイメージdigest、Node/pnpmおよび複数のlockfileの整合を同様に審査する。
 
+### Pythonパッケージ管理
+
+**Python依存管理の標準は [uv](https://github.com/astral-sh/uv) とする。** 既存のPython実行版・仮想環境・依存宣言・lockfileを正本として維持し、実行時の未固定版解決やハッシュ検証の弱体化を認めない。uv自身も検証済み公式releaseの版と配布SHA-256を固定する。新規導入および既存経路の移行は対象の実際の検証・配備契約を満たした上で行い、既存のOS管理パッケージや保護されたホストの運用を無検証に変更しない。CIのキャッシュ採否とStrictDocの実行条件は[CI/CD正本](../verification/CI-CD.md)に従う。
+
 ### pnpm Catalog と依存の実行区分
 
 - pnpmワークスペースで複数利用される外部ライブラリの**共通バージョン指定**は `pnpm-workspace.yaml` の `catalogs.production`・`catalogs.development` に集約する。ワークスペース内の `package.json` は `catalog:production`／`catalog:development` を参照する。Catalogは版を管理するための仕組みであり、インストール／配布への採否を決める機構ではない。
