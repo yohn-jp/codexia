@@ -37,11 +37,12 @@ function candidateIdentity(backend, frontend, authSchemas) {
 
 export function publicFrontendEvidence(value) {
   if (!value) return null;
-  const { oauthConfigIdentity, ...rest } = frontendIdentity(value);
+  const { format, sourceSha, version, profile, apiEpoch, oauthConfigIdentity } = assertFrontendIdentity(value);
+  assert.equal(profile, 'full');
   parsePublicFrontendConfigIdentity(oauthConfigIdentity);
   // The exact archive digest or immutable Worker deployment binds these
   // public settings. Keep only release identity fields in the plan evidence.
-  return rest;
+  return { format, sourceSha, version, profile, apiEpoch };
 }
 
 function stateDatabase(database, target, intent) {
