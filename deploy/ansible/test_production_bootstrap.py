@@ -6,10 +6,11 @@ import importlib.util
 import io
 import json
 from pathlib import Path
-from unittest import mock
+import shutil
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -50,6 +51,11 @@ class BootstrapControllerTests(unittest.TestCase):
         self.env = {
             "GITHUB_ACTIONS": "true",
             "GITHUB_REPOSITORY": "yohn-jp/codexia",
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_SHA": "c" * 40,
+            "GITHUB_RUN_ID": "900",
+            "GITHUB_RUN_ATTEMPT": "1",
             "RUNNER_TEMP": str(self.base),
             "GITHUB_OUTPUT": str(self.base / "outputs"),
             "CODEXIA_BOOTSTRAP_MODE": "preflight",
@@ -58,10 +64,24 @@ class BootstrapControllerTests(unittest.TestCase):
             "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY": self.key.read_text(),
             "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": f"{self.host} {pubkey}",
             "CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED": "false",
-            "CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED": "false",
             "CODEXIA_BOOTSTRAP_FULL_IMAGE": "",
         }
+        self.image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        self.candidate = self.base / "codexia-lifecycle-candidate.json"
         self.set_bundle()
+
+    def certify(self, *, image: str | None = None, profile: str = "full", **binding):
+        receipt = {
+            "sourceSha": self.env["GITHUB_SHA"],
+            "runId": int(self.env["GITHUB_RUN_ID"]),
+            "attempt": int(self.env["GITHUB_RUN_ATTEMPT"]),
+            "candidateBackend": {
+                "image": image or self.image,
+                "identity": {"profile": profile},
+            },
+        }
+        self.candidate.write_text(json.dumps(receipt | binding), encoding="utf-8")
+        self.candidate.chmod(0o600)
 
     def set_bundle(self, extra_members: dict[str, bytes] | None = None, symlink: str | None = None):
         result = io.BytesIO()
@@ -83,9 +103,19 @@ class BootstrapControllerTests(unittest.TestCase):
         control = Path(result["control"])
         self.assertEqual((control / "inventory.yml").stat().st_mode & 0o777, 0o600)
         runtime = json.loads((control / "runtime-vars.json").read_text())
-        self.assertEqual(runtime["codexia_stage"], "bootstrap")
+        inventory = yaml.safe_load((control / "inventory.yml").read_text())
+        group = inventory["all"]["children"]["codexia"]
+        target = group["hosts"]["codexia-target"]
+        self.assertEqual(target["ansible_host"], "codexia-bootstrap-target")
+        self.assertEqual(target["ansible_user"], "bootstrap-admin")
+        self.assertEqual(target["ansible_connection"], "ssh")
+        self.assertIn("codexia-bootstrap/ssh/config", target["ansible_ssh_common_args"])
+        self.assertTrue(all(not key.startswith("ansible_") for key in runtime))
+        self.assertEqual(group["vars"]["codexia_service_uid"], 1001)
+        self.assertNotIn("fixture-private", json.dumps(inventory))
+        self.assertEqual(runtime["codexia_stage"], "inspect")
         self.assertFalse(runtime["codexia_database_initialization_approved"])
-        self.assertFalse(runtime["codexia_recreate_missing_app_database_approved"])
+        self.assertNotIn("codexia_recreate_missing_app_database_approved", runtime)
         self.assertNotIn("fixture-private/tunnel-token", json.dumps(runtime))
         self.assertIn(self.host, (self.base / "outputs").read_text())
 
@@ -93,23 +123,94 @@ class BootstrapControllerTests(unittest.TestCase):
         self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "reviewed immutable Full image"):
             bootstrap.prepare(self.env)
-        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        self.certify()
         self.env["CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED"] = "true"
-        self.env["CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED"] = "true"
         out = bootstrap.prepare(self.env)
         runtime = json.loads((Path(out["control"]) / "runtime-vars.json").read_text())
         self.assertTrue(runtime["codexia_database_initialization_approved"])
-        self.assertTrue(runtime["codexia_recreate_missing_app_database_approved"])
+        self.assertNotIn("codexia_recreate_missing_app_database_approved", runtime)
         self.assertEqual(runtime["codexia_auth_bootstrap_image"], self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"])
+
+    def test_bootstrap_refuses_format_valid_digest_without_candidate_verification(self):
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "verified lifecycle candidate"):
+            bootstrap.prepare(self.env)
+        self.assertFalse((self.base / "codexia-bootstrap").exists())
+
+    def test_bootstrap_refuses_candidate_from_another_source_run_or_attempt(self):
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        for binding in ({"sourceSha": "b" * 40}, {"runId": 901}, {"attempt": 2}):
+            with self.subTest(binding=binding):
+                self.certify(**binding)
+                with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "current workflow run and attempt"):
+                    bootstrap.prepare(self.env)
+                self.assertFalse((self.base / "codexia-bootstrap").exists())
+
+    def test_bootstrap_refuses_a_different_certified_image_or_profile(self):
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        for candidate in ({"image": self.image[:-1] + "b"}, {"profile": "core"}):
+            with self.subTest(candidate=candidate):
+                self.certify(**candidate)
+                with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "reviewed digest and Full profile"):
+                    bootstrap.prepare(self.env)
+                self.assertFalse((self.base / "codexia-bootstrap").exists())
+
+    def test_owner_setup_and_prepare_activation_require_same_run_candidate(self):
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        for mode in ("owner-setup", "prepare-activation"):
+            with self.subTest(mode=mode):
+                self.env["CODEXIA_BOOTSTRAP_MODE"] = mode
+                with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "verified lifecycle candidate"):
+                    bootstrap.prepare(self.env)
+                self.assertFalse((self.base / "codexia-bootstrap").exists())
+
+    def test_owner_operations_require_explicit_inventory_approval(self):
+        self.certify()
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        for mode in ("owner-setup", "prepare-activation"):
+            with self.subTest(mode=mode):
+                self.env["CODEXIA_BOOTSTRAP_MODE"] = mode
+                with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "explicitly approve owner setup"):
+                    bootstrap.prepare(self.env)
+                shutil.rmtree(self.base / "codexia-bootstrap")
+
+    def test_owner_setup_requires_separate_edge_approval(self):
+        self.certify()
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "owner-setup"
+        inv = yaml.safe_load(self.contents["inventory.yml"])
+        inv["all"]["children"]["codexia"]["vars"]["codexia_owner_setup_approved"] = True
+        self.contents["inventory.yml"] = yaml.safe_dump(inv).encode()
+        self.set_bundle()
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "explicitly approve the restricted owner setup edge"):
+            bootstrap.prepare(self.env)
+
+    def test_approved_owner_modes_stage_only_the_requested_certified_operation(self):
+        self.certify()
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        inv = yaml.safe_load(self.contents["inventory.yml"])
+        approvals = inv["all"]["children"]["codexia"]["vars"]
+        approvals["codexia_owner_setup_approved"] = True
+        approvals["codexia_owner_setup_edge_approved"] = True
+        self.contents["inventory.yml"] = yaml.safe_dump(inv).encode()
+        self.set_bundle()
+        for mode in ("owner-setup", "prepare-activation"):
+            with self.subTest(mode=mode):
+                self.env["CODEXIA_BOOTSTRAP_MODE"] = mode
+                out = bootstrap.prepare(self.env)
+                runtime = json.loads((Path(out["control"]) / "runtime-vars.json").read_text())
+                self.assertEqual(runtime["codexia_stage"], mode)
+                self.assertEqual(runtime["codexia_auth_bootstrap_image"], self.image)
+                self.assertFalse(runtime["codexia_database_initialization_approved"])
+                shutil.rmtree(self.base / "codexia-bootstrap")
 
     def test_preflight_rejects_mutation_gate(self):
         self.env["CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED"] = "true"
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "Read-only preflight"):
-            bootstrap.prepare(self.env)
-
-    def test_recreation_cannot_bypass_separate_initialization_approval(self):
-        self.env["CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED"] = "true"
-        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "requires database initialization approval"):
             bootstrap.prepare(self.env)
 
     def test_refuses_incomplete_bundle(self):
@@ -134,6 +235,49 @@ class BootstrapControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "independently pinned"):
             bootstrap.prepare(self.env)
 
+    def test_refuses_a_host_range_in_the_single_host_mapping(self):
+        inventory = yaml.safe_load(self.contents["inventory.yml"])
+        hosts = inventory["all"]["children"]["codexia"]["hosts"]
+        hosts["node[01:02]"] = hosts.pop("node")
+        self.contents["inventory.yml"] = yaml.safe_dump(inventory).encode()
+        self.set_bundle()
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "one literal host alias"):
+            bootstrap.prepare(self.env)
+
+    def test_refuses_additional_inventory_topology_or_connection_overrides(self):
+        original = self.contents["inventory.yml"]
+        for section, key, value in (
+            ("all", "hosts", {}),
+            ("children", "other", {}),
+            ("group", "children", {}),
+            ("host", "ansible_ssh_executable", "/some/ssh"),
+            ("vars", "ansible_ssh_executable", "/some/ssh"),
+            ("vars", "codexia_stage", "deploy"),
+            ("vars", "codexia_auth_bootstrap_image", self.image),
+            ("vars", "codexia_database_initialization_approved", True),
+            ("vars", "codexia_recreate_missing_app_database_approved", True),
+            ("vars", "codexia_bootstrap_stages", ["base", "auth-runtime"]),
+            ("vars", "codexia_owner_setup_install_intent", True),
+            ("vars", "codexia_owner_setup_operation", "open"),
+        ):
+            with self.subTest(section=section, key=key):
+                inventory = yaml.safe_load(original)
+                group = inventory["all"]["children"]["codexia"]
+                sections = {
+                    "all": inventory["all"], "children": inventory["all"]["children"],
+                    "group": group, "host": group["hosts"]["node"], "vars": group["vars"],
+                }
+                sections[section][key] = value
+                self.contents["inventory.yml"] = yaml.safe_dump(inventory).encode()
+                self.set_bundle()
+                with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "Private inventory"):
+                    bootstrap.prepare(self.env)
+                # Invalid bundles abort before staging the SSH configuration.
+                control_root = self.base / "codexia-bootstrap"
+                self.assertFalse((control_root / "ssh").exists())
+                if control_root.exists():
+                    shutil.rmtree(control_root)
+
     def test_refuses_rootless_service_as_admin_identity(self):
         self.env["CODEXIA_BOOTSTRAP_SSH_USER"] = "codexia"
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "independent"):
@@ -145,7 +289,8 @@ class BootstrapControllerTests(unittest.TestCase):
         self.contents["inventory.yml"] = yaml.safe_dump(inv).encode()
         self.set_bundle()
         self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
-        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        self.certify()
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "explicitly approve"):
             bootstrap.prepare(self.env)
 

@@ -1018,7 +1018,7 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
     app = createOwnerSetupApp(config, [config.publicOrigin + '/desktop/']);
     const dist = process.env.CODEXIA_PASSKEY_SETUP_UI_DIST;
     if (dist) {
-      // Serve the reviewed built SPA route as Workers does. API requests still
+      // Serve the dedicated setup assets as the limited Worker does. API requests still
       // go directly to the actual setup-only Fastify routes and PostgreSQL.
       const index = await readFile(join(dist, 'index.html'), 'utf8');
       const assetDirectory = join(dist, 'assets');
@@ -1031,7 +1031,7 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
         });
       }
       app.get('/console/setup', (_request, reply) => reply.type('text/html').send(index));
-      app.get<{ Params: { file: string } }>('/desktop/assets/:file', (request, reply) => {
+      app.get<{ Params: { file: string } }>('/console/setup/assets/:file', (request, reply) => {
         const asset = assets.get(request.params.file);
         return asset ? reply.type(asset.type).send(asset.body) : reply.code(404).send();
       });
@@ -1039,7 +1039,7 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
     await app.verifySchema();
     if (dist) {
       for (const asset of ['unknown.js', '%2e%2e%2findex.html', 'subdirectory%2fasset.js']) {
-        const source: LightMyRequestResponse = await app.inject({ method: 'GET', url: '/desktop/assets/' + asset });
+        const source: LightMyRequestResponse = await app.inject({ method: 'GET', url: '/console/setup/assets/' + asset });
         assert.equal(source.statusCode, 404, asset);
         assert.equal(source.body, '');
       }

@@ -73,7 +73,9 @@
 
     - name: Converge the rootless host account and dependencies
       ansible.builtin.include_tasks: host.yml
-      when: codexia_stage in ['bootstrap', 'host']
+      when: >-
+        codexia_stage == 'host' or
+        (codexia_stage == 'bootstrap' and 'host' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Install only explicitly authorized base credentials
       ansible.builtin.include_tasks:
@@ -82,7 +84,9 @@
           become: true
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage in ['bootstrap', 'secrets']
+      when: >-
+        codexia_stage == 'secrets' or
+        (codexia_stage == 'bootstrap' and 'secrets' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Recreate only a separately approved absent Codexia logical database
       ansible.builtin.include_tasks:
@@ -100,7 +104,9 @@
           become: true
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage in ['bootstrap', 'base']
+      when: >-
+        codexia_stage == 'base' or
+        (codexia_stage == 'bootstrap' and 'base' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Provision Better Auth runtime role, schema, and protected secrets before first activation
       ansible.builtin.include_tasks:
@@ -109,7 +115,10 @@
           become: "{{ ansible_facts.user_id != codexia_service_user }}"
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage == 'auth-runtime' or (codexia_stage == 'bootstrap' and codexia_auth_runtime_approved | default(false) | bool)
+      when: >-
+        codexia_stage == 'auth-runtime' or (codexia_stage == 'bootstrap' and
+        'auth-runtime' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime']))
+        and codexia_auth_runtime_approved | default(false) | bool)
 
     - name: Require a certified immutable release for the push deployment
       ansible.builtin.assert:

@@ -12,10 +12,10 @@ spec.loader.exec_module(observer)
 
 
 class ObserveDatabaseTests(unittest.TestCase):
-    def observe(self, *, volume=True, container=True, layout="ready", writer=None):
+    def observe(self, *, volume=True, container=True, layout="ready", writer=None, directory=Path("/unused")):
         return observer.observe_database(
             {"codexia-postgres": volume}, {"codexia-db": container},
-            Path("/unused"), Path("/unused"), writer, "", layout)
+            directory, directory, writer, "", layout)
 
     def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
         with patch.object(observer, "command") as command:
@@ -58,6 +58,38 @@ class ObserveDatabaseTests(unittest.TestCase):
             args = command.call_args.args[0]
             self.assertIn("default_transaction_read_only=on", args[6])
             self.assertEqual(command.call_args.kwargs["stdin"], "SELECT 1;\n")
+
+    def test_initialized_setup_without_grant_needs_matching_fresh_intent(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        no_grant = {"grant": False, "hasGrant": False, "consumed": False,
+                    "ownerCount": 0, "ownerBinding": None, "pristine": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+            (directory / "owner-setup.installation").write_text("123\n")
+            (directory / "owner-setup.container").write_text(f"Image={image}\n")
+            for intent_database, expected in [(None, "recovery"), ("456", "pending")]:
+                if intent_database:
+                    intent.write_text(f"123:{intent_database}:{image}\n")
+                    intent.chmod(0o600)
+                with self.subTest(intent_database=intent_database):
+                    with patch.object(observer, "command", return_value=(0, "true")), \
+                            patch.object(observer, "sql", return_value="t"), \
+                            patch.object(observer, "json_sql", side_effect=[
+                                cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                            ]):
+                        result = self.observe(directory=directory)
+                        self.assertEqual(result["authState"], expected)
+            intent.write_text(f"123:999:{image}\n")
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "sql", return_value="t"), \
+                    patch.object(observer, "json_sql", side_effect=[
+                        cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                    ]):
+                with self.assertRaises(ValueError):
+                    self.observe(directory=directory)
 
 
 class TransactionTests(unittest.TestCase):

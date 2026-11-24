@@ -70,6 +70,12 @@ variable "frontend_route_enabled" {
   default     = false
 }
 
+variable "owner_setup_route_enabled" {
+  type        = bool
+  description = "Attach only first-owner enrollment assets under Access. Keep normal UI routes inactive until the setup API stops."
+  default     = false
+}
+
 variable "public_oauth_edge_enabled" {
   type        = bool
   description = "Enable exact-path Access Bypass apps and Tunnel routes for OAuth/MCP only after Passkey-first OAuth acceptance; false keeps every path under the existing Access boundary."

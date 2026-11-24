@@ -48,6 +48,7 @@
     "scripts/release/frontend/promotion-handoff.test.mjs",
     "scripts/build/frontend/oauth-config.mjs",
     "scripts/build/frontend/oauth-config.test.mjs",
+    "scripts/build/frontend/owner-setup-assets.mjs",
     "scripts/release/components/record-model*.mjs",
     "scripts/ci/certification/reuse-merged-pr*.mjs",
     "scripts/release/frontend/verify-compatibility*.mjs",

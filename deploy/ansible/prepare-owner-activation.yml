@@ -1,0 +1,41 @@
+---
+- name: Run the protected first-owner handoff on the declared rootless host
+  hosts: codexia
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    owner_setup_home: "{{ codexia_service_home }}"
+    owner_setup_operations:
+      owner-setup: ['--converge', "{{ codexia_auth_bootstrap_image }}", 'NEW_APPROVED', "{{ codexia_owner_setup_age_recipient | default('') }}"]
+      prepare-activation: ['--prepare-activation', "{{ codexia_auth_bootstrap_image }}"]
+  tasks:
+    - name: Require a single pinned host and separately approved owner operation
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - not ansible_check_mode
+          - codexia_service_user == 'codexia'
+          - codexia_service_uid is integer and codexia_service_uid > 0
+          - owner_setup_home == '/home/codexia'
+          - codexia_owner_setup_approved is sameas true
+          - codexia_owner_setup_operation in owner_setup_operations
+          - codexia_auth_bootstrap_image is match('^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_edge_approved | default(false) is sameas true
+          - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
+        fail_msg: Owner handoff requires the pinned rootless account, certified Full image and protected enrollment approval.
+
+    - name: Run the canonical operator operation under its host lock
+      become: true
+      become_user: "{{ codexia_service_user }}"
+      environment:
+        HOME: "{{ owner_setup_home }}"
+        XDG_CONFIG_HOME: "{{ owner_setup_home }}/.config"
+        XDG_DATA_HOME: "{{ owner_setup_home }}/.local/share"
+        XDG_STATE_HOME: "{{ owner_setup_home }}/.local/state"
+        XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+      ansible.builtin.command:
+        argv: "{{ [owner_setup_home + '/.local/bin/codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"
+        expand_argument_vars: false
+      register: owner_setup_command
+      changed_when: owner_setup_command.stdout != ''

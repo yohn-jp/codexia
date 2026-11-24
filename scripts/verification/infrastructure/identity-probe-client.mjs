@@ -70,7 +70,7 @@ function accessBoundaryDenied(response, origin) {
 }
 
 /** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}|null} credentials @param {typeof fetch} fetchImpl */
-async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
+export async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
   const response = await requestProbe(endpoint, origin, credentials, fetchImpl);
   const evidence = statusEvidence(response);
   await response.body?.cancel().catch(() => undefined);

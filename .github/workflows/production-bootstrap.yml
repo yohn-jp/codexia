@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Read-only controller and SSH preflight, or approved Ansible bootstrap
+        description: Read-only SSH preflight, R4 convergence, or one protected R5 owner operation
         type: choice
-        options: [preflight, bootstrap]
+        options: [preflight, bootstrap, owner-setup, prepare-activation]
         default: preflight
         required: true
       main_sha:
@@ -13,19 +13,27 @@ on:
         type: string
         required: true
       full_image:
-        description: Reviewed immutable Full image digest (required for bootstrap)
+        description: Reviewed immutable Full image digest (required to mutate)
         type: string
         required: false
       initialize_database:
         description: Approve fresh Codexia schema initialization (no data deletion)
         type: boolean
         default: false
-      recreate_missing_database:
-        description: Also recreate only an absent codexia logical DB in the existing cluster
-        type: boolean
-        default: false
+      request:
+        description: Exact lifecycle Preflight candidate request JSON (required to mutate)
+        type: string
+        required: false
+      plan_sha256:
+        description: SHA-256 of the exact reviewed lifecycle Preflight plan
+        type: string
+        required: false
+      preflight_run_id:
+        description: Run ID that produced the reviewed lifecycle Preflight plan
+        type: string
+        required: false
       approval_phrase:
-        description: Enter BOOTSTRAP_CODEXIA for a mutating bootstrap
+        description: Enter BOOTSTRAP_CODEXIA for R4 or OWNER_SETUP_CODEXIA for R5
         type: string
         required: false
   pull_request:
@@ -34,7 +42,13 @@ on:
       - .github/workflows/production-bootstrap.yml
       - deploy/ansible/prepare-production-bootstrap.py
       - deploy/ansible/test_production_bootstrap.py
-      - deploy/ansible/recreate-missing-app-database.yml
+      - deploy/ansible/prepare-owner-activation.yml
+      - deploy/ansible/owner-setup*
+      - deploy/ansible/test_owner_setup.py
+      - deploy/ansible/auth-runtime*
+      - deploy/ansible/preflight-observe*
+      - scripts/deployment/bootstrap/**
+      - scripts/deployment/preflight/**
       - deploy/ansible/site.yml
       - docs/deployment/PRODUCTION-BOOTSTRAP.md
 permissions:
@@ -49,6 +63,9 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
       - name: Install pinned Ansible Python dependencies
         run: |
           set -euo pipefail
@@ -57,8 +74,13 @@ jobs:
       - name: Verify protected controller inputs and Ansible syntax
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p test_production_bootstrap.py -v
-          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
+          node --test scripts/deployment/bootstrap/admission.test.mjs
+          for fixture in test_production_bootstrap.py test_owner_setup.py test_preflight_observe.py; do
+            PYTHONDONTWRITEBYTECODE=1 "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p "$fixture" -v
+          done
+          for playbook in site preflight-observe prepare-owner-activation; do
+            "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml "deploy/ansible/$playbook.yml" --syntax-check
+          done
 
       - name: Reject bootstrap between durable cutover phases
         run: |
@@ -90,6 +112,8 @@ jobs:
       queue: max
     permissions:
       contents: read
+      actions: read
+      packages: read
       id-token: write
     steps:
       - name: Validate reviewed main and independent approvals before acquiring privileged credentials
@@ -101,7 +125,9 @@ jobs:
           CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           DATABASE_GATE: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
           INIT_REQUESTED: ${{ inputs.initialize_database }}
-          RECREATE_REQUESTED: ${{ inputs.recreate_missing_database }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
+          LIFECYCLE_REQUEST: ${{ inputs.request }}
           APPROVAL_PHRASE: ${{ inputs.approval_phrase }}
           FULL_IMAGE: ${{ inputs.full_image }}
         shell: bash
@@ -110,31 +136,88 @@ jobs:
           [[ "$REQUESTED_SHA" =~ ^[a-f0-9]{40}$ && "$REQUESTED_SHA" == "$GITHUB_SHA" ]] || { echo 'Reviewed SHA differs from the dispatch commit.' >&2; exit 1; }
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main advanced after dispatch; review the new source before retrying.' >&2; exit 1; }
+          if [[ "$BOOTSTRAP_MODE" == preflight ]]; then
+            [[ "$INIT_REQUESTED" == false ]]
+            exit 0
+          fi
+          [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true ]] || { echo 'Bootstrap is paused for coordinated API epoch maintenance.' >&2; exit 1; }
+          [[ "$BOOTSTRAP_ENABLED" == true && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ && "$PREFLIGHT_RUN" =~ ^[1-9][0-9]{0,15}$ && -n "$LIFECYCLE_REQUEST" ]] || {
+            echo 'Protected enablement and reviewed lifecycle plan are required.' >&2; exit 1;
+          }
+          [[ "$FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || exit 1
           case "$BOOTSTRAP_MODE" in
-            preflight)
-              [[ "$INIT_REQUESTED" == false && "$RECREATE_REQUESTED" == false ]] || exit 1
-              ;;
             bootstrap)
-              [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true ]] || { echo 'Bootstrap is paused for coordinated API epoch maintenance.' >&2; exit 1; }
-              [[ "$BOOTSTRAP_ENABLED" == true && "$APPROVAL_PHRASE" == BOOTSTRAP_CODEXIA ]] || { echo 'Protected environment enablement or per-run approval is missing.' >&2; exit 1; }
-              [[ "$FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || exit 1
-              if [[ "$INIT_REQUESTED" == true ]]; then
-                [[ "$DATABASE_GATE" == true ]] || { echo 'Separate database initialization approval is missing.' >&2; exit 1; }
-              fi
-              [[ "$RECREATE_REQUESTED" == false || "$INIT_REQUESTED" == true ]] || exit 1
+              [[ "$APPROVAL_PHRASE" == BOOTSTRAP_CODEXIA ]] || exit 1
+              [[ "$INIT_REQUESTED" == false || "$DATABASE_GATE" == true ]] || {
+                echo 'Separate database initialization approval is missing.' >&2; exit 1;
+              }
+              ;;
+            owner-setup|prepare-activation)
+              [[ "$APPROVAL_PHRASE" == OWNER_SETUP_CODEXIA && "$INIT_REQUESTED" == false ]] || exit 1
               ;;
             *) exit 1 ;;
           esac
+      - name: Resolve the exact protected Preflight producer and attempt
+        if: inputs.mode != 'preflight'
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
+        run: |
+          set -euo pipefail
+          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN" |
+            jq -er --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" '
+              select(.repository.full_name == $repo and .head_repository.full_name == $repo and
+                .event == "workflow_dispatch" and .head_branch == "main" and .head_sha == $sha and
+                .path == ".github/workflows/production-preflight.yml" and .status == "completed") |
+              .run_attempt | select(type == "number" and . > 0)')
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+      - name: Download the reviewed redacted lifecycle plan
+        if: inputs.mode != 'preflight'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: lifecycle-preflight-${{ inputs.preflight_run_id }}-${{ steps.preflight.outputs.attempt }}
+          path: ${{ runner.temp }}/reviewed-preflight
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preflight_run_id }}
       - name: Check out the exact reviewed main source without persisted credentials
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        if: inputs.mode != 'preflight'
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen evidence-reader dependencies
+        if: inputs.mode != 'preflight'
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - uses: docker/login-action@v4.8.0
+        if: inputs.mode != 'preflight'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify candidate pair, Full OCI identity and current main before opening SSH
+        if: inputs.mode != 'preflight'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
+          CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
+        run: node scripts/deployment/preflight/run.mjs candidate
       - name: Install the pinned Ansible control environment
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+          echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
       - name: Prepare private inventory, exact secret inputs, pinned SSH identity, and run-scoped approvals
         id: control
         env:
@@ -146,7 +229,6 @@ jobs:
           CODEXIA_BOOTSTRAP_BUNDLE_B64: ${{ secrets.CODEXIA_BOOTSTRAP_BUNDLE_B64 }}
           CODEXIA_BOOTSTRAP_FULL_IMAGE: ${{ inputs.full_image }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
-          CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.recreate_missing_database && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: |
           "$RUNNER_TEMP/codexia-ansible/bin/python" deploy/ansible/prepare-production-bootstrap.py
       - name: Connect to the protected Tailnet with GitHub OIDC
@@ -165,33 +247,54 @@ jobs:
           actual=$(ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'id -un')
           [[ "$actual" == "$EXPECTED_USER" ]] || { echo 'The VM returned an unexpected SSH identity.' >&2; exit 1; }
           ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'sudo -n true'
-      - name: Verify Ansible syntax and inspect only the declared target inventory
+      - name: Verify read-only controller inventory and Ansible syntax
+        if: inputs.mode == 'preflight'
         env:
           CONTROL: ${{ steps.control.outputs.control }}
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
-            --extra-vars "@$CONTROL/runtime-vars.json" --syntax-check
-          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
-            --extra-vars "@$CONTROL/runtime-vars.json" --list-hosts
-      - name: Reverify main before any production mutation
-        if: inputs.mode == 'bootstrap'
+          ansible-playbook -i "$CONTROL/inventory.yml" deploy/ansible/site.yml --extra-vars "@$CONTROL/runtime-vars.json" --syntax-check
+          ansible-playbook -i "$CONTROL/inventory.yml" deploy/ansible/site.yml --extra-vars "@$CONTROL/runtime-vars.json" --list-hosts
+      - name: Observe the pinned host after entering the production queue
+        if: inputs.mode != 'preflight'
+        env:
+          CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.control.outputs.host }}
+          ANSIBLE_HOST_KEY_CHECKING: 'True'
+        run: node scripts/deployment/preflight/run.mjs bootstrap-host
+      - name: Resolve current edge state and match the approved Preflight plan
+        if: inputs.mode != 'preflight'
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
+          CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
+          CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+          CODEXIA_BOOTSTRAP_MODE: ${{ inputs.mode }}
+          CODEXIA_BOOTSTRAP_PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT: ${{ steps.preflight.outputs.attempt }}
+          CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
+        run: node scripts/deployment/preflight/run.mjs bootstrap-admission
+      - name: Execute only the admitted R4 or R5 operation through Ansible
+        if: inputs.mode != 'preflight'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL: ${{ steps.control.outputs.control }}
+          OPERATION: ${{ inputs.mode }}
+          ANSIBLE_HOST_KEY_CHECKING: 'True'
         run: |
           set -euo pipefail
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main advanced during bootstrap preflight; no mutation was attempted.' >&2; exit 1; }
-      - name: Converge approved host, secrets, base and Better Auth runtime through canonical Ansible
-        if: inputs.mode == 'bootstrap'
-        env:
-          CONTROL: ${{ steps.control.outputs.control }}
-          ANSIBLE_HOST_KEY_CHECKING: 'True'
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$CONTROL/inventory.yml" deploy/ansible/site.yml \
-            --limit codexia --extra-vars "@$CONTROL/runtime-vars.json"
-          echo 'Approved Ansible bootstrap converged; API deployment, owner enrollment and frontend release are separate operations.' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$OPERATION" == bootstrap ]]; then
+            playbook=site
+          else
+            playbook=prepare-owner-activation
+          fi
+          ansible-playbook -i "$CONTROL/inventory.yml" "deploy/ansible/$playbook.yml" \
+            --limit codexia --extra-vars "@$CONTROL/runtime-vars.json" --extra-vars "@$CONTROL/admission.json"
       - name: Remove private controller inputs from the runner
         if: always()
         run: |

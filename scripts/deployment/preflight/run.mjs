@@ -47,11 +47,12 @@ export function parsePreflightRequest(raw) {
   return request;
 }
 
-async function hostObservation() {
+async function hostObservation({ bootstrap = false } = {}) {
   const binding = runBinding();
   const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-lifecycle-'));
   try {
-    const pin = await readFile(join(env.RUNNER_TEMP, 'codexia-ssh/known_hosts'), 'utf8');
+    const ssh = bootstrap ? 'codexia-bootstrap/ssh' : 'codexia-ssh';
+    const pin = (await readFile(join(env.RUNNER_TEMP, ssh, 'known_hosts'), 'utf8')).trimEnd();
     assert.ok(env.CODEXIA_PREFLIGHT_TARGET_HOST && pin);
     const hostPinSha256 = digestEvidence({ target: env.CODEXIA_PREFLIGHT_TARGET_HOST, pin });
     const out = join(scratch, 'host.json');
@@ -75,8 +76,10 @@ async function hostObservation() {
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
       codexia_preflight_quadlets: quadlets,
     }), { mode: 0o600, flag: 'wx' });
-    await run('ansible-playbook', ['-i', join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml'),
-      'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
+    const control = join(env.RUNNER_TEMP, 'codexia-bootstrap/control');
+    const inventory = bootstrap ? join(control, 'inventory.yml') : join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml');
+    await run('ansible-playbook', ['-i', inventory, 'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars],
+      { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
     const host = JSON.parse(await readFile(out, 'utf8'));
     await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
       JSON.stringify({ ...binding, hostPinSha256, host }) + '\n', { mode: 0o600, flag: 'wx' });
@@ -133,7 +136,7 @@ async function candidateObservation() {
       candidateFrontend, authSchemas, priorBackend }) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
-async function planObservation() {
+async function planObservation({ bootstrapMode } = {}) {
   const binding = runBinding();
   let stage = 'request';
   try {
@@ -165,7 +168,10 @@ async function planObservation() {
     });
     let edge = null;
     try {
-      edge = await edgeReader.observeLifecycle({ backendExpected: host.backend?.state === 'running' });
+      edge = await edgeReader.observeLifecycle({
+        backendExpected: host.backend?.state === 'running',
+        ownerSetupArtifactDigest: candidateFrontend.artifactDigest,
+      });
     } catch { /* failed or unauthorized observation is never absence */ }
     stage = 'plan';
     const { planFromObservations } = await import('./observe.mjs');
@@ -173,6 +179,41 @@ async function planObservation() {
       candidateBackend, candidateFrontend, authSchemas, priorBackend,
       intent: request.intent, window: request.window ?? null });
     await mainSource();
+    if (bootstrapMode) {
+      stage = 'bootstrap-admission';
+      const { admitBootstrap } = await import('../bootstrap/admission.mjs');
+      const { plan } = result;
+      if (bootstrapMode !== 'bootstrap') {
+        assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
+      }
+      const reviewed = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'reviewed-preflight/codexia-lifecycle-preflight.json'), 'utf8'));
+      assert.equal(reviewed.sourceSha, binding.sourceSha);
+      assert.equal(reviewed.runId, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID));
+      assert.equal(reviewed.attempt, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT));
+      assert.equal(reviewed.planSha256, env.CODEXIA_BOOTSTRAP_PLAN_SHA256);
+      const admission = admitBootstrap({
+        mode: bootstrapMode,
+        plan: reviewed.plan,
+        planSha256: reviewed.planSha256,
+        current: plan,
+        topology: host.topology,
+        initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
+      });
+      if (bootstrapMode === 'owner-setup') {
+        assert.equal(edge?.publicProtocolEnabled, false, 'Public OAuth/MCP must be disabled for limited setup');
+        assert.equal(edge.ownerSetup?.artifactDigest, candidateFrontend.artifactDigest,
+          'The limited setup route must serve the certified frontend assets');
+      }
+      const overrides = bootstrapMode === 'bootstrap' ? {
+        codexia_bootstrap_stages: admission.stages,
+        codexia_owner_setup_install_intent: admission.installIntent,
+        codexia_owner_setup_approved: false,
+      } : { codexia_owner_setup_operation: bootstrapMode };
+      await writeFile(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/admission.json'),
+        JSON.stringify(overrides) + '\n', { mode: 0o600, flag: 'wx' });
+      console.log('Protected operation admitted for ' + admission.route);
+      return;
+    }
     await writeFile(output(), JSON.stringify({ ...binding, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     console.log('Read-only lifecycle candidate route: ' + result.plan.candidateRoute +
       '; evidence blockers: ' + (result.plan.blockers.join(', ') || 'none') +
@@ -191,6 +232,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (process.argv[2] === 'candidate') await candidateObservation();
     else if (process.argv[2] === 'host') await hostObservation();
     else if (process.argv[2] === 'plan') await planObservation();
+    else if (process.argv[2] === 'bootstrap-host') await hostObservation({ bootstrap: true });
+    else if (process.argv[2] === 'bootstrap-admission') await planObservation({
+      bootstrapMode: env.CODEXIA_BOOTSTRAP_MODE,
+    });
     else throw new Error('Unknown lifecycle preflight operation');
   } catch {
     console.error('Protected lifecycle observation unavailable; no mutation performed');

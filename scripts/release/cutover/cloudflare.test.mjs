@@ -13,6 +13,7 @@ const newVersion = '10000000-0000-4000-8000-000000000002';
 const deploymentId = '10000000-0000-4000-8000-000000000003';
 const artifactDigest = 'sha256:' + 'e'.repeat(64);
 const workerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-frontend`;
+const setupWorkerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-owner-setup`;
 const accountPath = `/client/v4/accounts/${accountId}`;
 const zonePath = `/client/v4/zones/${zoneId}`;
 const rulesPath = `/client/v4/zones/${zoneId}/rulesets`;
@@ -32,6 +33,7 @@ function fixture() {
   const writes = [];
   const state = { enabled: false, preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false, ipAllow: false,
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
+    setupRoutes: false, setupPreview: false, setupAlias: false, setupTag: null, setupExposed: false,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
     id: fenceRuleId,
@@ -56,6 +58,7 @@ function fixture() {
       const target = new URL(url);
       const method = init.method ?? 'GET';
       if (target.origin === origin) {
+        if (state.setupExposed && target.pathname === '/console/setup') return new Response('Setup UI');
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/api/version') {
           if (state.backendAbsent) return new Response('Unavailable', { status: 502 });
           return Response.json({ name: 'codexia', profile: 'full', version: '1.0.0', apiEpoch: state.publicEpoch, auth: state.publicAuth });
@@ -75,7 +78,10 @@ function fixture() {
       }
       if (path === accountPath + '/workers/scripts') {
         if (state.inventoryDenied) return new Response('Denied', { status: 403 });
-        return apiResponse(state.scriptAbsent ? [] : [{ id: 'codexia-frontend' }]);
+        return apiResponse([
+          ...(!state.scriptAbsent ? [{ id: 'codexia-frontend' }] : []),
+          ...(state.setupTag ? [{ id: 'codexia-owner-setup' }] : []),
+        ]);
       }
       if (path === workerPath + '/deployments') {
         if (method === 'POST') {
@@ -90,11 +96,25 @@ function fixture() {
         return apiResponse({ id: newVersion, metadata: { hasPreview: false }, annotations: { 'workers/tag': state.uploadTag } });
       }
       if (path === workerPath + '/versions/' + oldVersion) return apiResponse({ id: oldVersion });
+      if (path === setupWorkerPath + '/deployments') return apiResponse({ deployments: [{
+        id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage',
+        versions: [{ version_id: newVersion, percentage: 100 }],
+      }] });
+      if (path === setupWorkerPath + '/versions/' + newVersion) return apiResponse({ id: newVersion,
+        metadata: { hasPreview: false }, annotations: { 'workers/tag': state.setupTag } });
+      if (path === setupWorkerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.setupPreview });
       if (path.endsWith('/firewall/access_rules/rules')) {
         return apiResponse(path.startsWith(zonePath) && state.ipAllow ? [{ mode: 'whitelist' }] : []);
       }
       if (path === zonePath + '/dns_records') return apiResponse([{ id: 'f'.repeat(32), name: hostname, proxied: true, type: 'CNAME', content: tunnelId + '.cfargotunnel.com' }]);
       if (path === zonePath + '/workers/routes') {
+        if (state.setupRoutes) return apiResponse([
+          ...['/console/setup', '/console/setup/', '/console/setup/assets/*'].map(route => ({
+            pattern: hostname + route, script: 'codexia-owner-setup',
+          })),
+          ...(!state.scriptAbsent ? [{ pattern: hostname + '/desktop/update-identity.json', script: 'codexia-frontend' }] : []),
+          ...(state.setupAlias ? [{ pattern: 'alias.example.com/*', script: 'codexia-owner-setup' }] : []),
+        ]);
         if (state.scriptAbsent) return apiResponse([]);
         const routes = [{ pattern: hostname + '/*', script: 'codexia-frontend' },
           ...['/api*', '/health*', '/mcp*', '/.well-known/*'].map(route => ({ pattern: hostname + route, script: null }))];
@@ -129,6 +149,35 @@ function fixture() {
   });
   return { client, state, writes };
 }
+
+test('lifecycle observes only the exact certified limited owner setup without a normal frontend', async () => {
+  const { client, state, writes } = fixture();
+  state.scriptAbsent = true;
+  state.backendAbsent = true;
+  state.setupRoutes = true;
+  state.setupTag = 'owner-setup-' + artifactDigest.slice(7);
+  const request = { backendExpected: false, ownerSetupArtifactDigest: artifactDigest.slice(7) };
+  const result = await client.observeLifecycle(request);
+  assert.equal(result.frontendState, 'absent');
+  assert.equal(result.publicProtocolEnabled, false);
+  assert.deepEqual(result.ownerSetup, { deploymentId, versionId: newVersion, artifactDigest: request.ownerSetupArtifactDigest });
+  await assert.rejects(client.observeLifecycle({ ...request, ownerSetupArtifactDigest: 'a'.repeat(64) }), /setup.*artifact/iu);
+  await assert.rejects(client.assertOwnerSetupDetached(), /setup/iu);
+  state.setupExposed = true;
+  await assert.rejects(client.observeLifecycle(request), /ACCESS_BOUNDARY/u);
+  state.setupExposed = false;
+  state.scriptAbsent = false;
+  const previous = await client.observeLifecycle(request);
+  assert.equal(previous.frontendState, 'running');
+  assert.equal(previous.deployment.versionId, oldVersion);
+  assert.deepEqual(previous.ownerSetup, result.ownerSetup);
+  state.setupAlias = true;
+  await assert.rejects(client.observeLifecycle(request), /alternate ingress/u);
+  state.setupAlias = false;
+  state.setupPreview = true;
+  await assert.rejects(client.observeLifecycle(request), /preview URLs/u);
+  assert.deepEqual(writes, []);
+});
 
 test('fence limits a maintenance exception to a single source IP, exact method and raw and normalized path', () => {
   assert.equal(buildFenceExpression(origin), expression);
