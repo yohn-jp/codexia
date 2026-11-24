@@ -143,6 +143,11 @@ test('the certified graph covers every declared obligation within the twenty-two
   assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DATABASE_URL,
     'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test');
   assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1');
+  const dbImage = apiUnitJob.steps.find(step => step.name === 'Materialize pinned DB contract restore image');
+  assert.equal(dbImage.if, "matrix.group == 'db'");
+  assert.match(dbImage.run, /toolchain\.json/);
+  assert.match(dbImage.run, /docker pull "\$image"/);
+  assert.ok(apiUnitJob.steps.indexOf(dbImage) < apiUnitJob.steps.findIndex(step => step.name === 'Run selected validations'));
   const authDatabase = apiUnitJob.steps.find(step => step.name === 'Create isolated Better Auth persistence database');
   assert.equal(authDatabase.if, "matrix.group == 'core' || matrix.group == 'api'");
   assert.equal(authDatabase.env.POSTGRES_CONTAINER, '${{ job.services.postgres.id }}');

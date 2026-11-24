@@ -217,6 +217,13 @@ jobs:
             core|modules) pnpm install --frozen-lockfile --prefer-offline ;;
             *) exit 2 ;;
           esac
+      - name: Materialize pinned DB contract restore image
+        if: matrix.group == 'db'
+        run: |
+          set -euo pipefail
+          image=$(node -p "require('./packages/persistence-postgres/tests/db-contract/toolchain.json').postgresImage")
+          [[ "$image" =~ @sha256:[a-f0-9]{64}$ ]]
+          docker pull "$image"
       - name: Create isolated Better Auth persistence database
         if: matrix.group == 'core' || matrix.group == 'api'
         env:
