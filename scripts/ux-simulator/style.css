@@ -1,0 +1,94 @@
+.ux-page {
+  --ux-paper: #fffefa;
+  --ux-ground: #f5f1e9;
+  --ux-ink: #24211d;
+  --ux-muted: #6d675e;
+  --ux-line: #d6cbbd;
+  --ux-accent: #70452f;
+  color: var(--ux-ink);
+  background: var(--ux-ground);
+  margin: 0;
+  font: 1rem/1.6 system-ui, sans-serif;
+}
+.ux-page :where(*, *::before, *::after) { box-sizing: border-box; }
+.ux-page [hidden] { display: none; }
+.ux-page a { color: var(--ux-accent); text-underline-offset: .2em; }
+.ux-page :focus-visible { outline: 3px solid var(--ux-accent); outline-offset: 2px; }
+.ux-page #main-content { max-inline-size: 100rem; margin-inline: auto; padding: clamp(1rem, 2vw, 2rem); }
+.ux-header { margin-block-end: 1rem; }
+.ux-header h1 { font-size: clamp(1.75rem, 1.4rem + 1.3vw, 2.65rem); letter-spacing: -.03em; line-height: 1.15; margin: 0; }
+.ux-header p { margin: .35rem 0 0; color: var(--ux-muted); }
+.ux-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-block-end: 1rem; }
+.ux-page :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+  border: 1px solid #8d8375;
+  border-radius: .375rem;
+  background: var(--ux-paper);
+  padding: .5rem .7rem;
+  min-block-size: 2.75rem;
+  max-inline-size: 100%;
+}
+.ux-page :where(input, select, textarea) { inline-size: 100%; }
+.ux-page label { display: block; color: var(--ux-muted); }
+.ux-page :where(button, summary) { cursor: pointer; }
+.ux-page button:disabled { cursor: default; opacity: .65; }
+.ux-page button:not(:disabled):hover { background: var(--ux-ground); }
+.ux-page :where(.primary, .ux-tabs [aria-pressed="true"]) { color: var(--ux-paper); background: var(--ux-accent); border-color: var(--ux-accent); }
+.ux-page :where(.primary, .ux-tabs [aria-pressed="true"]):not(:disabled):hover { color: var(--ux-paper); background: #573321; }
+.ux-layout { display: grid; gap: 1rem; align-items: start; grid-template-columns: minmax(0, 1fr); }
+.ux-layout > * { min-inline-size: 0; }
+.ux-catalog, .ux-inspector, .ux-player, .ux-comparison {
+  background: var(--ux-paper);
+  border: 1px solid var(--ux-line);
+  border-radius: .75rem;
+  padding: clamp(.875rem, 2vw, 1.25rem);
+  overflow-wrap: anywhere;
+}
+.ux-layout > details > summary { font-weight: 700; }
+.ux-layout > details[open] > summary { margin-block-end: .875rem; }
+.ux-catalog-results h2 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
+.ux-catalog label:not(:first-child) { margin-block-start: .65rem; }
+.ux-scenarios, .ux-history { margin: 0; list-style: none; padding: 0; }
+.ux-scenarios li + li, .ux-history li + li, .ux-screen-details + .ux-screen-details { border-block-start: 1px solid var(--ux-line); }
+.ux-scenarios li, .ux-history li, .ux-screen-details { padding-block: .55rem; }
+.ux-scenarios li > button { text-align: start; }
+.ux-scenarios small { display: block; color: var(--ux-muted); }
+.ux-screen-details summary { min-block-size: 2rem; font-size: .9rem; }
+.ux-source { font-size: .85rem; }
+.ux-notice { margin: 0 0 .75rem; padding: .5rem .75rem; border: 1px solid var(--ux-line); background: var(--ux-ground); }
+.ux-notice:empty { display: none; }
+.ux-stage > section > h2:first-child { margin-block-start: 0; }
+.ux-inspector :where(h3, p) { font-size: .9rem; }
+.ux-inspector select { margin-block: .25rem .5rem; }
+.ux-state { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); column-gap: .5rem; font-size: .85rem; margin: 0; }
+.ux-state dt { color: var(--ux-muted); }
+.ux-state dd { margin: 0; }
+.ux-history { font-size: .85rem; }
+.ux-history small { color: var(--ux-muted); }
+.ux-page .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block-start: .75rem; }
+.ux-page dialog {
+  color: var(--ux-ink);
+  background: var(--ux-paper);
+  border: 1px solid #8d8375;
+  border-radius: .75rem;
+  inline-size: min(32rem, calc(100% - 2rem));
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+.ux-page dialog h2 { margin-block-start: 0; }
+.ux-page dialog:modal { overscroll-behavior: contain; }
+.ux-page dialog::backdrop { background: #24211d99; overflow: hidden; overscroll-behavior: contain; }
+.reference-page { max-inline-size: 44rem; min-block-size: 18rem; }
+.reference-page .library-item { border-block: 1px solid var(--ux-line); padding-block: .75rem; margin-block-end: 1rem; }
+.reference-page .library-item h3 { margin: 0 0 .5rem; }
+@media (min-width: 900px) {
+  .ux-layout { grid-template-columns: minmax(14rem, 1fr) minmax(0, 3fr); }
+  .ux-inspector { grid-column: 2; }
+}
+@media (min-width: 1100px) {
+  .ux-layout { grid-template-columns: minmax(13rem, 1fr) minmax(0, 2.7fr) minmax(13rem, 1fr); }
+  .ux-inspector { grid-column: auto; }
+  .ux-catalog-results { max-block-size: 64dvh; overflow: auto; padding-inline: .25rem; }
+}
+.ux-coverage-label { display: block; color: var(--ux-muted); }
