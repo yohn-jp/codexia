@@ -33,9 +33,10 @@ final class AuthoringFlowUITests: XCTestCase {
         let editor = app.textViews["原稿本文"]
         XCTAssertTrue(editor.waitForExistence(timeout: 15))
         let before = editor.value as? String ?? ""
-        XCTAssertFalse(before.isEmpty)
+        XCTAssertEqual(before, "原稿のコピー 🌙")
         editor.tap()
         app.buttons["fixture.clipboard.copy"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.clipboard.verified"].waitForExistence(timeout: 10))
 
         app.buttons["戻る"].tap()
         let scene = app.buttons["CTRL-OUT-01.B.fixture.10000"]
@@ -46,10 +47,10 @@ final class AuthoringFlowUITests: XCTestCase {
 
         editor.tap()
         app.buttons["fixture.clipboard.paste"].tap()
-        let pasted = NSPredicate(format: "value.length == %d", before.utf16.count * 2)
+        let pasted = NSPredicate(format: "value == %@", before + before)
         let expectation = XCTNSPredicateExpectation(predicate: pasted, object: editor)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed)
-        XCTAssertTrue((editor.value as? String ?? "").contains(before))
+        XCTAssertEqual(editor.value as? String, before + before)
         app.buttons["戻る"].tap()
         XCTAssertTrue(app.alerts["原稿はまだ保護されていません"].waitForExistence(timeout: 5))
     }

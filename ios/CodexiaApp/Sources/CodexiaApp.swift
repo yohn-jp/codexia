@@ -1156,13 +1156,16 @@ private final class FixtureEditingSession: ObservableObject {
     @Published var state: EditorState
 
     init(characterCount: Int) {
-        state = EditorState(documentID: "fixture-\(characterCount)", text: manuscriptFixture(characterCount: characterCount))
+        let testsClipboard = ProcessInfo.processInfo.arguments.contains("--codexia-test-clipboard")
+        let text = testsClipboard ? "原稿のコピー 🌙" : manuscriptFixture(characterCount: characterCount)
+        state = EditorState(documentID: "fixture-\(characterCount)", text: text)
     }
 }
 
 private struct FixtureEditorDestination: View {
     @ObservedObject var session: FixtureEditingSession
     let onLeave: () -> Void
+    @State private var copied = false
     private let showsClipboardControls = ProcessInfo.processInfo.arguments.contains("--codexia-test-clipboard")
 
     var body: some View {
@@ -1171,17 +1174,21 @@ private struct FixtureEditorDestination: View {
                 if showsClipboardControls {
                     HStack {
                         Button("選択してコピー") {
-                            let app = UIApplication.shared
+                            guard let editor = focusedEditor else { return }
                             UIPasteboard.general.items = []
-                            app.sendAction(#selector(UIResponderStandardEditActions.selectAll(_:)),
-                                           to: nil, from: nil, for: nil)
-                            app.sendAction(#selector(UIResponderStandardEditActions.copy(_:)),
-                                           to: nil, from: nil, for: nil)
+                            editor.selectAll(nil)
+                            editor.copy(nil)
+                            copied = UIPasteboard.general.string == session.state.text
                         }
                         .accessibilityIdentifier("fixture.clipboard.copy")
-                        Button("貼り付け") {
-                            UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.paste(_:)),
-                                                            to: nil, from: nil, for: nil)
+                        if copied {
+                            Text("ペーストボード照合済み")
+                                .accessibilityIdentifier("fixture.clipboard.verified")
+                        }
+                        Button("末尾に貼り付け") {
+                            guard let editor = focusedEditor else { return }
+                            editor.selectedRange = NSRange(location: editor.text.utf16.count, length: 0)
+                            editor.paste(nil)
                         }
                         .accessibilityIdentifier("fixture.clipboard.paste")
                     }
@@ -1189,6 +1196,24 @@ private struct FixtureEditorDestination: View {
                     .background(.bar)
                 }
             }
+    }
+
+    private var focusedEditor: UITextView? {
+        let windows = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }
+        for window in windows {
+            if let editor = findFocusedEditor(in: window) { return editor }
+        }
+        return nil
+    }
+
+    private func findFocusedEditor(in view: UIView) -> UITextView? {
+        if let editor = view as? UITextView, editor.isFirstResponder, editor.accessibilityLabel == "原稿本文" {
+            return editor
+        }
+        for child in view.subviews {
+            if let editor = findFocusedEditor(in: child) { return editor }
+        }
+        return nil
     }
 }
 #endif
