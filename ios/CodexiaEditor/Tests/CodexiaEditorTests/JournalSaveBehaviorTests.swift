@@ -72,8 +72,8 @@ private func responseJSON(_ object: [String: Any]?) -> Data? {
     return try? JSONSerialization.data(withJSONObject: object)
 }
 
-private func makeReceipt(markdown: String, sha256: String, parent: String, revision: String, authorID: String = "author") -> Data {
-    let now = "2026-11-23T00:00:00.000Z"
+private func makeReceipt(markdown: String, sha256: String, parent: String, revision: String, authorID: String = "owner") -> Data {
+    let now = "2026-11-23T00:00:00Z"
     let value: [String: Any] = [
         "document": ["id": "document", "projectId": "project", "parentId": NSNull(), "kind": "scene",
                      "title": "稿", "orderKey": "0", "headRevisionId": revision, "version": 2,
@@ -131,9 +131,8 @@ final class JournalSaveBehaviorTests: XCTestCase {
         XCTAssertEqual(rebased[0].text, "second")
         XCTAssertEqual(rebased[0].baseRevisionID, "revision-first")
         XCTAssertEqual(rebased[0].baseText, "first")
-        XCTAssertEqual(rebased[0].saveRequest.changes.count, 1)
-        XCTAssertEqual(rebased[0].saveRequest.changes[0].fromUtf16, 0)
-        XCTAssertEqual(rebased[0].saveRequest.changes[0].toUtf16, 5)
+        XCTAssertFalse(rebased[0].saveRequest.changes.isEmpty)
+        XCTAssertEqual(apply(rebased[0].saveRequest.changes, to: "first"), "second")
         XCTAssertEqual(rebased[0].operationID, queued.operationID)
 
         guard case .saved(_) = await coordinator.save(documentID: "document") else { return XCTFail("Queued save should commit") }
