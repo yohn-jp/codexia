@@ -77,7 +77,8 @@ function itemKey(item, includePlatform = true) {
   assert.ok(item && typeof item === 'object' && !Array.isArray(item), 'Projection item must be an object');
   assert.ok(typeof item.id === 'string' && item.id.trim(), 'Projection item has no stable ID');
   assert.ok(item.platform === undefined || typeof item.platform === 'string', `Invalid platform on ${item.id}`);
-  return includePlatform && item.platform ? `${item.platform}/${item.id}` : item.id;
+  const scope = item.platform ?? (Array.isArray(item.platforms) ? item.platforms.join(',') : '');
+  return includePlatform && scope ? `${scope}/${item.id}` : item.id;
 }
 
 function uniqueItems(items, label, includePlatform = true) {
