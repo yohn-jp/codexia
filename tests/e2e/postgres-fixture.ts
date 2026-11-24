@@ -57,13 +57,17 @@ export async function replaceManuscript(page: Page, text: string): Promise<void>
   // Let CodeMirror handle the selection as an editor command before typing.
   await editor.click();
   await editor.press("ControlOrMeta+a");
-  if (text) await page.keyboard.insertText(text);
+  if (text) await editor.pressSequentially(text);
   else await editor.press("Backspace");
   await expect.poll(() => readManuscriptMarkdown(page)).toBe(text);
 }
 
 export async function appendManuscript(page: Page, text: string): Promise<void> {
-  await replaceManuscript(page, (await readManuscriptMarkdown(page)) + text);
+  const editor = manuscriptEditor(page);
+  const previous = await readManuscriptMarkdown(page);
+  await editor.press("Control+End");
+  await editor.pressSequentially(text);
+  await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + text);
 }
 
 export async function fillDraft(page: Page, text: string): Promise<void> {
