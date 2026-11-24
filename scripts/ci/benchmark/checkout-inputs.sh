@@ -25,14 +25,15 @@ for mode in full blobless sparse; do
   if [[ "$mode" == sparse ]]; then
     (
       cd "$repo"
+      export EVIDENCE_INPUT_SELECTOR="$GITHUB_WORKSPACE/scripts/ci/impact/evidence-checkout.mjs"
       git ls-tree -r -z --name-only "$BENCH_HEAD" | node --input-type=module -e '
         import {readFileSync} from "node:fs";
         import {pathToFileURL} from "node:url";
-        const {evidenceCheckoutInputs}=await import(pathToFileURL(process.argv[1]));
+        const {evidenceCheckoutInputs}=await import(pathToFileURL(process.env.EVIDENCE_INPUT_SELECTOR));
         const inputs=evidenceCheckoutInputs(readFileSync(0,"utf8").split("\0").filter(Boolean));
         if(!inputs) throw Error("Sparse candidate requires full fallback");
         console.log(inputs.patterns.join("\n"));
-      ' "$GITHUB_WORKSPACE/scripts/ci/impact/evidence-checkout.mjs"
+      '
     ) > "$out/sparse-patterns.txt"
     git -C "$repo" sparse-checkout set --no-cone --stdin < "$out/sparse-patterns.txt"
   fi
