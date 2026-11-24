@@ -125,7 +125,10 @@ jobs:
             host="$derived/Build/Products/Debug-iphonesimulator/KeychainHost.app"
             test -d "$host"
             codesign --verify "$host"
-            codesign -d --entitlements :- "$host" > "$evidence/keychain-entitlements.plist"
+            # Xcode links Simulator entitlements into the host's Mach-O section.
+            xcrun otool -X -s __TEXT __entitlements "$host/KeychainHost" \
+              | python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex("".join(sys.stdin.read().split())).rstrip(b"\x00"))' \
+              > "$evidence/keychain-entitlements.plist"
             python3 - "$evidence/keychain-entitlements.plist" <<'PY'
           import plistlib, sys
           with open(sys.argv[1], "rb") as stream:
