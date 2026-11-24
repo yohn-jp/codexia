@@ -279,6 +279,8 @@ test('infrastructure reuse requires actual selected scopes rather than a green s
   assert.equal((await verifyReusableDedicatedProof(terraform.args)).jobId, 500);
   const mixed = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml', 'deploy/cloudflare/terraform/main.tf'], ['Check Ansible configuration']);
   await assert.rejects(verifyReusableDedicatedProof(mixed.args), /Terraform/);
+  const shared = dedicatedFixture('.github/workflows/deployment-config.yml', ['scripts/shared/python-env.sh', 'deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
+  await assert.rejects(verifyReusableDedicatedProof(shared.args), /Ansible/);
 });
 
 test('standalone main model job reuses only the successful Verify PR caller lifecycle proof', async () => {

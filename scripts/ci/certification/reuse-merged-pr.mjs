@@ -259,7 +259,7 @@ export const DEDICATED_PROOFS = Object.freeze({
 function assertInfrastructureSelection(job, files) {
   // The same merged-base diff must select the same independent scopes as the
   // existing deployment-config workflow. Require positive evidence for each.
-  const ansible = files.some(file => /^(deploy\/(?:ansible|backup|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
+  const ansible = files.some(file => /^(deploy\/(?:ansible|backup|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$|scripts\/shared\/python-env\.sh$)/u.test(file));
   const terraform = files.some(file => /^(deploy\/cloudflare\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
   if (ansible || !terraform) assertSuccessfulStep(job, 'Check Ansible configuration');
   if (terraform || !ansible) {

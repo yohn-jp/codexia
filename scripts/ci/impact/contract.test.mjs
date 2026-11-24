@@ -125,7 +125,7 @@ test('the certified graph covers every declared obligation within the twenty-two
     assert.equal(createVerificationPlan({ files, event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) }).tasks.includes('requirements-trace'),
       expected, `StrictDoc admission for ${files.join(', ')}`);
   }
-  assert.match(strictdocSetup.run, /bash scripts\/strictdoc\/install\.sh/u);
+  assert.match(strictdocSetup.run, /bash scripts\/shared\/python-env\.sh create python/u);
   assert.match(strictdocSetup.run, /requirements\.lock\.txt/u);
   assert.doesNotMatch(strictdocSetup.run, /(?:-m pip|\/bin\/pip) install/u);
   assert.match(strictdocSetup.run, /playwright install --with-deps --only-shell chromium/u);
@@ -489,4 +489,38 @@ test('release workflow_run dispatch is main-only while PR artifact builds and ma
 test('Passkey bootstrap remains in the canonical browser verification graph', () => {
   assert.ok(VERIFICATION_TASKS.includes('browser-core-passkey-bootstrap'));
   assert.ok(Object.values(VERIFICATION_GROUPS).some(tasks => tasks.includes('browser-core-passkey-bootstrap')));
+});
+
+test('active Python installers share the pinned environment recipe and retain their workflow admissions', () => {
+  const helper = 'scripts/shared/python-env.sh';
+  const readWorkflow = name => parse(readFileSync(new URL('../../../.github/workflows/' + name, import.meta.url), 'utf8'));
+  const active = ['verify.yml', 'repository-audit.yml', 'ansible-base-secrets.yml', 'ansible-host.yml',
+    'push-host.yml', 'push-app-lifecycle.yml', 'production-bootstrap.yml', 'production-epoch-cutover.yml',
+    'production-preflight.yml', 'backend-deployment-handoff.yml', 'deployment-config.yml',
+    'full-model-oci-acceptance.yml', 'ios-api.yml'];
+  for (const name of active) {
+    const definition = readWorkflow(name);
+    const runs = Object.values(definition.jobs).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
+    assert.ok(runs.some(run => run.includes(helper)), name);
+    assert.ok(runs.every(run => !/(?:-m pip|\/bin\/pip) install/u.test(run)), name);
+    for (const event of ['pull_request', 'push']) {
+      const paths = definition.on[event]?.paths;
+      if (paths) assert.ok(paths.includes(helper), name + ' ' + event);
+    }
+  }
+  const backup = readWorkflow('push-backup.yml');
+  for (const event of ['pull_request', 'push']) assert.ok(backup.on[event].paths.includes(helper));
+  const s3 = readFileSync(new URL('../../../deploy/backup/install-s3-runtime.sh', import.meta.url), 'utf8');
+  assert.ok(s3.includes(helper + '" ensure python3'));
+  assert.ok(s3.includes('--require-hashes --reinstall'));
+  const frozen = readWorkflow('strictdoc-runtime-experiment.yml');
+  assert.deepEqual(Object.keys(frozen.on), ['workflow_dispatch']);
+  for (const job of Object.values(frozen.jobs)) {
+    assert.equal(job.if, '${{ false }}');
+    assert.notEqual(job.permissions?.packages, 'write');
+  }
+  assert.equal(matchesFullModelOciPath(helper), true);
+  const plan = createVerificationPlan({ files: [helper], event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) });
+  assert.ok(plan.tasks.includes('requirements-trace'));
+  assert.equal(plan.full_model_oci, true);
 });
