@@ -1,4 +1,6 @@
-# Protected API epoch 1 → 2 maintenance
+# Protected API epoch 1 → 2 maintenance (supported in-place procedure)
+
+This runbook describes the currently supported in-place transition only. The [deployment lifecycle design](DEPLOYMENT-LIFECYCLE.md#共通制御と個別移行の境界) owns the general cutover, explicit transition contract and recovery target; do not treat the workflow's fixed epoch values as the design or use this procedure for other source/target combinations without implementation and verification.
 
 The [coordinated cutover contract](PUSH-DEPLOYMENT.md#coordinated-api-epoch-cutover) governs this workflow. Use [Coordinated API epoch maintenance](../../.github/workflows/production-epoch-cutover.yml) from main and approve each mutation in the protected production Environment. The in-place workflow requires an installed Full epoch 1 release on persistence format 1, an existing Better Auth owner, and the same packaged SQL ledger on both images. If the old account still uses token authentication, follow the design's separately approved clean-target enrollment and data-transfer procedure. A missing owner or unsupported ledger blocks this workflow.
 
