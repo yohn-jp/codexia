@@ -244,9 +244,6 @@ jobs:
     if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.types != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -260,25 +257,11 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
-      - name: Select exact prebuilt StrictDoc runtime
-        id: trace-runtime
+      - uses: actions/setup-python@v6.1.0
+        # Use the canonical per-task plan; coverage/test-type checks do not need StrictDoc or Chromium.
         if: matrix.group == 'trace'
-        run: |
-          set -euo pipefail
-          if [[ "$(git hash-object scripts/strictdoc/requirements.lock.txt)" == c13d982998d42e052021bafcd2d54a563da3b38b &&
-                "$(git hash-object .github/docker/strictdoc-ci.Dockerfile)" == 6e4a1f00319c75700011aba1aa31e3953fbb3947 &&
-                "$(node -p 'require("./package.json").devDependencies["@playwright/test"]')" == 1.65.1 ]]; then
-            echo "image=ghcr.io/yohn-jp/codexia/strictdoc-ci@sha256:10c392e71dd43b43d15f9ccd2b6fcd83df43d4da66f5904b46d74f014ba7db3f" >> "$GITHUB_OUTPUT"
-          else
-            echo "StrictDoc runtime inputs changed; install the exact locked tools locally." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: docker/login-action@v4.8.0
-        if: matrix.group == 'trace' && steps.trace-runtime.outputs.image != ''
-        continue-on-error: true
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          python-version: '3.12'
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
@@ -291,40 +274,28 @@ jobs:
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
-      - name: Install frozen dependencies and prefetch trace runtime
-        id: trace-prefetch
-        env:
-          TRACE_IMAGE: ${{ steps.trace-runtime.outputs.image }}
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Install pinned StrictDoc and Chromium
+        if: matrix.group == 'trace'
         run: |
           set -euo pipefail
-          pull_pid=
-          if [[ -n "$TRACE_IMAGE" ]]; then
-            # Pull independently of the frozen install. Cache availability is
-            # optional; a selected verifier failure is never retried locally.
-            (timeout --kill-after=5s 30s docker pull "$TRACE_IMAGE" > "$RUNNER_TEMP/strictdoc-pull.log" 2>&1) &
-            pull_pid=$!
+          # Independent locked Python and browser prerequisites. The trace
+          # acceptance launches Chromium headless; only its pinned shell is needed.
+          (
+            python -m venv "$RUNNER_TEMP/strictdoc"
+            "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+          ) &
+          strictdoc_pid=$!
+          browser_status=0
+          pnpm exec playwright install --with-deps --only-shell chromium || browser_status=$?
+          strictdoc_status=0
+          wait "$strictdoc_pid" || strictdoc_status=$?
+          if (( strictdoc_status != 0 || browser_status != 0 )); then
+            echo "StrictDoc setup=$strictdoc_status Chromium setup=$browser_status" >&2
+            exit 1
           fi
-          pnpm install --frozen-lockfile --prefer-offline
-          if [[ -n "$pull_pid" ]]; then
-            if wait "$pull_pid"; then
-              echo "image=$TRACE_IMAGE" >> "$GITHUB_OUTPUT"
-              echo "StrictDoc runtime: pinned GHCR image" >> "$GITHUB_STEP_SUMMARY"
-            else
-              cat "$RUNNER_TEMP/strictdoc-pull.log"
-              echo "StrictDoc runtime cache unavailable; install pinned tools locally." >> "$GITHUB_STEP_SUMMARY"
-            fi
-          fi
-      - uses: actions/setup-python@v6.1.0
-        if: matrix.group == 'trace' && steps.trace-prefetch.outputs.image == ''
-        with:
-          python-version: '3.12'
-      - name: Install pinned StrictDoc and Chromium
-        if: matrix.group == 'trace' && steps.trace-prefetch.outputs.image == ''
-        run: |
-          python -m venv "$RUNNER_TEMP/strictdoc"
-          "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
           echo "STRICTDOC_BIN=$RUNNER_TEMP/strictdoc/bin/strictdoc" >> "$GITHUB_ENV"
-          pnpm exec playwright install --with-deps chromium
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
@@ -337,14 +308,7 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-          TRACE_IMAGE: ${{ steps.trace-prefetch.outputs.image }}
-        run: |
-          set -euo pipefail
-          if [[ -n "$TRACE_IMAGE" ]]; then
-            bash scripts/ci/execution/strictdoc-runtime.sh "$TRACE_IMAGE"
-          else
-            node scripts/ci/execution/group.mjs "types-${{ matrix.group }}"
-          fi
+        run: node scripts/ci/execution/group.mjs "types-${{ matrix.group }}"
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
