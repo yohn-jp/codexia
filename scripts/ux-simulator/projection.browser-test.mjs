@@ -113,6 +113,24 @@ try {
       assert.equal(await stage.getAttribute('data-projection'), 'observed');
       if (screenshots) await page.screenshot({ path: join(screenshots, 'ux-observed-' + width + '.png') });
     }
+    const saveObservation = snapshot.observed.scenarios.find(({ id }) => id === 'observed-save-receipt');
+    if (site && snapshot.observed.screens.some(({ id, platform }) => id === 'WRT-01' && platform === 'desktop')) {
+      assert.ok(saveObservation, 'Assembled Pages must contain canonical Desktop execution evidence');
+    }
+    if (saveObservation) {
+      await page.goto(link('desktop', saveObservation.id, 'start', 'observed'));
+      await assertHeading('idle');
+      await button('RECOVERY.READY').click();
+      await assertHeading('saving');
+      await stage.getByRole('button', { name: /^xstate\.done\.actor/ }).click();
+      await assertHeading('unknown');
+      await button('SAVE.RETRY').click();
+      await stage.getByRole('button', { name: /^xstate\.done\.actor/ }).click();
+      await assertHeading('confirmed');
+      const proof = page.locator('.ux-inspector');
+      if (await proof.getAttribute('open') === null) await proof.locator('summary').click();
+      assert.match(await proof.innerText(), /synthetic-receipt/);
+    }
     await page.goto(link('desktop', 'atlas-entry-01', 'atlas-entry-01/SESSION'));
     await assertHeading('APIと認証を照合');
     const directInspector = page.locator('.ux-inspector');
