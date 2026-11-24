@@ -103,15 +103,36 @@ try {
   page = await context.newPage();
   page.setDefaultTimeout(60000);
   const finiteRequests = new Set();
+  const startupRequests = new WeakMap();
+  let startupSample = null;
+  report.startupNavigation = [];
+  page.on("framenavigated", frame => {
+    if (startupSample && frame === page.mainFrame()) report.startupNavigation.push({
+      sample: startupSample, at: performance.now(), path: new URL(frame.url()).pathname,
+    });
+  });
   let lastFiniteEvent = performance.now();
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
     const streaming = request.resourceType() === 'eventsource' || request.resourceType() === 'websocket' ||
       (request.method() === 'GET' && path.endsWith('/events')) || request.headers().accept?.includes('text/event-stream');
-    report.requests.push({ start: performance.now(), method: request.method(), path, type: request.resourceType(), streaming: Boolean(streaming) });
+    const row = { start: performance.now(), method: request.method(), path, type: request.resourceType(), streaming: Boolean(streaming) };
+    report.requests.push(row);
+    if (startupSample && !streaming) {
+      row.startupSample = startupSample;
+      startupRequests.set(request, row);
+    }
     if (!streaming) { finiteRequests.add(request); lastFiniteEvent = performance.now(); }
   });
-  const finished = request => { if (finiteRequests.delete(request)) lastFiniteEvent = performance.now(); };
+  const finished = request => {
+    const row = startupRequests.get(request);
+    if (row) {
+      row.elapsedMs = performance.now() - row.start;
+      row.timing = request.timing();
+      row.failed = request.failure() !== null;
+    }
+    if (finiteRequests.delete(request)) lastFiniteEvent = performance.now();
+  };
   page.on('requestfinished', finished); page.on('requestfailed', finished);
   async function settleFiniteRequests() {
     const deadline = performance.now() + 60000;
@@ -147,6 +168,7 @@ try {
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.start');
+  startupSample = 'cold';
   await phase('browser.startup.login-ready', async () => {
     await page.goto(`${base}/desktop/`);
     await page.getByRole('button', { name: 'OAuthでサインイン', exact: true }).waitFor();
@@ -154,6 +176,7 @@ try {
   await phase('browser.author.login', async () => {
     await signInAuthorBrowser(page, base, 'desktop', { continueCurrentPage: true });
   });
+  startupSample = null;
   const project = ready.fixture.project;
   const scenes = ready.fixture.scenes;
   const editor = manuscriptEditor(page);
@@ -203,8 +226,21 @@ try {
       { sceneId: scenes[index % Math.min(3, scenes.length)].id, documentBytes: scenes[index % Math.min(3, scenes.length)].bytes });
   }
   await settleFiniteRequests();
-  report.storageEstimate = await page.evaluate(() => navigator.storage.estimate());
+  // The init script starts a fresh probe on every document navigation. Keep
+  // authoring-workload metrics separate from the subsequent warm login.
   report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
+  startupSample = 'warm';
+  await phase('browser.startup.warm-login-ready', async () => {
+    await page.goto(`${base}/desktop/`);
+    await page.getByRole('button', { name: 'OAuthでサインイン', exact: true }).waitFor();
+  });
+  await phase('browser.author.warm-login', async () => {
+    await signInAuthorBrowser(page, base, 'desktop', { continueCurrentPage: true });
+  });
+  startupSample = null;
+  await settleFiniteRequests();
+  report.storageEstimate = await page.evaluate(() => navigator.storage.estimate());
+  report.warmLoginBrowserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
   report.server = await stats();
   if (report.server.counts.gitProcesses > 0) throw new Error('PostgreSQL browser workload invoked Git at runtime');
   report.browserRuntime = await browserRuntime();
@@ -218,7 +254,11 @@ try {
   report.status = 'failed';
   report.error = { message: error.message, stack: error.stack };
   if (page && !page.isClosed()) {
-    report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    if (report.browserMetrics === undefined) {
+      report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    } else {
+      report.warmLoginBrowserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
+    }
     report.server = await stats().catch(() => null);
     if (cdp) {
       try { const { profile } = await cdp.send('Profiler.stop'); await writeFile(`${output}.cpuprofile`, JSON.stringify(profile)); } catch { /* browser may already be closed */ }

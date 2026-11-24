@@ -31,6 +31,7 @@ export async function withBrowserFixture(task, index, execute) {
   assert.equal(process.env.CI, 'true', 'Browser fixture creation is CI-only');
   assert.ok(!process.env.CODEXIA_E2E_BASE_URL && !process.env.CODEXIA_BASE_URL
     && process.env.CODEXIA_E2E_EXTERNAL_DATABASE !== '1', 'External browser fixtures are forbidden in CI');
+  const started = performance.now();
   const database = 'codexia_ci_' + randomUUID().replaceAll('-', '');
   const stateDir = await mkdtemp(path.join(tmpdir(), 'codexia-ci-browser-'));
   let control, created = false;
@@ -42,7 +43,7 @@ export async function withBrowserFixture(task, index, execute) {
     await control.connect();
     await control.query(`CREATE DATABASE "${database}"`);
     created = true;
-    console.log(JSON.stringify({ phase: 'browser-fixture', task, database, port: settings.CODEXIA_E2E_PORT }));
+    console.log(JSON.stringify({ phase: 'browser-fixture', task, database, port: settings.CODEXIA_E2E_PORT, durationMs: Math.round(performance.now() - started) }));
     return await execute(settings);
   } finally {
     try {
