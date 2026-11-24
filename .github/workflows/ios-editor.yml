@@ -54,7 +54,7 @@ jobs:
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
           DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for runtime, devices in d["devices"].items() if ".iOS-27-" in runtime for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
           echo "EDITOR_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-      - name: Build test products while Simulator boots
+      - name: Build test products before Simulator boot
         if: ${{ matrix.lane != 'state-model' }}
         timeout-minutes: 25
         env:
@@ -63,13 +63,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/native-evidence"
           derived="$RUNNER_TEMP/native-derived"
-          # The build and boot are independent; both must succeed before testing.
-          xcrun simctl bootstatus "$EDITOR_SIMULATOR_ID" -b > "$RUNNER_TEMP/native-evidence/simulator-boot.log" 2>&1 &
-          boot_pid=$!
-          trap 'kill "$boot_pid" 2>/dev/null || true' EXIT
-          args=(-destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID"
+          # The generic ARM64 build avoids contention with cold Simulator startup.
+          args=(-destination 'generic/platform=iOS Simulator' ARCHS=arm64
             -derivedDataPath "$derived" -onlyUsePackageVersionsFromResolvedFile
-            -parallel-testing-enabled NO
+            -parallel-testing-enabled NO -showBuildTimingSummary
             -resultBundlePath "$RUNNER_TEMP/native-evidence/build.xcresult")
           case "$LANE" in
             editor-simulator)
@@ -81,14 +78,7 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
-          build_status=0
-          xcodebuild "${args[@]}" build-for-testing || build_status=$?
-          boot_status=0
-          wait "$boot_pid" || boot_status=$?
-          trap - EXIT
-          cat "$RUNNER_TEMP/native-evidence/simulator-boot.log"
-          test "$build_status" -eq 0
-          test "$boot_status" -eq 0
+          xcodebuild "${args[@]}" build-for-testing
           # Use only the test products produced on this exact-source runner.
           test_run=$(python3 - "$derived" <<'PY'
           import pathlib, sys
@@ -99,6 +89,11 @@ jobs:
           PY
           )
           echo "NATIVE_TEST_RUN=$test_run" >> "$GITHUB_ENV"
+      - name: Boot Simulator and verify readiness
+        if: ${{ matrix.lane != 'state-model' }}
+        timeout-minutes: 10
+        shell: bash
+        run: xcrun simctl bootstatus "$EDITOR_SIMULATOR_ID" -b 2>&1 | tee "$RUNNER_TEMP/native-evidence/simulator-boot.log"
       - name: Run Simulator tests without rebuilding
         if: ${{ matrix.lane != 'state-model' }}
         timeout-minutes: 15
