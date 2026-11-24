@@ -1,0 +1,175 @@
+import assert from 'node:assert/strict';
+import { execFile, execFileSync } from 'node:child_process';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { digestEvidence } from '../cutover/coordinator.mjs';
+import { verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
+import { verifyCutoverFrontendArtifact } from '../../verification/artifacts/frontend.mjs';
+import { createCloudflareCutover } from '../../release/cutover/cloudflare.mjs';
+import { selectReleaseSource } from '../../release/components/source-gate.mjs';
+import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
+import { planFromObservations } from './observe.mjs';
+
+const run = promisify(execFile);
+const env = process.env;
+const positive = value => Number.isSafeInteger(value) && value > 0;
+const rawHash = /^[a-f0-9]{64}$/u;
+const sha = /^[a-f0-9]{40}$/u;
+const output = () => join(env.RUNNER_TEMP, 'codexia-lifecycle-preflight.json');
+
+function runBinding() {
+  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main');
+  assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
+  assert.ok(sha.test(env.GITHUB_SHA ?? '') && positive(Number(env.GITHUB_RUN_ID)) &&
+    positive(Number(env.GITHUB_RUN_ATTEMPT)), 'Invalid protected workflow identity');
+  return { sourceSha: env.GITHUB_SHA, runId: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
+}
+
+export function parsePreflightRequest(raw) {
+  const request = JSON.parse(raw);
+  assert.ok(request && typeof request === 'object' && !Array.isArray(request) &&
+    Object.keys(request).every(key => ['backendPublisherRunId', 'priorBackendPublisherRunId',
+      'frontend', 'intent', 'window'].includes(key)), 'Invalid preflight request');
+  assert.ok(positive(request.backendPublisherRunId));
+  assert.ok(request.priorBackendPublisherRunId === undefined || positive(request.priorBackendPublisherRunId));
+  assert.ok(['install', 'adopt', 'update', 'maintenance', 'restore'].includes(request.intent));
+  const front = request.frontend;
+  assert.ok(front && Object.keys(front).sort().join(',') === 'artifactDigest,artifactId,runId,verifyRunId' &&
+    [front.artifactId, front.runId, front.verifyRunId].every(positive) &&
+    typeof front.artifactDigest === 'string' && rawHash.test(front.artifactDigest), 'Invalid frontend artifact reference');
+  if (request.window != null) {
+    const window = request.window;
+    assert.ok(Object.keys(window).sort().join(',') === 'id,notAfter,notBefore' &&
+      typeof window.id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(window.id) &&
+      ['notBefore','notAfter'].every(key => typeof window[key] === 'string' &&
+        new Date(window[key]).toISOString() === window[key]) &&
+      Date.parse(window.notBefore) < Date.parse(window.notAfter), 'Invalid preflight window');
+  }
+  return request;
+}
+
+async function hostObservation() {
+  const binding = runBinding();
+  const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-lifecycle-'));
+  try {
+    const pin = await readFile(join(env.RUNNER_TEMP, 'codexia-ssh/known_hosts'), 'utf8');
+    assert.ok(env.CODEXIA_PREFLIGHT_TARGET_HOST && pin);
+    const hostPinSha256 = digestEvidence({ target: env.CODEXIA_PREFLIGHT_TARGET_HOST, pin });
+    const out = join(scratch, 'host.json');
+    const vars = join(scratch, 'vars.json');
+    let query;
+    // Invoke the owning auth catalog definition with a read-only query adapter.
+    // The reviewed SQL is executed in the existing PostgreSQL instance.
+    await authSchemaFingerprint({ query: async (sql, parameters) => {
+      assert.deepEqual(parameters, [CODEXIA_AUTH_SCHEMA]);
+      assert.equal(sql.split('$1').length, 2);
+      query = sql.replace('$1', "'codexia_auth'");
+      return { rows: [] };
+    }});
+    assert.ok(query);
+    await writeFile(vars, JSON.stringify({
+      codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
+    }), { mode: 0o600, flag: 'wx' });
+    await run('ansible-playbook', ['-i', join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml'),
+      'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
+    const host = JSON.parse(await readFile(out, 'utf8'));
+    await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
+      JSON.stringify({ ...binding, hostPinSha256, host }) + '\n', { mode: 0o600, flag: 'wx' });
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function mainSource() {
+  const { stdout } = await run('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
+    { timeout: 30_000 });
+  const main = stdout.trim();
+  assert.equal(main, env.GITHUB_SHA, 'Main changed after protected dispatch');
+  return main;
+}
+
+async function certifiedAuthSchemas(sourceSha) {
+  assert.ok(sha.test(sourceSha));
+  const { stdout: contract } = await run('git', ['show', sourceSha + ':packages/api/src/auth-schema.ts'], { timeout: 60_000 });
+  // Extract fixed catalog identities from certified source. Never execute older
+  // source code on the credentialed runner.
+  const values = [...contract.matchAll(/^const EXPECTED_(?:SETUP_)?AUTH_SCHEMA = "(sha256:[a-f0-9]{64})";$/gm)]
+    .map(match => match[1]);
+  assert.ok(values.length > 0 && new Set(values).size === values.length, 'Certified auth schema identity not found');
+  return values;
+}
+
+async function planObservation() {
+  const binding = runBinding();
+  let stage = 'request';
+  try {
+    const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
+    const main = await mainSource();
+    stage = 'host-evidence';
+    const receipt = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'), 'utf8'));
+    for (const [key, value] of Object.entries(binding)) assert.equal(receipt[key], value);
+    assert.ok(rawHash.test(receipt.hostPinSha256));
+    const host = receipt.host;
+    assert.equal(host.format, 'codexia-lifecycle-host/v1');
+    stage = 'certified-backend';
+    const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
+    const candidateBackend = backend.fullCertificate;
+    const authSchemas = await certifiedAuthSchemas(candidateBackend.verifiedMainSha);
+    stage = 'certified-frontend';
+    const candidateFrontend = await verifyCutoverFrontendArtifact(request.frontend, {
+      expectedEpoch: candidateBackend.identity.apiEpoch,
+    });
+    const gitSync = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
+    assert.ok(selectReleaseSource('backend', candidateBackend.verifiedMainSha, main, gitSync, null).affected);
+    assert.ok(selectReleaseSource('frontend', candidateFrontend.identity.sourceSha, main, gitSync, null).affected);
+    stage = 'installed-publication';
+    let priorBackend = null;
+    if (host.backend?.state === 'running') {
+      if (host.backend.writer.image === candidateBackend.image) priorBackend = candidateBackend;
+      else if (request.priorBackendPublisherRunId) {
+        try {
+          priorBackend = (await verifyCutoverBackendPublication(request.priorBackendPublisherRunId)).fullCertificate;
+        } catch { /* normalized plan retains the unverified-source blocker */ }
+      }
+    }
+    stage = 'edge-observation';
+    const edgeReader = createCloudflareCutover({
+      ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET),
+      origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
+      readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+    });
+    let edge = null;
+    try {
+      edge = await edgeReader.observeLifecycle({ backendExpected: host.backend?.state === 'running' });
+    } catch { /* failed or unauthorized observation is never absence */ }
+    stage = 'plan';
+    const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
+      candidateBackend, candidateFrontend, authSchemas, priorBackend,
+      intent: request.intent, window: request.window ?? null });
+    await mainSource();
+    await writeFile(output(), JSON.stringify({ ...binding, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    console.log('Read-only lifecycle candidate route: ' + result.plan.candidateRoute +
+      '; evidence blockers: ' + (result.plan.blockers.join(', ') || 'none') +
+      '; no mutation authority granted');
+    if (result.plan.route === 'R0') process.exitCode = 1;
+  } catch {
+    await writeFile(output(), JSON.stringify({ ...binding, format: 'codexia-lifecycle-preflight-failure/v1',
+      route: 'R0', reason: stage, observedAt: new Date().toISOString() }) + '\n', { mode: 0o600, flag: 'wx' });
+    console.error('Read-only lifecycle preflight stopped at ' + stage);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    if (process.argv[2] === 'host') await hostObservation();
+    else if (process.argv[2] === 'plan') await planObservation();
+    else throw new Error('Unknown lifecycle preflight operation');
+  } catch {
+    console.error('Protected lifecycle observation unavailable; no mutation performed');
+    process.exitCode = 1;
+  }
+}
