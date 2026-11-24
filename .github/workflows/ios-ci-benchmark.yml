@@ -1,0 +1,86 @@
+name: Native iOS CI benchmark
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-ci-benchmark.yml'
+      - 'scripts/ci/benchmark/ios-native.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ios-ci-benchmark-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  benchmark:
+    name: ${{ matrix.lane }} / ${{ matrix.mode }}
+    runs-on: xcode-27
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [editor, app]
+        mode: [baseline, serial-generic, serial-no-index]
+        include:
+          - lane: app
+            mode: warm-control
+          - lane: app
+            mode: warm-cas
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Measure native test build and execution
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LANE: ${{ matrix.lane }}
+          MODE: ${{ matrix.mode }}
+        run: bash scripts/ci/benchmark/ios-native.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: ios-ci-benchmark-${{ matrix.lane }}-${{ matrix.mode }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-ci-benchmark/
+          retention-days: 2
+          if-no-files-found: error
+  compare:
+    name: Compare native test inventories and timings
+    if: ${{ !cancelled() }}
+    needs: benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: ios-ci-benchmark-*-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: results
+      - name: Check all experiments and report timings
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+          expected = {(lane, mode) for lane in ("editor", "app") for mode in ("baseline", "serial-generic", "serial-no-index")}
+          expected |= {("app", "warm-control"), ("app", "warm-cas")}
+          results = {}
+          for path in pathlib.Path("results").glob("*/report.json"):
+              report = json.loads(path.read_text())
+              key = report["lane"], report["mode"]
+              assert key in expected and key not in results, key
+              assert report["source"] == os.environ["EXPECTED_SHA"], key
+              results[key] = report
+          print("| Lane | Mode | Cold build (s) | Warm build (s) | Boot (s) | Tests (s) | Total (s) | Tests | CAS KiB |")
+          print("|---|---|---:|---:|---:|---:|---:|---:|---:|")
+          for key, r in sorted(results.items()):
+              p = r["phases"]
+              print(f"| {key[0]} | {key[1]} | {p['cold-build']} | {p.get('warm-build', '-')} | {p['boot']} | {p['test']} | {r['elapsed']} | {len(r['tests'])} | {r['cas_kib']} |")
+          assert results.keys() == expected, f"missing {expected - results.keys()}"
+          identities = {(r["image_version"], r["xcode"], r["sdk"], r["runtime"], r["device"], r["arch"]) for r in results.values()}
+          assert len(identities) == 1, f"unmatched toolchain/device: {identities}"
+          for (lane, mode), r in results.items():
+              assert r["tests"], (lane, mode)
+              assert r["tests"] == results[lane, "baseline"]["tests"], (lane, mode, "test inventory/outcome differs")
+          assert os.environ["BENCHMARK_RESULT"] == "success", os.environ["BENCHMARK_RESULT"]
+          print("All lanes passed, with identical executed XCTest inventories per lane. Timings are one observational sample, not certified savings.")
+          PY
