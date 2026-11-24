@@ -191,6 +191,7 @@ export async function completeOAuthAuthorization(
   config: OAuthWebConfig,
   callbackUrl = window.location.href,
   fetcher: typeof fetch = fetch,
+  onValidatedCallback?: () => void,
 ): Promise<{ accessToken: string; returnPath: string } | null> {
   const issuer = validateConfig(config);
   const callback = new URL(callbackUrl);
@@ -256,6 +257,9 @@ export async function completeOAuthAuthorization(
     throw new Error('OAuth issuer or state validation failed. Start sign-in again.');
   }
 
+  // Local response validation is complete, but the code has not been exchanged.
+  // This notification may start independent static loading, never grant admission.
+  onValidatedCallback?.();
   const options = requestOptions(issuer, fetcher);
   const metadata = await discoverAuthorizationServer(config, issuer, options);
   let response: Response;

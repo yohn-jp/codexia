@@ -95,19 +95,29 @@ test('OAuth browser client uses state and S256 PKCE, exchanges once and returns 
     const callback = `${config.redirectUri}?code=authorization-code&state=${state}&iss=${encodeURIComponent(config.issuer)}`;
 
     let submitted = new URLSearchParams();
-    const authorizationResult = await completeOAuthAuthorization(config, callback, async (input, init) => {
-      if (init?.method !== 'POST') return Response.json(metadata);
-      assert.equal(String(input), metadata.token_endpoint);
-      submitted = new URLSearchParams(init?.body as URLSearchParams);
-      assert.equal(init?.credentials, 'omit');
-      assert.equal(init?.redirect, 'error');
-      assert.equal(init?.cache, 'no-store');
-      return Response.json({
-        access_token: 'codexia-api-access-token',
-        token_type: 'Bearer',
-        expires_in: 300,
-      });
-    });
+    let callbackValidated = 0;
+    const authorizationResult = await completeOAuthAuthorization(
+      config,
+      callback,
+      async (input, init) => {
+        assert.equal(callbackValidated, 1, 'static preparation starts before discovery and token exchange');
+        if (init?.method !== 'POST') return Response.json(metadata);
+        assert.equal(String(input), metadata.token_endpoint);
+        submitted = new URLSearchParams(init?.body as URLSearchParams);
+        assert.equal(init?.credentials, 'omit');
+        assert.equal(init?.redirect, 'error');
+        assert.equal(init?.cache, 'no-store');
+        return Response.json({
+          access_token: 'codexia-api-access-token',
+          token_type: 'Bearer',
+          expires_in: 300,
+        });
+      },
+      () => {
+        callbackValidated += 1;
+      },
+    );
+    assert.equal(callbackValidated, 1);
     assert.deepEqual(authorizationResult, { accessToken: 'codexia-api-access-token', returnPath });
     assert.equal(browser.storage.size, 0, 'token exchange leaves tab storage empty');
     const verifier = submitted.get('code_verifier') ?? '';
@@ -168,14 +178,20 @@ test('OAuth callback rejects state mismatch and clears the one-time transaction'
     await beginOAuthAuthorization(config, metadataFetch());
     const state = new URL(browser.assigned).searchParams.get('state');
     const unexpectedFetch = async () => assert.fail('a rejected or consumed transaction cannot send a request');
+    let callbackValidated = 0;
+    const onValidatedCallback = () => {
+      callbackValidated += 1;
+    };
+    assert.equal(await completeOAuthAuthorization(config, config.redirectUri, unexpectedFetch, onValidatedCallback), null);
     await assert.rejects(
-      completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=wrong`, unexpectedFetch),
+      completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=wrong`, unexpectedFetch, onValidatedCallback),
       /state validation/u,
     );
     await assert.rejects(
-      completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=${state}`, unexpectedFetch),
+      completeOAuthAuthorization(config, `${config.redirectUri}?code=x&state=${state}`, unexpectedFetch, onValidatedCallback),
       /state validation/u,
     );
+    assert.equal(callbackValidated, 0);
   } finally {
     browser.restore();
   }
@@ -231,6 +247,7 @@ test('OAuth callback rejects a different authorization-server issuer', async () 
     await beginOAuthAuthorization(config, metadataFetch());
     const state = new URL(browser.assigned).searchParams.get('state');
     let tokenExchanges = 0;
+    let callbackValidated = 0;
     await assert.rejects(
       completeOAuthAuthorization(
         config,
@@ -239,10 +256,14 @@ test('OAuth callback rejects a different authorization-server issuer', async () 
           if (init?.method === 'POST') tokenExchanges += 1;
           return Response.json(metadata);
         },
+        () => {
+          callbackValidated += 1;
+        },
       ),
       /issuer(?: or state)? validation/u,
     );
     assert.equal(tokenExchanges, 0);
+    assert.equal(callbackValidated, 0);
   } finally {
     browser.restore();
   }

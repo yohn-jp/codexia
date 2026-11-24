@@ -43,9 +43,9 @@ export function PersistenceEntry({
   const [sessionBlocked, setSessionBlocked] = useState(false);
   const [consoleNavigationError, setConsoleNavigationError] = useState('');
 
-  // Fetch the static editor graph after successful token acquisition or author
-  // admission, concurrently with the remaining server checks. Rendering is
-  // still gated on all of version, session, PostgreSQL and author scope.
+  // Fetch the static editor graph after local OAuth callback validation or
+  // author-session admission, concurrently with the remaining server checks.
+  // Rendering is still gated on the token, version, session, PostgreSQL and author scope.
   const workspaceLoadRef = useRef<Promise<WorkspaceComponent> | null>(null);
   const loadWorkspace = useCallback(() => {
     if (eagerWorkspace) return Promise.resolve(eagerWorkspace);
@@ -130,10 +130,11 @@ export function PersistenceEntry({
         const config = nativeShell ? null : webOAuthConfig(mode);
         if (mounted) setOAuthConfig(config);
         if (config) {
-          const authorization = await completeOAuthAuthorization(config);
+          const authorization = await completeOAuthAuthorization(config, undefined, undefined, () => {
+            if (mounted && !eagerWorkspace) void loadWorkspace();
+          });
           if (authorization) {
             setOAuthAccessToken(authorization.accessToken);
-            if (!eagerWorkspace) void loadWorkspace();
             window.history.replaceState(window.history.state, '', authorization.returnPath);
             window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
           }
