@@ -1,0 +1,59 @@
+.desktop-surface {
+  --desktop-line: #d6cbbd;
+  --desktop-blank: #fffefa;
+  --desktop-muted: #6d675e;
+  --desktop-text: #24211d;
+  color: var(--desktop-text);
+  background: var(--desktop-blank);
+  padding: clamp(.6rem, 2vw, 1.25rem);
+}
+.desktop-surface[data-theme="paper"] { --desktop-blank: #f4eddf; --desktop-text: #3d3429; }
+.desktop-surface[data-theme="dark"] {
+  --desktop-blank: #18211e;
+  --desktop-text: #f5f8f7;
+  --desktop-line: #60736a;
+  --desktop-muted: #bfcdc6;
+}
+.desktop-surface[data-theme="dark"] :where(button:not(.primary), input, select, textarea, label) {
+  background: var(--desktop-blank);
+  color: var(--desktop-text);
+}
+.desktop-surface[data-theme="dark"] .primary { background: #7daf9f; color: #08120f; }
+.desktop-surface h2 { margin-block: 0 .45rem; font-size: clamp(1.4rem, 1.2rem + .65vw, 1.9rem); }
+.desktop-field { margin-block: .6rem; }
+.desktop-field span { display: block; margin-block-end: .2rem; }
+.desktop-meta { color: var(--desktop-muted); margin-block: .3rem .6rem; font-size: .9rem; }
+.desktop-list-item { border-block: 1px solid var(--desktop-line); padding-block: .75rem; }
+.desktop-surface .actions { margin-block: .7rem; }
+.desktop-outline { padding-inline-start: 0; list-style: none; }
+.desktop-outline li { margin-block: .5rem; }
+.desktop-outline [data-kind="chapter"] { padding-inline-start: .75rem; }
+.desktop-outline [data-kind="scene"] { padding-inline-start: 1.5rem; }
+.desktop-outline[data-zoom="large"] { font-size: 1.15rem; }
+.desktop-workspace { display: flex; flex-wrap: wrap; gap: .65rem; margin-block: 1rem; }
+.desktop-work { flex: 3 1 19rem; min-inline-size: 0; }
+.desktop-workspace[data-width="narrow"] .desktop-work { flex-grow: 2; }
+.desktop-workspace[data-width="wide"] .desktop-work { flex-grow: 5; }
+.desktop-subpanel { flex: 1 1 7.5rem; border-block-start: 1px solid var(--desktop-line); min-inline-size: 0; }
+.desktop-subpanel h3 { font-size: 1rem; }
+.desktop-surface textarea[aria-label="原稿本文"], .desktop-manuscript {
+  font: 1rem/1.8 ui-serif, "Yu Mincho", "Hiragino Mincho ProN", serif;
+  white-space: pre-wrap;
+}
+.desktop-surface textarea[aria-label="原稿本文"][data-font="large"] { font-size: 1.25rem; }
+.desktop-manuscript { padding-block: 1rem; max-inline-size: 56ch; }
+.desktop-manuscript[data-orientation="vertical"] {
+  writing-mode: vertical-rl;
+  max-block-size: 100%;
+  max-inline-size: 28rem;
+  min-block-size: min(12rem, 100%);
+  overflow: auto;
+}
+.desktop-diff, .desktop-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: .75rem;
+  margin-block: .75rem;
+}
+.desktop-diff > * { border-block: 1px solid var(--desktop-line); }
+.desktop-settings .desktop-field { margin: 0; }
