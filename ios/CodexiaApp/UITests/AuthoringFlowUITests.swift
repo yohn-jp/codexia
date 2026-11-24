@@ -16,11 +16,11 @@ final class AuthoringFlowUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.navigationBars["ライブラリ"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["account.signIn"].exists)
-        XCTAssertTrue(app.buttons["account.entry"].exists)
+        XCTAssertTrue(app.buttons["CTRL-LIB-01.B"].exists)
+        XCTAssertTrue(app.buttons["CTRL-LIB-01.C"].exists)
         XCTAssertFalse(app.buttons["サンプル作品"].exists)
 
-        app.buttons["account.entry"].tap()
+        app.buttons["CTRL-LIB-01.C"].tap()
         XCTAssertTrue(app.navigationBars["アカウント"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["原稿の保存と編集機能は準備中です。利用できない機能を使用可能として表示しません。"].exists)
     }
