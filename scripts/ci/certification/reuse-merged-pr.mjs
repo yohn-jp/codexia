@@ -12,7 +12,8 @@ import { deploymentImpactForSource } from '../impact/migration-contracts.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
-import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from '../../release/components/policy.mjs';
+import { REUSED_MAIN_SKIPPED_JOBS } from '../../release/components/policy.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
 const FULL_MODEL_JOB = 'full-model-oci / Run pinned Full model lifecycle on rootless Podman';
@@ -93,8 +94,8 @@ async function mergedPrNumber(run, candidate, repoId, request) {
   }
   // GitHub may clear workflow_run.pull_requests after the PR closes.
   // Resolve the association from the actual merge commit instead, not a branch search.
-  const pulls = await request('commits/' + candidate.sourceSha + '/pulls?per_page=100&page=1');
-  assert.ok(Array.isArray(pulls) && pulls.length < 100, 'Incomplete merge PR association inventory');
+  const pulls = await request.paginate('commits/' + candidate.sourceSha + '/pulls', {}, null);
+  assert.ok(Array.isArray(pulls), 'Invalid merge PR association inventory');
   const merged = pulls.filter(pr => pr?.merge_commit_sha === candidate.sourceSha &&
     pr.head?.sha === candidate.head && pr.base?.ref === 'main' && pr.base?.sha === candidate.base &&
     sameRepo(pr.head?.repo, repoId) && sameRepo(pr.base?.repo, repoId));
@@ -146,8 +147,7 @@ function assertFullModelJob(plan, jobs) {
 }
 
 function apiList(request, endpoint, key) {
-  return collectGitHubPages((page, perPage) => request(endpoint + (endpoint.includes('?') ? '&' : '?') +
-    'per_page=' + perPage + '&page=' + page), key);
+  return request.paginate(endpoint, {}, key);
 }
 
 function mainContext(repository, currentRun, sourceSha, workflowPath) {
@@ -305,14 +305,15 @@ async function main() {
   assert.match(sourceSha ?? '', shaPattern);
   assert.match(runId ?? '', /^[1-9]\d*$/u);
   assert.ok(token && eventPath);
+  assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
+  const github = createGitHubRestClient({ token });
   const request = async endpoint => {
-    const response = await fetch('https://api.github.com/repos/' + repository + '/' + endpoint, {
-      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
-      redirect: 'error', signal: AbortSignal.timeout(15_000),
-    });
-    assert.ok(response.ok, 'GitHub proof lookup failed (HTTP ' + response.status + ')');
-    return response.json();
+    const response = await github.request('GET', `/repos/${repository}/${endpoint}`);
+    assert.ok(response.status >= 200 && response.status < 300, 'GitHub proof lookup failed (HTTP ' + response.status + ')');
+    return response.data;
   };
+  request.paginate = (endpoint, parameters, key) => github.paginate(
+    endpoint.startsWith(`/repos/${repository}/`) ? endpoint : `/repos/${repository}/${endpoint}`, parameters, key);
   const resolve = async () => {
     const payload = JSON.parse(await readFile(eventPath, 'utf8'));
     assert.equal(payload.ref, ref);

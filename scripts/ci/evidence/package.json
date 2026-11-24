@@ -2,6 +2,7 @@
   "name": "@codexia/ci-evidence",
   "private": true,
   "dependencies": {
+    "@octokit/rest": "22.0.1",
     "@zip.js/zip.js": "2.25.0"
   }
 }

@@ -119,6 +119,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `@zip.js/zip.js` | `2.25.0` | `scripts/ci/evidence`・不信頼なCI ArtifactのZIP読取 | **CI専用**: BSD-3-Clause。Node 24に対応し、peer依存なし。更新時は厳格な形式検査、CRC、重複・重なり、パス・ファイル種別、実展開量の拒否条件と、認定・promotionの証拠検証を確認 |
+| `@octokit/rest` | `22.0.1` | `scripts/ci/evidence`の実行時依存・`scripts/github/rest-client.mjs`を正本とするCI、release、deployment、artifact provenance用GitHub REST通信とLink pagination | **CI専用**: GitHub API通信を単一のSDKに集約し、無条件リトライを無効化する。API originと`yohn-jp/codexia` repository pathを制限し、total_count・全page・run/attempt/SHA・artifact identityをCodexia側で検証する。署名付きartifact URLからのarchive取得とブラウザーでの公開API参照は別経路に保つ |
 
 ### ネイティブ・エッジ
 

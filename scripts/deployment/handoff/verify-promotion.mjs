@@ -6,25 +6,24 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { verifyFrontendMainPromotionProof } from '../../verification/artifacts/frontend.mjs';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from '../../verification/artifacts/backend.mjs';
 import { selectBackendPromotionRun, inspectBackendImageWithoutExecution } from '../../release/backend/resolve-promotion.mjs';
 import { readComponentVersion } from '../../release/components/version.mjs';
 import { expectedBackendMigrationFingerprint } from '../../release/backend/image-inspection.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
 const DIRECTORY=process.env.CODEXIA_BACKEND_PROMOTION_DIR;
 const RECORD='codexia-backend-promotion.json';
 
-async function githubJson(url,token){
-  const response=await fetch(url,{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},
-    redirect:'error',signal:AbortSignal.timeout(20_000)});
-  if(!response.ok)throw new Error('Backend promotion handoff provenance lookup failed (HTTP '+response.status+')');
-  return response.json();
+async function githubJson(github,route){
+  const response=await github.request('GET',route,{headers:{'X-GitHub-Api-Version':'2022-11-28'}});
+  if(response.status<200||response.status>=300)throw new Error('Backend promotion handoff provenance lookup failed (HTTP '+response.status+')');
+  return response.data;
 }
-async function pages(url,token,key){
-  return collectGitHubPages((page,perPage)=>githubJson(url+(url.includes('?')?'&':'?')+'per_page='+perPage+'&page='+page,token),key);
+async function pages(github,route,key,parameters={}){
+  return github.paginate(route,parameters,key);
 }
 function positive(value,label){
   assert.ok(Number.isSafeInteger(Number(value))&&Number(value)>0,label+' is invalid');
@@ -40,6 +39,7 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   assert.ok(typeof DIRECTORY==='string'&&path.isAbsolute(DIRECTORY),'Backend promotion directory is invalid');
   const token=env.GH_TOKEN;
   const receipt=JSON.parse(await readFile(path.join(DIRECTORY,RECORD),'utf8'));
+  const github=createGitHubRestClient({token,timeout:20_000});
   const proof=await verifyFrontendMainPromotionProof({env});
   assert.equal(receipt.format,'codexia-backend-promotion/v1');
   assert.equal(receipt.event,'pull_request');
@@ -54,19 +54,19 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   assert.equal(receipt.planDigest,proof.planDigest);
   assert.equal(receipt.version,readComponentVersion('backend',String(receipt.workflowRunNumber)));
   const repositoryId=positive(env.CODEXIA_REPOSITORY_ID,'Repository ID');
-  const workflow=await githubJson('https://api.github.com/repos/'+REPOSITORY+'/actions/workflows/backend-release.yml',token);
+  const workflow=await githubJson(github,`/repos/${REPOSITORY}/actions/workflows/backend-release.yml`);
   assert.equal(workflow.path,'.github/workflows/backend-release.yml');
   assert.equal(positive(receipt.workflowId,'Producer workflow ID'),workflow.id);
-  const runs=await pages('https://api.github.com/repos/'+REPOSITORY+'/actions/workflows/'+workflow.id+'/runs?head_sha='+proof.headSha+'&event=pull_request',token,'workflow_runs');
+  const runs=await pages(github,`/repos/${REPOSITORY}/actions/workflows/${workflow.id}/runs`,'workflow_runs',{head_sha:proof.headSha,event:'pull_request'});
   const run=selectBackendPromotionRun(runs,proof,repositoryId,workflow.id);
   for(const [key,value] of [['workflowRunId',run.id],['workflowRunNumber',run.run_number],['workflowAttempt',run.run_attempt]]) assert.equal(receipt[key],value,'Backend producer '+key+' changed');
   const [latestJobs,artifacts]=await Promise.all([
-    pages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/jobs?filter=latest',token,'jobs'),
-    pages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/artifacts',token,'artifacts'),
+    pages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/jobs`,'jobs',{filter:'latest'}),
+    pages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/artifacts`,'artifacts'),
   ]);
   const selected=selectBackendArtifacts(run,artifacts,latestJobs,{runId:run.id,currentAttempt:run.run_attempt,sourceSha:proof.headSha,event:'pull_request',headBranch:proof.headRef});
   const producerAttempts=new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
-    attempt,await pages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/attempts/'+attempt+'/jobs',token,'jobs'),
+    attempt,await pages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/attempts/${attempt}/jobs`,'jobs'),
   ])));
   for(const item of selected){
     assertBackendProducerAttempt(item,producerAttempts.get(item.producerAttempt),{runId:run.id,sourceSha:proof.headSha});

@@ -39,10 +39,10 @@ test('manual selection queries the authenticated API and accepts only the exact 
   let requested;
   const publisher = await resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async (url, options) => {
     requested = { url, options };
-    return { ok: true, json: async () => run() };
+    return Response.json(run());
   } });
-  assert.equal(requested.url, 'https://api.github.com/repos/yohn-jp/codexia/actions/runs/44878012473');
-  assert.equal(requested.options.headers.Authorization, 'Bearer opaque-test-token');
+  assert.equal(String(requested.url), 'https://api.github.com/repos/yohn-jp/codexia/actions/runs/44878012473');
+  assert.ok(new Headers(requested.options.headers).get('authorization')?.includes('opaque-test-token'));
   assert.equal(publisher.id, 44878012473);
   assert.equal(publisher.run_number, 773);
   assert.equal(publisher.head_sha, sha('a'));
@@ -56,7 +56,7 @@ test('manual selection queries the authenticated API and accepts only the exact 
     [{ CODEXIA_PUBLISHER_RUN_ID: '44878012473x' }, sha('b')],
     [{ CODEXIA_PUBLISHER_SHA: 'invalid' }, sha('b')],
   ]) {
-    await assert.rejects(resolveManualPublisherRun({ env: { ...env(), ...patch }, checkoutSha, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
+    await assert.rejects(resolveManualPublisherRun({ env: { ...env(), ...patch }, checkoutSha, fetchImpl: async () => Response.json(run()) }));
   }
   for (const invalid of [
     { path: '.github/workflows/other.yml' },
@@ -67,9 +67,9 @@ test('manual selection queries the authenticated API and accepts only the exact 
     { repository: { full_name: 'fork/codexia' } },
     { head_repository: { full_name: 'fork/codexia' } },
   ]) {
-    await assert.rejects(resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async () => ({ ok: true, json: async () => ({ ...run(), ...invalid }) }) }));
+    await assert.rejects(resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async () => Response.json({ ...run(), ...invalid }) }));
   }
-  await assert.rejects(resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async () => ({ ok: false, status: 403 }) }), /HTTP 403/u);
+  await assert.rejects(resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async () => Response.json({}, { status: 403 }) }), /HTTP 403/u);
 });
 
 test('manual context is built from the authenticated API run and exact checked-out publisher source', async () => {
@@ -82,21 +82,18 @@ test('manual context is built from the authenticated API run and exact checked-o
     GITHUB_WORKSPACE: repositoryPath,
     CODEXIA_MANUAL_REVALIDATION: 'true',
   };
-  const context = await prepareManualVerifierContext({ env: envForWrapper, fetchImpl: async () => ({
-    ok: true,
-    json: async () => ({ ...run(), head_sha: checkedOutSha }),
-  }) });
+  const context = await prepareManualVerifierContext({ env: envForWrapper, fetchImpl: async () => Response.json({ ...run(), head_sha: checkedOutSha }) });
   assert.equal(context.env.GITHUB_EVENT_NAME, 'workflow_run');
   assert.equal(context.payload.workflow_run.head_sha, checkedOutSha);
   assert.equal(context.payload.workflow_run.id, 44878012473);
   assert.equal(context.payload.workflow_run.run_number, 773);
   assert.equal(context.payload.workflow_run.path, '.github/workflows/backend-release.yml');
   assert.equal('GITHUB_EVENT_PATH' in context.env, false);
-  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, GITHUB_EVENT_NAME: 'push' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
-  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, CODEXIA_MANUAL_REVALIDATION: 'false' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
+  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, GITHUB_EVENT_NAME: 'push' }, fetchImpl: async () => Response.json(run()) }));
+  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, CODEXIA_MANUAL_REVALIDATION: 'false' }, fetchImpl: async () => Response.json(run()) }));
   await assert.rejects(prepareManualVerifierContext({
     env: { ...envForWrapper, CODEXIA_PUBLISHER_SHA: sha('a') },
-    fetchImpl: async () => ({ ok: true, json: async () => run() }),
+    fetchImpl: async () => Response.json(run()),
   }), /Publisher checkout differs/u);
 });
 
