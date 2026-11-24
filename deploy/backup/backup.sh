@@ -335,6 +335,12 @@ case "${1:-}" in
     age -d -i "$3" "$dir/database.dump.age" |
       podman exec -i "$db" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
+    # Podman imports the archived entries into an already created mount root.
+    # Give only that disposable root the canonical API ownership and mode.
+    podman run --rm --pull=never --network none --read-only --user 0:0 \
+      --cap-drop all --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges \
+      --entrypoint /bin/sh --volume "$history:/history:rw,nocopy" "$PG_IMAGE" \
+      -ec 'chmod 0700 /history; chown 1000:1000 /history'
     [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     if [[ -n "$candidate" ]]; then rehearse_restore_maintenance "$candidate" "$db" "$history"; fi

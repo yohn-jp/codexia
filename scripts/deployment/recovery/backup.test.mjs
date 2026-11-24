@@ -268,6 +268,13 @@ save();
 
     const scratchHistory = rehearsed.calls.find(call => call[0] === 'volume' && call[1] === 'import')[2];
     assert.equal(scratchHistory, `${dbName}-history`);
+    const historyImport = rehearsed.calls.findIndex(call => call[0] === 'volume' && call[1] === 'import');
+    const privateMountRoot = rehearsed.calls.findIndex(call => call.at(-1) === 'chmod 0700 /history; chown 1000:1000 /history');
+    assert.ok(privateMountRoot > historyImport && privateMountRoot < rehearsed.calls.indexOf(candidateCalls[0]));
+    const mountSetup = rehearsed.calls[privateMountRoot];
+    assert.equal(mountSetup[mountSetup.indexOf('--volume') + 1], `${scratchHistory}:/history:rw,nocopy`);
+    assert.equal(mountSetup[mountSetup.indexOf('--network') + 1], 'none');
+
     const historyCalls = candidateCalls.slice(4);
     assert.deepEqual(historyCalls.map(call => call.at(-1)), ['--check', '--apply', '--check']);
     assert.deepEqual(historyCalls.map(call => call[call.indexOf('--volume') + 1]), [

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from '../../release/components/version.mjs';
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from '../../ci/evidence/download-artifacts.mjs';
-import { assertFrontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
+import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../../build/frontend/oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from '../../release/components/policy.mjs';
 import { assertFrontendIdentity } from '../../release/frontend/verify-compatibility.mjs';
 import { verifyReusableMainProof } from '../../ci/certification/reuse-merged-pr.mjs';
@@ -426,6 +426,7 @@ async function writePromotionOutputs(file,output){
 export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch } = {}) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Cutover frontend repository mismatch');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover frontend verification requires main');
+  assert.ok(readFrontendOAuthConfig(env), 'Cutover requires the approved public frontend OAuth configuration');
   const id = positiveInteger(input.artifactId, 'Frontend artifact ID');
   const runId = positiveInteger(input.runId, 'Frontend producer run ID');
   const verifyRunId = positiveInteger(input.verifyRunId, 'Frontend Verify run ID');
