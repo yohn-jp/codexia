@@ -137,3 +137,20 @@ test('historical release migration identity is computed from certified Git tree,
   assert.equal(await expectedBackendMigrationFingerprint(sha, { cwd: root }), expected);
   await assert.rejects(expectedBackendMigrationFingerprint('HEAD', { cwd: root }), /Invalid certified migration source/);
 });
+
+
+test('disposable cutover host can verify embedded image identity with its minimal source archive', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-minimal-image-identity-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const relative of ['scripts/release/backend/image-inspection.mjs',
+    'scripts/release/backend/update-identity.mjs', 'scripts/release/components/version.mjs']) {
+    const destination = path.join(root, relative);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, await readFile(new URL('../../../' + relative, import.meta.url)));
+  }
+  const module = new URL('file://' + path.join(root, 'scripts/release/backend/image-inspection.mjs'));
+  const result = execFileSync(process.execPath, ['--input-type=module', '-e',
+    'import { assertBackendImageIdentity } from ' + JSON.stringify(module.href) + '; console.log(typeof assertBackendImageIdentity)'],
+  { cwd: root, encoding: 'utf8' });
+  assert.equal(result.trim(), 'function');
+});
