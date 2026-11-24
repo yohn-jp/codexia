@@ -114,6 +114,21 @@ export async function validateRelations(nodes, repositoryRoot) {
   return violations;
 }
 
+export function validateObligationDesignRefs(nodes, registerPath, repositoryRoot) {
+  const from = path.posix.dirname(registerPath);
+  const withRelations = nodes.map(node => ({
+    UID: node.UID,
+    RELATIONS: String(node['Design reference'] ?? '').split(/[;、]/u).map(reference => reference.trim()).filter(Boolean).map(reference => {
+      const link = /^\[[^\]]+\]\(([^)]+)\)$/u.exec(reference);
+      const [, target] = link ?? ['', reference];
+      const [file] = target.split('#');
+      const value = link && !path.posix.isAbsolute(file) ? path.posix.join(from, file) : file;
+      return { TYPE: 'File', VALUE: value };
+    }),
+  }));
+  return validateRelations(withRelations, repositoryRoot);
+}
+
 export async function validateScenarioNodes(scenarios, requirements, repositoryRoot) {
   const violations = [];
   const requirementByUid = new Map(requirements.map((node) => [node.UID, node]));
@@ -832,6 +847,8 @@ async function runVerifier(args) {
     }
     const relationViolations = await validateRelations([...requirementNodes, ...scenarioNodes, ...obligationNodes], root);
     if (relationViolations.length > 0) throw new Error(relationViolations.join('\n'));
+    const designViolations = await validateObligationDesignRefs(obligationNodes, sourceRel, root);
+    if (designViolations.length > 0) throw new Error(designViolations.join('\n'));
 
     const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
     const { discovered, violations: inventoryViolations } = await verifySourceInventory(root, inventory);

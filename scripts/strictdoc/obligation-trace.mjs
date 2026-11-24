@@ -66,6 +66,9 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     const requirement = requirementById.get(requirementId);
     if (!requirement) violations.push(`${obligation.UID} refers to unknown requirement ${requirementId}`);
     if (obligation.MID !== deterministicMid(obligation.UID)) violations.push(`MID for ${obligation.UID} is not deterministic`);
+    if (obligation['Exact-run reference'] !== 'NOT_RUN') {
+      violations.push(`${obligation.UID} authored Exact-run reference must be NOT_RUN; observed runs are attached in Verify evidence`);
+    }
     const parents = (obligation.RELATIONS ?? []).filter((item) => item.TYPE === 'Parent').map((item) => item.VALUE);
     if (parents.length !== 1 || parents[0] !== requirementId) violations.push(`${obligation.UID} must have exactly one Parent relation to ${requirementId}`);
     const designRefs = String(obligation['Design reference'] ?? '').split(/\s*;\s*/u).filter(Boolean);
@@ -112,7 +115,9 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     }
     rows.push({
       requirementId, obligationId: obligation.UID, obligationText: obligation.STATEMENT ?? obligation.TITLE ?? '',
-      designRefs, sourceRefs, surfaceIdentifiers, testIds, exactRuns, status,
+      designRefs, sourceRefs,
+      implementationIdentifiers: String(obligation['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean),
+      surfaceIdentifiers, testIds, exactRuns, status,
     });
   }
   for (const requirement of requirements) {

@@ -12,6 +12,8 @@ const obligation = {
   'Design reference': 'docs/architecture/API-CONTRACT.md#optimistic-concurrency',
   'Surface identifiers': 'httpOperation=PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}',
   'Test IDs': 'TEST-API-001',
+  'Implementation identifiers': 'API-PERSIST-007',
+  'Exact-run reference': 'NOT_RUN',
   RELATIONS: [
     { TYPE: 'Parent', VALUE: 'REQ-API-002' },
     { TYPE: 'File', VALUE: 'packages/api/src/persistence-routes.ts', LINE_RANGE: '12, 19' },
@@ -28,6 +30,7 @@ test('projects explicit obligation links and retains missing trace stages as gap
   assert.deepEqual(result.violations, []);
   assert.equal(result.rows[0].requirementId, 'REQ-API-002');
   assert.equal(result.rows[0].sourceRefs[0].range, '12, 19');
+  assert.deepEqual(result.rows[0].implementationIdentifiers, ['API-PERSIST-007']);
   assert.deepEqual(result.rows[0].surfaceIdentifiers, [{ kind: 'httpOperation', id: 'PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}' }]);
   assert.equal(result.rows[0].status, 'MAPPED_UNVERIFIED');
   assert.match(result.gaps.join('\n'), /no exact-source run evidence/);
@@ -56,6 +59,7 @@ test('fault injection rejects malformed exact-source evidence and unsafe source 
   const result = buildObligationTrace({
     requirements: [requirement], obligations: [{
       ...obligation,
+      'Exact-run reference': 'https://github.com/foreign/repo/actions/runs/1',
       RELATIONS: [
         { TYPE: 'Parent', VALUE: 'REQ-API-002' },
         { TYPE: 'File', VALUE: '../outside.ts', LINE_RANGE: '1, 1' },
@@ -66,4 +70,5 @@ test('fault injection rejects malformed exact-source evidence and unsafe source 
   });
   assert.match(result.violations.join('\n'), /incomplete or invalid exact-source run evidence/);
   assert.match(result.violations.join('\n'), /repository-relative/);
+  assert.match(result.violations.join('\n'), /authored Exact-run reference/);
 });
