@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { planFromObservations } from './observe.mjs';
 import { parsePreflightRequest } from './run.mjs';
+import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 
 const h = c => c.repeat(64);
 const now = new Date('2026-11-24T00:00:00.000Z');
@@ -10,13 +11,20 @@ const window = { id: 'maintenance', notBefore: '2026-11-23T23:55:00.000Z', notAf
 const ledger = [{ version: '0001-initial.sql', checksum: h('b') }];
 const schema = 'sha256:' + h('c');
 const image = c => 'ghcr.io/yohn-jp/codexia-backend@sha256:' + h(c);
+const publicSettings = {
+  VITE_CODEXIA_OAUTH_ISSUER: 'https://example.test/api/auth',
+  VITE_CODEXIA_OAUTH_CLIENT_ID: 'fixture-public-config',
+  VITE_CODEXIA_API_AUDIENCE: 'https://example.test/api',
+  VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: 'https://example.test/desktop',
+  VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: 'https://example.test/mobile',
+};
 
 function fixture() {
   const identity = { format: 'codexia-backend-identity/v1', version: '1.0.0', sourceSha: 'a'.repeat(40),
     profile: 'full', platform: 'linux/amd64', migrationFingerprint: migrationSetFingerprint(ledger),
     apiEpoch: 2, persistenceFormat: 2 };
   const frontend = { format: 'codexia-frontend-identity/v1', version: '1.0.0', sourceSha: 'f'.repeat(40),
-    profile: 'full', apiEpoch: 2, oauthConfigIdentity: 'fixture-public-config' };
+    profile: 'full', apiEpoch: 2, oauthConfigIdentity: frontendOAuthConfigIdentity(publicSettings) };
   const candidateBackend = { image: image('d'), identity, verifiedMainSha: 'a'.repeat(40) };
   return {
     host: { format: 'codexia-lifecycle-host/v1', hostId: h('a'), M: 'ready', H: 'ready',
@@ -174,4 +182,27 @@ test('each present observation must have its own fresh canonical timestamp', () 
   const f = fixture();
   f.host.observedAt = '2026-11-23T23:59:00.000Z';
   assert.equal(planFromObservations(f).plan.observation.observedAt, f.host.observedAt);
+});
+
+
+test('frontend evidence binds validated public settings and rejects arbitrary identity contents', () => {
+  const baseline = fixture();
+  const before = planFromObservations(baseline);
+  const changed = fixture();
+  changed.edge.frontend = { ...changed.edge.frontend, version: '0.9.0',
+    oauthConfigIdentity: frontendOAuthConfigIdentity({ ...publicSettings, VITE_CODEXIA_OAUTH_CLIENT_ID: 'other-public-client' }) };
+  const after = planFromObservations(changed);
+  assert.ok(after.plan.observation.changeAxes.includes('oauth-contract'));
+  assert.notEqual(after.plan.observation.binding.frontendSha256, before.plan.observation.binding.frontendSha256);
+  assert.ok(!JSON.stringify(after).includes('other-public-client'));
+  for (const invalid of ['arbitrary-untrusted-value',
+    JSON.stringify({ format: 'codexia-web-oauth-config/v1', settings: { clientSecret: 'not-public' } })]) {
+    const f = fixture();
+    f.edge.frontend = { ...f.edge.frontend, oauthConfigIdentity: invalid };
+    assert.throws(() => planFromObservations(f), /Invalid public frontend configuration identity/u);
+  }
+  const absent = fixture();
+  absent.candidateFrontend.identity = { ...absent.candidateFrontend.identity,
+    oauthConfigIdentity: frontendOAuthConfigIdentity({}) };
+  assert.throws(() => planFromObservations(absent), /no certified OAuth contract/u);
 });

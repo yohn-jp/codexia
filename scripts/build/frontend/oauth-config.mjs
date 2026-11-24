@@ -69,6 +69,44 @@ export function frontendOAuthConfigIdentity(env = process.env) {
   return JSON.stringify({ format: configFormat, settings: readFrontendOAuthConfig(env) });
 }
 
+/**
+ * Decode only the canonical, public Web OAuth settings from a deployed bundle.
+ * Never treat an arbitrary identity string as a public credential-free record.
+ * The exact producer serialization also rejects extra fields and noncanonical
+ * representations; all URL and scope checks stay with the existing config owner.
+ */
+export function parsePublicFrontendConfigIdentity(serialized) {
+  if (serialized === undefined) return undefined;
+  const invalid = () => new Error('Invalid public frontend configuration identity');
+  if (typeof serialized !== 'string' || serialized.length > 4096) throw invalid();
+  let value;
+  try { value = JSON.parse(serialized); }
+  catch { throw invalid(); }
+  if (!value || value.format !== configFormat) throw invalid();
+  if (value.settings === null) {
+    if (serialized !== frontendOAuthConfigIdentity({})) throw invalid();
+    return null;
+  }
+  const settings = value.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings) ||
+      !Array.isArray(settings.scopes) || !settings.scopes.every(scope => typeof scope === 'string')) {
+    throw invalid();
+  }
+  let publicConfig;
+  try {
+    publicConfig = readFrontendOAuthConfig({
+      VITE_CODEXIA_OAUTH_ISSUER: settings.issuer,
+      VITE_CODEXIA_OAUTH_CLIENT_ID: settings.clientId,
+      VITE_CODEXIA_API_AUDIENCE: settings.apiAudience,
+      VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: settings.desktopRedirectUri,
+      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: settings.mobileRedirectUri,
+      VITE_CODEXIA_OAUTH_SCOPES: settings.scopes.join(' '),
+    });
+  } catch { throw invalid(); }
+  if (!publicConfig || JSON.stringify({ format: configFormat, settings: publicConfig }) !== serialized) throw invalid();
+  return publicConfig;
+}
+
 /** Reject promotion or release artifacts that were built with different public OAuth settings. */
 export function assertFrontendOAuthConfigIdentity(identity, env = process.env) {
   const expected = frontendOAuthConfigIdentity(env);

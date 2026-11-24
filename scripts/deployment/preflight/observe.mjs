@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { digestEvidence } from '../cutover/coordinator.mjs';
+import { parsePublicFrontendConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { validateBackendIdentity } from '../../release/backend/update-identity.mjs';
 import { assertFrontendIdentity, assertFrontendReleaseAdmission } from '../../release/frontend/verify-compatibility.mjs';
 import { compareComponentVersions } from '../../release/components/version.mjs';
@@ -26,8 +27,7 @@ function candidateIdentity(backend, frontend, authSchemas) {
   assert.equal(identity.profile, 'full');
   assert.ok(image.test(backend.image));
   assert.equal(identity.apiEpoch, ui.apiEpoch, 'Candidate artifacts do not form a compatible Full pair');
-  assert.ok(typeof ui.oauthConfigIdentity === 'string' && ui.oauthConfigIdentity.length > 0,
-    'Candidate frontend has no certified OAuth contract');
+  assert.ok(parsePublicFrontendConfigIdentity(ui.oauthConfigIdentity), 'Candidate frontend has no certified OAuth contract');
   assert.ok(Array.isArray(authSchemas) && authSchemas.length > 0 &&
     authSchemas.every(value => taggedHash.test(value)), 'Candidate auth schema contract is missing');
   assert.ok(rawHash.test(frontend.artifactDigest ?? ''), 'Invalid candidate frontend archive digest');
@@ -37,7 +37,10 @@ function candidateIdentity(backend, frontend, authSchemas) {
 function publicFrontendEvidence(value) {
   if (!value) return null;
   const { oauthConfigIdentity, ...rest } = frontendIdentity(value);
-  return { ...rest, oauthConfigSha256: hash(oauthConfigIdentity) };
+  const publicConfig = parsePublicFrontendConfigIdentity(oauthConfigIdentity);
+  // This is an integrity fingerprint of validated public browser configuration,
+  // not a hash of a password, bearer credential or arbitrary identity string.
+  return { ...rest, oauthConfigSha256: publicConfig === undefined ? null : digestEvidence({ settings: publicConfig }) };
 }
 
 function stateDatabase(database, target, intent) {
@@ -60,7 +63,8 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   const target = {
     backendCertificateSha256: digestEvidence(candidateBackend),
     frontendArtifactSha256: candidateFrontend.artifactDigest,
-    identitySha256: digestEvidence(targetIdentity),
+    identitySha256: digestEvidence({ backend: targetIdentity.backend, image: targetIdentity.image,
+      frontend: publicFrontendEvidence(targetIdentity.frontend), authSchemas: targetIdentity.authSchemas }),
   };
   const state = { ...unknown };
   const changeAxes = [];
