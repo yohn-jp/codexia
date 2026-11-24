@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
+import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 
@@ -142,6 +143,36 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
+test('UX projection source and Pages inputs select scoped canonical proofs', async () => {
+  const { UX_PROJECTION_DOCUMENTS } = await import('../evidence/task-inputs.mjs');
+  const { OPERATIONAL_ROOT_PATHS, OPERATIONAL_ROOT_PREFIXES } = await import('./plan.mjs');
+  const pagesWorkflow = parse(readFileSync(new URL('../../../.github/workflows/repository-audit.yml', import.meta.url), 'utf8'));
+  assert.ok(OPERATIONAL_ROOT_PREFIXES.includes('scripts/pages-ui/'));
+  assert.ok(OPERATIONAL_ROOT_PREFIXES.includes('scripts/ux-simulator/'));
+  assert.ok(matchesWorkflowPaths(pagesWorkflow.on.pull_request.paths, ['scripts/ux-simulator/generate.mjs']));
+  for (const file of ['scripts/ux-simulator/generate.mjs', 'scripts/ux-simulator/compare/browser.mjs',
+    'scripts/pages-ui/navigation.mjs', 'scripts/audit/ux-artifact.mjs', 'scripts/verification/artifacts/pages-smoke.mjs']) {
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('unit-root'), file);
+    assert.ok(selected.tasks.includes('coverage'), file);
+    assert.equal(selected.mode, 'affected', file);
+    assert.equal(selected.full_model_oci, false, file);
+    assert.ok(!selected.tasks.some(task => /^(?:build|oci|browser)-/u.test(task)), file);
+  }
+  for (const file of UX_PROJECTION_DOCUMENTS) {
+    assert.ok(matchesWorkflowPaths(pagesWorkflow.on.pull_request.paths, [file]), `Pages must rebuild from ${file}`);
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('unit-root'), file);
+    assert.equal(selected.full_model_oci, file === 'app/DESIGN.md', file);
+    if (file.startsWith('docs/requirements/')) assert.ok(selected.tasks.includes('requirements-trace'), file);
+  }
+  for (const file of ['scripts/audit/ux-artifact.mjs', 'scripts/audit/ux-artifact.test.mjs',
+    '.github/workflows/repository-audit.yml']) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
+  for (const file of ['scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/task-inputs.test.mjs']) {
+    assert.equal((await plan([file])).mode, 'full', 'shared CI evidence authority preserves full verification');
+  }
+});
+
 test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
   const owners = [
     ['packages/api/src/server.ts', 'unit-api'],
@@ -176,9 +207,13 @@ test('StrictDoc authority selects trace proof and the requirement register also 
   ]) {
     const selected = await plan([file]);
     const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
+    const uxAuthority = UX_PROJECTION_DOCUMENTS.includes(file);
     assert.deepEqual(selected.tasks, requirementRegister
-      ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
-    assert.deepEqual(selected.groups, requirementRegister ? ['unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+      ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
+      : uxAuthority ? ['unit-root', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
+    assert.deepEqual(selected.groups, requirementRegister
+      ? ['unit-core', 'unit-db', 'types-tests', 'types-trace']
+      : uxAuthority ? ['unit-core', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 

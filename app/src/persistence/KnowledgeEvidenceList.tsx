@@ -74,7 +74,7 @@ export function KnowledgeEvidenceList({
               <div><dt>Knowledgeリンク</dt><dd>{link ? statusLabel(link.status) : "状態を確認できません"}</dd></div>
             </dl>
             {item.anchor.id === selectedEvidenceId && <p className="kci__selected-note">原稿の根拠選択で選ばれています。</p>}
-            <button className="kci__quote-action" type="button" onClick={() => onOpenEvidence(item)}>
+            <button className="kci__quote-action" type="button" data-ux-control="KNO-02.A" onClick={() => onOpenEvidence(item)}>
               {currentReference ? "現在の原稿で位置を確認" : "引用と位置を確認"}
             </button>
             <details className="kci__technical">

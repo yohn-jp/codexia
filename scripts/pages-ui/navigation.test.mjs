@@ -21,6 +21,16 @@ test('decoratePage uses project-subpath-safe relative assets and destination lin
   assert.match(decorated, /href="https:\/\/github\.com\/yohn-jp\/codexia\/tree\/main\/docs">GitHub Docs<\/a>/);
 });
 
+test('UX Simulator navigation binds GitHub Docs to the exact projection source SHA', () => {
+  const sha = 'c'.repeat(40);
+  const uxPage = { id: 'ux', title: 'UX Simulator', section: 'Design', mode: 'source projections', source: 'Design and implementation projections', sha };
+  const decorated = decoratePage('<html><head></head><body><main>UX</main></body></html>', {
+    pagePath: 'ux/index.html', page: uxPage,
+  });
+  assert.match(decorated, new RegExp(`href="https://github\\.com/yohn-jp/codexia/tree/${sha}/docs">GitHub Docs`));
+  assert.doesNotMatch(decorated, /tree\/main\/docs/);
+});
+
 test('decoratePage adds a focusable main target without duplicating landmarks', () => {
   const decorated = decoratePage('<html><head></head><body><main>Content</main></body></html>', { pagePath: 'index.html', page: { ...page, id: 'overview' } });
   assert.match(decorated, /href="#main"/);

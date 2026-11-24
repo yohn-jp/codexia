@@ -1,0 +1,14 @@
+.ux-compare-inputs, .ux-compare-results li dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: .5rem 1rem;
+}
+.ux-compare-inputs { margin-block: 1rem; }
+.ux-compare-inputs fieldset { min-inline-size: 0; border: 1px solid var(--ux-line); border-radius: .5rem; }
+.ux-compare-inputs input { margin-block: .25rem .65rem; }
+.ux-compare-search { margin-block-start: 1rem; }
+.ux-compare-results li { border-block-start: 1px solid var(--ux-line); padding-block: .75rem; list-style: none; }
+.ux-compare-results h3, .ux-compare-results dl, .ux-compare-results dd { margin: 0; }
+.ux-compare-results li dl { grid-template-columns: minmax(4rem, auto) minmax(0, 1fr); }
+.ux-compare-status { color: var(--ux-muted); font-size: .9rem; }
+.ux-compare-list { padding-inline-start: 0; }
