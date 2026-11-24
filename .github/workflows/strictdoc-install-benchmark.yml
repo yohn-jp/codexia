@@ -1,0 +1,50 @@
+name: Benchmark StrictDoc dependency installation
+on:
+  pull_request:
+    paths:
+      - .github/workflows/strictdoc-install-benchmark.yml
+      - scripts/strictdoc/benchmark-install.sh
+permissions:
+  contents: read
+concurrency:
+  group: strictdoc-install-benchmark-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  benchmark:
+    name: install-sample-${{ matrix.sample }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.3
+      - uses: actions/setup-python@v6.1.0
+        with:
+          python-version: '3.12'
+      - name: Prepare identical Node and Chromium inputs
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 install --frozen-lockfile --prefer-offline
+          pnpm exec playwright install --with-deps --only-shell chromium
+      - name: Compare matched cold and warm dependency installs and actual trace
+        env:
+          BENCH_SAMPLE: ${{ matrix.sample }}
+          CODEXIA_CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          CODEXIA_CI_TASK: requirements-trace
+        run: bash scripts/strictdoc/benchmark-install.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: strictdoc-install-benchmark-${{ matrix.sample }}
+          path: ${{ runner.temp }}/strictdoc-install-benchmark/results
+          retention-days: 2
+          if-no-files-found: error
