@@ -74,6 +74,8 @@ test('removing the canonical OAuth route changes regenerated projection and reco
   const projection = project(changed);
   assert.ok(!projection.screens.some(({ id }) => id === 'AUTH-01'));
   assert.ok(projection.gaps.some(({ id, status }) => id === 'AUTH-01' && status === 'unextracted'));
+  assert.ok(!projection.controls.some(({ id }) => id.startsWith('AUTH-01.')));
+  assert.ok(!projection.transitions.some(({ id }) => id === 'auth-session-consent-continuation'));
 });
 
 test('changing the canonical login control handler removes that observed control', () => {
@@ -82,6 +84,22 @@ test('changing the canonical login control handler removes that observed control
   const projection = project(changed);
   assert.ok(project(sourceWith()).controls.some(({ id }) => id === 'AUTH-01.A'));
   assert.ok(!projection.controls.some(({ id }) => id === 'AUTH-01.A'));
+  assert.ok(!projection.transitions.some(({ id }) => id === 'auth-session-consent-continuation'));
+});
+
+test('removing setup Passkey action keeps the independently sourced profile screen, but removes dependent control and edge', () => {
+  const path = 'app/src/console/ConsoleSetup.tsx';
+  const changed = withFileEdit(path, (text) => text.replace('onClick={createPasskey}', 'onClick={beginPasskeyCreation}'));
+  const projection = project(changed);
+  assert.ok(projection.screens.some(({ id, source }) => id === 'CON-02' && source.path === path));
+  assert.ok(!projection.controls.some(({ id }) => id === 'CON-02.A'));
+  assert.ok(!projection.transitions.some(({ id }) => id === 'setup-owner-enrolled'));
+});
+
+test('initial public metadata expiry transitions from loading, before content exists', () => {
+  const edge = project(sourceWith()).transitions.find(({ id }) => id === 'public-share-expired');
+  assert.equal(edge.from, 'PUB-01/loading');
+  assert.equal(edge.to, 'PUB-01/unavailable');
 });
 
 test('removing a console section target removes its navigation transition and grouped control', () => {

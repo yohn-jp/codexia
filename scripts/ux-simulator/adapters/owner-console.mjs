@@ -86,10 +86,10 @@ export function projectConsole(source) {
       ],
     },
     setupRoute && sourceAt(source, setup, 'onSubmit={submitProfile}') && {
-      id: 'CON-02', platform: 'console', route: '/console/setup', source: sourceRef(sourceAt(source, setup, 'onClick={createPasskey}')),
+      id: 'CON-02', platform: 'console', route: '/console/setup', source: sourceRef(sourceAt(source, setup, 'onSubmit={submitProfile}')),
       regions: [
         { id: 'setup-profile', role: 'form', label: '所有者プロフィール', source: sourceRef(sourceAt(source, setup, 'onSubmit={submitProfile}')) },
-        { id: 'setup-passkey', role: 'actions', label: 'Passkey登録', source: sourceRef(sourceAt(source, setup, 'onClick={createPasskey}')) },
+        ...(sourceAt(source, setup, 'onClick={createPasskey}') ? [{ id: 'setup-passkey', role: 'actions', label: 'Passkey登録' }] : []),
       ],
     },
     setupRoute && sourceAt(source, setup, 'status.state === "owner-enrolled"') && {
@@ -135,7 +135,7 @@ export function projectConsole(source) {
     ].map(([target, controlId, screenId, sectionNeedle]) => homeNavigation(source, '/console', target, '', controlId, sectionNeedle).transition),
     transition({ id: 'setup-key-authorized', platform: 'console', from: 'CON-01/key', to: 'CON-02/profile', event: 'submitKey', screen: 'CON-01', control: 'CON-01.A', condition: 'setStep("profile")', location: sourceAt(source, setup, 'setStep("profile");') }),
     transition({ id: 'setup-profile-confirmed', platform: 'console', from: 'CON-02/profile', to: 'CON-02/passkey', event: 'submitProfile', screen: 'CON-02', condition: 'setStep("passkey")', location: sourceAt(source, setup, 'setStep("passkey");') }),
-    transition({ id: 'setup-owner-enrolled', platform: 'console', from: 'CON-02/passkey', to: 'CON-03/owner-enrolled', event: 'refresh', screen: 'CON-02', control: 'CON-02.A', condition: 'state.state === "owner-enrolled" && token', location: sourceAt(source, setup, 'if (state.state === "owner-enrolled" && token) {') }),
+    sourceAt(source, setup, 'onClick={createPasskey}') && transition({ id: 'setup-owner-enrolled', platform: 'console', from: 'CON-02/passkey', to: 'CON-03/owner-enrolled', event: 'refresh', screen: 'CON-02', control: 'CON-02.A', condition: 'state.state === "owner-enrolled" && token', location: sourceAt(source, setup, 'if (state.state === "owner-enrolled" && token) {') }),
     transition({ id: 'setup-profile-expired', platform: 'console', from: 'CON-02/profile', to: 'CON-01/key', event: 'submitProfile failure', screen: 'CON-02', condition: 'state === "setup-pending"', location: sourceAt(source, setup, 'setStep("key");') }),
     transition({ id: 'setup-active-console-link', platform: 'console', from: 'CON-03/active', to: 'CON-00/ready', event: 'open consoleUrl', screen: 'CON-03', condition: 'current === "active" || current === "blocked"', location: sourceAt(source, setup, '<a href={consoleUrl} className="codexia-console__link">管理コンソールへ</a>') }),
     ...[

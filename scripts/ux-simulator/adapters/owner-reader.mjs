@@ -42,7 +42,7 @@ export function projectReader(source) {
       event: 'openScene(id)', screen: 'PUB-01', control: control?.id, condition: 'public scene response is ok', location: sourceAt(source, publishing, 'setScene(await response.json() as Record<string, unknown>);'),
     }),
     transition({
-      id: 'public-share-expired', platform: 'reader', from: 'PUB-01/content', to: 'PUB-01/unavailable',
+      id: 'public-share-expired', platform: 'reader', from: 'PUB-01/loading', to: 'PUB-01/unavailable',
       event: 'public metadata response', screen: 'PUB-01', condition: 'if (!response.ok)', location: sourceAt(source, publishing, 'if (!response.ok) throw new Error("共有リンクは無効か、期限切れです。");'),
     }),
     transition({

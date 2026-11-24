@@ -17,6 +17,10 @@ export function projectAuth(source) {
   const consentRoute = routeFor(source, 'isOAuthConsent');
   const loginComponent = sourceAt(source, login, 'export function OAuthLoginPage()');
   const consentComponent = sourceAt(source, consent, 'export function OAuthConsentPage()');
+  const passkeySignIn = sourceAt(source, login, 'onClick={() => void signInWithPasskey()}');
+  const providerSignIn = sourceAt(source, login, 'onClick={() => void signInWithProvider()}');
+  const allowConsent = sourceAt(source, consent, 'onClick={() => void decide(true)}');
+  const denyConsent = sourceAt(source, consent, 'onClick={() => void decide(false)}');
   const screens = records(
     loginRoute && loginComponent && {
       id: 'AUTH-01', platform: 'auth', source: sourceRef(loginComponent), route: loginRoute.route,
@@ -34,18 +38,18 @@ export function projectAuth(source) {
     },
   );
   const controls = records(
-    control(source, { id: 'AUTH-01.A', platform: 'auth', path: login, label: 'Passkeyでサインイン', handler: 'onClick={() => void signInWithPasskey()}', region: 'login-actions' }),
-    control(source, { id: 'AUTH-01.B', platform: 'auth', path: login, label: 'IDプロバイダーでサインイン', handler: 'onClick={() => void signInWithProvider()}', region: 'login-actions' }),
-    control(source, { id: 'AUTH-02.A', platform: 'auth', path: consent, label: '許可して続ける', handler: 'onClick={() => void decide(true)}', region: 'consent-actions' }),
-    control(source, { id: 'AUTH-02.B', platform: 'auth', path: consent, label: '拒否して戻る', handler: 'onClick={() => void decide(false)}', region: 'consent-actions' }),
+    loginRoute && loginComponent && control(source, { id: 'AUTH-01.A', platform: 'auth', path: login, label: 'Passkeyでサインイン', handler: 'onClick={() => void signInWithPasskey()}', region: 'login-actions' }),
+    loginRoute && loginComponent && control(source, { id: 'AUTH-01.B', platform: 'auth', path: login, label: 'IDプロバイダーでサインイン', handler: 'onClick={() => void signInWithProvider()}', region: 'login-actions' }),
+    consentRoute && consentComponent && control(source, { id: 'AUTH-02.A', platform: 'auth', path: consent, label: '許可して続ける', handler: 'onClick={() => void decide(true)}', region: 'consent-actions' }),
+    consentRoute && consentComponent && control(source, { id: 'AUTH-02.B', platform: 'auth', path: consent, label: '拒否して戻る', handler: 'onClick={() => void decide(false)}', region: 'consent-actions' }),
   );
   const transitions = records(
-    transition({
+    loginRoute && loginComponent && passkeySignIn && transition({
       id: 'auth-session-consent-continuation', platform: 'auth', from: 'AUTH-01/ready', to: 'AUTH-02/ready',
       event: 'valid OAuth session', screen: 'AUTH-01', condition: 'session.data && validPrompt',
       location: sourceAt(source, login, 'window.location.replace(oauthConsentContinuationURL(window.location.search));'),
     }),
-    transition({
+    consentRoute && consentComponent && allowConsent && denyConsent && transition({
       id: 'oauth-consent-client-continuation', platform: 'auth', from: 'AUTH-02/ready', to: 'registered-client-callback',
       event: 'decide', screen: 'AUTH-02', condition: 'sameOriginOAuthContinuation(result.url, window.location.origin, context?.redirectUri)',
       location: sourceAt(source, consent, 'window.location.assign(sameOriginOAuthContinuation(result.url, window.location.origin, context?.redirectUri));'),
