@@ -32,9 +32,9 @@ export const VERIFICATION_TASKS = [
   'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace',
 ];
 // Execution groups batch work without removing any validation obligation.
-// Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
+// Browser lanes retain their stable job names; the transitional WebKit lane runs Chromium UI and scoped legacy WebKit.
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
-// Start the two long-running specs together in each browser lane.
+// Start the two long-running specs together in each browser lane; fill shorter lanes before adding a tail.
 export const VERIFICATION_GROUPS = {
   biome: ['biome-ci'],
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'http-contract', 'root'].map(id => `unit-${id}`),
@@ -52,11 +52,11 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['core', 'persistence-database', 'outline-headings', 'native-review'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-writing`, ['core', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
-    [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['webkit', 'ui-v1', 'auth-recovery', 'oauth-web', 'passkey-bootstrap'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-reference`, ['modular-workspace', 'recent-activity', 'auth-recovery', 'native-review', 'oauth-web', 'outline-headings', 'passkey-bootstrap', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, ['ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),
 };
 // A single dependency authority for profile artifact consumers and certification.

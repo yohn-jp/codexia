@@ -13,6 +13,8 @@ type TestPostgresClient = {
 };
 const { Client } = requirePersistence("pg") as { Client: new (options: { connectionString: string }) => TestPostgresClient };
 
+// WebKit is retained only for mixed/legacy Mobile and independent public-surface proof.
+// @author-desktop marks reviewed Desktop-only scenarios; Chromium still runs every case.
 test.use({ hasTouch: true });
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
 const legacyKey = "scriptorium:draft:legacy-project:legacy-scene";
@@ -70,7 +72,7 @@ async function denyWrites(page: Page, enabled: boolean) {
   }, enabled);
 }
 
-test("legacy draft import preserves active input when its journal debounce is pending", async ({ page, authorizeAuthor }) => {
+test("legacy draft import preserves active input when its journal debounce is pending", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { scene } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   const text = "現在入力中の原稿を旧記録で消さない。";
@@ -80,7 +82,7 @@ test("legacy draft import preserves active input when its journal debounce is pe
   await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown === text)).toBe(true);
 });
 
-test("legacy draft import can be canceled, reloads its source, and removes it only after journal durability", async ({ page, authorizeAuthor }) => {
+test("legacy draft import can be canceled, reloads its source, and removes it only after journal durability", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { scene } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await page.getByRole("button", { name: "取り込みをキャンセル" }).click(); expect(await sourceExists(page)).toBe(true);
   await seedLegacy(page, "再読込した元原稿。");
@@ -96,7 +98,7 @@ test("legacy draft import can be canceled, reloads its source, and removes it on
 // Keep the original fill-based acceptance intact while comparing it with a
 // user-facing selection + typing path. This isolates the automation boundary
 // without weakening the canonical persisted-body assertion.
-test("keyboard select-all replacement saves exactly the intended manuscript", async ({ page, authorizeAuthor }) => {
+test("keyboard select-all replacement saves exactly the intended manuscript", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const text = "先に確定した本文。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
@@ -111,7 +113,7 @@ test("keyboard select-all replacement saves exactly the intended manuscript", as
   }).toBe(text);
 });
 
-test("a committed save with a lost response stays unconfirmed until the same operation receives a receipt", async ({ page, authorizeAuthor }) => {
+test("a committed save with a lost response stays unconfirmed until the same operation receives a receipt", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop");
   const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
   expect(databaseUrl, "the browser test must use its disposable PostgreSQL database").toBeTruthy();
@@ -181,7 +183,7 @@ test("a committed save with a lost response stays unconfirmed until the same ope
   }
 });
 
-test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page, authorizeAuthor }) => {
+test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); const text = "先に確定した本文。";
   // Use the same user-facing replacement path that passes in WebKit. The
   // legacy fill probe was diagnostic only and can append to a contenteditable
@@ -204,7 +206,7 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
   expect((await pinned.json()).revision.markdown).toBe(text); expect(await sourceExists(page)).toBe(false);
 });
 
-test("legacy draft import preserves input after its strict journal write fails", async ({ page, authorizeAuthor }) => {
+test("legacy draft import preserves input after its strict journal write fails", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   await createOAuthWritingFixture(authorizeAuthor, page); const original = await editor(page).innerText(); await seedLegacy(page); await previewLegacy(page); await denyWrites(page, true);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   // Import is asynchronous. Keep the synthetic IndexedDB failure enabled until
@@ -218,7 +220,7 @@ test("legacy draft import preserves input after its strict journal write fails",
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
 });
 
-test("legacy draft import reports a rejected composition flush and keeps its source", async ({ page, authorizeAuthor }) => {
+test("legacy draft import reports a rejected composition flush and keeps its source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page); const text = await editor(page).innerText();
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
@@ -227,7 +229,7 @@ test("legacy draft import reports a rejected composition flush and keeps its sou
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
 });
 
-test("legacy draft composition cannot write old scene text into a newly selected scene", async ({ page, authorizeAuthor }) => {
+test("legacy draft composition cannot write old scene text into a newly selected scene", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { second } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
@@ -244,7 +246,7 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
   await page.goto(authorServer.apiOrigin); await expect(page).toHaveURL(/desktop/u);
 });
 
-test("revision history responses and errors stay bound to the scene that requested them", async ({ page, authorizeAuthor }) => {
+test("revision history responses and errors stay bound to the scene that requested them", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const aPast = "Aだけにある過去本文。";
   const aCurrent = "Aの現在本文。";
@@ -330,7 +332,7 @@ test("revision history responses and errors stay bound to the scene that request
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true }).getByRole("status")).toHaveCount(0);
 });
 
-test("revision history restarts a blocked page after a save on the same scene", async ({ page, authorizeAuthor }) => {
+test("revision history restarts a blocked page after a save on the same scene", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   test.setTimeout(90_000);
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
@@ -527,7 +529,7 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
 });
 
-test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page, authorizeAuthor }) => {
+test("a failed Knowledge list does not block the initial document and can be retried in its panel", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const author = await authorizeAuthor("desktop");
   const headers = { Origin: new URL(page.url()).origin };
   const createdProject = await author.fetch("/api/v1/persistence/projects", { method: "POST", headers, data: { title: `Knowledge failure ${crypto.randomUUID()}` } });
@@ -817,7 +819,7 @@ test("desktop mode switch stays visible and operable at 320 CSS pixels", async (
   await expect(editor(page)).toContainText("最初の本文。");
 });
 
-test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page, authorizeAuthor }) => {
+test("recovery retry after pagehide retains its exact PostgreSQL draft", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const text = "頁を隠しても残る日本語のDraft。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
@@ -941,7 +943,7 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
   }
 });
 
-test("profile-selected workspace panels remain discoverable in the PostgreSQL workspace", async ({ page, authorizeAuthor }) => {
+test("profile-selected workspace panels remain discoverable in the PostgreSQL workspace", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const response = await author.fetch(`/api/projects/${project.id}/contributions`); expect(response.ok()).toBe(true);
   const catalog = await response.json();
@@ -958,7 +960,7 @@ test("profile-selected workspace panels remain discoverable in the PostgreSQL wo
   await expect(editor(page)).toBeVisible();
 });
 
-test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", async ({ page, authorizeAuthor }) => {
+test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   await createOAuthWritingFixture(authorizeAuthor, page); await editor(page).evaluate((element) => { element.dataset.originalEditor = "retained"; });
   await replaceManuscript(page, "保存応答でも選択と同じエディタを保持する。");
   await expectServerSaved(page);
@@ -980,7 +982,7 @@ test("UX canon puts Japanese prose before optional chrome at every shell width",
   }
 });
 
-test("UX canon preserves focus and recovery when journal storage fails and returns", async ({ page, authorizeAuthor }) => {
+test("UX canon preserves focus and recovery when journal storage fails and returns", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); await denyWrites(page, true);
   const text = "保存領域が戻るまで失わない原稿。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
@@ -1071,7 +1073,7 @@ test("guarded shell switches remember completed choices and keep the manuscript 
   await expectMarkdown(page, secondDraft);
 });
 
-test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page, authorizeAuthor }) => {
+test("optional terminology cancels work at pagehide and resumes at pageshow", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The terminology resolver is selected by the Full profile.");
   const { project } = await createOAuthWritingFixture(authorizeAuthor, page);
   const resolverPath = `/api/projects/${project.id}/actions/search.terms.resolve`;
@@ -1131,7 +1133,7 @@ test("Full WebKit terminology stays safe across a held native Shell departure wi
 });
 
 
-test("desktop author can download a portable work and import it without replacing the source", async ({ page, authorizeAuthor }) => {
+test("desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
   await transfer.locator("summary").click();
