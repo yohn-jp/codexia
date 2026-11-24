@@ -54,8 +54,10 @@ test('every combination of observation axes has exactly one route or safe stop',
         const result = selectRoute(state, intent, admission);
         count++;
         assert.match(result, /^R[0-8]$/u);
-        if (state.M !== 'ready' || Object.values(state).includes('unknown')) assert.equal(result, 'R0');
+        if (state.M !== 'ready' || state.T === 'unknown') assert.equal(result, 'R0');
         else if (state.T !== 'none') assert.equal(result, 'R1');
+        else if (state.D === 'lost') assert.equal(result, intent === 'restore' ? 'R2' : 'R0');
+        else if (Object.values(state).includes('unknown')) assert.equal(result, 'R0');
         if (result === 'R5') assert.equal(intent, 'install');
         if (result === 'R8') {
           assert.equal(state.B, 'compatible');

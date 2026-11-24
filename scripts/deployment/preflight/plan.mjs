@@ -7,7 +7,7 @@ export const STATES = Object.freeze({
   M: Object.freeze(['unprepared', 'ready', 'unknown']),
   H: Object.freeze(['absent', 'partial', 'ready', 'drift', 'unknown']),
   D: Object.freeze(['absent', 'pristine', 'compatible', 'incompatible', 'lost', 'unknown']),
-  A: Object.freeze(['absent', 'pending', 'unprepared', 'ready', 'legacy', 'recovery', 'unknown']),
+  A: Object.freeze(['absent', 'pending', 'unprepared', 'ready', 'legacy', 'incompatible', 'recovery', 'unknown']),
   B: Object.freeze(['absent', 'setup', 'compatible', 'incompatible', 'fault', 'unknown']),
   F: Object.freeze(['absent', 'compatible', 'incompatible', 'fault', 'unknown']),
   T: Object.freeze(['none', 'resume', 'recover', 'unknown']),
@@ -51,16 +51,17 @@ export function selectRoute(state, intent, frontendAdmission) {
     ['allowed', 'denied', 'not-applicable', 'unknown'].includes(frontendAdmission),
   'Invalid normalized deployment observation');
   const { M, H, D, A, B, F, T } = state;
-  if (M !== 'ready' || axes.some(key => state[key] === 'unknown')) return 'R0';
+  if (M !== 'ready' || T === 'unknown') return 'R0';
   if (T !== 'none') return 'R1';
   if (D === 'lost') return intent === 'restore' ? 'R2' : 'R0';
+  if (axes.some(key => state[key] === 'unknown')) return 'R0';
   if (intent === 'restore') return 'R0'; // Never reinterpret a restore as a fresh install.
   if (H === 'absent' && (['compatible', 'incompatible'].includes(D) || B !== 'absent')) return 'R0';
   // A clean database cannot substantiate an existing installed writer or owner.
   if (['absent', 'pristine'].includes(D) &&
       (['ready', 'legacy', 'unprepared'].includes(A) || ['setup', 'compatible', 'incompatible'].includes(B))) return 'R0';
   if (['compatible', 'incompatible'].includes(B) && ['absent', 'pending', 'unprepared'].includes(A)) return 'R0';
-  if (H === 'drift' || D === 'incompatible' || ['legacy', 'recovery'].includes(A) ||
+  if (H === 'drift' || D === 'incompatible' || ['legacy', 'incompatible', 'recovery'].includes(A) ||
       B === 'fault' || F === 'fault') return 'R3';
   if (['absent', 'partial'].includes(H) || ['absent', 'pristine'].includes(D) || A === 'absent') {
     if (!['install', 'adopt'].includes(intent)) return 'R0';
@@ -120,7 +121,7 @@ function validateWindow(window) {
 // establishes identity, not the authenticity of evidence. The transition
 // resolution is provided by the same static resolver the executor will use.
 export function createDeploymentPlan({ observation, target, intent, window = null,
-  transition = null, now = new Date(), maxAgeMs = 5 * 60_000 }) {
+  transition = null, now = new Date(), maxAgeMs = 5 * 60_000, evidenceBlockers = [] }) {
   validateObservation(observation);
   validateTarget(target);
   requireCondition(Number.isSafeInteger(maxAgeMs) && maxAgeMs > 0 &&
@@ -136,7 +137,11 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   }
   const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission);
   const { binding, state } = observation;
-  const blockers = [];
+  const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
+    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'ambiguous-transition'];
+  requireCondition(Array.isArray(evidenceBlockers) && evidenceBlockers.every(reason => knownBlockers.includes(reason)) &&
+    new Set(evidenceBlockers).size === evidenceBlockers.length, 'Invalid external evidence blockers');
+  const blockers = [...evidenceBlockers].sort();
   if (candidateRoute === 'R0') blockers.push('state-or-intent-not-admitted');
   // All positive paths need a pinned host and edge observation; the adapter
   // represents verified absence by hashing the observation, not by null.
@@ -147,8 +152,10 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const migrationAxes = ['api-epoch', 'oauth-contract', 'sql-ledger', 'persistence-format', 'auth-schema', 'auth-mode'];
   const requiresTransition = ['R3', 'R7'].includes(candidateRoute) &&
     (changeAxes.some(key => migrationAxes.includes(key)) || state.D === 'incompatible' ||
-      state.A === 'legacy' || state.B === 'incompatible');
+      ['legacy', 'incompatible'].includes(state.A) || state.B === 'incompatible');
   if (requiresTransition && !transition) blockers.push('unsupported-transition');
+  if (transition && !requiresTransition) blockers.push('unexpected-transition');
+  if (candidateRoute === 'R8' && changeAxes.some(key => migrationAxes.includes(key))) blockers.push('incompatible-ordinary-update');
   if (transition?.dataConversion && !changeAxes.some(key => ['sql-ledger', 'persistence-format', 'auth-mode'].includes(key))) {
     blockers.push('unexpected-data-conversion');
   }
@@ -159,9 +166,14 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   if (candidateRoute === 'R4' && ['absent', 'pristine'].includes(state.D)) requiredApprovals.push('database-initialization');
   const route = blockers.length ? 'R0' : candidateRoute;
   const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes },
+    evidenceBlockers: [...evidenceBlockers].sort(),
     target, intent, window, transition, candidateRoute, route,
     system: route === 'R3' && requiresTransition ? 'cutover' : systems[route],
-    requiredApprovals, blockers };
+    requiredApprovals, blockers,
+    noOp: route === 'R8' && changeAxes.length === 0,
+    authorization: 'pending',
+    requiredAcceptance: ['identity', 'health', 'access-boundary', 'single-writer', 'data-and-auth'],
+    requiresTransition };
   return { plan, planSha256: digestEvidence(plan) };
 }
 
