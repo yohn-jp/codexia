@@ -37,6 +37,29 @@ test("Playwright discovers only the selected spec and browser project", t => {
   }
 });
 
+test("WebKit discovery retains every unclassified or mixed UI case and excludes only reviewed Desktop cases", () => {
+  const env = { ...process.env, CODEXIA_E2E_TEST_FILE: "ui-v1.acceptance.spec.ts",
+    CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
+  const discover = (id) => {
+    const result = spawnSync("pnpm", [...buildBrowserTestArguments(resolveBrowserShard("full", id)), "--list", "--reporter=json"], {
+      cwd: new URL("../../../", import.meta.url), encoding: "utf8", env,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const { suites } = JSON.parse(result.stdout);
+    const collect = (suite) => [...(suite.specs ?? []), ...(suite.suites ?? []).flatMap(collect)];
+    return suites.flatMap(collect).map(spec => ({ title: spec.title, line: spec.line, tags: spec.tags ?? [] }));
+  };
+  const chromium = discover("ui-v1");
+  const webkit = discover("webkit");
+  const desktop = chromium.filter(spec => spec.tags.includes("@author-desktop"));
+  assert.ok(desktop.length > 0, "The reviewed Desktop cases must remain in Chromium");
+  const identity = spec => JSON.stringify([spec.line, spec.title]);
+  assert.deepEqual(webkit.map(identity).sort(), chromium.filter(spec => !spec.tags.includes("@author-desktop")).map(identity).sort());
+  assert.ok(webkit.some(spec => spec.title.includes("Mobile reader")), "Legacy Mobile reader proof must remain");
+  assert.ok(webkit.some(spec => spec.title.includes("guarded shell switches")), "Mixed shell proof must remain");
+});
+
 test("browser coverage counts discovered, executed, skipped and failed cases", () => {
   assert.deepEqual(summarizeBrowserCoverage({
     expected: 6,
