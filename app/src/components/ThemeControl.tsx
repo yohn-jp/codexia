@@ -13,6 +13,7 @@ export function ThemeControl({
     <label className="theme-control">
       <span>外観</span>
       <select
+        data-ux-control="DISPLAY-01.A"
         aria-label="外観"
         value={mode}
         onChange={(event) => onChange(event.currentTarget.value as ThemeMode)}
