@@ -1,0 +1,88 @@
+name: Flashwright isolated E2E experiment
+on:
+  pull_request:
+    paths:
+      - .github/workflows/flashwright-experiment.yml
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [playwright, strict, default]
+    services:
+      postgres:
+        image: docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      FLASHWRIGHT_SESSION: '0'
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+      CODEXIA_PROFILE: full
+      MODE: ${{ matrix.mode }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: Install and build canonical source
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm exec playwright install --with-deps chromium
+          browser=$(node -p "require('@playwright/test').chromium.executablePath()")
+          test -x "$browser"
+          "$browser" --version
+          echo "CODEXIA_E2E_CHROMIUM=$browser" >> "$GITHUB_ENV"
+      - name: Install isolated experimental runner
+        if: matrix.mode != 'playwright'
+        run: |
+          mkdir -p "$RUNNER_TEMP/flashwright"
+          cd "$RUNNER_TEMP/flashwright"
+          npm init -y
+          npm install --ignore-scripts --save-exact @playwright/test@npm:flashwright-test@1.64.1-flashwright.12
+          cd "$GITHUB_WORKSPACE"
+          rm node_modules/@playwright/test
+          ln -s "$RUNNER_TEMP/flashwright/node_modules/@playwright/test" node_modules/@playwright/test
+          if [[ "$MODE" == strict ]]; then
+            node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'tests/e2e/playwright.config.ts';
+          const source = readFileSync(path, 'utf8');
+          if (!source.includes('headless: true,')) throw new Error('Unexpected config');
+          writeFileSync(path, source.replace('headless: true,', "headless: true, isolation: 'strict', waitForAnimations: true, failFastWhenIdle: false,").replace('fullyParallel: false,', "fullyParallel: false, testOrder: 'file',"));
+          JS
+          fi
+      - name: Run representative unchanged acceptance spec
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/flashwright-results"
+          node -p "JSON.stringify(require('@playwright/test/package.json'))" > "$RUNNER_TEMP/flashwright-results/runner.json"
+          git rev-parse HEAD > "$RUNNER_TEMP/flashwright-results/source.txt"
+          "$CODEXIA_E2E_CHROMIUM" --version > "$RUNNER_TEMP/flashwright-results/browser.txt"
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$RUNNER_TEMP/flashwright-results/report.json"
+          /usr/bin/time -o "$RUNNER_TEMP/flashwright-results/time.txt" -f '%e seconds' node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts --project chromium --workers 1 --retries 0 --reporter=list,json tests/e2e/core.acceptance.spec.ts
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: flashwright-${{ matrix.mode }}
+          path: ${{ runner.temp }}/flashwright-results
+          retention-days: 2
+          if-no-files-found: warn
