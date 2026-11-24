@@ -8,13 +8,17 @@ const server = 'packages/api/src/server.ts';
 const catalog = 'docs/design/SCREEN-CONTROL-CATALOG.md';
 
 function publicControl(source) {
-  const themeHandler = sourceAt(source, theme, 'onChange={(event) => onChange(event.currentTarget.value as ThemeMode)}');
+  if (!source.exists(theme)) return null;
+  const themeSource = source.read(theme);
+  const binding = themeSource.match(/onChange\s*=\s*\{\s*(?:\(event\)|event)\s*=>\s*onChange\(event\.currentTarget\.value as ThemeMode\)\s*\}/u)?.[0];
+  const themeHandler = binding && sourceAt(source, theme, binding);
+  const themeLabel = themeSource.match(/aria-label=["']([^"']+)["']/u)?.[1];
   const sceneHandler = sourceAt(source, publishing, 'onClick={() => void openScene(item.id)}');
   const label = sourceAt(source, publishing, '読み取り専用の共有です。期限:');
   if (!themeHandler || !sceneHandler || !label) return null;
   return {
-    id: 'PUB-01.A', platform: 'reader', source: sourceRef(sceneHandler), label: '公開版を読む・外観を変更する',
-    role: 'control', handler: 'onChange={(event) => onChange(event.currentTarget.value as ThemeMode)} · onClick={() => void openScene(item.id)}', region: 'public-content',
+    id: 'PUB-01.A', platform: 'reader', source: sourceRef(sceneHandler), label: themeLabel,
+    role: 'control', handler: [themeHandler.symbol, sceneHandler.symbol].join(' · '), region: 'public-content',
   };
 }
 
