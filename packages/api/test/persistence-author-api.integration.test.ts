@@ -24,6 +24,31 @@ async function startAuthorApi(t: TestContext) {
   return { base, ownerHeaders, persistence, fixture };
 }
 
+test("PostgreSQL API admits only authenticated declared persistence methods and paths", async (t) => {
+  const { base, ownerHeaders, persistence } = await startAuthorApi(t);
+
+  const unauthorizedUnknownPath = await fetch(`${base}/api/v1/persistence/not-a-route`);
+  assert.equal(unauthorizedUnknownPath.status, 401, "authentication runs before persistence route lookup");
+  assert.equal((await unauthorizedUnknownPath.json() as { code: string }).code, "UNAUTHORIZED");
+
+  const unauthorizedWrongMethod = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: "PUT", body: JSON.stringify({ title: "must not be created" }),
+  });
+  assert.equal(unauthorizedWrongMethod.status, 401, "anonymous callers do not learn that the path is known but the method is not");
+  assert.equal((await unauthorizedWrongMethod.json() as { code: string }).code, "UNAUTHORIZED");
+
+  const wrongMethod = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: "PUT", headers: ownerHeaders, body: JSON.stringify({ title: "must not be created" }),
+  });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal((await wrongMethod.json() as { code: string }).code, "METHOD_NOT_ALLOWED");
+  assert.ok(!(await persistence.read((reader) => reader.listProjects(200))).some((project) => project.title === "must not be created"));
+
+  const unknownPath = await fetch(`${base}/api/v1/persistence/not-a-route`, { headers: ownerHeaders });
+  assert.equal(unknownPath.status, 404);
+  assert.equal((await unknownPath.json() as { code: string }).code, "NOT_FOUND");
+});
+
 test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores", async (t) => {
   const { base, ownerHeaders, persistence, fixture } = await startAuthorApi(t);
   const unauthorized = await fetch(`${base}/api/v1/persistence/projects`);
