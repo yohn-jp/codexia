@@ -137,3 +137,11 @@ test('deleting the canonical route entry removes its route transition even while
   assert.ok(project(sourceWith()).transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
   assert.ok(!projection.transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
 });
+
+test('detaching the canonical reader theme callback removes its control and transition', () => {
+  const path = 'app/src/contributions/PublicModuleView.tsx';
+  const changed = withFileEdit(path, (text) => text.replace('onChange={onThemeChange}', 'onChange={() => undefined}'));
+  const projection = project(changed);
+  assert.ok(!projection.controls.some(({ id }) => id === 'PUB-01.A'));
+  assert.ok(!projection.transitions.some(({ id }) => id === 'public-theme-local-change'));
+});

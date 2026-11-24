@@ -545,7 +545,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
               const headline = operation ? [...new Set(item.operations.map(operationLabel))].join(" / ") : "内容を確認できません";
               const target = operation ? [...new Set(item.operations.map(operationTarget))].join(" / ") : "提案payloadを確認してください";
               return <li key={item.id}>
-                <button type="button" className="native-changeset-select" data-status={item.status} aria-pressed={selectedId === item.id} onClick={() => void inspect(item.id)} disabled={busy}>
+                <button type="button" className="native-changeset-select" data-ux-control="REV-01.A" data-status={item.status} aria-pressed={selectedId === item.id} onClick={() => void inspect(item.id)} disabled={busy}>
                   <span className="native-review-row-meta"><span>保存済み提案</span><span className={"native-review-state is-" + item.status}>{statusLabel(item.status)}</span></span>
                   <strong>{headline}</strong>
                   <span className="native-review-row-target">{target}</span>
@@ -643,12 +643,12 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
               <div className="proposal-actions native-review-actions">
                 {current.status === "proposed" && <>
                   <p>承認後も正本は変わりません。適用前に同じ提案の内容とversionを再確認します。</p>
-                  <button type="button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "approve")}>{!canWrite ? "閲覧専用" : busy ? "処理中…" : "承認する"}</button>
-                  <button type="button" className="quiet-button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
+                  <button type="button" data-ux-control="REV-02.A" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "approve")}>{!canWrite ? "閲覧専用" : busy ? "処理中…" : "承認する"}</button>
+                  <button type="button" data-ux-control="REV-02.A" className="quiet-button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
                 </>}
                 {current.status === "approved" && <>
                   <p>承認済みです。適用まではPostgreSQLの正本は変更されません。</p>
-                  <button type="button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "apply")}>{!canWrite ? "閲覧専用" : busy ? "適用結果を照合中…" : "承認済み提案を適用"}</button>
+                  <button type="button" data-ux-control="REV-02.A" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "apply")}>{!canWrite ? "閲覧専用" : busy ? "適用結果を照合中…" : "承認済み提案を適用"}</button>
                 </>}
               </div>
             </article>}

@@ -57,6 +57,22 @@ try {
     const fits = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.goto(link('desktop', 'atlas-entry-01'));
     await assertHeading('Web /desktop/');
+    const readability = await stage.evaluate((stage) => {
+      const luminance = (color) => {
+        const rgb = color.match(/[^(), ]+/g).slice(1, 4).map(Number).map((value) => value / 255);
+        const linear = rgb.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+      };
+      const heading = stage.querySelector('[data-current-state]');
+      const foreground = luminance(getComputedStyle(heading).color);
+      const background = luminance(getComputedStyle(heading.parentElement).backgroundColor);
+      const nodes = document.createTreeWalker(document.querySelector('.ux-layout'), NodeFilter.SHOW_TEXT);
+      let stray = false;
+      while (nodes.nextNode()) stray ||= /^(?:undefined|null)$/.test(nodes.currentNode.textContent.trim());
+      return { ratio: (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05), stray };
+    });
+    assert.ok(readability.ratio >= 4.5, 'UX wireframe heading must retain contrast under the Pages shell');
+    assert.equal(readability.stray, false, 'Absent projection data must not render as text');
     await button('APIと認証を照合').focus();
     await page.keyboard.press('Enter');
     await assertHeading('APIと認証を照合');
@@ -130,6 +146,33 @@ try {
       const proof = page.locator('.ux-inspector');
       if (await proof.getAttribute('open') === null) await proof.locator('summary').click();
       assert.match(await proof.innerText(), /synthetic-receipt/);
+    }
+    if (Object.hasOwn(manifest.outputs, 'compare/browser.mjs')) {
+      const panel = page.getByRole('region', { name: '版比較' });
+      await page.getByRole('button', { name: '比較', exact: true }).click();
+      await panel.getByRole('button', { name: '設計と実装' }).waitFor();
+      await panel.getByRole('searchbox').fill('CON-32.B');
+      await panel.getByRole('heading', { name: 'CON-32.B', exact: true }).waitFor();
+      await fits();
+      await panel.getByRole('button', { name: '2 版の差分' }).click();
+      if (Object.hasOwn(manifest.outputs, 'compare/base.mjs')) {
+        await panel.getByText(/ビルドで確認済み/).waitFor();
+        await panel.getByText(/このビルドの検証済み投影/).waitFor();
+      } else {
+        await panel.getByText('版差分は利用できません。比較する 2 版の生成物を選択してください。').waitFor();
+      }
+      if (width === 1440) {
+        for (const side of ['比較元', '比較先']) {
+          await panel.getByLabel(side + ' の manifest.json').setInputFiles(join(output, 'manifest.json'));
+          await panel.getByLabel(side + ' の snapshot.json').setInputFiles(join(output, 'snapshot.json'));
+        }
+        await panel.getByText('表示条件に該当する差分はありません。').waitFor();
+        await panel.getByLabel('比較先 の snapshot.json').setInputFiles({
+          name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from('{}'),
+        });
+        await panel.getByText('比較元を利用できません。版、形式、ダイジェストを確認してください。').waitFor();
+      }
+      await page.getByRole('button', { name: '探索', exact: true }).click();
     }
     await page.goto(link('desktop', 'atlas-entry-01', 'atlas-entry-01/SESSION'));
     await assertHeading('APIと認証を照合');

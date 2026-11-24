@@ -35,6 +35,35 @@ for (const run of sarif.runs) {
     assert.match(result.ruleId ?? '', /^lint\//u, 'Only lint diagnostics may enter Code Scanning');
   }
 }
+
+// Temporary formatter retrieval for this draft experiment only. Never mutate the checked-out source.
+{
+  const { cpSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const scratch = mkdtempSync(path.join(tmpdir(), 'codexia-format-'));
+  const paths = ['app/src/App.tsx', 'app/src/entries/mobile-native.tsx', 'app/src/entries/mobile.tsx', 'app/src/persistence/PersistenceEntry.tsx'];
+  try {
+    const config = JSON.parse(readFileSync('biome.json', 'utf8'));
+    config.vcs.enabled = false;
+    writeFileSync(path.join(scratch, 'biome.json'), JSON.stringify(config));
+    for (const file of paths) {
+      const target = path.join(scratch, file);
+      mkdirSync(path.dirname(target), { recursive: true });
+      cpSync(file, target);
+    }
+    const formatted = spawnSync('biome', ['check', '--write', ...paths], { cwd: scratch, stdio: 'inherit' });
+    console.log('CODEXIA_FORMAT_STATUS', formatted.status);
+    if (formatted.status === 0) {
+      for (const file of paths) {
+        const content = readFileSync(path.join(scratch, file), 'utf8');
+        content.split('\n').forEach((line, index) => console.log('CODEXIA_FORMAT_LINE ' + JSON.stringify({ file, index, line })));
+      }
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 const ciStatus = execute(['ci', ...scope]);
 assert.equal(ciStatus, 0, 'Biome CI detected a format, lint or import issue');
 assert.equal(lintStatus, 0, 'Biome lint failed even though the combined check passed');

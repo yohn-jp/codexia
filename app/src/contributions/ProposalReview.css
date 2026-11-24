@@ -88,12 +88,16 @@
 .module-operation-technical summary,
 .module-proposal-evidence summary,
 .module-proposal-technical summary { min-height: 2.45rem; padding: 0.6rem 0; color: var(--accent-strong); cursor: pointer; font-size: 0.78rem; font-weight: 650; }
-.module-change-after pre,
-.module-operation-technical pre,
-.module-proposal-evidence pre {
+.module-proposal-preview {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
   max-height: 18rem;
   margin: 0.2rem 0 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  field-sizing: content;
   overflow: auto;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -102,7 +106,7 @@
   font-size: 0.73rem;
   line-height: 1.5;
 }
-.module-proposal-review pre[tabindex="0"]:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.module-proposal-preview:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .module-operation-technical,
 .module-proposal-evidence,
 .module-proposal-technical { border-top: 1px solid var(--line); }
@@ -114,7 +118,7 @@
 .module-proposal-technical dt { color: var(--muted); font-size: 0.73rem; }
 .module-operation-technical dd,
 .module-proposal-technical dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.75rem; }
-.module-operation-technical dd pre { margin: 0; }
+.module-operation-technical dd .module-proposal-preview { margin: 0; }
 .module-proposal-evidence > ul { display: grid; gap: 0.55rem; margin: 0 0 0.65rem; padding: 0; list-style: none; }
 .module-proposal-evidence > ul > li { padding: 0.65rem; border: 1px solid var(--line); border-radius: 0.3rem; }
 .module-proposal-evidence p { margin: 0 0 0.35rem; font-size: 0.78rem; }
