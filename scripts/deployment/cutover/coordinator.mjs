@@ -54,8 +54,8 @@ export function assertPairedObservation({ edge, host, pinned, environment, now =
     pinned.frontend.apiEpoch === expected.apiEpoch && edge.backend?.name === 'codexia' &&
     ['version', 'profile', 'apiEpoch'].every(key => edge.backend[key] === expected[key]),
   'Public backend version does not match the pinned Full release');
-  requireCondition(expected.apiEpoch === 1 || hasStandaloneOAuthIdentity(edge.backend),
-    'Candidate public backend did not advertise standalone OAuth');
+  requireCondition((pinned.standaloneOAuth === false ? !hasStandaloneOAuthIdentity(edge.backend) : hasStandaloneOAuthIdentity(edge.backend)),
+    'Public backend OAuth contract differs from the reviewed release');
   requireCondition(immutableImage.test(pinned.image) && pinned.image === host.writer.image &&
     isDeepStrictEqual(expected, host.writer.identity) && host.writer.authMode === 'better-auth',
   'Running writer does not match the pinned image and Better Auth configuration');
@@ -79,24 +79,4 @@ export function assertFunctionalAcceptance(evidence, expected, { since, now = ne
   requireCondition(evidence.checks && Object.keys(evidence.checks).length === checks.length &&
     checks.every(key => sha256.test(evidence.checks[key] ?? '')),
   'Functional acceptance is missing required evidence digests');
-}
-
-export function assertMaintenanceApproval(plan, approval, { now = new Date(), recovery = false } = {}) {
-  const from = timestamp(plan.window.notBefore);
-  const until = timestamp(plan.window.notAfter);
-  requireCondition(until > from && from <= now.getTime() && (recovery || now.getTime() <= until),
-    'Outside the approved maintenance window');
-  requireCondition(plan.format === 'codexia-epoch-cutover-plan/v1' && sha256.test(approval ?? '') &&
-    approval === digestEvidence(plan), 'Maintenance plan approval does not match the exact plan');
-  for (const [release, epoch] of [[plan.prior, 1], [plan.candidate, 2]]) {
-    const identity = validateBackendIdentity(release.identity);
-    const frontend = assertFrontendIdentity(release.frontend);
-    requireCondition(immutableImage.test(release.image) && identity.profile === 'full' &&
-      identity.apiEpoch === epoch && identity.persistenceFormat === epoch &&
-      frontend.profile === 'full' && frontend.apiEpoch === epoch, 'Unsupported API epoch or persistence transition');
-  }
-  requireCondition(plan.prior.workerVersion !== plan.candidate.workerVersion &&
-    plan.prior.image !== plan.candidate.image && typeof plan.window.id === 'string' && plan.window.id.length > 0,
-  'Maintenance plan must pair distinct immutable releases');
-  return approval;
 }

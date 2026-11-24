@@ -1,4 +1,4 @@
-import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from '../../ci/impact/contract.mjs';
+import { DEPLOYMENT_FIXTURE_CALLER, DEPLOYMENT_FIXTURE_JOB, REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from '../../ci/impact/contract.mjs';
 
 /** @typedef {{id: number, head_sha: string, head_branch: string, event: string, status: string, conclusion: string | null}} VerificationRun */
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
@@ -88,12 +88,15 @@ export function assertVerificationJobs(jobs) {
     if (reuseSteps.length !== 1 || reuseSteps[0]?.status !== 'completed') throw new Error('Ambiguous reused main certification');
     const normal = steps.filter(step => step.name === 'Certify every required exact-source matrix element');
     if (normal.length !== 1 || normal[0]?.status !== 'completed' || normal[0]?.conclusion !== 'skipped') throw new Error('Conflicting main certification modes');
-    assertNamedJobs(jobs, ['plan', 'certification'], REUSED_MAIN_SKIPPED_JOBS);
-    if (jobs.length !== 2 + REUSED_MAIN_SKIPPED_JOBS.length) throw new Error('Incomplete compact main verification inventory');
+    assertNamedJobs(jobs, ['plan', 'certification'], [...REUSED_MAIN_SKIPPED_JOBS, DEPLOYMENT_FIXTURE_CALLER]);
+    if (jobs.filter(job => !record(job) || job.name !== DEPLOYMENT_FIXTURE_CALLER).length !== 2 + REUSED_MAIN_SKIPPED_JOBS.length) throw new Error('Incomplete compact main verification inventory');
     return;
   }
   // Main Verify skips the PR-only call; the standalone workflow owns matching main pushes.
-  assertNamedJobs(jobs, REQUIRED_VERIFICATION_JOBS, ['full-model-oci']);
+  const fixtureRan = jobs.some(job => record(job) && job.name === DEPLOYMENT_FIXTURE_JOB);
+  const required = fixtureRan ? [...REQUIRED_VERIFICATION_JOBS, DEPLOYMENT_FIXTURE_JOB] : REQUIRED_VERIFICATION_JOBS;
+  const skipped = fixtureRan ? ['full-model-oci'] : ['full-model-oci', DEPLOYMENT_FIXTURE_CALLER];
+  assertNamedJobs(jobs, required, skipped);
 }
 
 /**

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { digestEvidence } from '../cutover/coordinator.mjs';
+import { resolveMigrationContracts } from '../cutover/transitions.mjs';
 import { parsePublicFrontendConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { validateBackendIdentity } from '../../release/backend/update-identity.mjs';
 import { assertFrontendIdentity, assertFrontendReleaseAdmission } from '../../release/frontend/verify-compatibility.mjs';
@@ -57,7 +58,7 @@ function stateDatabase(database, target, intent) {
 // supplied state, certificate body, digest-only backup claim or transition.
 export function planFromObservations({ host, edge, hostPinSha256, candidateBackend,
   candidateFrontend, authSchemas, priorBackend = null, intent, window = null,
-  preservationReceipt = null, resolveTransition = () => [], now = new Date() }) {
+  preservationReceipt = null, resolveTransition = resolveMigrationContracts, now = new Date() }) {
   assert.ok(rawHash.test(hostPinSha256));
   const targetIdentity = candidateIdentity(candidateBackend, candidateFrontend, authSchemas);
   const target = {
@@ -178,9 +179,6 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       host.backend.writer.identity.migrationFingerprint !== migrationSetFingerprint(host.database.ledger)) {
     blockers.push('writer-ledger-identity-mismatch');
   }
-  // #805 owns one static transition resolver. It consumes this exact source /
-  // target and normalized axes; until an implementation exists, do not invent
-  // support for any migration, including an API-only epoch transition.
   const matches = resolveTransition({ source, target: targetIdentity, state, changeAxes: observation.changeAxes });
   assert.ok(Array.isArray(matches), 'Invalid transition resolution');
   if (matches.length > 1) blockers.push('ambiguous-transition');

@@ -31,6 +31,7 @@ const bindingPatterns = {
 const authEvidenceFields = ['offVmCiphertext', 'postgresRoles', 'podmanSecrets', 'previousOwnerAuthentication', 'rollbackProcedure'];
 const run = promisify(execFile);
 const backupProgram = fileURLToPath(new URL('../../../deploy/backup/backup.sh', import.meta.url));
+const snapshotHistoryMigration = 'snapshot-history-v2';
 
 function matches(value, pattern) {
   return typeof value === 'string' && value.trim() === value && pattern.test(value);
@@ -42,12 +43,20 @@ function exactKeys(value, keys) {
 }
 
 function verifyBinding(binding, expected) {
-  const fields = Object.keys(bindingPatterns);
-  if (!exactKeys(binding, fields) || !fields.every(field => matches(binding[field], bindingPatterns[field])) ||
-      binding.hostname.length > 253 || binding.priorImage === binding.candidateImage) {
+  const patterns = Object.entries(bindingPatterns);
+  const fields = patterns.map(([field]) => field);
+  const pair = binding && Object.hasOwn(binding, 'planSha256');
+  if (pair) fields.push('planSha256', 'migration');
+  const firstActivation = pair && binding.priorImage === null && binding.priorMigrationFingerprint === null;
+  if (!exactKeys(binding, fields) || !patterns.every(([field, pattern]) =>
+    (firstActivation && ['priorImage', 'priorMigrationFingerprint'].includes(field)) || matches(binding[field], pattern)) ||
+    binding.hostname.length > 253 || binding.priorImage === binding.candidateImage ||
+    (pair && (!matches(binding.planSha256, sha256) ||
+      (binding.migration !== null && (firstActivation || binding.migration !== snapshotHistoryMigration)) ||
+      (!firstActivation && binding.priorMigrationFingerprint !== binding.candidateMigrationFingerprint)))) {
     throw new Error('Invalid epoch cutover recovery binding');
   }
-  if (expected && fields.some(field => binding[field] !== expected[field])) {
+  if (expected && (!exactKeys(expected, fields) || fields.some(field => binding[field] !== expected[field]))) {
     throw new Error('Recovery proof does not match the stopped source and certified candidate');
   }
 }
@@ -157,9 +166,14 @@ export async function readEpochCutoverRecoveryReceipt(filename, binding, window)
   return validateEpochCutoverRecoveryReceipt(await readProtectedJson(filename), binding, window);
 }
 
-async function runCanonicalDrill({ backupDirectory, ageIdentityFile, candidateImage }) {
+async function runCanonicalDrill({ backupDirectory, ageIdentityFile, candidateImage, candidateMigrationFingerprint, migration }) {
+  const args = [backupProgram, 'drill', backupDirectory, ageIdentityFile, '--approved', '--candidate-full-image', candidateImage];
+  if (candidateMigrationFingerprint !== undefined) {
+    args.push('--candidate-ledger', candidateMigrationFingerprint);
+    if (migration !== null) args.push('--migration', migration);
+  }
   try {
-    const result = await run('bash', [backupProgram, 'drill', backupDirectory, ageIdentityFile, '--approved', '--candidate-full-image', candidateImage]);
+    const result = await run('bash', args);
     return result.stdout;
   } catch {
     throw new Error('The canonical isolated restore drill failed');
@@ -177,18 +191,23 @@ export async function produceEpochCutoverRecoveryReceipt({
   verifyAuthRecovery(authRecovery, binding, recoveryHostId, start, observed);
   await verifyAuthRecoveryRecords(authEvidenceDirectory, authRecovery, start);
 
-  const stdout = await runDrill({ backupDirectory, ageIdentityFile, candidateImage: binding.candidateImage });
+  const pair = Object.hasOwn(binding, 'planSha256');
+  const stdout = await runDrill({
+    backupDirectory, ageIdentityFile, candidateImage: binding.candidateImage,
+    ...(pair ? { candidateMigrationFingerprint: binding.candidateMigrationFingerprint, migration: binding.migration } : {}),
+  });
   const lines = stdout.split('\n');
   const evidence = new Map([
     ['Isolated restore verified:', 'database and history fingerprints match'],
     ['Verified checksum manifest sha256:', binding.checksumManifestSha256],
     ['Verified database logical sha256:', binding.databaseFingerprint],
     ['Verified history logical sha256:', binding.historyFingerprint],
-    ['Isolated maintenance rehearsal verified:', binding.candidateImage],
+    ['Isolated candidate ledger verified:', pair ? binding.candidateMigrationFingerprint : null],
+    ['Isolated maintenance rehearsal verified:', !pair || binding.migration !== null ? binding.candidateImage : null],
   ]);
   for (const [prefix, value] of evidence) {
     const matches = lines.filter(line => line.startsWith(prefix));
-    if (matches.length !== 1 || matches[0] !== `${prefix} ${value}`) {
+    if (value === null ? matches.length !== 0 : matches.length !== 1 || matches[0] !== `${prefix} ${value}`) {
       throw new Error('The isolated restore drill did not verify the expected backup and candidate');
     }
   }

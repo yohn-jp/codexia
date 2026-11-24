@@ -83,7 +83,7 @@ function fixture() {
           if (state.replyLost) throw new Error('connection reset');
         }
         const deployment = { id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage', versions: [{ version_id: state.activeVersion, percentage: 100 }] };
-        return apiResponse(method === 'GET' ? { deployments: [deployment] } : deployment);
+        return apiResponse(method === 'GET' ? { deployments: state.activeVersion === null ? [] : [deployment] } : deployment);
       }
       if (path === workerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.preview });
       if (path === workerPath + '/versions/' + newVersion) {
@@ -148,6 +148,22 @@ test('upload binds archive digest to a version while the old version stays the o
   await assert.rejects(client.assertStaged({ versionId: newVersion, artifactDigest }), /tag/u);
 });
 
+test('first activation stages a version with no deployment and promotes only behind the fence', async () => {
+  const { client, state, writes } = fixture();
+  state.activeVersion = null;
+  state.backendAbsent = true;
+  const pending = await client.observeLifecycle({ backendExpected: false });
+  assert.equal(pending.frontendState, 'absent');
+  assert.equal(pending.routesReady, true);
+  assert.equal((await client.stage({ previousVersionId: null, artifactDigest })).versionId, newVersion);
+  assert.equal(state.activeVersion, null);
+  await assert.rejects(client.deploy({ fromVersionId: null, toVersionId: newVersion }), /fence/u);
+  await client.fence();
+  assert.equal((await client.deploy({ fromVersionId: null, toVersionId: newVersion })).versionId, newVersion);
+  assert.equal((await client.observeIngress({ lifecycle: true })).ingressDigest, pending.ingressDigest);
+  assert.equal(writes.filter(entry => entry.method === 'POST').length, 1);
+});
+
 test('candidate upload fails before using the upload credential when previews are enabled', async () => {
   const { client, state } = fixture();
   state.preview = true;
@@ -203,15 +219,16 @@ test('fence removal proves the dedicated block response is absent and the applic
   assert.equal((await client.verifyUnfenced()).status, 403);
 });
 
-test('protected observation binds the old wire identity and keeps epoch 2 OAuth admission strict', async () => {
+test('protected observation allows a reviewed legacy identity and otherwise requires standalone OAuth', async () => {
   const { client, state } = fixture();
-  assert.equal((await client.observe()).backend.apiEpoch, 1);
+  assert.equal((await client.observe({ allowLegacyBackend: true })).backend.apiEpoch, 1);
   state.publicEpoch = undefined;
-  await assert.rejects(client.observe(), /epoch is missing/u);
+  await assert.rejects(client.observe({ allowLegacyBackend: true }), /epoch is missing/u);
   state.publicEpoch = 2;
   await assert.rejects(client.observe(), /standalone OAuth/u);
   state.publicAuth = ['oauth-owner', 'oauth-mcp'];
-  assert.equal((await client.observe()).backend.apiEpoch, 2);
+  state.publicEpoch = 46;
+  assert.equal((await client.observe()).backend.apiEpoch, 46);
 });
 
 test('lifecycle inventory distinguishes confirmed empty deployment from denied observations without writes', async () => {

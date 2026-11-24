@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS, requiresWorkspacePreparation } from './contract.mjs';
+import { CERTIFICATION_DEPENDENCIES, REQUIRED_VERIFICATION_JOBS, BROWSER_SHARDS, PROFILES, VERIFICATION_GROUPS, VERIFICATION_TASKS, requiresWorkspacePreparation } from './contract.mjs';
 import { browserRuntimeRequirements, PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
 import { createVerificationPlan, matchesFullModelOciPath } from './plan.mjs';
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
@@ -77,8 +77,8 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
 });
 
 test('the certified graph covers every declared obligation within the twenty-job cap', () => {
-  assert.ok(REQUIRED_VERIFICATION_JOBS.length <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
-  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
+  assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 20, 'CI-CD.md caps certification at twenty jobs, including plan and certification');
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'deployment_cutover', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -196,7 +196,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
-  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'biome'].includes(id))) {
+  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'deployment_cutover', 'biome'].includes(id))) {
     assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
@@ -358,7 +358,7 @@ test('browser consumers report blocked tasks without launching a child on missin
   }
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {
-  for (const job of Object.values(workflow.jobs).filter(job => job.uses !== './.github/workflows/full-model-oci-acceptance.yml')) {
+  for (const job of Object.values(workflow.jobs).filter(job => !job.uses)) {
     const checkout = job.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
     assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
     assert.equal(checkout.with['persist-credentials'], false);
