@@ -1037,6 +1037,17 @@ model ReadinessResponse {
   ...Record<never>;
 }
 
+model ReadinessSuccess {
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: ReadinessResponse;
+}
+
+model ReadinessUnavailable {
+  @statusCode statusCode: 503;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: ReadinessResponse;
+}
+
 // HEAD responses retain applicable representation headers but never a body.
 model HeadJsonResponse {
   @header contentType: "application/json";

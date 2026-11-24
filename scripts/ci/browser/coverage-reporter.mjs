@@ -5,6 +5,13 @@ import { summarizeBrowserCoverage } from "./shards.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
+function timingSteps(steps) {
+  return steps.flatMap(step => [
+    ...(step.category === "test.step" && step.title.startsWith("CI phase: ") ? [{ title: step.title, durationMs: step.duration }] : []),
+    ...timingSteps(step.steps ?? []),
+  ]);
+}
+
 export default class BrowserCoverageReporter {
   constructor({ outputFile }) {
     if (typeof outputFile !== "string" || outputFile.length === 0) {
@@ -56,6 +63,7 @@ export default class BrowserCoverageReporter {
         file: path.relative(root, test.location.file),
         line: test.location.line,
         outcome: outcomes[index],
+        attempts: test.results.map(attempt => ({ durationMs: attempt.duration, status: attempt.status, phases: timingSteps(attempt.steps) })),
       })),
     };
     await mkdir(path.dirname(this.outputFile), { recursive: true });

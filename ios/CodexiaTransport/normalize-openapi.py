@@ -72,14 +72,14 @@ with open(sys.argv[2], "w", encoding="utf-8") as destination:
 
 methods = {"get", "head", "post", "put", "patch", "delete", "options", "trace"}
 operations = [
-    operation["operationId"]
-    for path in document["paths"].values()
+    (operation["operationId"], method.upper(), route)
+    for route, path in document["paths"].items()
     for method, operation in path.items()
     if method in methods
 ]
-if not operations or len(set(operations)) != len(operations):
+if not operations or len({operation_id for operation_id, _, _ in operations}) != len(operations):
     raise ValueError("Expected unique OpenAPI operation IDs")
-if not all(re.fullmatch(r"[a-z0-9_]+", name) for name in operations):
+if not all(re.fullmatch(r"[a-z0-9_]+", operation_id) for operation_id, _, _ in operations):
     raise ValueError("Update the operation ID comparison for the changed TypeSpec naming convention")
 with open(sys.argv[3], "w", encoding="utf-8") as destination:
-    destination.write("\n".join(sorted(operations)) + "\n")
+    destination.write("\n".join("\t".join(operation) for operation in sorted(operations)) + "\n")

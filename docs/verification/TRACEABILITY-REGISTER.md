@@ -88,4 +88,15 @@
 - スキーマと実装の差分、権限差、未実装の設計目標、変更された実装の影響要求・試験を提示する。
 - VERIFIEDは該当義務のexact-source証拠を持つ場合のみ。追加したMarkdownやCIの存在だけでは昇格させない。
 
-この文書の追加でCIの現行gateを変更せず、導入候補ツールを確定した後に自動化を設計する。
+## 生成された追跡結果
+
+義務を追加・修正するときは [Requirement register](../requirements/REQUIREMENT-REGISTER.md) の StrictDoc node を編集する。
+既存の `requirements-trace` は、node の義務 ID、設計・実装参照、TEST ID を `trace-report.json` の `obligationTrace` に出力し、実装側から見つかった要素と義務の対応を `reverseTrace` に記録する。
+両方の表は同じ義務 ID で照合できる。
+識別子が分からない要素や、観測できない範囲と必要な証拠は、生成結果の残件として残る。
+
+`caseExecutions` の結果は、そのテストケースが実際に実行されたことを示す。
+GitHub Actions 上の実行では同じレポートの `execution` が source SHA、run、attempt、job、task を保持し、既存の Verify が選択した証拠 ZIP の ID・ダイジェストと照合する。
+製品側の各義務は、実装の識別子、必要な試験とその証明力、対応する環境と証拠が揃うまで、既存の適合状態を保つ。
+公開 Pages は StrictDoc HTML と JSON を既存 publisher から配布する。
+実行レポートは Verify の証拠で参照する。

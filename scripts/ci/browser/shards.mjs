@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { BROWSER_SHARDS, PROFILES } from "../impact/contract.mjs";
 
 const COVERAGE_OUTCOMES = new Set(["expected", "skipped", "unexpected", "flaky", "notRun"]);
@@ -9,10 +10,12 @@ export function resolveBrowserShard(profile, id) {
   return { profile, ...shard };
 }
 
+export function resolveBrowserTestCli() {
+  return createRequire(import.meta.url).resolve("@playwright/test/cli");
+}
+
 export function buildBrowserTestArguments(shard) {
   return [
-    "exec",
-    "playwright",
     "test",
     "--config",
     "tests/e2e/playwright.config.ts",

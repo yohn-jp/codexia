@@ -14,11 +14,9 @@ swift run --package-path "$package" --force-resolved-versions --jobs 4 swift-ope
   "$scratch/openapi.yaml" --config "$package/openapi-generator-config.yaml" \
   --output-directory "$scratch/source"
 
-# Compare every operation ID emitted by the TypeSpec contract, including HEAD.
-sed -n 's/^ *public static let id: Swift.String = "\([a-z0-9_][a-z0-9_]*\)"$/\1/p' \
-  "$scratch/source/Types+Operations.swift" | LC_ALL=C sort > "$scratch/actual"
-test -s "$scratch/expected"
-diff -u "$scratch/expected" "$scratch/actual"
+# Compare every generated operation's ID, method and path against OpenAPI.
+python3 "$package/check-operation-manifest.py" "$scratch/expected" \
+  "$scratch/source/Types+Operations.swift" "$scratch/source/Client.swift"
 
 case "${1:-}" in
   --check) diff -ru "$sources" "$scratch/source" ;;

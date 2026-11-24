@@ -19,10 +19,36 @@ export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
   'docs/deployment/README.md',
 ]);
 export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
+  'docs/architecture/API-AUTHN-AUTHZ.md',
+  'docs/architecture/API-CONTRACT.md',
+  'docs/architecture/BACKUP-CONSOLE-CONTRACT.md',
+  'docs/architecture/CORE.md',
+  'docs/architecture/DATA-MODEL.md',
+  'docs/architecture/EXTERNAL-INTERFACES.md',
+  'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
+  'docs/architecture/MCP-FIRST.md',
+  'docs/architecture/MCP-OAUTH.md',
+  'docs/architecture/MODULES.md',
+  'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
+  'docs/architecture/SYSTEM-DESIGN.md',
+  'docs/deployment/BACKUP.md',
+  'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md',
+  'docs/deployment/README.md',
+  'docs/deployment/UPDATE-FLOW.md',
+  'docs/design/ADMIN-SCREEN-FLOW.md',
+  'docs/design/INTERACTION-CONTRACT.md',
+  'docs/design/SCREEN-CONTROL-CATALOG.md',
+  'docs/design/SCREEN-STATE-ATLAS.md',
+  'docs/design/UX-CONTRACT.md',
+  'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md',
+  'docs/performance/README.md',
   'docs/requirements/README.md',
   'docs/requirements/REQUIREMENT-REGISTER.md',
-  'docs/requirements/STRICTDOC-TRACEABILITY.md',
   'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
+  'docs/requirements/STRICTDOC-TRACEABILITY.md',
+  'docs/verification/CI-CD.md',
+  'docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.md',
+  'docs/verification/TRACEABILITY-REGISTER.md',
 ]);
 export const UX_PROJECTION_DOCUMENTS = Object.freeze([
   'docs/design/UX-SIMULATOR-CONTRACT.md',
@@ -45,6 +71,26 @@ export const UX_PROJECTION_DOCUMENTS = Object.freeze([
 const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
 const requirementsTraceDocuments = new Set(REQUIREMENTS_TRACE_DOCUMENTS);
 const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
+export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
+  '.github/workflows/backend-deployment-handoff.yml',
+  '.github/workflows/backend-release.yml',
+  '.github/workflows/push-backup.yml',
+  'deploy/ansible/deploy-transaction.yml',
+  'deploy/ansible/deploy.yml',
+  'deploy/ansible/restore-drill.yml',
+  'deploy/backup/backup.sh',
+  'deploy/backup/s3_transfer.py',
+  'packages/http-contract/openapi/codexia.openapi.yaml',
+  'packages/http-contract/src/source-dispatcher-inventory.mjs',
+  'packages/http-contract/test/fixtures/admitted-routes.json',
+  'packages/persistence-postgres/tests/db-contract/catalog-contract.json',
+]);
+const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
+
+export function isRequirementsTraceInput(file) {
+  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
+    (/^app\/src\/.*\.[jt]sx?$/u.test(file) && !/\.test\./u.test(file));
+}
 
 export function isNonExecutableDocumentation(file) {
   if (rootVerificationDocuments.has(file)) return false;

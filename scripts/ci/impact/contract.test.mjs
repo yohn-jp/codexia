@@ -116,7 +116,8 @@ test('the certified graph covers every declared obligation within the twenty-two
   const traceSelected = "matrix.group == 'trace'";
   assert.equal(strictdocSetup.if, traceSelected);
   for (const [files, expected] of [
-    [['docs/verification/CI-CD.md'], false],
+    [['docs/verification/CI-CD.md'], true],
+    [['docs/design/DEVELOPMENT-PAGES-UX.md'], false],
     [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
     [['docs/requirements/STRICTDOC-TRACEABILITY.md'], true],
     [['scripts/strictdoc/verify.mjs'], true],

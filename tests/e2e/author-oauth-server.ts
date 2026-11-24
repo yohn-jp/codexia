@@ -82,7 +82,7 @@ export function buildAuthorBrowserAssets(
   if (build.error) throw build.error;
   if (build.status !== 0) throw new Error(`Author browser fixture build failed:\n${build.stdout}\n${build.stderr}`);
   observePhase("vite-build", started, profile);
-  if (!frontendSource && process.env.CI === "true" && process.env.CODEXIA_CI_PROFILE_RESTORE === "success") {
+  if (!frontendSource && process.env.CI === "true" && process.env.CODEXIA_CI_PROFILE_RESTORE === "success" && process.env.CODEXIA_E2E_COMPARE_ASSETS === "1") {
     const compareStarted = performance.now();
     compareAuthorAssets(join(root, "app/dist"), assets, profile);
     observePhase("asset-comparison", compareStarted, profile);
