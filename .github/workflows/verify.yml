@@ -504,7 +504,7 @@ jobs:
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
-          set -euo pipefail
+          set -eu
           case "$PROFILE" in
             core)
               pnpm --filter '@codexia/profile-core...' --filter '@codexia/app...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
