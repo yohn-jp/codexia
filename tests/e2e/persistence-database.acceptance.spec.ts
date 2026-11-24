@@ -701,7 +701,7 @@ preparedAuthorTest("an unknown delete response after PostgreSQL commit does not 
   }
 });
 
-test("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page, authorizeAuthor }) => {
   const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const error = "Knowledge candidate temporarily unavailable";
   await page.route(url => url.pathname.startsWith(`/api/v1/persistence/projects/${project.id}/nodes/`), async route => {
@@ -742,7 +742,7 @@ test("a Knowledge save error stays with the visible form across Desktop layouts 
   await submit();
 });
 
-test("Knowledge candidate retries reconcile uncertain creates without blocking deliberate same-name candidates", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Knowledge candidate retries reconcile uncertain creates without blocking deliberate same-name candidates", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Knowledge create retry ${crypto.randomUUID()}`);
   const persistence = createPostgresPersistence(databaseUrl!);
@@ -865,7 +865,7 @@ test("Knowledge candidate retries reconcile uncertain creates without blocking d
   }
 });
 
-test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page, authorizeAuthor }) => {
   test.setTimeout(120_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const author = await authorizeAuthor("desktop");
@@ -928,7 +928,7 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
 
 });
 
-test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Outline ${crypto.randomUUID()}`);
   const headers = { Origin: new URL(page.url()).origin };
@@ -972,7 +972,7 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
-test("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Headless DnD ${crypto.randomUUID()}`);
   const outline = page.locator('[data-workspace-panel="outline"]');
@@ -988,7 +988,7 @@ test("Headless Tree reparent drag moves an unselected document through the canon
   await expect(target).toHaveAttribute("aria-current", "page");
 });
 
-test("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Headless rename ${crypto.randomUUID()}`);
   const outline = page.locator('[data-workspace-panel="outline"]');
@@ -1224,7 +1224,7 @@ for (const { mode, width, forceAppendFallback = false } of [
   { mode: "mobile", width: 390, forceAppendFallback: true },
   { mode: "desktop", width: 1280, forceAppendFallback: true },
 ] as const) {
-  test(`CodeMirror undo, redo, selection, and scroll survive a guarded ${mode} ${width}px panel switch during save (${forceAppendFallback ? "append fallback" : "moveBefore when supported"})`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`CodeMirror undo, redo, selection, and scroll survive a guarded ${mode} ${width}px panel switch during save (${forceAppendFallback ? "append fallback" : "moveBefore when supported"})`, async ({ page, authorizeAuthor }) => {
     expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
     const usesMoveBefore = await installMoveBeforeProbe(page, forceAppendFallback);
     await page.setViewportSize({ width, height: mode === "mobile" ? 844 : 900 });
@@ -1391,7 +1391,7 @@ async function openResearchInspector(page: import("@playwright/test").Page) {
   }
 }
 
-test("replays ambiguous project and document creates with retained client intent", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("replays ambiguous project and document creates with retained client intent", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const projectTitle = `Replay project ${crypto.randomUUID()}`;
   const documentTitle = `Replay scene ${crypto.randomUUID()}`;
@@ -1576,7 +1576,7 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
 });
 
 for (const shell of ["desktop", "mobile"] as const) {
-  test(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page, authorizeAuthor }) => {
     await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
     let showProject = false;
     await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
@@ -1799,7 +1799,7 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
 });
 
 for (const shell of ["desktop", "mobile"] as const) {
-  test(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page, authorizeAuthor }) => {
     if (shell === "mobile") await page.setViewportSize({ width: 390, height: 844 });
     const author = await authorizeAuthor(shell);
     const origin = new URL(page.url()).origin;
@@ -1857,7 +1857,7 @@ for (const shell of ["desktop", "mobile"] as const) {
   });
 }
 
-test("revision comparison separates distant manuscript edits", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("revision comparison separates distant manuscript edits", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
@@ -1897,7 +1897,7 @@ test("revision comparison separates distant manuscript edits", async ({ page, au
   }
 });
 
-test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({ page, authorizeAuthor }) => {
   test.setTimeout(90000);
   const author = await authorizeAuthor("desktop");
   const title = `Long outline ${crypto.randomUUID()}`;

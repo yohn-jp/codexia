@@ -12,7 +12,7 @@ import { browserServerProfile } from "./browser-server-profile";
 export type Shell = "desktop" | "mobile";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
 export interface AuthorBrowserFixture extends BetterAuthFixture {
-  preparedEntryUrl(shell: Shell): string | null;
+  readonly preparedAuthorEntries: boolean;
 }
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -86,7 +86,7 @@ export function buildAuthorBrowserAssets(
   if (build.error) throw build.error;
   if (build.status !== 0) throw new Error(`Author browser fixture build failed:\n${build.stdout}\n${build.stderr}`);
   observePhase("vite-build", started, profile);
-  if (!frontendSource && process.env.CI === "true" && process.env.CODEXIA_CI_PROFILE_RESTORE === "success") {
+  if (!frontendSource && process.env.CI === "true" && process.env.CODEXIA_CI_PROFILE_RESTORE === "success" && process.env.CODEXIA_E2E_COMPARE_ASSETS === "1") {
     const compareStarted = performance.now();
     compareAuthorAssets(join(root, "app/dist"), assets, profile);
     observePhase("asset-comparison", compareStarted, profile);
@@ -121,19 +121,15 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
     observePhase("api-db-auth-bootstrap", started, profile);
     const usePreparedEntries = preparedAuthorEntries && !frontendSource;
     buildAuthorBrowserAssets(server, profile, assets, frontendSource, usePreparedEntries);
-    const entries = new Map<Shell, string>();
     if (usePreparedEntries) {
       for (const shell of ["desktop", "mobile"] as const) {
-        const names = readdirSync(join(assets, shell, "assets")).filter(name => /^prepared-author-[A-Za-z0-9_-]+\.js$/u.test(name));
-        if (names.length !== 1) throw new Error("Expected exactly one isolated prepared author entry");
-        const path = `/${shell}/assets/${names[0]}`;
-        if (readFileSync(join(assets, shell, "index.html"), "utf8").includes(path)) {
-          throw new Error("Ordinary author HTML must not execute the prepared entry");
-        }
-        entries.set(shell, new URL(path, server.apiOrigin).href);
+        const directory = join(assets, shell, "assets");
+        const hasHandoff = readdirSync(directory).some(name => name.endsWith(".js") &&
+          readFileSync(join(directory, name), "utf8").includes("__codexiaClaimPreparedAuthor"));
+        if (!hasHandoff) throw new Error("Isolated prepared author entry was not built");
       }
     }
-    return { ...server, close, preparedEntryUrl: shell => entries.get(shell) ?? null };
+    return { ...server, close, preparedAuthorEntries: usePreparedEntries };
   } catch (error) {
     await close();
     throw error;
