@@ -444,8 +444,8 @@ export function verificationPlanOutputs(plan) {
   return {
     plan: JSON.stringify(plan),
     biome: String(plan.groups.includes('biome')),
-    unit: JSON.stringify(['core', 'modules', 'architecture'].filter(id => plan.groups.includes(`unit-${id}`))),
-    types: JSON.stringify(['sources', 'tests', 'trace'].filter(id => plan.groups.includes(`types-${id}`))),
+    unit: JSON.stringify(plan.groups.filter(group => group.startsWith('unit-')).map(group => group.slice(5))),
+    types: JSON.stringify(plan.groups.filter(group => group.startsWith('types-')).map(group => group.slice(6))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
