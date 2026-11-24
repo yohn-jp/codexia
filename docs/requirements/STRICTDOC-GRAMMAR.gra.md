@@ -63,6 +63,55 @@
 
 #### Relation: File
 
+## Element: OBLIGATION
+**Prefix**: OBL
+
+### Field: MID
+**Type**: String
+**Required**: True
+
+### Field: UID
+**Type**: String
+**Required**: True
+
+### Field: Title
+**Type**: String
+**Required**: True
+
+### Field: Design reference
+**Type**: String
+**Required**: True
+
+### Field: Implementation identifiers
+**Type**: String
+**Required**: True
+
+### Field: Surface identifiers
+**Type**: String
+**Required**: False
+
+### Field: Test IDs
+**Type**: String
+**Required**: True
+
+### Field: Exact-run reference
+**Type**: String
+**Required**: True
+
+### Field: Comment
+**Type**: String
+**Required**: False
+
+### Field: Statement
+**Type**: String
+**Required**: True
+
+### Relations
+
+#### Relation: Parent
+
+#### Relation: File
+
 ## Element: TEST
 **Prefix**: TEST
 

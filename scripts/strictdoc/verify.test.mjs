@@ -13,6 +13,7 @@ import {
   resolveRunIdentity,
   validateScenarioNodes,
   validateInventory,
+  validateObligationDesignRefs,
   validateRequirementNodes,
   validateRelations,
 } from './verify.mjs';
@@ -29,6 +30,27 @@ test('rejects duplicate requirement UIDs and unstable MIDs', () => {
 
   assert.match(violations.join('\n'), /duplicate UID REQ-DATA-001/i);
   assert.match(violations.join('\n'), /MID.*REQ-DATA-002/i);
+});
+
+test('rejects authored VERIFIED status without authenticated product evidence', () => {
+  const uid = 'REQ-DATA-001';
+  const violations = validateRequirementNodes([{
+    UID: uid, MID: stableMid(uid), TITLE: 'Authoritative data', STATEMENT: 'Use PostgreSQL.',
+    'Decision status': 'ACCEPTED', 'Conformance status': 'VERIFIED', Applicability: 'CURRENT',
+  }]);
+  assert.deepEqual(violations, [`${uid} cannot be VERIFIED without authenticated product obligation evidence`]);
+});
+
+test('rejects missing normative design links in obligation nodes', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-design-links-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'docs/requirements'), { recursive: true });
+  await writeFile(path.join(root, 'docs/requirements/authority.md'), '# Authority\n');
+  const violations = await validateObligationDesignRefs([{
+    UID: 'OBL-REQ-DATA-001-O01',
+    'Design reference': '[Authority](authority.md)、[Missing](../architecture/missing.md); docs/requirements/authority.md',
+  }], 'docs/requirements/REQUIREMENT-REGISTER.md', root);
+  assert.deepEqual(violations, ['OBL-REQ-DATA-001-O01: File relation target is missing: docs/architecture/missing.md']);
 });
 
 test('rejects missing files and ranges beyond the referenced source', async (t) => {

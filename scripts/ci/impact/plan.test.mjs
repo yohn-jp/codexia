@@ -217,6 +217,27 @@ test('StrictDoc authority selects trace proof and the requirement register also 
   }
 });
 
+test('changes to trace inputs select the existing trace task without dropping domain checks', async () => {
+  for (const [file, owner] of [
+    ['packages/api/src/server.ts', 'unit-api'],
+    ['packages/http-contract/src/source-dispatcher-inventory.mjs', 'unit-http-contract'],
+    ['modules/mcp/src/tools/project.ts', 'unit-mcp'],
+    ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
+    ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],
+    ['docs/design/SCREEN-CONTROL-CATALOG.md', null],
+    ['docs/design/INTERACTION-CONTRACT.md', null],
+    ['app/src/App.tsx', 'unit-app'],
+    ['deploy/ansible/deploy.yml', 'unit-root'],
+    ['deploy/backup/backup.sh', 'db-contract'],
+  ]) {
+    const selection = await plan([file]);
+    assert.ok(selection.tasks.includes('requirements-trace'), file);
+    if (owner) assert.ok(selection.tasks.includes(owner), file);
+  }
+  const unrelated = await plan(['docs/design/UX-SIMULATOR.md']);
+  assert.ok(!unrelated.tasks.includes('requirements-trace'));
+});
+
 test('Full-model OCI selection follows the standalone workflow and the Verify caller', async () => {
   const { FULL_MODEL_OCI_PATHS, matchesFullModelOciPath } = await import('./plan.mjs');
   const standalone = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
@@ -416,7 +437,7 @@ test('DB contract source authorities select DB proof while retaining trace and a
 test('the canonical age backup script selects both DBV-007 and existing root backup verification', async () => {
   const selected = await plan(['deploy/backup/backup.sh']);
   assert.equal(selected.mode, 'affected');
-  assert.deepEqual(selected.tasks, ['unit-root', 'db-contract', 'coverage']);
+  assert.deepEqual(selected.tasks, ['unit-root', 'db-contract', 'coverage', 'requirements-trace']);
 });
 
 test('existing PostgreSQL migration changes retain full verification', async () => {
@@ -433,12 +454,12 @@ test('architecture design documents select G5 in the existing Verify unit matrix
     'docs/architecture/THREAT-MODEL.md',
     'docs/verification/ARCHITECTURE-ATLAS.md',
   ]);
-  assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5']);
-  assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests']);
+  assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
+  assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests', 'types-trace']);
   const outputs = verificationPlanOutputs(selected);
   assert.deepEqual(JSON.parse(outputs.unit), ['architecture']);
-  assert.deepEqual(JSON.parse(outputs.types), ['tests']);
-  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5']);
+  assert.deepEqual(JSON.parse(outputs.types), ['tests', 'trace']);
+  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
   assert.deepEqual((await plan(['docs/security/authorization.md'])).tasks, ['coverage', 'architecture-g5']);
   assert.deepEqual((await plan(['docs/deployment/IAC.md'])).tasks, ['unit-root', 'coverage', 'architecture-g5']);
 
@@ -513,12 +534,18 @@ test('known operational inputs retain root proof without unrelated browser or OC
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
     const expected = file === 'deploy/backup/backup.sh'
-      ? ['unit-root', 'db-contract', 'coverage']
+      ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
       : file.startsWith('docs/deployment/')
         ? ['unit-root', 'coverage', 'architecture-g5']
         : file.startsWith('edge/frontend/') && /\.[cm]?[jt]sx?$/u.test(file)
           ? ['unit-root', 'coverage', 'biome-ci']
           : ['unit-root','coverage'];
+    if ([
+      '.github/workflows/backend-deployment-handoff.yml', '.github/workflows/push-backup.yml',
+      'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/deploy.yml',
+      'deploy/ansible/restore-drill.yml', 'deploy/backup/s3_transfer.py',
+      'docs/deployment/BACKUP.md', 'docs/deployment/README.md',
+    ].includes(file)) expected.push('requirements-trace');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
@@ -639,8 +666,11 @@ test('push backup changes retain root and independent exact-head verification', 
   ];
   for (const file of source) {
     const expected = file === 'deploy/backup/backup.sh'
-      ? ['unit-root', 'db-contract', 'coverage']
+      ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
       : ['unit-root', 'coverage'];
+    if (['deploy/ansible/deploy.yml', 'deploy/ansible/restore-drill.yml', '.github/workflows/push-backup.yml'].includes(file)) {
+      expected.push('requirements-trace');
+    }
     assert.deepEqual((await plan([file])).tasks, expected, file);
     assert.equal((await plan([file])).full_model_oci, false, file);
     for (const event of ['pull_request', 'push']) {
