@@ -63,17 +63,15 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(deploymentGate.env.CODEXIA_PUSH_DEPLOYMENT_ENABLED, '${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}');
   const freshness = deploy.steps.find(step => step.id === 'freshness');
   assert.equal(deployCheckout.with['fetch-depth'], 0);
-  assert.equal(freshness.run, 'node scripts/release/components/source-gate.mjs backend-deployment');
+  assert.match(freshness.run, /if \[\[ "\$CODEXIA_MANUAL_ACTIVATION" == true \]\]; then\s+node scripts\/deployment\/bootstrap\/activate-backend\.mjs freshness\s+else\s+node scripts\/release\/components\/source-gate\.mjs backend-deployment/u);
+  assert.equal(freshness.env.CODEXIA_MANUAL_ACTIVATION, "${{ github.event_name == 'workflow_dispatch' }}");
   assert.equal(freshness.env.CODEXIA_VERIFIED_MAIN_SHA, verifiedSource);
   const afterEnablement = deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1);
   const freshnessIndex = afterEnablement.indexOf(freshness);
   assert.ok(freshnessIndex >= afterEnablement.indexOf(deployCheckout));
   assert.ok(afterEnablement.slice(0, freshnessIndex + 1).every(step =>
     step.if === "steps.deployment-gate.outputs.enabled == 'true'"));
-  const manualFreshness = afterEnablement[freshnessIndex + 1];
-  assert.equal(manualFreshness.if, "github.event_name == 'workflow_dispatch'");
-  assert.equal(manualFreshness.run, 'test "$SOURCE_CURRENT" = true');
-  assert.ok(afterEnablement.slice(freshnessIndex + 2).every(step => [
+  assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step => [
     "steps.freshness.outputs.current == 'true'",
     "github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'",
   ].includes(step.if)), 'Stale or disabled deployments must not connect to the target or run Ansible');

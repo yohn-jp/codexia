@@ -1,12 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
-import { admitBackendActivation } from './activate-backend.mjs';
+import { admitBackendActivation, assertManualActivationSource } from './activate-backend.mjs';
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
 const window = { id: 'r6', notBefore: '2026-11-24T05:58:00.000Z', notAfter: '2026-11-24T06:05:00.000Z' };
 const flags = { initialInstall: true, databaseUse: true };
+
+test('manual activation keeps a still-current certified Backend on the reviewed live main', () => {
+  const certified = 'a'.repeat(40), reviewed = 'b'.repeat(40), advanced = 'c'.repeat(40);
+  const git = (checkout, files) => (operation, ...args) => {
+    if (operation === 'rev-parse') {
+      assert.deepEqual(args, ['HEAD']);
+      return checkout + '\n';
+    }
+    if (operation === 'rev-list') {
+      assert.deepEqual(args, ['--first-parent', reviewed]);
+      return reviewed + '\n' + certified + '\n';
+    }
+    assert.equal(operation, 'diff');
+    assert.deepEqual(args, ['--name-only', '--no-renames', '-z', certified, reviewed, '--']);
+    return files.join('\0');
+  };
+  assert.doesNotThrow(() => assertManualActivationSource(certified, reviewed, reviewed, git(reviewed, ['docs/notes.md'])));
+  assert.throws(() => assertManualActivationSource(certified, reviewed, reviewed, git(reviewed, ['packages/api/src/server.ts'])),
+    /newer Backend inputs/);
+  assert.throws(() => assertManualActivationSource(certified, reviewed, advanced, git(reviewed, [])), /live main/);
+  assert.throws(() => assertManualActivationSource(certified, reviewed, reviewed, git(certified, [])), /checkout/);
+});
 
 function fixture(state = {}, binding = {}) {
   const current = createDeploymentPlan({

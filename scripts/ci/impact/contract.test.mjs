@@ -34,19 +34,23 @@ test('artifact ZIP consumers install only the frozen CI dependency before loadin
       publish: 'node scripts/verification/artifacts/backend.mjs',
     },
     'backend-deployment-handoff.yml': {
-      'verify-handoff': 'node scripts/deployment/handoff/verify-push.mjs',
-      'deploy-production': 'node scripts/release/components/source-gate.mjs backend-deployment',
+      'verify-handoff': ['node scripts/deployment/handoff/verify-push.mjs',
+        'node scripts/deployment/bootstrap/activate-backend.mjs certify'],
+      'deploy-production': ['node scripts/release/components/source-gate.mjs backend-deployment',
+        'PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" node scripts/deployment/bootstrap/activate-backend.mjs admit'],
     },
     'push-app-lifecycle.yml': { lifecycle: 'bash deploy/ansible/test-push-app-lifecycle.sh' },
   };
   for (const [file, consumers] of Object.entries(jobs)) {
     const definition = parse(readFileSync(new URL('../../../.github/workflows/' + file, import.meta.url), 'utf8'));
-    for (const [job, command] of Object.entries(consumers)) {
+    for (const [job, commands] of Object.entries(consumers)) {
       const steps = definition.jobs[job].steps;
       const install = steps.findIndex(step => step.run === installCommand);
       const checkout = steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
-      const consumer = steps.findIndex(step => step.run === command);
-      assert.ok(checkout >= 0 && checkout < install && install < consumer, `${file} ${job}`);
+      for (const command of [].concat(commands)) {
+        const consumer = steps.findIndex(step => step.run?.split('\n').some(line => line.trim() === command));
+        assert.ok(checkout >= 0 && checkout < install && install < consumer, `${file} ${job} ${command}`);
+      }
       assert.equal(steps[install].env, undefined);
       assert.equal(steps[install]['continue-on-error'], undefined);
       assert.equal(steps[install].if, job === 'deploy-production' ? "steps.deployment-gate.outputs.enabled == 'true'" : undefined);

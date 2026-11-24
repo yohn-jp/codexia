@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { createHandoffDeploymentOutputs, verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
 import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
 
 const hash = /^[a-f0-9]{64}$/u;
+
+export function assertManualActivationSource(certified, dispatch, liveMain, git) {
+  assert.equal(git('rev-parse', 'HEAD').trim(), dispatch, 'Deployment checkout differs from the reviewed dispatch revision');
+  assert.equal(liveMain, dispatch, 'The reviewed dispatch revision differs from live main');
+  assert.ok(selectReleaseSource('backend', certified, liveMain, git, null).affected,
+    'The certified publication has been superseded by newer Backend inputs');
+}
 
 function assertBackendOnly(plan) {
   const state = plan?.observation?.state;
@@ -32,6 +41,14 @@ async function main(stage, env) {
   assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
+  if (stage === 'freshness') {
+    const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
+    const liveMain = execFileSync('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
+      { encoding: 'utf8', timeout: 30_000 }).trim();
+    assertManualActivationSource(env.CODEXIA_VERIFIED_MAIN_SHA, env.GITHUB_SHA, liveMain, git);
+    await appendFile(env.GITHUB_OUTPUT, 'current=true\n');
+    return;
+  }
   const input = JSON.parse(env.CODEXIA_FIRST_ACTIVATION_REQUEST);
   assert.deepEqual(Object.keys(input).sort(), ['artifacts', 'deployment']);
   const { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } = await import('../preflight/run.mjs');
@@ -78,7 +95,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
     await main(process.argv[2], process.env);
   } catch {
-    console.error('Protected R6 Backend-only activation stopped at candidate certification or exact plan admission.');
+    console.error('Protected R6 Backend-only activation stopped at source freshness, candidate certification or exact plan admission.');
     process.exitCode = 1;
   }
 }

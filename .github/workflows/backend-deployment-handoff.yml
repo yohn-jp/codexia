@@ -155,14 +155,18 @@ jobs:
       - name: Recheck the certified backend against main inside the production slot
         id: freshness
         if: steps.deployment-gate.outputs.enabled == 'true'
+        shell: bash
         env:
+          CODEXIA_MANUAL_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' }}
           CODEXIA_VERIFIED_MAIN_SHA: ${{ needs.verify-handoff.outputs.verified-main-sha }}
-        run: node scripts/release/components/source-gate.mjs backend-deployment
-      - name: Require live release source admission before manual activation
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          SOURCE_CURRENT: ${{ steps.freshness.outputs.current }}
-        run: test "$SOURCE_CURRENT" = true
+          GH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.token || '' }}
+        run: |
+          set -euo pipefail
+          if [[ "$CODEXIA_MANUAL_ACTIVATION" == true ]]; then
+            node scripts/deployment/bootstrap/activate-backend.mjs freshness
+          else
+            node scripts/release/components/source-gate.mjs backend-deployment
+          fi
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'

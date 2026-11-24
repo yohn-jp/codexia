@@ -108,10 +108,9 @@ function fixture() {
         const deployment = { id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage', versions: [{ version_id: state.activeVersion, percentage: 100 }] };
         return apiResponse(method === 'GET' ? { deployments: state.activeVersion === null ? [] : [deployment] } : deployment);
       }
-      if (path === workerResource) {
-        return apiResponse({ id: state.workerId, name: 'codexia-frontend', subdomain: { enabled: false, previews_enabled: state.preview } });
+      if (path === workerResource || path.startsWith(workerResource + '/versions/')) {
+        return new Response('Worker ID required', { status: 404 });
       }
-      if (path.startsWith(workerResource + '/versions/')) return new Response('Worker ID required', { status: 404 });
       if (path === workerResourceById + '/versions/' + newVersion) {
         const includeModules = target.searchParams.get('include') === 'modules';
         return apiResponse({ id: newVersion, urls: [], annotations: { 'workers/tag': state.uploadTag },

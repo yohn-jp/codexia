@@ -195,7 +195,6 @@ export function createCloudflareCutover({
   const accountPath = `/accounts/${accountId}`;
   const zonePath = `/zones/${zoneId}`;
   const workerPath = `${accountPath}/workers/scripts/${worker}`;
-  const workerResource = `${accountPath}/workers/workers/${worker}`;
   const setupWorkerPath = `${accountPath}/workers/scripts/${setup.worker}`;
 
   async function request(label, path, { method = 'GET', token = readToken, body } = {}) {
@@ -265,10 +264,18 @@ export function createCloudflareCutover({
     return version;
   }
 
+  async function readWorkerInventory() {
+    const workers = await list('Worker inventory', `${accountPath}/workers/workers`);
+    assert.ok(workers.every(item => typeof item?.id === 'string' && workerIdPattern.test(item.id) &&
+      typeof item.name === 'string' && item.name.length > 0) &&
+      new Set(workers.map(item => item.id)).size === workers.length &&
+      new Set(workers.map(item => item.name)).size === workers.length, 'Worker inventory is ambiguous');
+    return workers;
+  }
+
   async function readNormalVersion(versionId, { initialWorkerId, includeModules = false } = {}) {
-    const resource = await result('Normal Worker resource', workerResource);
-    assert.ok(resource.name === worker && typeof resource.id === 'string' && workerIdPattern.test(resource.id) &&
-      (!initialWorkerId || resource.id === initialWorkerId), 'Normal Worker resource identity changed');
+    const resource = (await readWorkerInventory()).find(item => item.name === worker);
+    assert.ok(resource && (!initialWorkerId || resource.id === initialWorkerId), 'Normal Worker resource identity changed');
     assertPrivateWorker(resource.subdomain);
     return readVersion(versionId, `${accountPath}/workers/workers/${resource.id}`,
       { includeModules });
@@ -448,11 +455,7 @@ export function createCloudflareCutover({
     // Positive absence requires an authenticated inventory, not a 404, failed
     // identity probe, or denied token. Strict cutover calls retain their
     // existing requirement for a deployed Worker.
-    const workers = await list('Worker inventory', `${accountPath}/workers/workers`);
-    assert.ok(workers.every(item => typeof item?.id === 'string' && workerIdPattern.test(item.id) &&
-      typeof item.name === 'string' && item.name.length > 0) &&
-      new Set(workers.map(item => item.id)).size === workers.length &&
-      new Set(workers.map(item => item.name)).size === workers.length, 'Worker inventory is ambiguous');
+    const workers = await readWorkerInventory();
     const normalWorker = workers.find(item => item.name === worker);
     const scriptPresent = normalWorker !== undefined;
     const setupScriptPresent = workers.some(item => item.name === setup.worker);
