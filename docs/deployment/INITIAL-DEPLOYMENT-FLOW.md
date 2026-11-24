@@ -1,7 +1,7 @@
 # 初期デプロイの遷移設計
 
 新規 VM を Ansible で構成し、Cloudflare Workers の `/console/setup` から登録キーと Passkey で初回所有者を登録する。
-本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。
+本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が全状態の経路選択、初回pair activation、保守・復旧・排他の横断契約を所有する。
 SSH ポートフォワード方式も移行中の運用手順として利用できる。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
 
 ## 初期構築・公開までの状態遷移
@@ -19,7 +19,7 @@ flowchart TD
     DB -->|既存ownerを復旧済み| RESTORED["既存owner/Passkey/clientを検証<br/>新しい初期キーは生成しない"]
     DB -->|復旧途中/不整合| STOP2["停止: 復旧が先<br/>セットアップ画面でownerを再作成しない"]
     EMPTY --> GRANT["CSPRNG 256-bitの一回限りキーを発行<br/>hash保存・秘密経路で所有者に渡す"]
-    GRANT --> SETUPONLY["setup-only API + Tunnelを制限付きで起動<br/>Workers /console/setup と接続"]
+    GRANT --> SETUPONLY["setup-only API + Tunnelと認定済みFrontend<br/>必要なsetup経路のみ制限付き公開"]
     SETUPONLY --> KEY["所有者本人: ブラウザーでキー入力"]
     KEY --> PASS{"キー検証・WebAuthn Passkey ceremony"}
     PASS -->|中断・期限切れ・競合| RETRY["状態再照合・必要なら明示再発行<br/>owner二重作成は拒否"]
@@ -27,11 +27,11 @@ flowchart TD
     PASS -->|APIで原子的に確定| OWNER["owner ID・Passkey・grant失効を確定"]
     OWNER --> CLIENT["認証済みsetup APIでWeb/iOS/内省client照合"]
     CLIENT -->|不整合| STOP3["停止: 本番公開しない<br/>登録結果の再検証"]
-    CLIENT -->|準備完了| PREP["初回本番配備の承認待ち"]
+    CLIENT -->|準備完了| PREP["保護されたactivation preparation<br/>setup-only停止・初回本番配備承認待ち"]
     RESTORED --> PREP
     PREP --> CERT{"認証済みmain Full digest/証明書<br/>DB/認証/バックアップ/公開承認OK?"}
     CERT -->|いいえ| STOP4["停止: セットアップ以外の業務APIは公開しない"]
-    CERT -->|はい| DEPLOY["保護されたGitHub Actions → Tailscale/SSH<br/>Ansible deploy / 暗号化バックアップ"]
+    CERT -->|はい| DEPLOY["保護された初回activation・暗号化backup<br/>互換UIならdeploy / 未配備・非互換ならpair経路"]
     DEPLOY --> HEALTH{"API・認証・Tunnel・UI正常?"}
     HEALTH -->|いいえ| STOP5["停止/切戻し・transaction復旧<br/>owner DBは初期化しない"]
     HEALTH -->|はい| ACT["setup APIの登録権限を無効化<br/>通常のownerログイン・/consoleへ"]
@@ -78,7 +78,7 @@ flowchart TD
 `auth-runtime` 後に、通常運用と同じ Fastify と Better Auth を **setup-only モード**で起動し、Cloudflare Tunnel 経由で限定公開する。
 許可するのは、セットアップ状態の取得、キーの認可、Passkey の登録、登録完了確認に必要な認証 API と readiness に限る。
 作品 API、MCP、owner 設定変更、任意のサインアップ、一般向け OAuth クライアント登録は 403 や 503 で拒否する。
-公開前に Workers の静的ルート、Access の経路とオリジン境界、WebAuthn の RP ID と HTTPS オリジンを検証する。
+公開前に Workers の静的ルート、Access の経路とオリジン境界、WebAuthn の RP ID と HTTPS オリジンを検証する。Frontendが存在しない・非互換の場合は、[初回協調配備](DEPLOYMENT-LIFECYCLE.md#初回協調配備と非互換切替)の認定済みassetsと限定setup経路を用意し、通常のFrontend releaseに互換性チェックを迂回させない。
 Access に加えてセットアップキーによる認可を要求し、キーは登録フォームに入力する。
 登録した Passkey と対応する owner は、登録が完了した時点で確定する。
 
@@ -88,11 +88,11 @@ Access に加えてセットアップキーによる認可を要求し、キー�
 
 ## 宣言的な初期化と公開の責務分離
 
-**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、別途承認された本番`deploy`に進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。
+**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。
 
 **運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。SSH ポートフォワード方式は移行中の既存手順として維持する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 
-初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。
+初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。Bootstrap中断の再開条件、証明済みFull artifact、保護されたowner引き渡しと独立activation起動は [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) に従う。
 
 ## 復旧状態と受入
 
@@ -108,8 +108,8 @@ stateDiagram-v2
     SetupPending --> SetupExposed : 256-bit grant・setup-only API・edge保護確認
     SetupExposed --> OwnerReady : Passkey + ownerを原子的に確定
     SetupExposed --> Blocked : キー失効・不正な状態
-    OwnerReady --> ActivationPending : clientと本番受入前提の検証
-    ActivationPending --> Active : 保護されたdeploy・ready検証
+    OwnerReady --> ActivationPending : client照合・setup停止・認証設定確定
+    ActivationPending --> Active : 保護された初回activation・必要時pair配備
     Active --> Accepted : 公開経路・再起動・独立restore実測
     SSHReady --> Blocked : 接続・ホスト証明失敗
     DataReady --> Blocked : 不明なDB・migration不一致

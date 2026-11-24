@@ -13,6 +13,47 @@ const require = createRequire(new URL('../../../packages/core/package.json', imp
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
+
+test('artifact ZIP consumers install only the frozen CI dependency before loading evidence', () => {
+  const installCommand = 'corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts';
+  const jobs = {
+    'verify.yml': {
+      plan: 'node scripts/ci/evidence/reuse-coverage-proof.mjs plan',
+      biome: 'node scripts/ci/execution/group.mjs biome',
+      oci: 'node scripts/ci/execution/group.mjs "oci-${{ matrix.profile }}"',
+      certification: 'node scripts/ci/evidence/download-artifacts.mjs',
+    },
+    'frontend-release.yml': {
+      source: 'node scripts/release/components/source-gate.mjs frontend',
+      preflight: 'node scripts/verification/artifacts/frontend.mjs select-promotion',
+      deploy: 'node scripts/verification/artifacts/frontend.mjs',
+    },
+    'backend-release.yml': {
+      source: 'node scripts/release/components/source-gate.mjs backend',
+      promotion: 'node scripts/release/backend/resolve-promotion.mjs',
+      publish: 'node scripts/verification/artifacts/backend.mjs',
+    },
+    'backend-deployment-handoff.yml': {
+      'verify-handoff': 'node scripts/deployment/handoff/verify-push.mjs',
+      'deploy-production': 'node scripts/release/components/source-gate.mjs backend-deployment',
+    },
+    'push-app-lifecycle.yml': { lifecycle: 'bash deploy/ansible/test-push-app-lifecycle.sh' },
+  };
+  for (const [file, consumers] of Object.entries(jobs)) {
+    const definition = parse(readFileSync(new URL('../../../.github/workflows/' + file, import.meta.url), 'utf8'));
+    for (const [job, command] of Object.entries(consumers)) {
+      const steps = definition.jobs[job].steps;
+      const install = steps.findIndex(step => step.run === installCommand);
+      const checkout = steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
+      const consumer = steps.findIndex(step => step.run === command);
+      assert.ok(checkout >= 0 && checkout < install && install < consumer, `${file} ${job}`);
+      assert.equal(steps[install].env, undefined);
+      assert.equal(steps[install]['continue-on-error'], undefined);
+      assert.equal(steps[install].if, job === 'deploy-production' ? "steps.deployment-gate.outputs.enabled == 'true'" : undefined);
+    }
+  }
+});
+
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);
@@ -394,6 +435,9 @@ test('independent main verification reuses exact PR proof without disabling PR o
     const definition = parse(readFileSync(new URL('../../../' + filename, import.meta.url), 'utf8'));
     const job = Object.values(definition.jobs)[0];
     const gate = job.steps.find(step => step.id === 'reuse');
+    const install = job.steps.find(step => step.name === 'Install frozen CI evidence dependencies');
+    assert.ok(install && job.steps.indexOf(install) < job.steps.indexOf(gate), filename);
+    assert.equal(install.if, gate.if);
     assert.equal(gate.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");
     assert.equal(gate.run, 'node scripts/ci/certification/reuse-merged-pr.mjs dedicated');
     assert.equal(job.permissions.actions, 'read');

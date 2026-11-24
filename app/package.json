@@ -27,6 +27,7 @@
     "@radix-ui/react-tabs": "1.2.1",
     "@xstate/react": "6.1.0",
     "better-auth": "catalog:production",
+    "oauth4webapi": "3.8.9",
     "react": "catalog:production",
     "react-dom": "catalog:production",
     "react-resizable-panels": "4.24.1",

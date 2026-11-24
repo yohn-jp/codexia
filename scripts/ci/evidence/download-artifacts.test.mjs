@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downloadArtifact, extractArtifactFiles, extractJsonEntry, extractProfileJson, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -108,13 +108,18 @@ test('extracts only one requested JSON entry and rejects missing or malformed JS
   execFileSync('zip', ['-q', 'artifact.zip', 'report.json', 'extra.txt'], { cwd: dir });
   const zip = await readFile(path.join(dir, 'artifact.zip'));
   assert.equal((await extractJsonEntry(zip, 'report.json')).toString(), '{"group":"browser-full-webkit"}');
+  for (const [offset, diagnostic] of [[6, /Multi-disk/], [8, /entry count/]]) {
+    const broken = Buffer.from(zip);
+    broken.writeUInt16LE(1, broken.length - 22 + offset);
+    await assert.rejects(extractJsonEntry(broken, 'report.json'), diagnostic);
+  }
   await assert.rejects(extractJsonEntry(zip, 'ci-plan.json'), /Missing required JSON entry/);
   await writeFile(path.join(dir, 'report.json'), 'not JSON');
   execFileSync('zip', ['-q', 'invalid.zip', 'report.json'], { cwd: dir });
   await assert.rejects(extractJsonEntry(await readFile(path.join(dir, 'invalid.zip')), 'report.json'), SyntaxError);
 });
 
-test('profile ZIP extracts with Node alone, rejects corruption and ignores untrusted paths', async t => {
+test('profile ZIP extracts stored and deflated JSON and rejects truncated archives', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'codexia-profile-zip-'));
   t.after(() => rm(dir, {recursive:true,force:true}));
   const data = JSON.stringify({files:Array.from({length:100},(_,i)=>'profile output '+i)});
@@ -123,12 +128,11 @@ test('profile ZIP extracts with Node alone, rejects corruption and ignores untru
   for(const method of ['-0','-9']){
     execFileSync('zip',['-q',method,'profile'+method+'.zip','profile-build.json','extra.txt'],{cwd:dir});
     const bytes=await readFile(path.join(dir,'profile'+method+'.zip'));
-    assert.equal(extractProfileJson(bytes).toString(),data);
     assert.equal((await extractJsonEntry(bytes,'profile-build.json')).toString(),data);
     const broken=Buffer.from(bytes);
     broken.writeUInt32LE(0xffffffff,broken.length-22+16);
-    assert.throws(()=>extractProfileJson(broken),/central directory/);
-    assert.throws(()=>extractProfileJson(bytes.subarray(0,bytes.length-8)));
+    await assert.rejects(extractJsonEntry(broken, 'profile-build.json'), /directory|entry|ZIP/i);
+    await assert.rejects(extractJsonEntry(bytes.subarray(0,bytes.length-8), 'profile-build.json'), /directory|ZIP/i);
   }
 });
 
@@ -158,4 +162,161 @@ test('frontend ZIP extraction rejects symbolic links',async t=>{
   execFileSync('zip',['-q','-y','frontend.zip','linked.js'],{cwd:dir});
   const archive=await readFile(path.join(dir,'frontend.zip'));
   await assert.rejects(extractArtifactFiles(archive,path.join(dir,'out')),/symlinks and special files/);
+});
+
+test('JSON and frontend artifact extraction reject files with an incorrect CRC', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-crc-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const content = '{"value":"original"}';
+  await writeFile(path.join(directory, 'profile-build.json'), content);
+  execFileSync('zip', ['-q', '-0', 'fixture.zip', 'profile-build.json'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const offset = archive.indexOf(content);
+  assert.ok(offset > 0);
+  archive.write('changed!', offset + content.indexOf('original'));
+  await assert.rejects(extractJsonEntry(archive, 'profile-build.json'), /CRC|signature/i);
+  const destination = path.join(directory, 'out');
+  await assert.rejects(extractArtifactFiles(archive, destination), /CRC|signature/i);
+  assert.deepEqual(await readdir(destination), []);
+});
+
+test('JSON extraction rejects an incorrect CRC on an unmaterialized diagnostic entry', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-diagnostic-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{}');
+  await writeFile(path.join(directory, 'diagnostic.txt'), 'diagnostic payload');
+  execFileSync('zip', ['-q', '-0', 'fixture.zip', 'report.json', 'diagnostic.txt'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const offset = archive.indexOf('diagnostic payload');
+  assert.ok(offset > 0);
+  archive[offset] ^= 1;
+  await assert.rejects(extractJsonEntry(archive, 'report.json'), /CRC|signature/i);
+});
+
+test('evidence JSON retains the report when accompanying trace diagnostics exceed the compressed archive limit', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-trace-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{"trace":true}');
+  await writeFile(path.join(directory, 'trace.html'), Buffer.alloc(19 * 1024 * 1024, 'a'));
+  execFileSync('zip', ['-q', 'fixture.zip', 'report.json', 'trace.html'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  assert.equal((await extractJsonEntry(archive, 'report.json')).toString(), '{"trace":true}');
+});
+
+test('frontend ZIP extraction rejects case and Unicode path collisions', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-collisions-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const [index, names] of [['Entry.js', 'entry.js'], ['café.js', 'cafe\u0301.js']].entries()) {
+    for (const name of names) await writeFile(path.join(directory, name), 'export {};');
+    const filename = `archive-${index}.zip`;
+    execFileSync('zip', ['-q', filename, ...names], { cwd: directory });
+    const archive = await readFile(path.join(directory, filename));
+    await assert.rejects(extractArtifactFiles(archive, path.join(directory, `out-${index}`)), /collision|duplicate/i);
+  }
+});
+
+test('frontend ZIP extraction bounds both compressed and expanded archive size', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-limits-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const content = 'a'.repeat(1024);
+  for (const name of ['one.txt', 'two.txt']) await writeFile(path.join(directory, name), content);
+  execFileSync('zip', ['-q', '-9', 'fixture.zip', 'one.txt', 'two.txt'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const destination = path.join(directory, 'out');
+  await assert.rejects(extractArtifactFiles(archive, destination, { maxArchive: archive.length - 1 }), /archive|limit/i);
+  await assert.rejects(extractArtifactFiles(archive, destination, { maxUncompressed: 2047 }), /size|limit/i);
+  assert.deepEqual((await extractArtifactFiles(archive, path.join(directory, 'valid'), { maxUncompressed: 2048 })).sort(), ['one.txt', 'two.txt']);
+
+  // An inflated entry must still observe the output limit when it declares less.
+  const undersized = Buffer.from(archive);
+  const centralRecord = undersized.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  assert.ok(centralRecord > 0);
+  const localRecord = undersized.readUInt32LE(centralRecord + 42);
+  undersized.writeUInt32LE(1023, centralRecord + 24);
+  undersized.writeUInt32LE(1023, localRecord + 22);
+  await assert.rejects(extractArtifactFiles(undersized, path.join(directory, 'undersized'), { maxUncompressed: 2047 }), /size|limit/i);
+});
+
+test('artifact ZIP extraction rejects encrypted entries', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-encryption-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{}');
+  execFileSync('zip', ['-q', '-P', 'fixture-password', 'fixture.zip', 'report.json'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  await assert.rejects(extractJsonEntry(archive, 'report.json'), /encrypt|encoding|password/i);
+  await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /encrypt|encoding|password/i);
+});
+
+test('ZIP readers reject disagreement between local and central file metadata', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-header-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{}');
+  execFileSync('zip', ['-q', '-0', 'fixture.zip', 'report.json'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const localFilename = archive.indexOf('report.json');
+  assert.ok(localFilename > 0 && archive.lastIndexOf('report.json') > localFilename);
+  archive.write('rePort.json', localFilename);
+  await assert.rejects(extractJsonEntry(archive, 'report.json'), /local|ambiguous/i);
+  await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /local|ambiguous/i);
+});
+
+test('ZIP readers reject overlapping file ranges before extraction', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-overlap-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'report.json'), '{}');
+  await writeFile(path.join(directory, 'diagnostic.txt'), 'fixture');
+  execFileSync('zip', ['-q', '-0', 'fixture.zip', 'report.json', 'diagnostic.txt'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const centralRecord = archive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  assert.ok(centralRecord > 0);
+  const localRecord = archive.readUInt32LE(centralRecord + 42);
+  const overlappingSize = '{}'.length + 1;
+  archive.writeUInt32LE(overlappingSize, localRecord + 18);
+  archive.writeUInt32LE(overlappingSize, localRecord + 22);
+  archive.writeUInt32LE(overlappingSize, centralRecord + 20);
+  archive.writeUInt32LE(overlappingSize, centralRecord + 24);
+  await assert.rejects(extractJsonEntry(archive, 'report.json'), /overlap/i);
+  const destination = path.join(directory, 'out');
+  await assert.rejects(extractArtifactFiles(archive, destination), /overlap/i);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});
+
+test('streamed artifact ZIP entries with data descriptors retain their content', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-descriptor-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const content = '{"streamed":true}';
+  await writeFile(path.join(directory, 'report.json'), content);
+  const archive = execFileSync('zip', ['-q', '-0', '-', 'report.json'], { cwd: directory });
+  assert.equal(archive.readUInt16LE(6) & 8, 8);
+  assert.equal((await extractJsonEntry(archive, 'report.json')).toString(), content);
+});
+
+test('frontend artifact extraction rejects ZIP64 even for a small archive', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip64-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = path.join(directory, 'source.txt');
+  await writeFile(source, 'fixture');
+  const input = await open(source);
+  t.after(() => input.close());
+  const archive = execFileSync('zip', ['-q', '-', '-'], { cwd: directory, stdio: [input.fd, 'pipe', 'pipe'] });
+  await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /ZIP64/i);
+});
+
+test('artifact extraction rejects a parent path in an unmaterialized entry', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-zip-parent-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(path.join(directory, 'xx'));
+  await writeFile(path.join(directory, 'report.json'), '{}');
+  await writeFile(path.join(directory, 'xx', 'fixture.txt'), 'fixture');
+  execFileSync('zip', ['-q', 'fixture.zip', 'report.json', 'xx/fixture.txt'], { cwd: directory });
+  const archive = await readFile(path.join(directory, 'fixture.zip'));
+  const originalName = 'xx/fixture.txt';
+  const localName = archive.indexOf(originalName);
+  const centralName = archive.lastIndexOf(originalName);
+  assert.ok(localName > 0 && centralName > localName);
+  archive.write('../fixture.txt', localName);
+  archive.write('../fixture.txt', centralName);
+  await assert.rejects(extractJsonEntry(archive, 'report.json'), /unsafe|filename|path/i);
+  await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /unsafe|filename|path/i);
+  await assert.rejects(readFile(path.join(directory, 'fixture.txt')), { code: 'ENOENT' });
 });

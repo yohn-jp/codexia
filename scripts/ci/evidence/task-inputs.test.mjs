@@ -31,6 +31,7 @@ async function fixture(t) {
   await mkdir(path.join(root, '.github/workflows'), { recursive: true });
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci/execution/group.mjs',
     'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/workspace.mjs', '.github/workflows/verify.yml',
+    'scripts/ci/evidence/package.json',
     'scripts/architecture/package.json', 'scripts/architecture/package-lock.json', 'scripts/architecture/verify.mjs',
     'packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/index.test.mjs', 'docs/README.md']) {
     const target = path.join(root, file);
@@ -68,6 +69,7 @@ test('task input closure binds source, test, dependency, environment, toolchain,
     ['packages/core/src/index.ts', 'source change\n', 'source'],
     ['packages/core/index.test.mjs', 'test change\n', 'tests'],
     ['packages/core/package.json', 'dependency change\n', 'dependencies'],
+    ['scripts/ci/evidence/package.json', 'CI evidence dependency change\n', 'dependencies'],
     ['scripts/architecture/package-lock.json', 'isolated architecture dependency change\n', 'dependencies'],
   ]) {
     await writeFile(path.join(root, file), nextSha);
@@ -262,6 +264,7 @@ test('affected requirements trace receives the exact source and isolated task en
   await rm(path.join(root, 'packages/core/index.test.mjs'));
   await symlink(path.join(sourceRoot, 'node_modules'), path.join(root, 'node_modules'));
   await symlink(path.join(sourceRoot, 'packages/core/node_modules'), path.join(root, 'packages/core/node_modules'));
+  await symlink(path.join(sourceRoot, 'scripts/ci/evidence/node_modules'), path.join(root, 'scripts/ci/evidence/node_modules'));
   const trace = path.join(root, 'scripts/strictdoc/verify.mjs');
   await writeFile(trace, `import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';

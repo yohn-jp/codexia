@@ -35,10 +35,14 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   assert.equal(manifest.diagrams.length, sourceCount + 1);
   assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount + 1);
   assert.deepEqual([...new Set(manifest.diagrams.map(d => d.group))],
-    ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']);
+    ['system', 'data', 'user', 'admin', 'screen', 'first', 'update', 'lifecycle']);
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-4' && d.title.includes('管理コンソール')));
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-5' && d.title.includes('初回所有者登録')));
   assert.ok(manifest.diagrams.some(d => d.id === 'first-3' && d.title.includes('VMの再構築')));
+  assert.deepEqual(manifest.diagrams.filter(d => d.group === 'lifecycle').map(d => [d.id, d.markdown, d.kind]), [
+    ['lifecycle-1', 'docs/deployment/DEPLOYMENT-LIFECYCLE.md', 'flowchart'],
+    ['lifecycle-2', 'docs/deployment/DEPLOYMENT-LIFECYCLE.md', 'flowchart'],
+  ]);
   const systemOverview = manifest.diagrams.find(d => d.id === 'system-1');
   assert.equal(systemOverview.title, 'Codexia system context, containers, and trust boundaries');
   assert.equal(systemOverview.markdown, SYSTEM_DESIGN_PATH);

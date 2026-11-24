@@ -60,6 +60,23 @@ jobs:
           "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p test_production_bootstrap.py -v
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
 
+      - name: Reject bootstrap between durable cutover phases
+        run: |
+          set -euo pipefail
+          fixture=$(mktemp -d)
+          trap 'rm -rf "$fixture"' EXIT
+          mkdir -p "$fixture/.local/state/codexia-deploy"
+          printf '{}\n' > "$fixture/.local/state/codexia-deploy/cutover-transaction.json"
+          printf '[codexia]\nlocalhost ansible_connection=local\n' > "$fixture/inventory"
+          if "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$fixture/inventory" deploy/ansible/site.yml \
+            -e "codexia_stage=bootstrap codexia_service_home=$fixture codexia_service_user=$(id -un)" > "$fixture/result" 2>&1; then
+            cat "$fixture/result"
+            exit 1
+          fi
+          cat "$fixture/result"
+          grep -F 'An unfinished coordinated cutover must be recovered before ordinary convergence.' "$fixture/result"
+          if grep -F 'TASK [Converge the rootless host account and dependencies]' "$fixture/result"; then exit 1; fi
+
   bootstrap:
     name: Protected production controller (${{ inputs.mode }})
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia'
@@ -81,6 +98,7 @@ jobs:
           REQUESTED_SHA: ${{ inputs.main_sha }}
           BOOTSTRAP_MODE: ${{ inputs.mode }}
           BOOTSTRAP_ENABLED: ${{ vars.CODEXIA_BOOTSTRAP_ENABLED }}
+          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           DATABASE_GATE: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
           INIT_REQUESTED: ${{ inputs.initialize_database }}
           RECREATE_REQUESTED: ${{ inputs.recreate_missing_database }}
@@ -97,6 +115,7 @@ jobs:
               [[ "$INIT_REQUESTED" == false && "$RECREATE_REQUESTED" == false ]] || exit 1
               ;;
             bootstrap)
+              [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true ]] || { echo 'Bootstrap is paused for coordinated API epoch maintenance.' >&2; exit 1; }
               [[ "$BOOTSTRAP_ENABLED" == true && "$APPROVAL_PHRASE" == BOOTSTRAP_CODEXIA ]] || { echo 'Protected environment enablement or per-run approval is missing.' >&2; exit 1; }
               [[ "$FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || exit 1
               if [[ "$INIT_REQUESTED" == true ]]; then

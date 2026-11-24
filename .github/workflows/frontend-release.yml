@@ -43,6 +43,7 @@ on:
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
+      - scripts/ci/evidence/package.json
       - scripts/release/components/policy.mjs
       - scripts/release/components/version*.mjs
       - scripts/release/components/record.mjs
@@ -115,6 +116,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Verify completed source and select changed frontend paths
         id: gate
         env:
@@ -157,6 +160,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Probe production identity endpoints and Access boundary
         id: probe
         env:
@@ -324,6 +329,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Require ordinary production deployment to be available
         env:
           CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}

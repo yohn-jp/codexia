@@ -65,6 +65,7 @@ on:
       - scripts/verification/artifacts/backend.mjs
       - scripts/ci/evidence/artifact-selection.mjs
       - scripts/ci/evidence/download-artifacts*.mjs
+      - scripts/ci/evidence/package.json
       - scripts/release/components/policy.mjs
       - scripts/release/backend/image-inspection.mjs
       - scripts/deployment/admission/validate.mjs
@@ -230,6 +231,8 @@ jobs:
           echo "LIFECYCLE_ANSIBLE_PROFILE strategy=mitogen_linear callback=codexia_profile"
           for script in deploy/ansible/test-push-{app,auth}-lifecycle.sh; do bash -n "$script"; done
           node --check scripts/deployment/lifecycle/auth-oidc.mjs
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Run exact-source image selection and real app lifecycle fixture
         env:
           GH_TOKEN: ${{ github.token }}

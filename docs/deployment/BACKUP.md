@@ -1,6 +1,6 @@
 # Encrypted push-deployment backups
 
-Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
+The [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns when backup, independent recovery evidence and restore are required for route admission and coordinated activation. Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
 
 The only backup executable is [`deploy/backup/backup.sh`](../../deploy/backup/backup.sh). It belongs to the GitHub Actions → Tailscale → SSH → Ansible → rootless Podman Quadlet push deployment. No pull updater, timer, signed-channel controller, compatibility handler or legacy proxy controls this backup.
 

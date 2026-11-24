@@ -26,6 +26,8 @@ on:
       - pnpm-workspace.yaml
       - scripts/build/packaging/**
       - scripts/deployment/**
+      - scripts/ci/evidence/**
+      - .github/workflows/production-bootstrap.yml
       - scripts/release/backend/update-identity*.mjs
       - scripts/release/cutover/**
       - scripts/verification/runtime/better-auth-fixture.sh
@@ -54,6 +56,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Run coordinator, Cloudflare mock and recovery receipt tests
         id: node-contract
         run: |

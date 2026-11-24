@@ -45,6 +45,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Install frozen CI evidence dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Verify main workflow, receipt, artifact digest and OCI identities
         id: verify
         env:
@@ -110,6 +112,9 @@ jobs:
         if: steps.deployment-gate.outputs.enabled == 'true'
         with:
           node-version: '24.22.3'
+      - name: Install frozen CI evidence dependencies
+        if: steps.deployment-gate.outputs.enabled == 'true'
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Recheck the certified backend against main inside the production slot
         id: freshness
         if: steps.deployment-gate.outputs.enabled == 'true'
