@@ -47,10 +47,12 @@ final class AuthoringFlowUITests: XCTestCase {
 
         editor.tap()
         app.buttons["fixture.clipboard.paste"].tap()
-        let pasted = NSPredicate(format: "value == %@", before + before)
+        // UIKit smart insertion adds a word separator when pasting at the end.
+        let expected = before + " " + before
+        let pasted = NSPredicate(format: "value == %@", expected)
         let expectation = XCTNSPredicateExpectation(predicate: pasted, object: editor)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed)
-        XCTAssertEqual(editor.value as? String, before + before)
+        XCTAssertEqual(editor.value as? String, expected)
         app.buttons["戻る"].tap()
         XCTAssertTrue(app.alerts["原稿はまだ保護されていません"].waitForExistence(timeout: 5))
     }
