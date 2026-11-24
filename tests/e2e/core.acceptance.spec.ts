@@ -3,10 +3,15 @@ import type { ChangeOperation } from "@codexia/contracts";
 import type { ChangeSet } from "@codexia/persistence-contracts";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import { expect, test, type AuthorApiFetch, type AuthorizeAuthor } from "./author-oauth-fixture";
+import { preparedAuthorTest } from "./prepared-author-session";
 import { createHash, randomUUID } from "node:crypto";
 import { text as readStreamText } from "node:stream/consumers";
 import { CoreStore } from "../../packages/core/src/index.js";
 import { expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+
+// Share the same worker build for opted-in and ordinary author scenarios.
+test.use({ preparedAuthorEntries: true });
+preparedAuthorTest.use({ preparedAuthorEntries: true });
 
 const rootPath = "/api/v1/persistence/projects";
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
@@ -165,7 +170,7 @@ test("appearance modes follow system preference initially and persist explicit l
   }
 });
 
-test("revision history keeps immutable content through a foreground refresh", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("revision history keeps immutable content through a foreground refresh", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const text = "Saved immutable version.";
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
@@ -192,7 +197,7 @@ test("same-origin stale tabs cannot replace an equal-generation journal draft", 
   } finally { gate.release(); await second.close(); }
 });
 
-test("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   const blockedUnload = await page.evaluate(() => {
@@ -481,7 +486,7 @@ test("undo cleanup cannot remove a higher-generation draft written by another ta
   await second.close();
 });
 
-test("undo during an in-flight save preserves the request and saves the restored text afterward", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("undo during an in-flight save preserves the request and saves the restored text afterward", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   const savedMarkdown = f.one.revision.markdown;
   const gate = await holdSaves(page, f);
@@ -497,7 +502,7 @@ test("undo during an in-flight save preserves the request and saves the restored
   } finally { gate.release(); }
 });
 
-test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
     await replaceEditor(page, "Scene One protected draft.");
@@ -522,7 +527,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
   } finally { gate.release(); }
 });
 
-test("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
     expect((await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
@@ -635,7 +640,7 @@ test("a PostgreSQL update during author approval keeps the conflicting editor dr
   } finally { gate.release(); }
 });
 
-test("IndexedDB quota failures remain visible and block PostgreSQL writes", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("IndexedDB quota failures remain visible and block PostgreSQL writes", async ({ page, authorizeAuthor }) => {
   await page.addInitScript(() => {
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
@@ -700,7 +705,7 @@ async function delayImages(page: Page): Promise<void> {
   });
 }
 
-test("a pending scratch image read is flushed to its captured document before navigation", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a pending scratch image read is flushed to its captured document before navigation", async ({ page, authorizeAuthor }) => {
   await delayImages(page); const f = await fixture(page, authorizeAuthor); await scratch(page);
   await memo(page).fill("Attachment belongs to Scene One."); await image(page).setInputFiles(png);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
@@ -709,7 +714,7 @@ test("a pending scratch image read is flushed to its captured document before na
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
 });
 
-test("saving a scratch note replays the same request after its committed response is lost", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("saving a scratch note replays the same request after its committed response is lost", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("Scratch text survives an ambiguous note save.");
@@ -783,7 +788,7 @@ test("saving a scratch note replays the same request after its committed respons
   expect(noteBodies.some((markdown) => markdown.includes("A newer scratch draft stays separate from the pending note."))).toBe(true);
 });
 
-test("a pending scratch note remains reconcilable after its editable draft is cleared", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a pending scratch note remains reconcilable after its editable draft is cleared", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("The pending note payload remains durable after editing the scratch.");
@@ -820,7 +825,7 @@ test("a pending scratch note remains reconcilable after its editable draft is cl
   expect(children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ")).toHaveLength(1);
 });
 
-test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("scratch still protects text and accepts a new image after an oversized attachment", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await image(page).setInputFiles(png);
@@ -993,7 +998,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   expect(await record()).toMatchObject(unreadable);
 });
 
-test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("resuming an older scratch generation cannot replace newer unprotected input", async ({ page, authorizeAuthor }) => {
   await fixture(page, authorizeAuthor); await scratch(page); await memo(page).fill("Protected older scratch generation.");
   await editor(page).click(); await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected older scratch generation."))).toBe(true);
   await memo(page).fill("Newer scratch input still inside debounce.");
@@ -1002,7 +1007,7 @@ test("resuming an older scratch generation cannot replace newer unprotected inpu
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Newer scratch input still inside debounce."))).toBe(true);
 });
 
-test("failed scratch protection refuses recovery selection and keeps the current error visible", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("failed scratch protection refuses recovery selection and keeps the current error visible", async ({ page, authorizeAuthor }) => {
   await fixture(page, authorizeAuthor); await scratch(page); await memo(page).fill("Older protected scratch."); await editor(page).click();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Older protected scratch."))).toBe(true);
   await page.evaluate(() => {
@@ -1015,7 +1020,7 @@ test("failed scratch protection refuses recovery selection and keeps the current
   expect((await scratchRecords(page)).some((r) => r.text.includes("Older protected scratch."))).toBe(true);
 });
 
-test("resuming an older scratch entry waits for its pending image read and keeps the latest draft", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("resuming an older scratch entry waits for its pending image read and keeps the latest draft", async ({ page, authorizeAuthor }) => {
   await delayImages(page); await fixture(page, authorizeAuthor); await scratch(page);
   await memo(page).fill("Protected scratch before attachment."); await editor(page).click();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected scratch before attachment."))).toBe(true);
@@ -1025,7 +1030,7 @@ test("resuming an older scratch entry waits for its pending image read and keeps
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch with attachment.") && r.text.includes("data:image/png;base64"))).toBe(true);
 });
 
-test("scratch text and image input survive while navigation waits for protection", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("scratch text and image input survive while navigation waits for protection", async ({ page, authorizeAuthor }) => {
   await delayImages(page);
   await page.addInitScript(() => {
     type Gate = { armed: boolean; started: boolean; target?: IDBTransaction; release?: () => void };
@@ -1127,7 +1132,7 @@ test("a root-only public share renders selectable scenes without an owner sessio
   expect(ownerSessionRequests).toEqual([]);
 });
 
-test("late document activation cannot replace explicit scene navigation", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("late document activation cannot replace explicit scene navigation", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
   try {
@@ -1142,7 +1147,7 @@ test("late document activation cannot replace explicit scene navigation", async 
   } finally { release(); }
 });
 
-test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigation during draft flush", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigation during draft flush", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   const draft = "Pending Scene One draft before explicit navigation.";
   try {
@@ -1157,7 +1162,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
   } finally { gate.release(); }
 });
 
-test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   for (const name of ["online", "focus", "visibilitychange"]) await page.evaluate((event) => window.dispatchEvent(new Event(event)), name);
@@ -1181,7 +1186,7 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   expect(authorizationRequests, "PostgreSQL recovery reuses the signed-in OAuth session").toBe(0);
 });
 
-test("a project containing only root scenes can export its full text from the publishing panel", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a project containing only root scenes can export its full text from the publishing panel", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
   const { one, two } = await fixture(page, authorizeAuthor);
   const menu = page.locator(".st-workspace-panel-menu");

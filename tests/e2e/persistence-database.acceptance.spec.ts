@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect, test, type AuthorApiFetch } from "./author-oauth-fixture";
+import { preparedAuthorTest } from "./prepared-author-session";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
-test("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page, authorizeAuthor }) => {
+// Build the extra entry once for this spec, not once per test or worker transition.
+test.use({ preparedAuthorEntries: true });
+preparedAuthorTest.use({ preparedAuthorEntries: true });
+
+preparedAuthorTest("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page, authorizeAuthor }) => {
   const original = "Before.";
   const appendedText = " After local quota failure.";
   const draft = original + appendedText;
@@ -46,7 +51,7 @@ test("browser quota failure blocks remote writes until explicit draft re-protect
 
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
-test("mixed line endings preserve source offsets for edits and selected evidence", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("mixed line endings preserve source offsets for edits and selected evidence", async ({ page, authorizeAuthor }) => {
   const original = "First.\r\nSecond.\nThird.\rLast.";
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Source offsets ${crypto.randomUUID()}`, original);
   const path = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
@@ -74,8 +79,8 @@ test("mixed line endings preserve source offsets for edits and selected evidence
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("Last.A");
 });
 
-test("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page, authorizeAuthor }) => {
-  // Each document navigation starts a fresh OAuth transaction because the access token lives in page memory.
+preparedAuthorTest("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page, authorizeAuthor }) => {
+  // Each document navigation creates a fresh runtime; restore the real test-scoped token through the isolated entry.
   test.setTimeout(180_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
@@ -129,7 +134,7 @@ test("an unavailable explicit scene route stays non-editable until the author se
   }
 });
 
-test("an anchor read failure leaves the confirmed manuscript readable and can be retried", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("an anchor read failure leaves the confirmed manuscript readable and can be retried", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
     const fixture = await createOAuthWritingFixture(authorizeAuthor, page, mode, `Anchor read recovery ${mode} ${crypto.randomUUID()}`, "Readable manuscript while evidence is unavailable.");
@@ -154,7 +159,7 @@ test("an anchor read failure leaves the confirmed manuscript readable and can be
   }
 });
 
-test("the manuscript opens and remains editable while its anchor read is pending", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("the manuscript opens and remains editable while its anchor read is pending", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
     const original = "Readable while anchors are pending.";
@@ -194,7 +199,7 @@ test("the manuscript opens and remains editable while its anchor read is pending
   }
 });
 
-test("a pending anchor read from the previous scene cannot replace the selected manuscript", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a pending anchor read from the previous scene cannot replace the selected manuscript", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Stale anchor read ${crypto.randomUUID()}`, "First scene manuscript.");
   let releaseAnchors!: () => void;
@@ -401,7 +406,7 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
 });
 
-test("a committed delete response for B preserves edited C, its selection, route, and recovery status", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a committed delete response for B preserves edited C, its selection, route, and recovery status", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const a = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete response A ${crypto.randomUUID()}`, "A manuscript.");
   const c = await createAdditionalScene(a.author.fetch, a.project.id, "Scene C", "c", "C manuscript.");
@@ -456,7 +461,7 @@ test("a committed delete response for B preserves edited C, its selection, route
   }
 });
 
-test("a delayed import keeps unprotected intervening input available and lists the committed work", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a delayed import keeps unprotected intervening input available and lists the committed work", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Import quota ${crypto.randomUUID()}`, "Source manuscript.");
   const archiveResponse = await fixture.author.fetch(`/api/v1/persistence/projects/${fixture.project.id}/archive`);
@@ -514,7 +519,7 @@ test("a delayed import keeps unprotected intervening input available and lists t
   }
 });
 
-test("a delayed import protects intervening input before the normal transition", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a delayed import protects intervening input before the normal transition", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Import protected ${crypto.randomUUID()}`, "Source manuscript.");
   const archiveResponse = await fixture.author.fetch(`/api/v1/persistence/projects/${fixture.project.id}/archive`);
@@ -544,7 +549,7 @@ test("a delayed import protects intervening input before the normal transition",
   }
 });
 
-test("deleting the still-selected document safely selects the first remaining scene", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("deleting the still-selected document safely selects the first remaining scene", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const a = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete transition A ${crypto.randomUUID()}`, "A manuscript.");
   await openManuscriptScene(page, a.second);
@@ -568,7 +573,7 @@ test("deleting the still-selected document safely selects the first remaining sc
   }
 });
 
-test("input added to B while deletion is pending stays visible when IndexedDB protection fails", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("input added to B while deletion is pending stays visible when IndexedDB protection fails", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete pending input ${crypto.randomUUID()}`, "A manuscript.");
   await openManuscriptScene(page, fixture.second);
@@ -603,7 +608,7 @@ test("input added to B while deletion is pending stays visible when IndexedDB pr
   }
 });
 
-test("input added to B while deletion is pending is protected before the safe transition", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("input added to B while deletion is pending is protected before the safe transition", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete protected pending input ${crypto.randomUUID()}`, "A manuscript.");
   await openManuscriptScene(page, fixture.second);
@@ -638,7 +643,7 @@ test("input added to B while deletion is pending is protected before the safe tr
   }
 });
 
-test("a failed outline refresh after committed deletion keeps the selected editor and route", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a failed outline refresh after committed deletion keeps the selected editor and route", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete outline failure ${crypto.randomUUID()}`, "A manuscript.");
   await openManuscriptScene(page, fixture.second);
@@ -673,7 +678,7 @@ test("a failed outline refresh after committed deletion keeps the selected edito
   }
 });
 
-test("an unknown delete response after PostgreSQL commit does not clear the selected manuscript", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("an unknown delete response after PostgreSQL commit does not clear the selected manuscript", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Delete response unknown ${crypto.randomUUID()}`, "A manuscript.");
   await openManuscriptScene(page, fixture.second);
@@ -696,7 +701,7 @@ test("an unknown delete response after PostgreSQL commit does not clear the sele
   }
 });
 
-test("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page, authorizeAuthor }) => {
   const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const error = "Knowledge candidate temporarily unavailable";
   await page.route(url => url.pathname.startsWith(`/api/v1/persistence/projects/${project.id}/nodes/`), async route => {
@@ -737,7 +742,7 @@ test("a Knowledge save error stays with the visible form across Desktop layouts 
   await submit();
 });
 
-test("Knowledge candidate retries reconcile uncertain creates without blocking deliberate same-name candidates", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Knowledge candidate retries reconcile uncertain creates without blocking deliberate same-name candidates", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Knowledge create retry ${crypto.randomUUID()}`);
   const persistence = createPostgresPersistence(databaseUrl!);
@@ -860,7 +865,7 @@ test("Knowledge candidate retries reconcile uncertain creates without blocking d
   }
 });
 
-test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page, authorizeAuthor }) => {
   test.setTimeout(120_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const author = await authorizeAuthor("desktop");
@@ -923,7 +928,7 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
 
 });
 
-test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Outline ${crypto.randomUUID()}`);
   const headers = { Origin: new URL(page.url()).origin };
@@ -967,7 +972,7 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
-test("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Headless DnD ${crypto.randomUUID()}`);
   const outline = page.locator('[data-workspace-panel="outline"]');
@@ -983,7 +988,7 @@ test("Headless Tree reparent drag moves an unselected document through the canon
   await expect(target).toHaveAttribute("aria-current", "page");
 });
 
-test("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Headless rename ${crypto.randomUUID()}`);
   const outline = page.locator('[data-workspace-panel="outline"]');
@@ -1219,7 +1224,7 @@ for (const { mode, width, forceAppendFallback = false } of [
   { mode: "mobile", width: 390, forceAppendFallback: true },
   { mode: "desktop", width: 1280, forceAppendFallback: true },
 ] as const) {
-  test(`CodeMirror undo, redo, selection, and scroll survive a guarded ${mode} ${width}px panel switch during save (${forceAppendFallback ? "append fallback" : "moveBefore when supported"})`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`CodeMirror undo, redo, selection, and scroll survive a guarded ${mode} ${width}px panel switch during save (${forceAppendFallback ? "append fallback" : "moveBefore when supported"})`, async ({ page, authorizeAuthor }) => {
     expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
     const usesMoveBefore = await installMoveBeforeProbe(page, forceAppendFallback);
     await page.setViewportSize({ width, height: mode === "mobile" ? 844 : 900 });
@@ -1386,7 +1391,7 @@ async function openResearchInspector(page: import("@playwright/test").Page) {
   }
 }
 
-test("replays ambiguous project and document creates with retained client intent", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("replays ambiguous project and document creates with retained client intent", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const projectTitle = `Replay project ${crypto.randomUUID()}`;
   const documentTitle = `Replay scene ${crypto.randomUUID()}`;
@@ -1571,7 +1576,7 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
 });
 
 for (const shell of ["desktop", "mobile"] as const) {
-  test(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page, authorizeAuthor }) => {
     await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
     let showProject = false;
     await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
@@ -1794,7 +1799,7 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
 });
 
 for (const shell of ["desktop", "mobile"] as const) {
-  test(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page, authorizeAuthor }) => {
+  preparedAuthorTest(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page, authorizeAuthor }) => {
     if (shell === "mobile") await page.setViewportSize({ width: 390, height: 844 });
     const author = await authorizeAuthor(shell);
     const origin = new URL(page.url()).origin;
@@ -1852,7 +1857,7 @@ for (const shell of ["desktop", "mobile"] as const) {
   });
 }
 
-test("revision comparison separates distant manuscript edits", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("revision comparison separates distant manuscript edits", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
@@ -1892,7 +1897,7 @@ test("revision comparison separates distant manuscript edits", async ({ page, au
   }
 });
 
-test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({ page, authorizeAuthor }) => {
+preparedAuthorTest("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({ page, authorizeAuthor }) => {
   test.setTimeout(90000);
   const author = await authorizeAuthor("desktop");
   const title = `Long outline ${crypto.randomUUID()}`;
