@@ -25,6 +25,35 @@ final class AuthoringFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["サインインしていません"].exists)
     }
 
+    func testNativeCopyAndPasteAcrossFixtureReopen() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--codexia-test-clipboard"]
+        openFixture(app)
+
+        let editor = app.textViews["原稿本文"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        let before = editor.value as? String ?? ""
+        XCTAssertFalse(before.isEmpty)
+        editor.tap()
+        app.buttons["fixture.clipboard.copy"].tap()
+
+        app.buttons["戻る"].tap()
+        let scene = app.buttons["CTRL-OUT-01.B.fixture.10000"]
+        XCTAssertTrue(scene.waitForExistence(timeout: 10))
+        scene.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertEqual(editor.value as? String, before)
+
+        editor.tap()
+        app.buttons["fixture.clipboard.paste"].tap()
+        let pasted = NSPredicate { _, _ in
+            guard let after = editor.value as? String else { return false }
+            return after.utf16.count == before.utf16.count * 2 && after.contains(before)
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: pasted, object: editor)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed)
+    }
+
     func testUnprotectedTextSurvivesBackGuardAndHomeRoundTrip() {
         let app = XCUIApplication()
         openFixture(app)

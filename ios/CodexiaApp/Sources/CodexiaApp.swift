@@ -1163,9 +1163,31 @@ private final class FixtureEditingSession: ObservableObject {
 private struct FixtureEditorDestination: View {
     @ObservedObject var session: FixtureEditingSession
     let onLeave: () -> Void
+    private let showsClipboardControls = ProcessInfo.processInfo.arguments.contains("--codexia-test-clipboard")
 
     var body: some View {
         AuthoringView(state: $session.state, onLeave: onLeave)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if showsClipboardControls {
+                    HStack {
+                        Button("選択してコピー") {
+                            let app = UIApplication.shared
+                            app.sendAction(#selector(UIResponderStandardEditActions.selectAll(_:)),
+                                           to: nil, from: nil, for: nil)
+                            app.sendAction(#selector(UIResponderStandardEditActions.copy(_:)),
+                                           to: nil, from: nil, for: nil)
+                        }
+                        .accessibilityIdentifier("fixture.clipboard.copy")
+                        Button("貼り付け") {
+                            UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.paste(_:)),
+                                                            to: nil, from: nil, for: nil)
+                        }
+                        .accessibilityIdentifier("fixture.clipboard.paste")
+                    }
+                    .padding()
+                    .background(.bar)
+                }
+            }
     }
 }
 #endif
