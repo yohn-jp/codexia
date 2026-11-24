@@ -138,7 +138,7 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission);
   const { binding, state } = observation;
   const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
-    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'ambiguous-transition'];
+    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'ambiguous-transition', 'recovery-plan-required'];
   requireCondition(Array.isArray(evidenceBlockers) && evidenceBlockers.every(reason => knownBlockers.includes(reason)) &&
     new Set(evidenceBlockers).size === evidenceBlockers.length, 'Invalid external evidence blockers');
   const blockers = [...evidenceBlockers].sort();
@@ -159,7 +159,9 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   if (transition?.dataConversion && !changeAxes.some(key => ['sql-ledger', 'persistence-format', 'auth-mode'].includes(key))) {
     blockers.push('unexpected-data-conversion');
   }
-  if (['R6', 'R7', 'R3', 'R2'].includes(candidateRoute) && !binding.backupSha256) blockers.push('missing-preservation-evidence');
+  const requiresPreservation = ['R6', 'R3', 'R2'].includes(candidateRoute) ||
+    (candidateRoute === 'R7' && (changeAxes.includes('backend') || requiresTransition));
+  if (requiresPreservation && !binding.backupSha256) blockers.push('missing-preservation-evidence');
   if (['R1', 'R2', 'R3', 'R6', 'R7'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
@@ -173,7 +175,7 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
     noOp: route === 'R8' && changeAxes.length === 0,
     authorization: 'pending',
     requiredAcceptance: ['identity', 'health', 'access-boundary', 'single-writer', 'data-and-auth'],
-    requiresTransition };
+    requiresTransition, requiresPreservation };
   return { plan, planSha256: digestEvidence(plan) };
 }
 

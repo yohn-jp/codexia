@@ -73,6 +73,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     state.D = stateDatabase(host.database, targetIdentity, intent);
     state.A = host.database?.authState ?? 'unknown';
     state.T = host.transaction ? (['converting', 'recovering', 'pending'].includes(host.transaction.phase) ? 'recover' : 'resume') : 'none';
+    if (state.T !== 'none') blockers.push('recovery-plan-required');
     const installed = host.backend;
     if (installed?.state === 'running') {
       const writer = installed.writer;

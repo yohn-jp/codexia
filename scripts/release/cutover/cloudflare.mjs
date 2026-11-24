@@ -336,8 +336,13 @@ export function createCloudflareCutover({
     // Positive absence requires an authenticated inventory, not a 404, failed
     // identity probe, or denied token. Strict cutover calls retain their
     // existing requirement for a deployed Worker.
-    const scriptPresent = !lifecycle || (await list('Worker script inventory', `${accountPath}/workers/scripts`))
-      .some(item => item.id === worker);
+    let scriptPresent = true;
+    if (lifecycle) {
+      const scripts = await list('Worker script inventory', `${accountPath}/workers/scripts`);
+      assert.ok(scripts.every(item => typeof item?.id === 'string' && item.id.length > 0) &&
+        new Set(scripts.map(item => item.id)).size === scripts.length, 'Worker script inventory is ambiguous');
+      scriptPresent = scripts.some(item => item.id === worker);
+    }
     const [dns, workerRoutes, domains, applications, tunnel, deployment, fence] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
       result('Worker routes', `${zonePath}/workers/routes`),
@@ -454,7 +459,7 @@ export function createCloudflareCutover({
       } catch { /* no positive identity evidence */ }
     }
     let backend = null;
-    if (backendExpected) {
+    {
       try {
         const value = await readLiveJson(IDENTITY_PROBE_PATHS.backend, liveOrigin, credentials, fetchImpl);
         assert.ok(value?.name === 'codexia' && value.profile === 'full' &&
@@ -466,6 +471,7 @@ export function createCloudflareCutover({
           apiEpoch: value.apiEpoch, standaloneOAuth };
       } catch { /* no positive identity evidence */ }
     }
+    if (!backendExpected && backend !== null) throw new Error('Public backend contradicts observed host absence');
     const after = await observeIngress({ lifecycle: true });
     assert.deepEqual({ deployment: ingress.deployment, fence: ingress.fence, ingressDigest: ingress.ingressDigest,
       scriptPresent: ingress.scriptPresent }, { deployment: after.deployment, fence: after.fence,

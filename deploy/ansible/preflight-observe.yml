@@ -37,6 +37,7 @@
         lifecycle_database_verified: false
         lifecycle_tunnel_verified: false
         lifecycle_writer: null
+        lifecycle_volume_layout: null
     - name: Verify the installed runtime using the existing read-only checks
       when:
         - inspect_account.rc == 0
@@ -67,6 +68,32 @@
           rescue:
             - ansible.builtin.set_fact:
                 lifecycle_base_drift: true
+        - name: Verify the existing PostgreSQL volume layout without initializing it
+          when: inspect_volumes.results[0].rc == 0
+          block:
+            - name: Read the canonical volume mountpoint
+              ansible.builtin.command:
+                argv: [podman, volume, inspect, --format, "{% raw %}{{.Mountpoint}}{% endraw %}", codexia-postgres]
+              register: lifecycle_volume_mount
+              changed_when: false
+              no_log: true
+            - name: Reuse the canonical PostgreSQL volume observer
+              ansible.builtin.command:
+                argv:
+                  - podman
+                  - unshare
+                  - python3
+                  - -c
+                  - "{{ lookup('ansible.builtin.file', playbook_dir + '/check_postgres_volume.py', rstrip=false) }}"
+                  - "{{ lifecycle_volume_mount.stdout }}"
+              register: lifecycle_volume_check
+              changed_when: false
+              no_log: true
+            - ansible.builtin.set_fact:
+                lifecycle_volume_layout: "{{ (lifecycle_volume_check.stdout | from_json).state }}"
+          rescue:
+            - ansible.builtin.set_fact:
+                lifecycle_base_drift: true
         - name: Reuse the canonical installed writer and owner observation
           when: inspect_containers.results[1].rc == 0
           block:
@@ -90,7 +117,8 @@
       environment: "{{ (runtime_environment if ansible_facts.user_id == 'codexia' else {}) | combine({
         'CODEXIA_INSPECT_FACTS': {'accountPresent': inspect_account.rc == 0,
           'storagePresent': (inspect_files.results[0].stat.exists | default(false)) if inspect_account.rc == 0 else false,
-          'baseDrift': lifecycle_base_drift,
+          'baseDrift': lifecycle_base_drift, 'volumeLayout': lifecycle_volume_layout,
+          'quadlets': codexia_preflight_quadlets,
           'baseEvidence': {'database': lifecycle_database_verified, 'tunnel': lifecycle_tunnel_verified}} | to_json,
         'CODEXIA_WRITER_OBSERVATION': lifecycle_writer | to_json,
         'CODEXIA_AUTH_SCHEMA_QUERY': codexia_preflight_auth_schema_query

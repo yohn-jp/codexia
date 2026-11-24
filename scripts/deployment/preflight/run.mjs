@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,8 +71,14 @@ async function hostObservation() {
       return { rows: [] };
     }});
     assert.ok(query);
+    const quadlets = {};
+    for (const name of ['codexia.network','codexia-data.network','codexia-postgres.volume',
+      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-tunnel.container']) {
+      quadlets[name] = createHash('sha256').update(await readFile(new URL('../../../deploy/quadlet/' + name, import.meta.url))).digest('hex');
+    }
     await writeFile(vars, JSON.stringify({
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
+      codexia_preflight_quadlets: quadlets,
     }), { mode: 0o600, flag: 'wx' });
     await run('ansible-playbook', ['-i', join(env.RUNNER_TEMP, 'codexia-preflight-inventory.yml'),
       'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
@@ -136,8 +143,12 @@ async function planObservation() {
       }
     }
     stage = 'edge-observation';
+    const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
+    assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId','fenceRuleId',
+      'acceptance','authorPolicyId','ciPolicyId','tunnelTeamName','publicProtocolEnabled'].includes(key)),
+    'Invalid protected Cloudflare target');
     const edgeReader = createCloudflareCutover({
-      ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET),
+      ...config,
       origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
       readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
     });

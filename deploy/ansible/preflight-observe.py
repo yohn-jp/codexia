@@ -56,7 +56,7 @@ def sql(database, query):
     return command(["podman", "exec", "-i", "codexia-db", "sh", "-ec",
                     'export PGPASSWORD="$(cat /run/secrets/admin-password)"; '
                     'export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000"; '
-                    'exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d "$1"',
+                    'exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d "$1"',
                     "sh", database], stdin=query + "\n")[1]
 
 
@@ -102,12 +102,12 @@ def observe_transaction(state_dir):
     return journals[0] if journals else None
 
 
-def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query):
+def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout):
     if not volumes["codexia-postgres"]:
         require(not containers["codexia-db"])
         return {"state": "absent", "authState": "absent"}
     if not containers["codexia-db"]:
-        return {"state": "unknown", "authState": "unknown"}
+        return {"state": "pristine", "authState": "absent"} if volume_layout == "empty" else {"state": "unknown", "authState": "unknown"}
     if command(["podman", "inspect", "--format", "{{.State.Running}}", "codexia-db"])[1] != "true":
         return {"state": "unknown", "authState": "unknown"}
     cluster = json_sql("postgres", """SELECT json_build_object(
@@ -121,12 +121,12 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     require(re.fullmatch(r"[1-9][0-9]{0,19}", cluster["clusterId"]))
     if not cluster["appExists"]:
         return {"state": "missing", "authState": "unknown", "clusterId": cluster["clusterId"]}
-    require(cluster["rolesValid"])
+    require(cluster["rolesValid"] and volume_layout == "ready")
     db = json_sql("codexia", """SELECT json_build_object(
         'ledgerExists', to_regclass('public.codexia_schema_migrations') IS NOT NULL,
         'authExists', EXISTS (SELECT FROM pg_namespace WHERE nspname='codexia_auth'),
         'appRelations', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-          WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f','S'))) ;""")
+          WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_toast' AND c.relkind IN ('r','p','v','m','f','S'))) ;""")
     if not db["ledgerExists"]:
         require(not db["authExists"] and db["appRelations"] == 0)
         return {"state": "pristine", "authState": "absent", "clusterId": cluster["clusterId"]}
@@ -239,15 +239,42 @@ def observe():
         containers = existence("container", ("codexia-db", "codexia-api", "codexia-tunnel"))
         if not lock_handle:
             require(not containers["codexia-api"] and not residue and transaction is None)
-        drift = facts["baseDrift"]
+        drift = False
+        unit_hashes = {}
+        for name, expected in facts["quadlets"].items():
+            path = units / name
+            if metadata(path) is not None:
+                actual = hashlib.sha256(private_text(path).encode()).hexdigest()
+                unit_hashes[name] = actual
+                drift |= actual != expected
+        network_hashes = {}
+        volume_hashes = {}
+        secret_hashes = {}
+        container_hashes = {}
         for name, exists in networks.items():
             if exists:
                 detail = command(["podman", "network", "inspect", "--format",
                                   "{{.Name}}|{{.Driver}}|{{.Internal}}", name])[1]
                 drift |= detail != name + "|bridge|" + ("true" if name == "codexia-data" else "false")
+                network_hashes[name] = digest(command(["podman", "network", "inspect", "--format", "{{.ID}}", name])[1])
+        for name, exists in volumes.items():
+            if exists:
+                detail = command(["podman", "volume", "inspect", "--format", "{{.Name}}|{{.Mountpoint}}", name])[1]
+                volume_hashes[name] = digest(detail)
+                drift |= not detail.startswith(name + "|/")
+        for name in (*secrets, "codexia-auth-database-url", "codexia-auth-secret",
+                     "codexia-oauth-introspection-client-secret", "codexia-oidc-client-secret"):
+            if command(["podman", "secret", "exists", name], (0, 1))[0] == 0:
+                secret_hashes[name] = digest(command(["podman", "secret", "inspect", "--format", "{{.ID}}", name])[1])
+        for name, exists in containers.items():
+            if exists:
+                container_hashes[name] = digest(command(["podman", "inspect", "--format",
+                    "{{.Id}} {{.State.Running}} {{.Image}}", name])[1])
         topology = {"accountPresent": True, "storagePresent": True, "uid": account.pw_uid,
                     "gid": account.pw_gid, "networks": networks, "volumes": volumes,
-                    "secrets": secrets, "containers": containers, "baseEvidence": facts["baseEvidence"]}
+                    "secrets": secrets, "containers": containers, "baseEvidence": facts["baseEvidence"],
+                    "unitHashes": unit_hashes, "networkHashes": network_hashes, "volumeHashes": volume_hashes,
+                    "secretHashes": secret_hashes, "containerHashes": container_hashes}
         # Reuse the already validated full-writer observation rather than
         # inferring authentication or a release identity from a container name.
         full = writer.get("writer") if writer and writer.get("hostId") == host_id else None
@@ -265,9 +292,9 @@ def observe():
                         and metadata(setup_file) is not None and unit == private_text(setup_file)):
                     backend = {"state": "setup", "containerSha256": digest(info)}
                 else:
-                    backend = {"state": "fault"}
+                    backend = {"state": "unknown"}
             else:
-                backend = {"state": "fault"}
+                backend = {"state": "fault"} if info[1] == "false" else {"state": "unknown"}
         elif residue:
             backend = {"state": "fault"}
         else:
@@ -276,11 +303,13 @@ def observe():
             if set(unit_state.splitlines()) == {"LoadState=not-found", "ActiveState=inactive"}:
                 backend = {"state": "absent"}
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
-                                    os.environ["CODEXIA_AUTH_SCHEMA_QUERY"])
+                                    os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"])
         if full:
             require(database.get("clusterId") == writer["database"]["clusterId"])
-        h = "drift" if drift else "ready" if all(networks.values()) and all(volumes.values()) \
-            and all(secrets.values()) and containers["codexia-db"] and facts["baseEvidence"]["database"] else "partial"
+        base_unknown = facts["baseDrift"] or (containers["codexia-tunnel"] and not facts["baseEvidence"]["tunnel"])
+        h = "drift" if drift else "unknown" if base_unknown else "ready" if all(networks.values()) and all(volumes.values()) \
+            and all(secrets.values()) and containers["codexia-db"] and facts["baseEvidence"]["database"] \
+            and set(unit_hashes) == set(facts["quadlets"]) else "partial"
         return {**base, "H": h, "database": database, "backend": backend,
                 "transaction": transaction, "topology": topology}
     finally:

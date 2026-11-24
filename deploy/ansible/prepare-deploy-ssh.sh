@@ -55,4 +55,5 @@ Host codexia-target
     UserKnownHostsFile "$pins"
     GlobalKnownHostsFile /dev/null
 CONFIG
-printf 'host=%s\nuser=%s\n' "$host" "$user" >> "${GITHUB_OUTPUT:?}"
+printf 'host=%s\n' "$host" >> "${GITHUB_OUTPUT:?}"
+if [[ "$user" != codexia ]]; then printf 'user=%s\n' "$user" >> "$GITHUB_OUTPUT"; fi

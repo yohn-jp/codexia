@@ -89,7 +89,7 @@ jobs:
           ping: ${{ steps.runtime.outputs.host || steps.bootstrap.outputs.host }}
       - name: Prepare the pinned read-only Ansible inventory
         env:
-          SSH_USER: ${{ steps.runtime.outputs.user || steps.bootstrap.outputs.user }}
+          SSH_USER: ${{ inputs.management == 'runtime' && 'codexia' || steps.bootstrap.outputs.user }}
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
