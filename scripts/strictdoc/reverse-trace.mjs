@@ -1,0 +1,237 @@
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readRegularFile } from '../shared/read-regular-file.mjs';
+import { discoverLiteralDispatcherOperations } from '../../packages/http-contract/src/source-dispatcher-inventory.mjs';
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
+
+async function walkFiles(root, relative) {
+  const absolute = path.join(root, relative);
+  let entries;
+  try { entries = await readdir(absolute, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  const files = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const file = path.join(relative, entry.name);
+    if (entry.isDirectory()) files.push(...await walkFiles(root, file));
+    else if (entry.isFile()) files.push(file);
+  }
+  return files;
+}
+
+function operationSurfaces(admitted, file) {
+  const surfaces = [];
+  const entries = [...(admitted.current ?? []).map((id) => [id, 'current']), ...(admitted.target ?? []).map((id) => [id, 'target'])];
+  for (const [id, classification] of entries) {
+    surfaces.push({ kind: 'httpOperation', id, classification, source: { path: file }, provenance: 'Operation from the admitted HTTP route inventory, checked against the TypeSpec/OpenAPI contract by the existing AST route test.' });
+  }
+  for (const pathname of admitted.betterAuthExternal?.metadataPaths ?? []) {
+    surfaces.push({ kind: 'httpExternalOperation', id: `GET ${pathname}`, classification: 'approved-external-exception', source: { path: 'packages/http-contract/test/fixtures/admitted-routes.json' }, provenance: 'Explicit Better Auth external metadata route exception recorded in the existing HTTP route inventory.' });
+  }
+  return surfaces;
+}
+
+function literalMcpTools(source, file) {
+  const surfaces = [];
+  const regex = /\bserver\.tool\s*\(\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/gu;
+  for (const match of source.matchAll(regex)) {
+    const line = source.slice(0, match.index).split('\n').length;
+    surfaces.push({ kind: 'mcpTool', id: match[2], source: { path: file, line }, provenance: 'Literal server.tool registration in MCP source; dynamic registrations are outside this scan.' });
+  }
+  if (/\bserver\.tool\s*\(\s*(?!["'])/u.test(source)) {
+    surfaces.push({ kind: 'mcpRegistration', id: `dynamic:${file}`, source: { path: file }, provenance: 'A non-literal tool registration was observed; name and effect require runtime/catalog resolution.' });
+  }
+  return surfaces;
+}
+
+function sqlObjects(source, file) {
+  const out = [];
+  const pattern = /^\s*(?:CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:UNIQUE\s+)?(?:TABLE|FUNCTION|TRIGGER|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+TABLE\s+\S+\s+ADD\s+CONSTRAINT\s+)([A-Za-z_][A-Za-z0-9_$]*)/gimu;
+  for (const match of source.matchAll(pattern)) out.push({ kind: 'databaseObject', id: match[1], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Named DDL declaration in a committed migration; not a live pg_catalog observation.' });
+  return out;
+}
+
+function controlSurfaces(source, file) {
+  const surfaces = [];
+  for (const match of source.matchAll(/\b(?:CTRL-[A-Z0-9]+-[A-Z0-9-]+|[A-Z]{2,}-\d{2}\.[A-Z])\b/gu)) {
+    surfaces.push({ kind: 'uiControl', id: match[0], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Control ID in the normative UI control catalog or state atlas; implementation binding remains separately evidenced.' });
+  }
+  return surfaces;
+}
+
+function implementationControlReferences(source, file) {
+  return [...source.matchAll(/\b(?:CTRL-[A-Z0-9]+-[A-Z0-9-]+|[A-Z]{2,}-\d{2}\.[A-Z])\b/gu)]
+    .map((match) => ({ kind: 'uiControlBindingReference', id: match[0], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Literal control identifier reference in application source; this is a code link only, not proof of rendered behavior or acceptance.' }));
+}
+
+/** Discover source-declared surfaces from domain authorities. The output is an inventory, never a certification. */
+export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, boundedDiscovery } = {}) {
+  const root = path.resolve(repositoryRoot);
+  const surfaces = [];
+  const limitations = [];
+  const openapiPath = 'packages/http-contract/openapi/codexia.openapi.yaml';
+  try {
+    const admitted = JSON.parse(await readRegularFile(path.join(root, 'packages/http-contract/test/fixtures/admitted-routes.json')));
+    await readRegularFile(path.join(root, openapiPath));
+    surfaces.push(...operationSurfaces(admitted, openapiPath));
+  } catch {
+    limitations.push({ area: 'http', reason: 'Generated OpenAPI/admitted route inventory is missing; no contract operations inferred.' });
+  }
+
+  for (const file of ['packages/api/src/server.ts', 'packages/api/src/persistence-routes.ts']) {
+    try {
+      const source = await readRegularFile(path.join(root, file));
+      surfaces.push(...discoverLiteralDispatcherOperations(source, file)
+        .map((id) => {
+          const delegatedMetadata = id === 'GET /.well-known/oauth-authorization-server/api/auth' || id === 'GET /.well-known/openid-configuration/api/auth';
+          return { kind: 'httpRuntimeRoute', id, classification: delegatedMetadata ? 'delegated-better-auth-metadata' : undefined, source: { path: file }, provenance: delegatedMetadata ? 'Explicit Better Auth external metadata path in the admitted HTTP fixture; the auth library owns its response.' : 'Literal method/path dispatch discovered by the shared AST helper; dynamic route families and other modules are not discovered.' };
+        }));
+    } catch {
+      limitations.push({ area: 'http', reason: `Runtime dispatcher source unavailable: ${file}` });
+    }
+  }
+  if (boundedDiscovery?.routes) {
+    for (const id of boundedDiscovery.routes) {
+      const deniedBoundary = id === 'ANY /api/auth/token';
+      const delegatedMetadata = id === 'GET /.well-known/oauth-authorization-server/api/auth' || id === 'GET /.well-known/openid-configuration/api/auth';
+      const classification = deniedBoundary ? 'explicitly-rejected-boundary' : delegatedMetadata ? 'delegated-better-auth-metadata' : 'bounded-source-discovery';
+      const reason = deniedBoundary ? 'Server explicitly rejects generic Better Auth token issuance at /api/auth/token.' : delegatedMetadata ? 'Route is listed under the admitted HTTP inventory Better Auth external metadata paths.' : 'Existing bounded StrictDoc source discovery; parser scope is partial and this is not a complete runtime route inventory.';
+      surfaces.push({ kind: 'httpBoundedRoute', id, classification, source: { path: 'scripts/strictdoc/surface-inventory.json' }, provenance: reason });
+    }
+    limitations.push({ area: 'http-bounded', reason: 'Existing bounded route scan includes static literal families only; other Fastify/module contributions, regex routes, and dynamic dispatch remain unexpanded.' });
+  }
+
+  const mcpFiles = (await walkFiles(root, 'modules/mcp/src')).filter((file) => /\.tsx?$/u.test(file));
+  for (const file of mcpFiles) surfaces.push(...literalMcpTools(await readRegularFile(path.join(root, file)), file));
+  if (mcpFiles.length === 0) limitations.push({ area: 'mcp', reason: 'MCP source tree is unavailable.' });
+  else limitations.push({ area: 'mcp-effect', reason: 'Per-tool effects and transport registration are not completely available as an authoritative static manifest; source tool names and existing effect tests do not certify the full action catalog.' });
+
+  const migrationFiles = (await walkFiles(root, 'packages/persistence-postgres/migrations')).filter((file) => file.endsWith('.sql'));
+  for (const file of migrationFiles) surfaces.push(...sqlObjects(await readRegularFile(path.join(root, file)), file));
+  if (migrationFiles.length === 0) limitations.push({ area: 'database', reason: 'Migration source directory is unavailable.' });
+  try {
+    const catalogPath = 'packages/persistence-postgres/tests/db-contract/catalog-contract.json';
+    const catalog = JSON.parse(await readRegularFile(path.join(root, catalogPath)));
+    for (const relation of catalog.relations ?? []) surfaces.push({ kind: 'databaseCatalogObject', id: `${relation.schema}.${relation.name}`, source: { path: catalogPath }, provenance: 'Committed observed catalog contract consumed by database contract checks; not a live database observation in this run.' });
+  } catch {
+    limitations.push({ area: 'database', reason: 'Committed db-contract catalog snapshot is unavailable.' });
+  }
+  limitations.push({ area: 'database-live', reason: 'No live pg_catalog observation is available in this source-only trace; committed catalog contract is a comparison baseline, not runtime proof.' });
+
+  for (const file of ['docs/design/SCREEN-CONTROL-CATALOG.md', 'docs/design/SCREEN-STATE-ATLAS.md']) {
+    try { surfaces.push(...controlSurfaces(await readRegularFile(path.join(root, file)), file)); }
+    catch { limitations.push({ area: 'ui', reason: `${file} is missing.` }); }
+  }
+  const appFiles = (await walkFiles(root, 'app/src')).filter((file) => /\.(tsx|jsx|ts|js)$/u.test(file) && !/\.test\./u.test(file));
+  for (const file of appFiles) surfaces.push(...implementationControlReferences(await readRegularFile(path.join(root, file)), file));
+  limitations.push({ area: 'ui-runtime', reason: 'A source control-ID reference does not prove rendered UI behavior; browser acceptance and explicit control bindings are required for runtime UI evidence.' });
+
+  const operationalFiles = [
+    'deploy/backup/backup.sh', 'deploy/backup/s3_transfer.py',
+    'deploy/ansible/deploy.yml', 'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/restore-drill.yml',
+    '.github/workflows/backend-release.yml', '.github/workflows/backend-deployment-handoff.yml', '.github/workflows/push-backup.yml',
+  ];
+  for (const file of operationalFiles) {
+    try {
+      await readRegularFile(path.join(root, file));
+      surfaces.push({ kind: file.startsWith('deploy/backup/') || file.includes('backup') || file.includes('restore') ? 'backupInterface' : 'deploymentInterface', id: file, source: { path: file }, provenance: 'Canonical protected deployment/backup entrypoint; file presence does not prove execution, host state, or restore evidence.' });
+    } catch {
+      limitations.push({ area: 'operations', reason: `Canonical operational entrypoint is missing: ${file}` });
+    }
+  }
+  limitations.push({ area: 'deployment-runtime', reason: 'Repository workflow/Ansible sources do not prove host execution, deployment state, OCI identity, or operator acceptance.' });
+  limitations.push({ area: 'backup-receipt', reason: 'S3 transfer sources do not provide a run-bound independent backup receipt or isolated restore result for this trace.' });
+  if (operationalFiles.length === 0) limitations.push({ area: 'operations', reason: 'Deployment and backup entrypoint directories are unavailable.' });
+
+  if (boundedDiscovery) {
+    for (const [bucket, kind] of [['tools', 'mcpRuntimeTool'], ['databaseObjects', 'databaseMigrationObject']]) {
+      for (const id of boundedDiscovery[bucket] ?? []) surfaces.push({ kind, id, source: { path: 'scripts/strictdoc/surface-inventory.json' }, provenance: 'Existing bounded source discovery from StrictDoc verifier; its declared scope remains partial.' });
+    }
+  }
+  const unique = new Map();
+  for (const surface of surfaces) unique.set(`${surface.kind}\0${surface.id}\0${surface.source.path}\0${surface.source.line ?? ''}`, surface);
+  return { surfaces: [...unique.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id) || a.source.path.localeCompare(b.source.path)), limitations };
+}
+
+function surfaceKindMatches(referenceKind, surfaceKind) {
+  if (referenceKind === 'httpOperation') return surfaceKind === 'httpOperation';
+  if (referenceKind === 'routeId') return ['httpOperation', 'httpRuntimeRoute', 'httpBoundedRoute'].includes(surfaceKind);
+  if (referenceKind === 'toolName') return ['mcpTool', 'mcpRuntimeTool'].includes(surfaceKind);
+  if (referenceKind === 'objectId') return ['databaseObject', 'databaseCatalogObject', 'databaseMigrationObject'].includes(surfaceKind);
+  if (referenceKind === 'controlId') return ['uiControl', 'uiControlBindingReference'].includes(surfaceKind);
+  if (referenceKind === 'surfaceId') return true;
+  if (referenceKind === 'identifier') return true;
+  return false;
+}
+
+function isExactSurfaceReference(value, surface) {
+  if (typeof value === 'string') return value.trim() === surface.id;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value.id === surface.id && surfaceKindMatches(value.kind, surface.kind)) return true;
+  const surfaceIds = Array.isArray(value.surfaceIdentifiers) ? value.surfaceIdentifiers : [];
+  if (surfaceIds.some((item) => item && item.id === surface.id && surfaceKindMatches(item.kind, surface.kind))) return true;
+  const typedKeys = [
+    ['operationId', 'httpOperation'], ['routeId', 'httpRuntimeRoute'], ['toolName', 'mcpTool'],
+    ['objectId', 'databaseObject'], ['controlId', 'uiControl'], ['surfaceId', surface.kind],
+  ];
+  return typedKeys.some(([key, kind]) => value[key] === surface.id && surfaceKindMatches(kind, surface.kind));
+}
+
+/** Relate discovered runtime/design surfaces to registered obligations without promoting conformance. */
+export function buildReverseTrace({ discovered = [], inventory = [], obligations = [], limitations = [] } = {}) {
+  const surfaces = Array.isArray(discovered) ? discovered : discovered.surfaces ?? [];
+  const reportedLimitations = Array.isArray(discovered) ? limitations : discovered.limitations ?? limitations;
+  const rows = [];
+  const gaps = [];
+  const violations = [];
+  const inventoryEntries = Array.isArray(inventory) ? inventory : inventory.classifications ?? [];
+  const registered = [...obligations];
+  const admittedHttpOperations = new Set(surfaces.filter((surface) => ['httpOperation', 'httpExternalOperation'].includes(surface.kind)).map((surface) => surface.id));
+
+  for (const surface of surfaces) {
+    const references = registered.filter((obligation) => {
+      // File paths/ranges are provenance, not semantic surface mappings.
+      return [...(obligation.designRefs ?? []), ...(obligation.sourceRefs ?? []), ...(obligation.surfaceIdentifiers ?? [])]
+        .some((reference) => isExactSurfaceReference(reference, surface));
+    });
+    const kindMatches = inventoryEntries.filter((entry) => entry.id === surface.id || entry.id === `${surface.kind} ${surface.id}` || (surface.kind === 'httpRuntimeRoute' && entry.id === surface.id));
+    const provenance = surface.provenance ?? 'Source discovery provided without provenance.';
+    if (surface.kind === 'httpRuntimeRoute' && (surface.classification === 'unadmitted' || (!admittedHttpOperations.has(surface.id) && surface.classification !== 'delegated-better-auth-metadata'))) {
+      violations.push(`Runtime HTTP operation is absent from the admitted HTTP inventory: ${surface.id} (${surface.source?.path ?? 'source unknown'})`);
+      gaps.push({ kind: 'DEVIATION', surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, reason: 'Runtime HTTP operation is absent from the admitted HTTP inventory.' });
+    }
+    if (surface.kind === 'httpBoundedRoute' && !admittedHttpOperations.has(surface.id) && !['delegated-better-auth-metadata', 'explicitly-rejected-boundary'].includes(surface.classification)) {
+      gaps.push({ kind: 'UNMAPPED', surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, reason: 'Bounded scan result lacks an exact admitted HTTP operation match; treated as partial discovery.' });
+    }
+    if (['unadmitted', 'missing-from-contract', 'missing-from-openapi'].includes(surface.classification)) {
+      gaps.push({ kind: 'DEVIATION', surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, reason: `Contract inventory classification is ${surface.classification}.` });
+    }
+    if (references.length === 0) {
+      const state = surface.classification === 'target' || surface.classification?.startsWith('missing-from-') ? 'BLOCKED' : 'UNMAPPED';
+      const gap = { kind: state, surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, classification: surface.classification };
+      gaps.push(gap);
+      rows.push({ ...gap, obligationIds: [], status: state });
+      continue;
+    }
+    for (const obligation of references) {
+      const ids = obligation.testIds ?? [];
+      const exactRuns = obligation.exactRuns ?? [];
+      const status = surface.classification === 'target' ? 'BLOCKED' : ids.length === 0 ? 'UNVERIFIED' : 'MAPPED_UNVERIFIED';
+      rows.push({ surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, requirementId: obligation.requirementId, provenance, source: surface.source, testIds: ids, exactRuns, status });
+      if (surface.classification === 'target') gaps.push({ kind: 'BLOCKED', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, source: surface.source, reason: 'Contract marks this operation as a target, not a current runtime obligation.' });
+      if (ids.length === 0) gaps.push({ kind: 'UNVERIFIED', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, source: surface.source, reason: 'No verification scenario is registered for this linked obligation.' });
+      if (kindMatches.some((item) => /DEVIATION|UNMAPPED|BLOCKED/u.test(item.classification ?? ''))) {
+        gaps.push({ kind: 'DEVIATION', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, classification: kindMatches.find((item) => /DEVIATION|UNMAPPED|BLOCKED/u.test(item.classification ?? '')).classification });
+      }
+    }
+  }
+  for (const limitation of reportedLimitations) gaps.push({ kind: 'BLOCKED', provenance: 'Discovery limitation', ...limitation });
+  for (const obligation of registered) {
+    if (!obligation.requirementId || !obligation.obligationId) violations.push(`Obligation row lacks requirementId or obligationId: ${JSON.stringify(obligation)}`);
+  }
+  if (rows.some((row) => row.status === 'VERIFIED')) violations.push('Reverse trace cannot certify VERIFIED; only the project certifier may assign that status.');
+  return { rows, gaps, violations };
+}
+
