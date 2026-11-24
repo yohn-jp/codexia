@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { reconcile } from './authority.mjs';
+import { captureSaveEvidence } from './execution.mjs';
 import { designProjection } from './design.mjs';
 import { observedProjection } from './observed.mjs';
 import { createSource, digest } from './source.mjs';
@@ -14,11 +15,11 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const here = dirname(fileURLToPath(import.meta.url));
 const shaPattern = /^[0-9a-f]{40}$/;
 const json = (value) => JSON.stringify(value, null, 2) + '\n';
-const coreModules = ['authority.mjs', 'design.mjs', 'generate.mjs', 'observed.mjs', 'source.mjs'];
+const coreModules = ['authority.mjs', 'design.mjs', 'execution.mjs', 'generate.mjs', 'observed.mjs', 'source.mjs'];
 const browserModules = ['browser.mjs', 'dom.mjs', 'model.mjs', 'style.css'];
 const compareModules = ['compare/browser.mjs', 'compare/model.mjs', 'compare/style.css'];
 
-export async function generate({ output, sourceSha, repositoryRoot = root }) {
+export async function generate({ output, sourceSha, repositoryRoot = root, observe = false }) {
   if (!shaPattern.test(sourceSha ?? '') || !output) throw new Error('Expected --output and --source-sha (40 hex)');
   const authority = createSource(repositoryRoot);
   const canonical = createSource(repositoryRoot);
@@ -29,6 +30,7 @@ export async function generate({ output, sourceSha, repositoryRoot = root }) {
     const path = 'scripts/ux-simulator/adapters/' + domain + '.mjs';
     return generator.exists(path) ? import(pathToFileURL(join(root, path))) : null;
   });
+  if (observe) await captureSaveEvidence(canonical, repositoryRoot, sourceSha, observed);
   const coverage = reconcile(expected, observed);
   const snapshot = { schemaVersion, repository, sourceSha, expected, observed, coverage };
   const outputs = new Map(browserModules.map((path) => [path, readFileSync(join(here, path))]));
@@ -93,6 +95,6 @@ function html(compare) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { output: { type: 'string' }, 'source-sha': { type: 'string' } } });
-  await generate({ output: values.output, sourceSha: values['source-sha'] });
+  const { values } = parseArgs({ options: { output: { type: 'string' }, 'source-sha': { type: 'string' }, observe: { type: 'boolean' } } });
+  await generate({ output: values.output, sourceSha: values['source-sha'], observe: values.observe });
 }
