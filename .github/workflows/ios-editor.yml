@@ -56,9 +56,7 @@ jobs:
         if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
         timeout-minutes: 15
         working-directory: ios/CodexiaEditor
-        run: |
-          xcodebuild -list
-          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-package.xcresult" test
+        run: xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/editor-package.xcresult" test
       - name: Test SwiftUI shell, draft navigation and scene on Simulator
         if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
         timeout-minutes: 15
