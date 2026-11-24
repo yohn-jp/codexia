@@ -52,7 +52,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `jose` | `6.2.18` | API・JWT検証 | **既存採用**: JWTプロファイル・失効判定・署名鍵と認可境界を更新時に検証 |
 | `pg` | API `8.23.1` / persistence `^8.23.1` | API/Auth・PostgreSQL | **連動**: 両接続主体の同系列を維持。Better Authの初期化・認証・Pool終了・PostgreSQL再起動と実OCIを確認 |
 | `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
-| `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
+| `jsonc-parser` | `3.3.1` | API・起動時のMCPクライアント別project割当を厳格JSONとして解析し、同一オブジェクト内の重複キーを検出 | **新規採用**: APIの実行時依存。更新時は構文エラー、コメント、末尾カンマ、エスケープ表記を含む重複キーの拒否を検証 |
+| `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力（API起動時のMCP project割当を含む）、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
 | `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
 
 ### Web UI・ルーター・エディター
