@@ -5,7 +5,7 @@ import { validateBackendIdentity } from '../../release/backend/update-identity.m
 import { assertFrontendIdentity, assertFrontendReleaseAdmission } from '../../release/frontend/verify-compatibility.mjs';
 import { compareComponentVersions } from '../../release/components/version.mjs';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
-import { createDeploymentPlan } from './plan.mjs';
+import { assertFreshObservationTime, createDeploymentPlan } from './plan.mjs';
 
 const rawHash = /^[a-f0-9]{64}$/u;
 const taggedHash = /^sha256:[a-f0-9]{64}$/u;
@@ -150,8 +150,9 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       }
     }
   }
-  const times = [host?.observedAt, edge?.observedAt].filter(Boolean);
-  const observedAt = times.length ? new Date(Math.min(...times.map(Date.parse))).toISOString() : now.toISOString();
+  const times = [host, edge].filter(value => value != null)
+    .map(value => assertFreshObservationTime(value.observedAt, { now }));
+  const observedAt = times.length ? new Date(Math.min(...times)).toISOString() : now.toISOString();
   const observation = {
     state, observedAt, frontendAdmission, changeAxes: [...new Set(changeAxes)],
     binding: {

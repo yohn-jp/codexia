@@ -161,3 +161,17 @@ test('dispatch accepts only artifact references and explicit intent, not fabrica
     { intent: 'guess' }, { window: { ...window, notAfter: window.notBefore } },
   ]) assert.throws(() => parsePreflightRequest(JSON.stringify({ ...request, ...extra })));
 });
+
+
+test('each present observation must have its own fresh canonical timestamp', () => {
+  for (const side of ['host', 'edge']) {
+    for (const observedAt of [undefined, '2026-11-24T00:00:01.000Z', '2026-11-23T23:54:59.000Z', '2026-11-24T00:00:00Z']) {
+      const f = fixture();
+      f[side].observedAt = observedAt;
+      assert.throws(() => planFromObservations(f), /timestamp|Stale or future/u, side + ': ' + observedAt);
+    }
+  }
+  const f = fixture();
+  f.host.observedAt = '2026-11-23T23:59:00.000Z';
+  assert.equal(planFromObservations(f).plan.observation.observedAt, f.host.observedAt);
+});

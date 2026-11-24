@@ -131,7 +131,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         require(not db["authExists"] and db["appRelations"] == 0)
         return {"state": "pristine", "authState": "absent", "clusterId": cluster["clusterId"]}
     ledger = json_sql("codexia", """SELECT coalesce(json_agg(json_build_object(
-        'version', version, 'checksum', btrim(checksum))), '[]'::json)
+        'version', version, 'checksum', btrim(checksum)) ORDER BY version COLLATE "C"), '[]'::json)
         FROM public.codexia_schema_migrations;""")
     require(isinstance(ledger, list) and len(ledger) > 0 and len(ledger) <= 1000)
     result = {"state": "initialized", "clusterId": cluster["clusterId"], "ledger": ledger,

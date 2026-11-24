@@ -133,6 +133,15 @@ jobs:
           audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
           tags: tag:ci
           ping: ${{ steps.runtime.outputs.host || steps.bootstrap.outputs.host }}
+      - name: Verify independent bootstrap identity and noninteractive sudo
+        if: inputs.management == 'bootstrap'
+        env:
+          EXPECTED_USER: ${{ steps.bootstrap.outputs.user }}
+        run: |
+          set -euo pipefail
+          actual=$(ssh -F "$RUNNER_TEMP/codexia-ssh/config" codexia-target 'id -un')
+          [[ "$actual" == "$EXPECTED_USER" ]] || { echo 'The VM returned an unexpected SSH identity.' >&2; exit 1; }
+          ssh -F "$RUNNER_TEMP/codexia-ssh/config" codexia-target 'sudo -n true'
       - name: Prepare the pinned read-only Ansible inventory
         env:
           SSH_USER: ${{ inputs.management == 'runtime' && 'codexia' || steps.bootstrap.outputs.user }}

@@ -40,6 +40,14 @@ function timestamp(value) {
     new Date(ms).toISOString() === value, 'Invalid deployment timestamp');
   return ms;
 }
+export function assertFreshObservationTime(value, { now = new Date(), maxAgeMs = 5 * 60_000 } = {}) {
+  requireCondition(Number.isSafeInteger(maxAgeMs) && maxAgeMs > 0 &&
+    now instanceof Date && Number.isFinite(now.getTime()), 'Invalid observation freshness policy');
+  const observed = timestamp(value);
+  requireCondition(observed <= now.getTime() && now.getTime() - observed <= maxAgeMs,
+    'Stale or future deployment observation');
+  return observed;
+}
 function validAxes(state) {
   return record(state, axes) && axes.every(key => STATES[key].includes(state[key]));
 }
@@ -124,11 +132,7 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   transition = null, now = new Date(), maxAgeMs = 5 * 60_000, evidenceBlockers = [] }) {
   validateObservation(observation);
   validateTarget(target);
-  requireCondition(Number.isSafeInteger(maxAgeMs) && maxAgeMs > 0 &&
-    now instanceof Date && Number.isFinite(now.getTime()), 'Invalid observation freshness policy');
-  const observedAt = timestamp(observation.observedAt);
-  requireCondition(observedAt <= now.getTime() && now.getTime() - observedAt <= maxAgeMs,
-    'Stale or future deployment observation');
+  assertFreshObservationTime(observation.observedAt, { now, maxAgeMs });
   if (window !== null) validateWindow(window);
   if (transition !== null) {
     requireCondition(record(transition, ['contractSha256', 'dataConversion']) &&
