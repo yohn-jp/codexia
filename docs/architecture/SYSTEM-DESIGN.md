@@ -1,10 +1,12 @@
 # Codexia システム基本設計
 
-## Desktop frontend toolchain — accepted target
+## Desktop frontend toolchain — independent acceptance gates
 
 The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type checking) + Vite 8 + vanilla-extract**, including `@vanilla-extract/css`, `@vanilla-extract/vite-plugin`, and `@vanilla-extract/recipes` for typed design tokens, Light/Dark/Paper theme contracts and component variants. React 19, Radix, Headless Tree and CodeMirror retain their existing responsibilities. Vite remains the bundler; replacing it with Rsbuild or another bundler is not part of this decision. The iOS client remains native SwiftUI and does not share Web UI/CSS implementation.
 
-**Status: design accepted; implementation and CI acceptance pending.** The current dependency manifests still declare TypeScript 5.9.x and do not yet install vanilla-extract. Do not present the target as deployed. Resolve TypeScript 7's previously observed Node built-in/`NodeJS` type resolution failures without suppressing checks or retaining a parallel TypeScript 5 compiler. Verify workspace builds, emitted declarations, tests, desktop/OAuth entry boundaries, CSS output, themes, CodeMirror, browser E2E and CI before declaring cutover. Migrate component styles to vanilla-extract and remove superseded global CSS; retain external editor styles where required, not a permanent duplicate design system. See [dependency inventory](DEPENDENCY-INVENTORY.md) and [CI acceptance](../verification/CI-CD.md).
+**WEB-01 — TypeScript 7 native compiler + Vite 8:** The compiler migration is implemented in the dependency manifests and workspace verification commands. Node ambient types are explicit; no TypeScript 5 fallback or diagnostic suppression is permitted. Acceptance requires workspace and test type checking, declaration emit, Core/Full builds and OCI, desktop/OAuth boundaries and browser verification. Exact-source CI evidence establishes acceptance for the integrated revision, not production deployment. See [#790](https://github.com/yohn-jp/codexia/issues/790).
+
+**WEB-02 — vanilla-extract:** Accepted design, implementation pending under [#791](https://github.com/yohn-jp/codexia/issues/791). This is an independent CSS migration after WEB-01; it is not a prerequisite for accepting the compiler migration. Preserve Light/Dark/Paper, CodeMirror and desktop interactions, compare CSS/JS output and performance, and remove superseded global CSS without retaining a duplicate theme authority. See [dependency inventory](DEPENDENCY-INVENTORY.md) and [CI acceptance](../verification/CI-CD.md).
 
 [図をグラフィカルに閲覧する](https://yohn-jp.github.io/codexia/architecture/#system-1)
 

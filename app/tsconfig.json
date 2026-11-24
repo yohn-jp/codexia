@@ -8,7 +8,8 @@
       "DOM.Iterable"
     ],
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ],
     "declaration": false,
     "sourceMap": false,

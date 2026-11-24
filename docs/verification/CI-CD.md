@@ -1,8 +1,12 @@
 # CI/CD architecture and certification contract
 
-## Accepted Desktop toolchain migration gate (not yet implemented)
+## Desktop toolchain — independent migration gates
 
-Target: TypeScript 7 native type checking, Vite 8, vanilla-extract CSS/theme/recipes. The target is a design decision, not evidence that the current main build has migrated. Require full workspace type checking including emitted declarations and Node built-in types, build/profile and OAuth source boundary checks, Light/Dark/Paper theme parity, CSS/JS output and performance comparison, CodeMirror interaction, Desktop browser E2E, and all existing mandatory verification and security checks. Do not use TypeScript 5 fallback, suppressed diagnostics, or skipped CI tasks to satisfy the gate. iOS SwiftUI acceptance remains independent.
+WEB-01 ([#790](https://github.com/yohn-jp/codexia/issues/790)) accepts TypeScript 7 native type checking with Vite 8 independently of CSS migration. Require workspace and test type checking, emitted declarations, Node built-in types, Core/Full builds and OCI, OAuth source boundaries, Desktop browser E2E and existing mandatory verification and security checks. Do not use TypeScript 5 fallback, suppressed diagnostics or skipped tasks as proof.
+
+WEB-02 ([#791](https://github.com/yohn-jp/codexia/issues/791)) remains a separate accepted design pending implementation: vanilla-extract CSS/theme/recipes, Light/Dark/Paper parity, CSS/JS output and performance comparison, CodeMirror interaction and Desktop browser E2E. Its completion is not required for WEB-01 acceptance. iOS SwiftUI acceptance remains independent.
+
+Workspace builds and `pnpm typecheck`, `pnpm typecheck:tests`, `pnpm typecheck:safety`, and `pnpm typecheck:deployment` use the root TypeScript 7 native `tsc`. The test-source runner supplies each existing verification scope as a project and reports compiler diagnostics through the corresponding `test-types-*` task. The shared tsconfig opts in to the installed Node types so project checks and declaration emit resolve Node built-ins consistently.
 
 The [system design](../architecture/SYSTEM-DESIGN.md) owns deployment boundaries; [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md) owns cross-component route selection, initial pair activation, coordinated maintenance/recovery and shared exclusion; [first activation](../deployment/INITIAL-DEPLOYMENT-FLOW.md) and [compatible update / rollback](../deployment/UPDATE-FLOW.md) own operational transitions. CI supplies source-bound conformance evidence and cannot redefine their requirements.
 
