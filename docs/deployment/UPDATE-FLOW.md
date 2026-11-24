@@ -2,6 +2,8 @@
 
 **種別: 正本・規範的設計。** PostgreSQL schema を変更せず、特別なデータ統合を必要としない範囲の API/Core/module 機能を、承認済み main の検証・配布から自動的に本番へ適用する経路を定める。「自動」は **検証済み互換 digest だけを保護されたデプロイ制御が適用すること**であり、未知の migration や認証・保存形式の破壊を無条件で取り込むことではない。
 
+[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が通常更新と初回activation・非互換cutover・復旧の経路選択、共通排他、保守状態を所有する。本書は通常の互換更新に限定する。
+
 [CI/CD 規範](../verification/CI-CD.md)、[Push deployment](PUSH-DEPLOYMENT.md)、[IaC](IAC.md)、[Backup](BACKUP.md)、[システム基本設計](../architecture/SYSTEM-DESIGN.md) を補完し、独立した release authority を追加しない。
 
 ## リリースからアクティベーションまでの状態遷移
@@ -22,7 +24,7 @@ flowchart TD
     ENABLE -->|いいえ| SKIP["安全に skip: VM不変"]
     ENABLE -->|はい| FRESH["queue内でsourceとreleaseを再検証"]
     FRESH --> COMPAT{"Full / API epoch / migration fingerprint<br/>/ persistence format / auth schema の互換性"}
-    COMPAT -->|不明または不一致| MAINT["停止: 別設計の migration / epoch cutover"]
+    COMPAT -->|不明または不一致| MAINT["停止: 状態観測・保守 / 協調cutoverへ"]
     COMPAT -->|一致| SSH["Tailscale OIDC → pinned SSH<br/>rootless codexia"]
     SSH --> LOCK["host lock / 中断transactionの回復確認"]
     LOCK --> SAME{"候補digestは稼働中と同一か"}

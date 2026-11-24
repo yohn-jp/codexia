@@ -19,6 +19,7 @@ export const DIAGRAM_DOCUMENTS = Object.freeze([
   { id: 'screen', label: '全画面の状態遷移', path: 'docs/design/SCREEN-STATE-ATLAS.md' },
   { id: 'first', label: '初期デプロイ', path: 'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md' },
   { id: 'update', label: 'アップデートと復旧', path: 'docs/deployment/UPDATE-FLOW.md' },
+  { id: 'lifecycle', label: '本番Deploymentライフサイクル', path: 'docs/deployment/DEPLOYMENT-LIFECYCLE.md' },
 ]);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -138,7 +139,7 @@ export function createManifest(sha, sources, screenCatalog = '', generatedSystem
   assert.ok(catalog.length >= 40 && catalog.length <= 64, 'Incomplete or excessive architecture diagram catalog');
   assert.ok(catalog.filter(d => d.group === 'screen').length >= 23,
     'Accepted logical screens require their individual state diagrams');
-  for (const group of ['system', 'data', 'user', 'admin', 'screen', 'first', 'update']) {
+  for (const group of ['system', 'data', 'user', 'admin', 'screen', 'first', 'update', 'lifecycle']) {
     assert.ok(catalog.some(d => d.group === group), 'Missing required diagram group: ' + group);
   }
   if (generatedSystemDiagram) assert.equal(generatedSystemDiagram.id, 'system-1',
