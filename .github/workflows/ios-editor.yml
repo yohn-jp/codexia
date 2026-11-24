@@ -1,57 +1,189 @@
-name: iOS editor
+name: Native iOS
 on:
   workflow_dispatch:
+    inputs:
+      api_origin:
+        description: Approved public HTTPS API origin for the unsigned app
+        type: string
+        required: false
+      oauth_client_id:
+        description: Registered public iOS OAuth client ID
+        type: string
+        required: false
   pull_request:
     paths:
       - 'ios/CodexiaEditor/**'
       - 'ios/CodexiaApp/**'
+      - 'ios/CodexiaTransport/**'
       - '.github/workflows/ios-editor.yml'
 permissions:
   contents: read
 concurrency:
-  group: ios-editor-${{ github.event.pull_request.number || github.ref }}
+  group: ios-editor-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   editor:
+    name: Native iOS (${{ matrix.lane }})
     runs-on: xcode-27
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [state-model, editor-simulator, app-simulator]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify Xcode
-        run: xcodebuild -version | grep -E '^Xcode 27\.'
-      - name: Build for iOS Simulator
-        working-directory: ios/CodexiaEditor
-        run: xcodebuild -scheme CodexiaEditor -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Verify exact source and native toolchain
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -m)" = arm64
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          xcrun --sdk iphonesimulator --show-sdk-version | grep -E '^27(\.|$)'
+          swift --version
       - name: Test state model
+        if: ${{ matrix.lane == 'state-model' }}
         working-directory: ios/CodexiaEditor
-        run: swift test
-      - name: Build fixture app for Simulator
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/codexia-editor" CODE_SIGNING_ALLOWED=NO build
-      - name: Select and boot Simulator
-        id: simulator_boot
-        timeout-minutes: 10
+        run: swift test --force-resolved-versions --jobs 4
+      - name: Select Simulator
+        if: ${{ matrix.lane != 'state-model' }}
         run: |
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
+          DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["udid"] for runtime, devices in d["devices"].items() if ".iOS-27-" in runtime for x in devices if x["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
           echo "EDITOR_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE_ID" || true
-          xcrun simctl bootstatus "$DEVICE_ID" -b
-      - name: Install and launch fixture app
+      - name: Build test products before Simulator boot
+        if: ${{ matrix.lane != 'state-model' }}
+        timeout-minutes: 25
+        env:
+          LANE: ${{ matrix.lane }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-evidence"
+          derived="$RUNNER_TEMP/native-derived"
+          # The generic ARM64 build avoids contention with cold Simulator startup.
+          args=(-destination 'generic/platform=iOS Simulator' ARCHS=arm64
+            -derivedDataPath "$derived" -onlyUsePackageVersionsFromResolvedFile
+            -parallel-testing-enabled NO -showBuildTimingSummary
+            -resultBundlePath "$RUNNER_TEMP/native-evidence/build.xcresult")
+          case "$LANE" in
+            editor-simulator)
+              cd ios/CodexiaEditor
+              args=(-scheme CodexiaEditor "${args[@]}")
+              ;;
+            app-simulator)
+              args=(-project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI "${args[@]}")
+              ;;
+            *) exit 1 ;;
+          esac
+          xcodebuild "${args[@]}" build-for-testing
+          # Use only the test products produced on this exact-source runner.
+          test_run=$(python3 - "$derived" <<'PY'
+          import pathlib, sys
+          runs = sorted((pathlib.Path(sys.argv[1]) / "Build" / "Products").glob("*.xctestrun"))
+          if len(runs) != 1 or not runs[0].is_file():
+              raise SystemExit(f"Expected exactly one xctestrun, found {runs}")
+          print(runs[0])
+          PY
+          )
+          echo "NATIVE_TEST_RUN=$test_run" >> "$GITHUB_ENV"
+      - name: Boot Simulator and verify readiness
+        if: ${{ matrix.lane != 'state-model' }}
         timeout-minutes: 10
-        run: |
-          xcrun simctl install "$EDITOR_SIMULATOR_ID" "$RUNNER_TEMP/codexia-editor/Build/Products/Debug-iphonesimulator/CodexiaApp.app"
-          xcrun simctl launch "$EDITOR_SIMULATOR_ID" jp.yohn.codexia.editorfixture
-      - name: Test UIKit adapter on Simulator
-        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
+        shell: bash
+        run: xcrun simctl bootstatus "$EDITOR_SIMULATOR_ID" -b 2>&1 | tee "$RUNNER_TEMP/native-evidence/simulator-boot.log"
+      - name: Run Simulator tests without rebuilding
+        if: ${{ matrix.lane != 'state-model' }}
         timeout-minutes: 15
-        working-directory: ios/CodexiaEditor
         run: |
-          xcodebuild -list
-          xcodebuild -scheme CodexiaEditor -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
-      - name: Test app navigation and scene on Simulator
-        if: ${{ !cancelled() && steps.simulator_boot.outcome == 'success' }}
-        timeout-minutes: 15
-        run: xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" -parallel-testing-enabled NO test
+          test -f "$NATIVE_TEST_RUN"
+          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
+            -destination "platform=iOS Simulator,id=$EDITOR_SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/native-evidence/tests.xcresult" test-without-building
+          test -d "$RUNNER_TEMP/native-evidence/tests.xcresult"
+      - name: Retain lane Simulator results
+        if: ${{ !cancelled() && matrix.lane != 'state-model' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ios-simulator-${{ matrix.lane }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-evidence/
+          if-no-files-found: error
+          retention-days: 14
+  native-ipa:
+    name: Native unsigned IPA
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source and ARM64 iOS toolchain
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -m)" = arm64
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          xcrun --sdk iphoneos --show-sdk-version | grep -E '^27(\.|$)'
+          swift --version
+      - name: Validate public build configuration
+        id: configuration
+        env:
+          API_ORIGIN: ${{ inputs.api_origin }}
+          OAUTH_CLIENT_ID: ${{ inputs.oauth_client_id }}
+        run: |
+          python3 - <<'PY'
+          from os import environ
+          from urllib.parse import urlsplit
+
+          origin = environ.get("API_ORIGIN", "")
+          client = environ.get("OAUTH_CLIENT_ID", "")
+          if bool(origin) != bool(client):
+              raise SystemExit("Supply both the HTTPS API origin and public OAuth client ID.")
+          if origin:
+              parts = urlsplit(origin)
+              if (len(origin) > 512 or not origin.isascii() or any(c.isspace() for c in origin)
+                  or parts.scheme != "https" or not parts.hostname or parts.username is not None
+                  or parts.password is not None or parts.path not in ("", "/")
+                  or parts.query or parts.fragment or "?" in origin or "#" in origin):
+                  raise SystemExit("The API origin must be an exact HTTPS origin.")
+              if not client.isascii() or not (1 <= len(client) <= 128) or any(not 33 <= ord(c) <= 126 for c in client):
+                  raise SystemExit("The public OAuth client ID is invalid.")
+          with open(environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              print("variant=" + ("configured" if origin else "unconfigured-proof"), file=out)
+          PY
+      - name: Archive native app for iPhone
+        env:
+          API_ORIGIN: ${{ inputs.api_origin }}
+          OAUTH_CLIENT_ID: ${{ inputs.oauth_client_id }}
+        run: |
+          xcodebuild -project ios/CodexiaApp/CodexiaApp.xcodeproj -scheme CodexiaAppUI \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/CodexiaNative.xcarchive" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/codexia-native-packages" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            "CODEXIA_API_ORIGIN=$API_ORIGIN" "CODEXIA_OAUTH_CLIENT_ID=$OAUTH_CLIENT_ID" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= archive
+      - name: Certify native unsigned IPA and archive contents
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_API_ORIGIN: ${{ inputs.api_origin }}
+          EXPECTED_OAUTH_CLIENT_ID: ${{ inputs.oauth_client_id }}
+        run: |
+          lock=ios/CodexiaApp/CodexiaApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          git ls-files --error-unmatch "$lock" >/dev/null
+          git diff --exit-code -- "$lock"
+          swift ios/CodexiaApp/Scripts/package-unsigned-ipa.swift \
+            "$RUNNER_TEMP/CodexiaNative.xcarchive/Products/Applications/CodexiaApp.app" \
+            "$RUNNER_TEMP/codexia-native-ipa" "$EXPECTED_SHA" "$(xcodebuild -version)" "$(swift --version)" "$lock"
+      - name: Retain unsigned native archive evidence
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: codexia-native-unsigned-${{ steps.configuration.outputs.variant }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/codexia-native-ipa
+          if-no-files-found: error
+          retention-days: 14

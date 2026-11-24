@@ -1,56 +1,60 @@
 import XCTest
 
 final class AuthoringFlowUITests: XCTestCase {
-    private func fixtureButton(_ count: Int, in app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "identifier == %@", "CTRL-OUT-01.B.fixture.\(count)")).firstMatch
-    }
-
     private func openFixture(_ app: XCUIApplication) {
+        app.launchArguments += ["--codexia-fixture-editor"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         app.buttons["サンプル作品"].tap()
         app.buttons["構成と原稿"].tap()
-        fixtureButton(10_000, in: app).tap()
+        app.buttons["CTRL-OUT-01.B.fixture.10000"].tap()
     }
 
-    private func menuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: label).firstMatch
-    }
-
-    func testCopyAndPasteWithinTheAppChangesManuscript() {
+    func testSignedOutShellOffersSystemAccountEntryAndHidesFixture() {
         let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["ライブラリ"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["account.signIn"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["account.entry"].exists)
+        XCTAssertFalse(app.buttons["サンプル作品"].exists)
+
+        app.buttons["account.entry"].tap()
+        XCTAssertTrue(app.navigationBars["アカウント"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["サインインしていません"].exists)
+    }
+
+    func testNativeCopyAndPasteAcrossFixtureReopen() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--codexia-test-clipboard"]
         openFixture(app)
+
         let editor = app.textViews["原稿本文"]
         XCTAssertTrue(editor.waitForExistence(timeout: 15))
-        editor.tap()
         let before = editor.value as? String ?? ""
-        XCTAssertFalse(before.isEmpty)
-        editor.press(forDuration: 1.2)
-        let selectAll = menuAction("Select All", in: app)
-        XCTAssertTrue(selectAll.waitForExistence(timeout: 5))
-        selectAll.tap()
-        let copy = menuAction("Copy", in: app)
-        XCTAssertTrue(copy.waitForExistence(timeout: 5))
-        copy.tap()
-        // Copy leaves a full-document selection. Reopen the same sample so the
-        // Paste gesture starts in a fresh editor while retaining the app clipboard.
+        XCTAssertEqual(before, "原稿のコピー 🌙")
+        editor.tap()
+        app.buttons["fixture.clipboard.copy"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.clipboard.verified"].waitForExistence(timeout: 10))
+
         app.buttons["戻る"].tap()
-        let sample = fixtureButton(10_000, in: app)
-        XCTAssertTrue(sample.waitForExistence(timeout: 10))
-        sample.tap()
+        let scene = app.buttons["CTRL-OUT-01.B.fixture.10000"]
+        XCTAssertTrue(scene.waitForExistence(timeout: 10))
+        scene.tap()
         XCTAssertTrue(editor.waitForExistence(timeout: 15))
         XCTAssertEqual(editor.value as? String, before)
+
         editor.tap()
-        editor.press(forDuration: 1.2)
-        let paste = menuAction("Paste", in: app)
-        guard paste.waitForExistence(timeout: 5) else {
-            XCTFail("Paste menu is unavailable after same-app Copy. UI: \(app.debugDescription)")
-            return
-        }
-        paste.tap()
-        let after = editor.value as? String ?? ""
-        XCTAssertGreaterThan(after.utf16.count, before.utf16.count)
-        XCTAssertNotEqual(after, before)
+        app.buttons["fixture.clipboard.paste"].tap()
+        // UIKit smart insertion adds a word separator when pasting at the end.
+        let expected = before + " " + before
+        let pasted = NSPredicate(format: "value == %@", expected)
+        let expectation = XCTNSPredicateExpectation(predicate: pasted, object: editor)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed)
+        XCTAssertEqual(editor.value as? String, expected)
+        app.buttons["戻る"].tap()
+        XCTAssertTrue(app.alerts["原稿はまだ保護されていません"].waitForExistence(timeout: 5))
     }
 
     func testUnprotectedTextSurvivesBackGuardAndHomeRoundTrip() {

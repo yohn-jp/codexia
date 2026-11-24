@@ -27,7 +27,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
     }
 
     public func updateUIView(_ view: UITextView, context: Context) {
-        context.coordinator.state = $state
+        guard context.coordinator.prepareForUpdate(with: $state, in: view) else { return }
         // Never replace a live input session. The model rejects stale responses,
         // and the text view remains the owner of IME and selection while focused.
         guard view.markedTextRange == nil, !view.isFirstResponder,
@@ -47,10 +47,51 @@ public struct ManuscriptEditor: UIViewRepresentable {
 
     public final class Coordinator: NSObject, UITextViewDelegate {
         fileprivate var state: Binding<EditorState>
-        init(state: Binding<EditorState>) { self.state = state }
+        private(set) var documentID: String
+        private(set) var sessionID: UUID
+        private var deferredReplacement: Binding<EditorState>?
+        init(state: Binding<EditorState>) {
+            self.state = state
+            self.documentID = state.wrappedValue.documentID
+            self.sessionID = state.wrappedValue.sessionID
+        }
 
-        private func synchronize(_ textView: UITextView) {
+        /// Keeps a live UITextView attached to its original document session.
+        /// Returns false while a new identity is deferred or installed.
+        @discardableResult
+        func prepareForUpdate(with incoming: Binding<EditorState>, in textView: UITextView) -> Bool {
+            let next = incoming.wrappedValue
+            guard next.documentID == documentID, next.sessionID == sessionID else {
+                // Hosts should pass their navigation protection gate first. This
+                // fallback prevents focused keystrokes from crossing identities.
+                deferredReplacement = incoming
+                if textView.markedTextRange == nil, !textView.isFirstResponder {
+                    finishDeferredReplacement(in: textView)
+                }
+                return false
+            }
+            state = incoming
+            deferredReplacement = nil
+            return true
+        }
+
+        func finishDeferredReplacement(in textView: UITextView) {
+            guard let replacement = deferredReplacement else { return }
+            deferredReplacement = nil
+            state = replacement
+            documentID = replacement.wrappedValue.documentID
+            sessionID = replacement.wrappedValue.sessionID
+            textView.text = replacement.wrappedValue.text
+            textView.selectedRange = NSRange(location: 0, length: 0)
+            textView.setContentOffset(.zero, animated: false)
+        }
+
+        @discardableResult
+        private func synchronize(_ textView: UITextView) -> Bool {
             var current = state.wrappedValue
+            // A SwiftUI binding can keep the same storage location while its
+            // value is replaced. Never write the old TextView into that new session.
+            guard current.documentID == documentID, current.sessionID == sessionID else { return false }
             if textView.markedTextRange != nil {
                 current.setComposing(true)
             } else {
@@ -58,6 +99,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
                 current.setComposing(false)
             }
             state.wrappedValue = current
+            return true
         }
 
         public func textViewDidChange(_ textView: UITextView) { synchronize(textView) }
@@ -68,18 +110,27 @@ public struct ManuscriptEditor: UIViewRepresentable {
         }
         public func textViewDidBeginEditing(_ textView: UITextView) {
             var current = state.wrappedValue
+            guard current.documentID == documentID, current.sessionID == sessionID else { return }
             current.setFocused(true)
             state.wrappedValue = current
         }
         public func textViewDidEndEditing(_ textView: UITextView) {
-            synchronize(textView)
+            guard synchronize(textView) else {
+                finishDeferredReplacement(in: textView)
+                return
+            }
             var current = state.wrappedValue
+            guard current.documentID == documentID, current.sessionID == sessionID else {
+                finishDeferredReplacement(in: textView)
+                return
+            }
             current.setFocused(false)
             // Install a deferred response before focus can return to this view.
             if textView.markedTextRange == nil, !textView.text.utf8.elementsEqual(current.text.utf8) {
                 ManuscriptEditor.applyText(current.text, to: textView)
             }
             state.wrappedValue = current
+            finishDeferredReplacement(in: textView)
         }
     }
 }
