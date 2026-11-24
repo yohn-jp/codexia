@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { assertBackendIdentity, assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
-import { probeScopedIdentityAccess } from '../../verification/infrastructure/identity-probe-client.mjs';
+import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
 const readConfig = async name => JSON.parse(await readFile(new URL(`../../../deploy/cloudflare/${name}.json`, import.meta.url), 'utf8'));
 const [identities, routes, protocols] = await Promise.all([
@@ -182,8 +182,9 @@ export function createCloudflareCutover({
     throw new Error(`Cloudflare ${label} pagination exceeded its bound`);
   }
 
-  async function observeDeployment() {
+  async function observeDeployment({ allowAbsent = false } = {}) {
     const { deployments } = await result('Worker deployments', `${workerPath}/deployments?per_page=1`);
+    if (allowAbsent && Array.isArray(deployments) && deployments.length === 0) return null;
     const latest = deployments?.[0];
     const created = latest?.created_on;
     const timestamp = typeof created === 'string' &&
@@ -324,7 +325,7 @@ export function createCloudflareCutover({
     assert.ok(allowLists.every(items => items.length === 0), 'Cloudflare IP Access Allow rules can skip the maintenance fence');
   }
 
-  async function observeIngress() {
+  async function observeIngress({ lifecycle = false } = {}) {
     assert.ok(uuid.test(authorPolicyId) && uuid.test(ciPolicyId) && authorPolicyId !== ciPolicyId &&
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
     'Access policy IDs, Tunnel team and protocol ingress setting must be pinned');
@@ -332,6 +333,11 @@ export function createCloudflareCutover({
     // Terraform iterates the JSON-decoded map in lexicographic key order.
     const enabledProtocols = publicProtocolEnabled ? Object.keys(protocols).sort().map(key => protocols[key]) : [];
     const expectedPaths = ['', ...identityPaths, ...enabledProtocols.map(item => item.path)];
+    // Positive absence requires an authenticated inventory, not a 404, failed
+    // identity probe, or denied token. Strict cutover calls retain their
+    // existing requirement for a deployed Worker.
+    const scriptPresent = !lifecycle || (await list('Worker script inventory', `${accountPath}/workers/scripts`))
+      .some(item => item.id === worker);
     const [dns, workerRoutes, domains, applications, tunnel, deployment, fence] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
       result('Worker routes', `${zonePath}/workers/routes`),
@@ -341,14 +347,15 @@ export function createCloudflareCutover({
       ]),
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
-      observeDeployment(), observeFence(), assertPrivateWorker(), assertNoFenceSkippingIpRules(),
+      scriptPresent ? observeDeployment({ allowAbsent: lifecycle }) : null, observeFence(),
+      scriptPresent ? assertPrivateWorker() : null, assertNoFenceSkippingIpRules(),
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
     assert.ok(domains.every(items => items.length === 0), 'Worker custom domains permit alternate ingress');
     assert.ok(Array.isArray(workerRoutes), 'Cloudflare Worker route inventory is invalid');
     const relevantRoutes = workerRoutes.filter(route => route.script === worker || allowsHostname(route.pattern, host));
-    const routePlan = [
+    const routePlan = lifecycle && deployment === null ? [] : [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
       ...routes.originRoutes.map(path => ({ pattern: host + path, script: null })),
     ];
@@ -404,7 +411,8 @@ export function createCloudflareCutover({
       fence: { rulesetId: fence.rulesetId, ruleId: fence.ruleId, expression },
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
-    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest };
+    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest,
+      ...(lifecycle ? { scriptPresent } : {}) };
   }
 
   async function observe() {
@@ -421,6 +429,50 @@ export function createCloudflareCutover({
     return { ...ingress, backend: live.backend, frontend: live.deployed };
   }
 
-  return { observe, observeIngress, observeDeployment, stage, assertStaged, fence: () => setFence(true),
+  async function observeLifecycle({ backendExpected }) {
+    assert.ok(typeof backendExpected === 'boolean', 'Lifecycle backend observation mode is invalid');
+    const ingress = await observeIngress({ lifecycle: true });
+    const { origin: liveOrigin, clientId, clientSecret } = readFrontendReleaseConfiguration(accessEnv);
+    assert.ok(liveOrigin.origin === target.origin, 'Protected identity origin differs from the pinned hostname');
+    const credentials = { clientId, clientSecret };
+    // Check both anonymous identity paths and author-route denial even when a
+    // component is absent. A failed authenticated probe never proves absence.
+    const boundary = await probeScopedIdentityAccess({ origin: liveOrigin, credentials, fetchImpl,
+      checkBoundary: true, includeBackend: false, includeFrontend: false });
+    assert.deepEqual(boundary, {});
+    let frontend = null;
+    let frontendState = ingress.deployment === null ? 'absent' : 'unknown';
+    if (ingress.deployment !== null) {
+      try {
+        const value = assertFrontendIdentity(await readLiveJson(IDENTITY_PROBE_PATHS.frontend, liveOrigin, credentials, fetchImpl));
+        // Expose only canonical identity fields, with the public OAuth
+        // configuration reduced to its digest by the lifecycle controller.
+        frontend = { format: value.format, sourceSha: value.sourceSha, version: value.version,
+          profile: value.profile, apiEpoch: value.apiEpoch,
+          ...(value.oauthConfigIdentity === undefined ? {} : { oauthConfigIdentity: value.oauthConfigIdentity }) };
+        frontendState = 'running';
+      } catch { /* no positive identity evidence */ }
+    }
+    let backend = null;
+    if (backendExpected) {
+      try {
+        const value = await readLiveJson(IDENTITY_PROBE_PATHS.backend, liveOrigin, credentials, fetchImpl);
+        assert.ok(value?.name === 'codexia' && value.profile === 'full' &&
+          typeof value.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(value.version) &&
+          Number.isSafeInteger(value.apiEpoch) && value.apiEpoch > 0, 'Invalid protected backend identity');
+        const standaloneOAuth = Array.isArray(value.auth) && value.auth.length === 2 &&
+          value.auth.includes('oauth-owner') && value.auth.includes('oauth-mcp');
+        backend = { name: value.name, profile: value.profile, version: value.version,
+          apiEpoch: value.apiEpoch, standaloneOAuth };
+      } catch { /* no positive identity evidence */ }
+    }
+    const after = await observeIngress({ lifecycle: true });
+    assert.deepEqual({ deployment: ingress.deployment, fence: ingress.fence, ingressDigest: ingress.ingressDigest,
+      scriptPresent: ingress.scriptPresent }, { deployment: after.deployment, fence: after.fence,
+      ingressDigest: after.ingressDigest, scriptPresent: after.scriptPresent }, 'Ingress changed during observation');
+    return { ...after, frontendState, frontend, backend };
+  }
+
+  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, fence: () => setFence(true),
     unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy };
 }
