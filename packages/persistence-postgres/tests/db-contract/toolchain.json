@@ -24,7 +24,7 @@
     }
   },
   "restoreDrill": {
-    "podmanImage": "quay.io/podman/stable@sha256:983f1e195090bbcce4a023e8d81757ab9d2044eabacb8d34e688ee37d7652fa0",
+    "podmanImage": "quay.io/podman/stable@sha256:a7f9db0206b1874fb5c6be74afea08ec2367cf22b52547f52042b8d0b92b0ee5",
     "age": {
       "version": "1.3.2",
       "archives": {
