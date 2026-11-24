@@ -5,25 +5,27 @@ ARG PROFILE=core
 
 FROM ${NODE_IMAGE} AS pnpm-base
 ARG PNPM_VERSION
-ENV CI=true
+ENV CI=true \
+    CODEXIA_PNPM_STORE_DIR=/pnpm/store
 RUN corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /opt/codexia
 
 FROM pnpm-base AS source
-# Fetch the locked external packages before copying frequently changed source.
-# The shared cache mount is usable by both BuildKit and Podman/Buildah.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch --store-dir=/pnpm/store
+ARG PROFILE
 COPY . ./
+# pnpm selects the transitive closure of this profile, rather than fetching
+# every importer in the monorepo. The shared local store is disposable;
+# frozen install retrieves any missing packages after cache eviction.
 RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
+    pnpm --filter "@codexia/profile-${PROFILE}..." --filter '@codexia/app...' --fail-if-no-match install \
+      --prefer-offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE
 ENV CODEXIA_PROFILE=${PROFILE}
-RUN node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --out /runtime
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
+    node scripts/build/packaging/profile-package.mjs --profile "${PROFILE}" --out /runtime
 
 FROM ${NODE_IMAGE} AS runtime
 ARG PROFILE

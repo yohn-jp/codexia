@@ -19,7 +19,8 @@ test('omitted and explicit Core profiles build the API and browser with a Core r
     const registry = commands.findIndex(({ args }) =>
       args.some(argument => path.basename(argument) === 'profile-build.mjs') && args.includes('core'));
     const runtime = commands.findIndex(({ args }) => args.includes('@codexia/module-runtime'));
-    assert.ok(runtime >= 0 && runtime < registry && registry < app && registry < api);
+    assert.ok(runtime >= 0 && runtime === api && runtime < registry && registry < app);
+    assert.ok(commands[runtime].args.includes('--recursive') && commands[runtime].args.includes('--sort'));
     assert.equal(commands[app].env?.CODEXIA_PROFILE, 'core');
     assert.ok(commands.every(({ args }) => args.every(argument => !optionalPackages.has(argument.replace(/\.\.\.$/u, '')))));
   }

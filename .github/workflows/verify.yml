@@ -38,9 +38,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+          # Bootstrap only the shared input selector; checkout uses blobless
+          # history for sparse mode. The selector expands the exact tree inputs.
+          sparse-checkout: scripts
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
+      - name: Materialize exact evidence inputs
+        env:
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci/impact/evidence-checkout.mjs
       - name: Select affected validations
         id: select
         env:
@@ -155,7 +162,7 @@ jobs:
       CODEXIA_AUTH_TEST_DISPOSABLE: "1"
     services:
       postgres:
-        image: docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
+        image: ${{ matrix.group != 'architecture' && 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' || '' }}
         env:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
@@ -188,12 +195,21 @@ jobs:
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v6.1.0
+        uses: actions/cache/restore@v6.1.0
+        if: matrix.group != 'architecture'
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
+        env:
+          UNIT_GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          if [[ "$UNIT_GROUP" == architecture ]]; then
+            pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+          else
+            pnpm install --frozen-lockfile --prefer-offline
+          fi
       - name: Create isolated Better Auth persistence database
         if: matrix.group == 'core'
         env:
@@ -270,19 +286,32 @@ jobs:
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install pinned StrictDoc and Chromium
         if: matrix.group == 'trace'
         run: |
-          python -m venv "$RUNNER_TEMP/strictdoc"
-          "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+          set -euo pipefail
+          # Independent locked Python and browser prerequisites. The trace
+          # acceptance launches Chromium headless; only its pinned shell is needed.
+          (
+            python -m venv "$RUNNER_TEMP/strictdoc"
+            "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+          ) &
+          strictdoc_pid=$!
+          browser_status=0
+          pnpm exec playwright install --with-deps --only-shell chromium || browser_status=$?
+          strictdoc_status=0
+          wait "$strictdoc_pid" || strictdoc_status=$?
+          if (( strictdoc_status != 0 || browser_status != 0 )); then
+            echo "StrictDoc setup=$strictdoc_status Chromium setup=$browser_status" >&2
+            exit 1
+          fi
           echo "STRICTDOC_BIN=$RUNNER_TEMP/strictdoc/bin/strictdoc" >> "$GITHUB_ENV"
-          pnpm exec playwright install --with-deps chromium
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
@@ -330,12 +359,23 @@ jobs:
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v6.1.0
+        uses: actions/cache/restore@v6.1.0
+        if: matrix.profile == 'full'
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          case "$PROFILE" in
+            core)
+              pnpm --filter '@codexia/profile-core...' --filter '@codexia/app...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
+              ;;
+            full) pnpm install --frozen-lockfile --prefer-offline ;;
+            *) exit 2 ;;
+          esac
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
@@ -454,7 +494,7 @@ jobs:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
@@ -550,9 +590,16 @@ jobs:
           persist-credentials: false
           # Verify the affected plan, fixture selection and compact proof against immutable Git boundaries.
           fetch-depth: 0
+          # Bootstrap only the shared input selector; checkout uses blobless
+          # history for sparse mode. The selector expands the exact tree inputs.
+          sparse-checkout: scripts
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
+      - name: Materialize exact evidence inputs
+        env:
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci/impact/evidence-checkout.mjs
       - name: Install frozen CI evidence dependencies
         run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Select latest exact-run plan and job inventory

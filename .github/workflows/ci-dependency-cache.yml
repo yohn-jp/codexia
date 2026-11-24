@@ -1,0 +1,69 @@
+name: Maintain bounded CI dependency cache
+on:
+  push:
+    branches: [main]
+    paths:
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - package.json
+      - .github/workflows/ci-dependency-cache.yml
+  workflow_dispatch:
+  pull_request_target:
+    types: [closed]
+permissions:
+  contents: read
+concurrency:
+  group: ci-dependency-cache-${{ github.event_name == 'pull_request_target' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: false
+jobs:
+  warm:
+    if: github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: Prepare exact pnpm toolchain
+        id: pnpm
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore content-addressed dependency cache
+        id: dependencies
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Fetch locked dependencies without executing package scripts
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        run: pnpm fetch --frozen-lockfile --ignore-scripts
+      - name: Save trusted dependency cache
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+  cleanup:
+    # Only event metadata; never checkout or run any PR-controlled code with
+    # actions:write. The only mutable resource is the closed PR's cache ref.
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Remove closed PR-scoped disposable caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          gh cache delete --all --succeed-on-no-caches --ref "refs/pull/$PR_NUMBER/merge" --repo "$GH_REPO"

@@ -41,6 +41,44 @@ test('browser cache has a single trusted main-push writer without changing test 
   assert.ok(main.groups.includes('browser-core-reference'), 'Full main verification always has the cache writer');
 });
 
+test('host dependencies are restore-only in Verify and cache mutation is scoped to trusted events', () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+  const cache = parse(readFileSync(new URL('../../../.github/workflows/ci-dependency-cache.yml', import.meta.url), 'utf8'));
+  const warm = cache.jobs.warm;
+  const warmRestore = warm.steps.find(step => step.id === 'dependencies');
+  const warmSave = warm.steps.find(step => step.uses?.startsWith('actions/cache/save@'));
+  assert.equal(warm.if, "github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main'");
+  assert.equal(warmSave.with.key, '${{ steps.dependencies.outputs.cache-primary-key }}');
+  for (const job of ['unit', 'types', 'build']) {
+    const steps = workflow.jobs[job].steps;
+    const restore = steps.find(step => step.id === 'dependencies');
+    assert.ok(restore.uses.startsWith('actions/cache/restore@'), job);
+    assert.equal(restore.with.key, warmRestore.with.key, job);
+    assert.equal(restore.with.path, warmRestore.with.path, job);
+    assert.ok(!steps.some(step => /^actions\/cache(?:\/save)?@/u.test(step.uses ?? '')), job);
+  }
+  assert.deepEqual(cache.on.pull_request_target.types, ['closed']);
+  const cleanup = cache.jobs.cleanup;
+  assert.equal(cleanup.if, "github.event_name == 'pull_request_target' && github.event.action == 'closed'");
+  assert.deepEqual(cleanup.permissions, { actions: 'write' });
+  assert.ok(cleanup.steps.every(step => !step.uses), 'Privileged cleanup must not checkout or run PR-controlled code');
+  assert.match(cleanup.steps[0].run, /--ref "refs\/pull\/\$PR_NUMBER\/merge"/u);
+  assert.equal(cleanup.steps[0].env.PR_NUMBER, '${{ github.event.pull_request.number }}');
+  assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture'/u);
+  assert.equal(workflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
+  assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture'");
+  for (const name of ['plan', 'certification']) {
+    const steps = workflow.jobs[name].steps;
+    const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    const materialize = steps.find(step => step.name === 'Materialize exact evidence inputs');
+    assert.equal(checkout.with['fetch-depth'], 0);
+    assert.equal(checkout.with['sparse-checkout'], 'scripts');
+    assert.equal(materialize.run, 'node scripts/ci/impact/evidence-checkout.mjs');
+    assert.ok(steps.indexOf(checkout) < steps.indexOf(materialize));
+    assert.ok(steps.indexOf(materialize) < steps.findIndex(step => step.name === 'Install frozen CI evidence dependencies'));
+  }
+});
+
 test('PR paths and completed-Verify release impact retain component build inputs', () => {
   const releases = ['frontend', 'backend'].map(component => parse(
     readFileSync(new URL(`../../../.github/workflows/${component}-release.yml`, import.meta.url), 'utf8')
