@@ -71,7 +71,11 @@ export function PersistenceEntry({
       versionChecked = true;
       const session = await api.session();
       if (sequence !== inspectSequenceRef.current) return;
-      if (!eagerWorkspace && session.authorScope && (workspaceScopeRef.current === null || workspaceScopeRef.current === session.authorScope))
+      if (
+        !eagerWorkspace &&
+        session.authorScope &&
+        (workspaceScopeRef.current === null || workspaceScopeRef.current === session.authorScope)
+      )
         void loadWorkspace();
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== 'postgres') {
