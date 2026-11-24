@@ -124,6 +124,17 @@ model OwnerSetupUnavailable {
   @body body: OwnerSetupError;
 }
 
+model OwnerSetupReadinessUnavailableBody {
+  code: "SETUP_UNAVAILABLE";
+  ...Record<never>;
+}
+
+model OwnerSetupReadinessUnavailable {
+  @statusCode statusCode: 503;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: OwnerSetupReadinessUnavailableBody;
+}
+
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "ANON; no OAuth bearer; same-origin status")
 @route("/api/auth/codexia/setup/status") @get @operationId("owner_setup_status_get")

@@ -72,7 +72,12 @@ if (reusedCoverageReports.length === 1) {
     repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
 }
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
-const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full']);
+const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full', 'types-trace']);
+if (plan.tasks.includes('requirements-trace')) {
+  const traceReport = reports.find(report => report.group === 'types-trace');
+  const traceJob = producerJobs.find(job => job.name === 'types-trace');
+  assert.equal(traceReport.workflowAttempt, traceJob.run_attempt, 'Trace evidence does not match the producer execution attempt');
+}
 assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);
 const message = `Verified ${plan.mode} plan: ${plan.tasks.length} validations at ${CODEXIA_EXPECTED_SHA}; run ${GITHUB_RUN_ID}. ${plan.excluded.length} explicitly NOT_SELECTED.\n`;
 console.log(message.trim());

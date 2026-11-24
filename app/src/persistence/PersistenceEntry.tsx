@@ -43,6 +43,22 @@ export function PersistenceEntry({
   const [sessionBlocked, setSessionBlocked] = useState(false);
   const [consoleNavigationError, setConsoleNavigationError] = useState('');
 
+  // Fetch the static editor graph after successful token acquisition or author
+  // admission, concurrently with the remaining server checks. Rendering is
+  // still gated on all of version, session, PostgreSQL and author scope.
+  const workspaceLoadRef = useRef<Promise<WorkspaceComponent> | null>(null);
+  const loadWorkspace = useCallback(() => {
+    if (eagerWorkspace) return Promise.resolve(eagerWorkspace);
+    if (!workspaceLoadRef.current) {
+      const pending = import('./PersistenceWorkspace').then(module => module.PersistenceWorkspace);
+      workspaceLoadRef.current = pending;
+      void pending.catch(() => {
+        if (workspaceLoadRef.current === pending) workspaceLoadRef.current = null;
+      });
+    }
+    return workspaceLoadRef.current;
+  }, [eagerWorkspace]);
+
   const inspect = useCallback(async () => {
     const sequence = ++inspectSequenceRef.current;
     if (workspaceScopeRef.current !== null) setSessionBlocked(true);
@@ -54,6 +70,9 @@ export function PersistenceEntry({
       if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
       const session = await api.session();
+      if (sequence !== inspectSequenceRef.current) return;
+      if (!eagerWorkspace && session.authorScope && (workspaceScopeRef.current === null || workspaceScopeRef.current === session.authorScope))
+        void loadWorkspace();
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== 'postgres') {
         throw new Error('PostgreSQL保存基盤が利用できません。');
@@ -68,7 +87,7 @@ export function PersistenceEntry({
       // Desktop defers the editor graph; legacy Mobile and the native bridge retain their eager bundle.
       // A failed Desktop chunk load must not admit an incomplete author workspace.
       if (!eagerWorkspace) {
-        const { PersistenceWorkspace } = await import('./PersistenceWorkspace');
+        const PersistenceWorkspace = await loadWorkspace();
         if (sequence !== inspectSequenceRef.current) return;
         setWorkspace(() => PersistenceWorkspace);
       }
@@ -98,7 +117,7 @@ export function PersistenceEntry({
     } finally {
       if (sequence === inspectSequenceRef.current) setBusy(false);
     }
-  }, [eagerWorkspace]);
+  }, [eagerWorkspace, loadWorkspace]);
 
   useEffect(() => {
     let mounted = true;
@@ -110,6 +129,7 @@ export function PersistenceEntry({
           const authorization = await completeOAuthAuthorization(config);
           if (authorization) {
             setOAuthAccessToken(authorization.accessToken);
+            if (!eagerWorkspace) void loadWorkspace();
             window.history.replaceState(window.history.state, '', authorization.returnPath);
             window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
           }
@@ -139,7 +159,7 @@ export function PersistenceEntry({
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', resume);
     };
-  }, [inspect, mode, nativeShell]);
+  }, [eagerWorkspace, inspect, loadWorkspace, mode, nativeShell]);
 
   const protectBeforeAuthTransition = useCallback(async (action: string): Promise<boolean> => {
     if (workspaceScopeRef.current === null) return true;

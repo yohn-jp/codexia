@@ -5065,6 +5065,25 @@ extension Components {
                 case email
             }
         }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupReadinessUnavailableBody`.
+        public struct OwnerSetupReadinessUnavailableBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupReadinessUnavailableBody/code`.
+            @frozen public enum codePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case SETUP_UNAVAILABLE = "SETUP_UNAVAILABLE"
+            }
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupReadinessUnavailableBody/code`.
+            public var code: Components.Schemas.OwnerSetupReadinessUnavailableBody.codePayload
+            /// Creates a new `OwnerSetupReadinessUnavailableBody`.
+            ///
+            /// - Parameters:
+            ///   - code:
+            public init(code: Components.Schemas.OwnerSetupReadinessUnavailableBody.codePayload) {
+                self.code = code
+            }
+            public enum CodingKeys: String, CodingKey {
+                case code
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/OwnerSetupState`.
         public struct OwnerSetupState: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/OwnerSetupState/state`.

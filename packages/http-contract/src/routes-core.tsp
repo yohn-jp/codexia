@@ -16,7 +16,7 @@ op headHealth(): HeadJsonResponse;
 
 @tag("health") @useAuth(NoAuth)
 @route("/api/ready") @get @operationId("api_ready_get")
-op getReady(): ReadinessResponse;
+op getReady(): ReadinessSuccess | ReadinessUnavailable;
 
 @tag("health") @useAuth(NoAuth)
 @route("/api/ready") @head @operationId("api_ready_head")
@@ -24,7 +24,7 @@ op headReady(): HeadJsonResponse | { @statusCode _: 503; @header contentType: "a
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/live") @get @operationId("health_live_get")
-op getLive(): ReadinessResponse;
+op getLive(): ReadinessSuccess;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/live") @head @operationId("health_live_head")
@@ -32,7 +32,9 @@ op headLive(): HeadJsonResponse;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/ready") @get @operationId("health_ready_get")
-op getHealthReady(): ReadinessResponse | OwnerSetupRateLimited;
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "In setup-only runtime mode, HTTP 200 returns `{ status: \"ready\" }` instead of the approved ReadinessResponse shape; keep this mismatch explicit until an approved compatibility correction.")
+op getHealthReady(): ReadinessSuccess | OwnerSetupRateLimited | ReadinessUnavailable | OwnerSetupReadinessUnavailable;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/ready") @head @operationId("health_ready_head")
@@ -40,7 +42,7 @@ op headHealthReady(): HeadJsonResponse | { @statusCode _: 503; @header contentTy
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/startup") @get @operationId("health_startup_get")
-op getStartup(): ReadinessResponse;
+op getStartup(): ReadinessSuccess | ReadinessUnavailable;
 
 @tag("health") @useAuth(NoAuth)
 @route("/health/startup") @head @operationId("health_startup_head")

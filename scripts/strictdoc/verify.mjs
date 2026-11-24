@@ -6,6 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
+import { associateTraceCases } from './case-results.mjs';
+import { buildObligationTrace } from './obligation-trace.mjs';
+import { buildReverseTrace, discoverReverseSurfaces } from './reverse-trace.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -39,6 +42,9 @@ export function validateRequirementNodes(nodes) {
     if (typeof node.TITLE !== 'string' || node.TITLE.trim() === '') violations.push(`Missing title for ${uid}`);
     if (!DECISION_STATES.has(node['Decision status'])) violations.push(`Invalid decision status for ${uid}`);
     if (!CONFORMANCE_STATES.has(node['Conformance status'])) violations.push(`Invalid conformance status for ${uid}`);
+    if (node['Conformance status'] === 'VERIFIED') {
+      violations.push(`${uid} cannot be VERIFIED without authenticated product obligation evidence`);
+    }
     if (!APPLICABILITY_STATES.has(node.Applicability)) violations.push(`Invalid applicability for ${uid}`);
     if (typeof node.STATEMENT !== 'string' || node.STATEMENT.trim() === '') violations.push(`Missing statement for ${uid}`);
   }
@@ -106,6 +112,21 @@ export async function validateRelations(nodes, repositoryRoot) {
     }
   }
   return violations;
+}
+
+export function validateObligationDesignRefs(nodes, registerPath, repositoryRoot) {
+  const from = path.posix.dirname(registerPath);
+  const withRelations = nodes.map(node => ({
+    UID: node.UID,
+    RELATIONS: String(node['Design reference'] ?? '').split(/[;、]/u).map(reference => reference.trim()).filter(Boolean).map(reference => {
+      const link = /^\[[^\]]+\]\(([^)]+)\)$/u.exec(reference);
+      const [, target] = link ?? ['', reference];
+      const [file] = target.split('#');
+      const value = link && !path.posix.isAbsolute(file) ? path.posix.join(from, file) : file;
+      return { TYPE: 'File', VALUE: value };
+    }),
+  }));
+  return validateRelations(withRelations, repositoryRoot);
 }
 
 export async function validateScenarioNodes(scenarios, requirements, repositoryRoot) {
@@ -586,30 +607,30 @@ function requirementIdsFromSource(markdown) {
   return [...markdown.matchAll(/^\|\s*(REQ-[A-Z]+-\d{3})\s*\|/gmu)].map((match) => match[1]);
 }
 
-function collectRequirementNodes(value, found = []) {
+function obligationIdsFromSource(markdown) {
+  return [...markdown.matchAll(/^\*\*UID\*\*:[ \t]*(OBL-REQ-[A-Z]+-\d{3}-O\d{2})[ \t]*$/gmu)].map(match => match[1]);
+}
+
+function collectNodes(value, type, found = []) {
   if (!value || typeof value !== 'object') return found;
-  if (Array.isArray(value)) {
-    for (const entry of value) collectRequirementNodes(entry, found);
-    return found;
-  }
-  if (value._NODE_TYPE === 'REQUIREMENT') found.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== '_NODE_TYPE') collectRequirementNodes(child, found);
-  }
+  if (value._NODE_TYPE === type) found.push(value);
+  for (const child of Object.values(value)) collectNodes(child, type, found);
   return found;
 }
 
-function collectTestNodes(value, found = []) {
-  if (!value || typeof value !== 'object') return found;
-  if (Array.isArray(value)) {
-    for (const entry of value) collectTestNodes(entry, found);
-    return found;
+async function executeTraceTests(root, tempRoot, reportName, testFiles, env = process.env) {
+  const resultPath = path.join(tempRoot, `${reportName}.ndjson`);
+  const result = execute(process.execPath, [
+    '--test',
+    '--test-reporter=tap', '--test-reporter-destination=stdout',
+    '--test-reporter=./scripts/strictdoc/case-results.mjs', `--test-reporter-destination=${resultPath}`,
+    ...testFiles,
+  ], { cwd: root, env });
+  if (result.status !== 0) {
+    throw new Error(`StrictDoc ${reportName} tests failed:\n${String(result.stdout)}\n${String(result.stderr)}`);
   }
-  if (value._NODE_TYPE === 'TEST') found.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== '_NODE_TYPE') collectTestNodes(child, found);
-  }
-  return found;
+  const outcomes = (await readFile(resultPath, 'utf8')).trim();
+  return { stdout: String(result.stdout).trim(), outcomes: outcomes ? outcomes.split('\n').map(line => JSON.parse(line)) : [] };
 }
 
 async function readGitFile(root, ref, relativePath) {
@@ -779,6 +800,12 @@ async function runVerifier(args) {
   const missingBaselineIds = baselineIds.filter((id) => !currentSourceIds.includes(id));
   if (missingBaselineIds.length > 0) throw new Error(`Requirement IDs removed from the baseline: ${missingBaselineIds.join(', ')}`);
 
+  const currentObligationIds = obligationIdsFromSource(sourceText);
+  const removedObligationIds = obligationIdsFromSource(baseText).filter(id => !currentObligationIds.includes(id));
+  if (removedObligationIds.length > 0) {
+    throw new Error(`Obligation IDs removed from the baseline: ${removedObligationIds.join(', ')}`);
+  }
+
   const versionResult = execute(args.strictdoc, ['--version'], { cwd: root });
   const version = String(versionResult.stdout).trim();
   if (versionResult.status !== 0 || version !== EXPECTED_STRICTDOC_VERSION) {
@@ -799,8 +826,15 @@ async function runVerifier(args) {
     await runStrictDoc(args.strictdoc, root, sourcePath, run1);
     await runStrictDoc(args.strictdoc, root, sourcePath, run2);
     const firstJson = JSON.parse(await readFile(path.join(run1, 'json/index.json'), 'utf8'));
-    const requirementNodes = collectRequirementNodes(firstJson);
-    const scenarioNodes = collectTestNodes(firstJson);
+    const requirementNodes = collectNodes(firstJson, 'REQUIREMENT');
+    const scenarioNodes = collectNodes(firstJson, 'TEST');
+    const obligationNodes = collectNodes(firstJson, 'OBLIGATION');
+    const exportedObligationIds = obligationNodes.map(node => node.UID);
+    const missingObligations = currentObligationIds.filter(id => !exportedObligationIds.includes(id));
+    const unexpectedObligations = exportedObligationIds.filter(id => !currentObligationIds.includes(id));
+    if (missingObligations.length > 0 || unexpectedObligations.length > 0) {
+      throw new Error(`StrictDoc export/source obligation mismatch; missing=${missingObligations.join(',')}; extra=${unexpectedObligations.join(',')}`);
+    }
     const nodeViolations = validateRequirementNodes(requirementNodes);
     if (nodeViolations.length > 0) throw new Error(nodeViolations.join('\n'));
     const scenarioViolations = await validateScenarioNodes(scenarioNodes, requirementNodes, root);
@@ -811,13 +845,15 @@ async function runVerifier(args) {
     if (missingFromExport.length > 0 || extraInExport.length > 0) {
       throw new Error(`StrictDoc export/source ID mismatch; missing=${missingFromExport.join(',')}; extra=${extraInExport.join(',')}`);
     }
-    const relationViolations = await validateRelations([...requirementNodes, ...scenarioNodes], root);
+    const relationViolations = await validateRelations([...requirementNodes, ...scenarioNodes, ...obligationNodes], root);
     if (relationViolations.length > 0) throw new Error(relationViolations.join('\n'));
+    const designViolations = await validateObligationDesignRefs(obligationNodes, sourceRel, root);
+    if (designViolations.length > 0) throw new Error(designViolations.join('\n'));
 
     const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
     const { discovered, violations: inventoryViolations } = await verifySourceInventory(root, inventory);
     if (inventoryViolations.length > 0) throw new Error(inventoryViolations.join('\n'));
-    const stableMids = [...requirementNodes, ...scenarioNodes].map((node) => node.MID);
+    const stableMids = [...requirementNodes, ...scenarioNodes, ...obligationNodes].map((node) => node.MID);
     const determinism = await compareExports(run1, run2, stableMids);
     if (determinism.violations.length > 0) throw new Error(determinism.violations.join('\n'));
     await mkdir(path.dirname(finalOutput), { recursive: true });
@@ -840,20 +876,49 @@ async function runVerifier(args) {
       const content = await readFile(absolutePath, 'utf8');
       if (content.includes(root)) await writeFile(absolutePath, content.replaceAll(root, 'REPOSITORY_ROOT'), 'utf8');
     }
-    const allNodeIds = [...exportedIds, ...scenarioNodes.map((node) => node.UID)];
+    const allNodeIds = [...exportedIds, ...exportedObligationIds, ...scenarioNodes.map(node => node.UID)];
     const staticOutput = await checkStaticOutput(finalOutput, allNodeIds, sourceRel, root);
-    const nodeTest = execute(process.execPath, ['--test', 'scripts/strictdoc/verify.test.mjs'], { cwd: root });
-    if (nodeTest.status !== 0) throw new Error(`StrictDoc Node fault-injection tests failed:\n${String(nodeTest.stdout)}\n${String(nodeTest.stderr)}`);
-    const browserTest = execute(process.execPath, ['--test', 'scripts/strictdoc/verify.browser.mjs'], {
-      cwd: root,
-      env: { ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput },
+    const nodeTraceTests = [
+      'scripts/strictdoc/verify.test.mjs', 'scripts/strictdoc/case-results.test.mjs',
+      'scripts/strictdoc/obligation-trace.test.mjs', 'scripts/strictdoc/reverse-trace.test.mjs',
+    ];
+    const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
+    const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeTraceTests);
+    const browserTest = await executeTraceTests(root, tempRoot, 'playwright', browserTraceTests, {
+      ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput,
     });
-    if (browserTest.status !== 0) throw new Error(`StrictDoc Playwright static-page acceptance failed:\n${String(browserTest.stdout)}\n${String(browserTest.stderr)}`);
+    const caseExecutions = associateTraceCases(scenarioNodes, [...nodeTest.outcomes, ...browserTest.outcomes]);
+    const traceTestPaths = new Set([...nodeTraceTests, ...browserTraceTests]);
+    const requiredCases = scenarioNodes.filter(node => (node.RELATIONS ?? []).some(relation =>
+      relation.TYPE === 'File' && traceTestPaths.has(relation.VALUE ?? relation.PATH)));
+    const caseById = new Map(caseExecutions.map(outcome => [outcome.testId, outcome]));
+    const casesWithoutPass = requiredCases.filter(node => caseById.get(node.UID)?.result !== 'PASSED');
+    if (casesWithoutPass.length > 0) {
+      throw new Error(`Required StrictDoc cases lacked a passing execution: ${casesWithoutPass.map(node =>
+        `${node.UID} (${caseById.get(node.UID)?.result ?? 'NOT_RUN'})`).join(', ')}`);
+    }
     const git = await readGitIdentity(root);
     const run = resolveRunIdentity(process.env);
-    if (run.status === 'IN_PROGRESS' && run.sourceSha !== git.sourceSha) {
-      throw new Error(`Codexia exact-source SHA ${run.sourceSha} does not match checkout ${git.sourceSha}`);
+    if (run.status === 'IN_PROGRESS') {
+      if (run.sourceSha !== git.sourceSha) {
+        throw new Error(`Codexia exact-source SHA ${run.sourceSha} does not match checkout ${git.sourceSha}`);
+      }
+      if (!git.worktreeClean) throw new Error('Codexia exact-source trace requires a clean checkout');
     }
+    // The producer can identify a case execution and its current run. The existing
+    // CI certifier verifies the uploaded artifact's job, attempt and digest later.
+    const runEvidence = run.status === 'IN_PROGRESS' ? caseExecutions.filter(item => item.result === 'PASSED').map(item => ({
+      testId: item.testId, url: run.runUrl, sourceSha: run.sourceSha, runId: run.runId,
+      attempt: run.runAttempt, repository: run.repository, job: run.job, task: run.task, result: 'PASS',
+    })) : [];
+    const obligationTrace = await buildObligationTrace({
+      requirements: requirementNodes, obligations: obligationNodes, scenarios: scenarioNodes,
+      repositoryRoot: root, expectedRepository: run.repository, expectedSourceSha: git.sourceSha, runEvidence,
+    });
+    if (obligationTrace.violations.length > 0) throw new Error(obligationTrace.violations.join('\n'));
+    const reverseDiscovery = await discoverReverseSurfaces({ repositoryRoot: root, boundedDiscovery: discovered });
+    const reverseTrace = await buildReverseTrace({ discovered: reverseDiscovery, inventory, obligations: obligationTrace.rows });
+    if (reverseTrace.violations.length > 0) throw new Error(reverseTrace.violations.join('\n'));
     const lockPath = path.join(SCRIPT_DIR, 'requirements.lock.txt');
     const lockDigest = await sha256File(lockPath);
     const report = {
@@ -890,16 +955,20 @@ async function runVerifier(args) {
       traceability: {
         TRC01: { status: 'LOCAL_PASS', detail: 'All baseline REQ-IDs are present exactly once as StrictDoc requirement nodes.' },
         TRC02: { status: 'LOCAL_PASS', detail: 'Two exports match after only recorded StrictDoc timestamp, Markdown document MID, and search-index key and unordered membership normalization.' },
-        TRC03: { status: 'PARTIAL', detail: 'File relations and ranges are validated; symbol/AST completeness is not asserted.' },
-        TRC04: { status: inventory.coverageStatus ?? 'PARTIAL', detail: 'See reverse inventory counts and limitations; unenumerated runtime routes remain explicit.' },
-        TRC05: { status: run.status === 'NOT_RUN' ? 'LOCAL_PASS_NO_RUN' : 'IN_PROGRESS', nodeTests: 'PASSED', browserTests: 'PASSED', detail: 'StrictDoc trace scenarios, Node fault injection, and a Playwright static-page check ran; product E2E coverage remains separate.' },
+        TRC03: { status: 'PARTIAL', detail: 'See obligationTrace for resolved design and source references, and the remaining mapping gaps.' },
+        TRC04: { status: inventory.coverageStatus ?? 'PARTIAL', detail: 'See reverseTrace for discovered surfaces, obligation links, deviations and discovery limitations.' },
+        TRC05: { status: run.status === 'NOT_RUN' ? 'LOCAL_PASS_NO_RUN' : 'IN_PROGRESS', nodeTests: 'PASSED', browserTests: 'PASSED', detail: 'See caseExecutions for observed TEST IDs. The existing CI certifier binds the uploaded report to its job and artifact.' },
         TRC06: { status: 'LOCAL_PASS', detail: 'Fault injection is exercised by the scoped Node test suite.' },
         TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED', detail: 'Static output is staged safely; publication remains with the existing Repository Audit Pages publisher and DOC-01.' },
       },
       tests: {
-        node: { status: 'PASSED', output: String(nodeTest.stdout).trim() },
-        playwright: { status: 'PASSED', output: String(browserTest.stdout).trim() },
+        node: { status: 'PASSED', output: nodeTest.stdout },
+        playwright: { status: 'PASSED', output: browserTest.stdout },
       },
+      obligationTrace: { rows: obligationTrace.rows, gaps: obligationTrace.gaps },
+      reverseTrace: { rows: reverseTrace.rows, gaps: reverseTrace.gaps },
+      requiredCaseIds: requiredCases.map(node => node.UID),
+      caseExecutions,
       execution: run,
       publication: { status: 'NOT_PUBLISHED', publisher: '.github/workflows/repository-audit.yml' },
     };
