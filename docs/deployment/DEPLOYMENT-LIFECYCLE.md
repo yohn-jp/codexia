@@ -59,7 +59,7 @@ flowchart TD
     PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
     LOST -->|はい| RESTORE["R2: 独立backup / Secret復元"]
     RESTORE --> OBS
-    LOST -->|いいえ| DRIFT{"drift・DB非互換・障害?"}
+    LOST -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
     DRIFT -->|はい| MAINT["R3: 保守・復旧・協調移行"]
     DRIFT -->|いいえ| BASE{"基盤・DB・Auth runtime収束済み?"}
     BASE -->|いいえ| BOOT["R4: Bootstrap"]
@@ -84,7 +84,7 @@ flowchart TD
 
 ### Frontend・Backendの配備マトリクス
 
-候補B/Fは互いに互換であることが前提。H/D/Aの収束、承認・証明・Tの解決を先行する。setup-onlyはR5であり通常Bではない。「互換」は候補profile/API epochに対する状態で、DB migration/persistence/認証schema不一致はR3が優先する。
+候補B/Fは互いに互換であることが前提。H/D/Aの収束、承認・証明・Tの解決を先行する。setup-onlyはR5であり通常Bではない。「互換」は候補profile/API epochに対する状態で、DB migration/persistence/認証schema不一致、確認済み旧認証方式からの変更はR3が優先する。
 
 | Backend ＼ Frontend | 未配備 | 非互換・旧形式確定 | 互換 |
 | --- | --- | --- | --- |

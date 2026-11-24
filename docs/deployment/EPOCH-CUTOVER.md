@@ -1,4 +1,4 @@
-# Protected API epoch 1 → 2 maintenance (supported in-place procedure)
+# Protected API epoch 1 → 2 maintenance
 
 This runbook describes the currently supported in-place transition only. The [deployment lifecycle design](DEPLOYMENT-LIFECYCLE.md#共通制御と個別移行の境界) owns the general cutover, explicit transition contract and recovery target; do not treat the workflow's fixed epoch values as the design or use this procedure for other source/target combinations without implementation and verification.
 
