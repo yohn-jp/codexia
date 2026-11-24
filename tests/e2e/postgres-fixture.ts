@@ -57,7 +57,7 @@ export async function replaceManuscript(page: Page, text: string): Promise<void>
   const normalized = normalizeManuscriptNewlines(text);
   await clickManuscriptEnd(editor);
   await editor.press("ControlOrMeta+a");
-  if (normalized) await typeManuscriptText(editor, normalized);
+  if (normalized) await page.keyboard.insertText(normalized);
   else await editor.press("Backspace");
   await expect.poll(() => readManuscriptMarkdown(page)).toBe(normalized);
 }
@@ -67,20 +67,12 @@ export async function appendManuscript(page: Page, text: string): Promise<void> 
   const previous = await readManuscriptMarkdown(page);
   const normalized = normalizeManuscriptNewlines(text);
   await clickManuscriptEnd(editor);
-  await typeManuscriptText(editor, normalized);
+  if (normalized) await page.keyboard.insertText(normalized);
   await expect.poll(() => readManuscriptMarkdown(page)).toBe(previous + normalized);
 }
 
 function normalizeManuscriptNewlines(text: string): string {
   return text.replace(/\r\n?/gu, "\n");
-}
-
-async function typeManuscriptText(editor: Locator, text: string): Promise<void> {
-  const lines = text.split("\n");
-  for (const [index, line] of lines.entries()) {
-    if (index > 0) await editor.press("Enter");
-    if (line) await editor.pressSequentially(line);
-  }
 }
 
 async function clickManuscriptEnd(editor: Locator): Promise<void> {
