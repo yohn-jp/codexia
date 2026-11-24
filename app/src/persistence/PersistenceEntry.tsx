@@ -15,10 +15,12 @@ export interface NativePersistenceAuth {
   signOut(): Promise<NativeSignOutResult>;
 }
 
-export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null }) {
+type WorkspaceComponent = typeof import("./PersistenceWorkspace").PersistenceWorkspace;
+
+export function PersistenceEntry({ mode, nativeAuth, eagerWorkspace }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null; eagerWorkspace?: WorkspaceComponent }) {
   const nativeShell = nativeAuth !== undefined;
   const [state, setState] = useState<EntryState>("checking");
-  const [Workspace, setWorkspace] = useState<typeof import("./PersistenceWorkspace").PersistenceWorkspace | null>(null);
+  const [Workspace, setWorkspace] = useState<WorkspaceComponent | null>(() => eagerWorkspace ?? null);
   const [oauthConfig, setOAuthConfig] = useState<OAuthWebConfig | null>(null);
   const [authorScope, setAuthorScope] = useState("owner");
   const [busy, setBusy] = useState(false);
@@ -52,11 +54,13 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       if (sequence !== inspectSequenceRef.current) return;
       const scope = session.authorScope;
       if (workspaceScopeRef.current !== null && workspaceScopeRef.current !== scope) throw new Error("認証された作者が変わりました。現在の下書きを保護してから再読み込みしてください。");
-      // Do not load the editor, module panels and recovery machinery on the signed-out path.
-      // Await the real workspace chunk before admitting the author; a failed load remains fail-closed.
-      const { PersistenceWorkspace } = await import("./PersistenceWorkspace");
-      if (sequence !== inspectSequenceRef.current) return;
-      setWorkspace(() => PersistenceWorkspace);
+      // Desktop defers the editor graph; legacy Mobile and the native bridge retain their eager bundle.
+      // A failed Desktop chunk load must not admit an incomplete author workspace.
+      if (!eagerWorkspace) {
+        const { PersistenceWorkspace } = await import("./PersistenceWorkspace");
+        if (sequence !== inspectSequenceRef.current) return;
+        setWorkspace(() => PersistenceWorkspace);
+      }
       workspaceScopeRef.current = scope;
       setAuthorScope(scope);
       setSessionBlocked(false);
@@ -83,7 +87,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     } finally {
       if (sequence === inspectSequenceRef.current) setBusy(false);
     }
-  }, []);
+  }, [eagerWorkspace]);
 
   useEffect(() => {
     let mounted = true;

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { installNativeSelectCspCompatibility } from "../browser/nativeSelect";
 import { PersistenceEntry } from "../persistence/PersistenceEntry";
+import { PersistenceWorkspace } from "../persistence/PersistenceWorkspace";
 import { applyThemeMode, loadThemeMode } from "../theme";
 import { configureNativeApiSession } from "../api";
 import { createNativeApiTransport, createNativeAuth } from "../../native/plugins/codexia-auth/src/index.mjs";
@@ -42,4 +43,4 @@ const nativeAuth = nativeAuthClient ? {
   signIn: async () => { await nativeAuthClient.signIn(); },
   signOut: async () => nativeAuthClient.signOut(),
 } : null;
-createRoot(root).render(<BrowserRouter><PersistenceEntry mode="mobile" nativeAuth={nativeAuth} /></BrowserRouter>);
+createRoot(root).render(<BrowserRouter><PersistenceEntry mode="mobile" nativeAuth={nativeAuth} eagerWorkspace={PersistenceWorkspace} /></BrowserRouter>);
