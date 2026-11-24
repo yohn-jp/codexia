@@ -72,3 +72,17 @@ test('fault injection rejects malformed exact-source evidence and unsafe source 
   assert.match(result.violations.join('\n'), /repository-relative/);
   assert.match(result.violations.join('\n'), /authored Exact-run reference/);
 });
+
+test('reports missing exact-source evidence for each TEST-ID even when another case passed', () => {
+  const missing = { ...scenario, UID: 'TEST-API-002' };
+  const result = buildObligationTrace({
+    requirements: [{ ...requirement, 'Test IDs': 'TEST-API-001 TEST-API-002' }],
+    obligations: [{ ...obligation, 'Test IDs': 'TEST-API-001 TEST-API-002' }],
+    scenarios: [scenario, missing], runEvidence: [candidate],
+    expectedRepository: 'yohn-jp/codexia', expectedSourceSha: 'a'.repeat(40),
+  });
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.rows[0].exactRuns, [candidate]);
+  assert.deepEqual(result.gaps, ['OBL-REQ-API-002-O01: no exact-source run evidence for TEST-API-002']);
+  assert.equal(result.rows[0].status, 'MAPPED_UNVERIFIED');
+});

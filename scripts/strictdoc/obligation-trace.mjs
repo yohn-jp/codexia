@@ -107,7 +107,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     if (designRefs.length === 0) gaps.push(`${obligation.UID}: no design reference`);
     if (sourceRefs.length === 0) gaps.push(`${obligation.UID}: no source/file/range reference`);
     if (testIds.length === 0) gaps.push(`${obligation.UID}: no TEST-ID`);
-    if (testIds.length && exactRuns.length === 0) gaps.push(`${obligation.UID}: no exact-source run evidence`);
+    for (const id of testIds) if (!exactRuns.some(evidence => evidence.testId === id)) gaps.push(`${obligation.UID}: no exact-source run evidence for ${id}`);
     for (const source of sourceRefs) {
       if (repositoryRoot && (typeof source.path !== 'string' || path.isAbsolute(source.path) || source.path.split(/[\\/]/u).includes('..'))) {
         violations.push(`${obligation.UID} source path must be repository-relative: ${String(source.path)}`);
