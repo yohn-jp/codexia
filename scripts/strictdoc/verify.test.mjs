@@ -31,6 +31,15 @@ test('rejects duplicate requirement UIDs and unstable MIDs', () => {
   assert.match(violations.join('\n'), /MID.*REQ-DATA-002/i);
 });
 
+test('rejects authored VERIFIED status without authenticated product evidence', () => {
+  const uid = 'REQ-DATA-001';
+  const violations = validateRequirementNodes([{
+    UID: uid, MID: stableMid(uid), TITLE: 'Authoritative data', STATEMENT: 'Use PostgreSQL.',
+    'Decision status': 'ACCEPTED', 'Conformance status': 'VERIFIED', Applicability: 'CURRENT',
+  }]);
+  assert.deepEqual(violations, [`${uid} cannot be VERIFIED without authenticated product obligation evidence`]);
+});
+
 test('rejects missing files and ranges beyond the referenced source', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-trace-'));
   t.after(() => rm(root, { recursive: true, force: true }));

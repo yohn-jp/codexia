@@ -42,6 +42,9 @@ export function validateRequirementNodes(nodes) {
     if (typeof node.TITLE !== 'string' || node.TITLE.trim() === '') violations.push(`Missing title for ${uid}`);
     if (!DECISION_STATES.has(node['Decision status'])) violations.push(`Invalid decision status for ${uid}`);
     if (!CONFORMANCE_STATES.has(node['Conformance status'])) violations.push(`Invalid conformance status for ${uid}`);
+    if (node['Conformance status'] === 'VERIFIED') {
+      violations.push(`${uid} cannot be VERIFIED without authenticated product obligation evidence`);
+    }
     if (!APPLICABILITY_STATES.has(node.Applicability)) violations.push(`Invalid applicability for ${uid}`);
     if (typeof node.STATEMENT !== 'string' || node.STATEMENT.trim() === '') violations.push(`Missing statement for ${uid}`);
   }
