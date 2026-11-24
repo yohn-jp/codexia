@@ -220,6 +220,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
 test('changes to trace inputs select the existing trace task without dropping domain checks', async () => {
   for (const [file, owner] of [
     ['packages/api/src/server.ts', 'unit-api'],
+    ['packages/http-contract/src/source-dispatcher-inventory.mjs', 'unit-http-contract'],
     ['modules/mcp/src/tools/project.ts', 'unit-mcp'],
     ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],

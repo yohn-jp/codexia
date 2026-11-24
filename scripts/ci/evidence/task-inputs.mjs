@@ -56,6 +56,7 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   'deploy/ansible/restore-drill.yml',
   'deploy/backup/backup.sh',
   'deploy/backup/s3_transfer.py',
+  'packages/http-contract/src/source-dispatcher-inventory.mjs',
 ]);
 const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
