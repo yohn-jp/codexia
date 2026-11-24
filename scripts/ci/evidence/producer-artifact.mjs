@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { resolveProducerJobAttempts, selectLatestJobArtifact } from './artifact-selection.mjs';
 import { downloadArtifact } from './download-artifacts.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
-export function listProducerArtifacts(request,runId,artifactName) {
-  return collectGitHubPages((page,perPage)=>{
-    const query=new URLSearchParams({name:artifactName,per_page:String(perPage),page:String(page)});
-    return request('actions/runs/'+runId+'/artifacts?'+query);
-  },'artifacts');
+export function listProducerArtifacts(github,runId,artifactName) {
+  return github.paginate(`/repos/yohn-jp/codexia/actions/runs/${runId}/artifacts`, { name: artifactName }, 'artifacts');
 }
 
 /** Wait only for the exact selected producer's actual terminal state.
@@ -53,17 +50,17 @@ export async function waitForProducerJob({read,runId,sourceSha,producerJob,expec
  * confined to GitHub REST metadata and the existing authenticated redirect path. */
 export async function fetchLatestProducerArtifact({plan,runId,repository,token,producerJob,artifactName,maxArchive,waitForProducerMs=0,expectedAttempt}) {
   assert.match(String(runId),/^\d+$/u);
-  assert.match(repository??'',/^[\w.-]+\/[\w.-]+$/u);
+  assert.equal(repository,'yohn-jp/codexia','Artifact producer repository mismatch');
   assert.ok(token,'Artifact read token required');
+  const github=createGitHubRestClient({token});
   const request=async (endpoint,timeoutMs=15_000)=>{
-    const response=await fetch('https://api.github.com/repos/'+repository+'/'+endpoint,{
-      headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'},redirect:'error',signal:AbortSignal.timeout(Math.max(1,Math.min(15_000,Math.ceil(timeoutMs))))});
-    assert.ok(response.ok,'Artifact metadata unavailable: HTTP '+response.status);return response.json();
+    const response=await github.request('GET',`/repos/${repository}/${endpoint}`,{request:{timeout:Math.max(1,Math.min(15_000,Math.ceil(timeoutMs)))}});
+    assert.ok(response.status>=200&&response.status<300,'Artifact metadata unavailable: HTTP '+response.status);return response.data;
   };
   const read=async timeoutMs=>{
     const [run,jobs]=await Promise.all([
       request('actions/runs/'+runId,timeoutMs),
-      collectGitHubPages(page=>request('actions/runs/'+runId+'/jobs?filter=latest&per_page=100&page='+page,timeoutMs),'jobs')]);
+      github.paginate(`/repos/${repository}/actions/runs/${runId}/jobs`,{filter:'latest'},'jobs')]);
     return {run,jobs};
   };
   const {run,jobs,waitMs}=waitForProducerMs>0
@@ -71,10 +68,10 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
     : {...await read(15_000),waitMs:0};
   assert.equal(String(run.id),String(runId),'Producer run mismatch');
   assert.equal(run.head_sha,plan.sha,'Producer source mismatch');
-  const artifacts=await listProducerArtifacts(request,runId,artifactName);
+  const artifacts=await listProducerArtifacts(github,runId,artifactName);
   if(waitForProducerMs>0)console.log(JSON.stringify({phase:'profile-producer-wait',producerJob,waitMs}));
   const selected=selectLatestJobArtifact(artifactName,producerJob,artifacts,jobs,{runId,sourceSha:plan.sha});
-  const resolved=await resolveProducerJobAttempts(jobs,run,request,[producerJob]);
+  const resolved=await resolveProducerJobAttempts(jobs,run,github,[producerJob]);
   const job=resolved.find(job=>job.name===producerJob);
   assert.ok(Number.isSafeInteger(job.run_attempt)&&job.run_attempt>0,'Invalid producer attempt');
   const bytes=await downloadArtifact(selected,repository,token,fetch,maxArchive===undefined?{}:{maxArchive});

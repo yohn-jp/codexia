@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, verificationPlanOutputs } from '../impact/plan.mjs';
 import { resolveExactMainCoverageProof } from './proof-reuse.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 async function publishPlan(plan, planPath) {
   const temporaryPath = `${planPath}.${process.env.GITHUB_RUN_ID ?? 'local'}.tmp`;
@@ -31,12 +32,11 @@ async function main() {
       console.log('Coverage proof unavailable; execute the selected coverage task.');
     } else {
       try {
-        const response = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`, {
-          headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json' },
-          signal: AbortSignal.timeout(15_000), redirect: 'error',
-        });
-        if (!response.ok) throw new Error(`Current workflow identity lookup returned HTTP ${response.status}`);
-        const current = await response.json();
+        assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
+        const github = createGitHubRestClient({ token: GH_TOKEN });
+        const response = await github.request('GET', `/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`);
+        if (response.status < 200 || response.status >= 300) throw new Error(`Current workflow identity lookup returned HTTP ${response.status}`);
+        const current = response.data;
         const coverageReuse = await resolveExactMainCoverageProof({
           plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN,
         });

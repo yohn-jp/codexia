@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from '../../ci/impact/contract.mjs';
-import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './policy.mjs';
+import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubArrayPages, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './policy.mjs';
 
 const sha = 'a'.repeat(40);
 const run = { id: 1, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success' };
@@ -55,23 +55,21 @@ test('main release verification permits only a skipped supplemental Full-model O
   assert.throws(() => assertVerificationLeafJobs([...jobs.filter(job => job.name !== 'certification'), { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' }]), /Unexpected release verification job/);
 });
 
-test('GitHub Actions pagination retrieves all pages and rejects incomplete responses', async () => {
-  const expected = Array.from({ length: 205 }, (_, id) => ({ id }));
+test('GitHub pagination policy delegates list collection to the Octokit client', async () => {
+  const expected = [{ id: 1 }, { id: 2 }];
   const calls = [];
-  const result = await collectGitHubPages(async (page, perPage) => {
-    calls.push([page, perPage]);
-    const start = (page - 1) * perPage;
-    return { total_count: expected.length, jobs: expected.slice(start, start + perPage) };
-  }, 'jobs');
-  assert.deepEqual(result, expected);
-  assert.deepEqual(calls, [[1, 100], [2, 100], [3, 100]]);
-  await assert.rejects(collectGitHubPages(async () => ({ total_count: 101, jobs: expected.slice(0, 99) }), 'jobs'), /Incomplete GitHub pagination/);
-  let page = 0;
-  await assert.rejects(collectGitHubPages(async () => {
-    page++;
-    return { total_count: page === 1 ? 101 : 102, jobs: expected.slice((page - 1) * 100, page * 100) };
-  }, 'jobs'), /count changed/);
-  await assert.rejects(collectGitHubPages(async () => { throw new Error('page request failed'); }, 'jobs'), /page request failed/);
+  const client = { async paginate(endpoint, parameters, key) {
+    calls.push({ endpoint, parameters, key });
+    return expected;
+  } };
+  assert.deepEqual(await collectGitHubPages(client, '/repos/yohn-jp/codexia/actions/runs/44/jobs', 'jobs'), expected);
+  assert.deepEqual(await collectGitHubArrayPages(client, '/repos/yohn-jp/codexia/releases'), expected);
+  assert.deepEqual(calls, [
+    { endpoint: '/repos/yohn-jp/codexia/actions/runs/44/jobs', parameters: {}, key: 'jobs' },
+    { endpoint: '/repos/yohn-jp/codexia/releases', parameters: {}, key: null },
+  ]);
+  await assert.rejects(collectGitHubPages({}, '/repos/yohn-jp/codexia/jobs', 'jobs'), /Invalid GitHub pagination request/u);
+  await assert.rejects(collectGitHubArrayPages({}, '/repos/yohn-jp/codexia/releases'), /Invalid GitHub array pagination request/u);
 });
 
 test('OCI publication refuses existing image tags and fails closed on registry uncertainty', async () => {

@@ -9,10 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from '../components/version.mjs';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from '../../verification/artifacts/backend.mjs';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
-import { collectGitHubPages } from '../components/policy.mjs';
 import { verifyFrontendMainPromotionProof } from '../../verification/artifacts/frontend.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution as inspectDockerImage } from './image-inspection.mjs';
 import { validateBackendIdentity } from './update-identity.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const IMAGE_FILE = 'codexia-backend-image.tar.gz';
@@ -62,39 +62,29 @@ export function assertBackendPromotionVersion(candidate, existing) {
   return true;
 }
 
-async function apiJson(url, token, fetchImpl) {
-  const response = await fetchImpl(url, {headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
-    'X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(20_000)});
-  if (!response.ok) throw new Error('Backend promotion provenance lookup failed (HTTP '+response.status+')');
-  return response.json();
+async function apiJson(github, route) {
+  const response = await github.request('GET', route, {headers:{'X-GitHub-Api-Version':'2022-11-28'}});
+  if (response.status < 200 || response.status >= 300) throw new Error('Backend promotion provenance lookup failed (HTTP '+response.status+')');
+  return response.data;
 }
 
-async function apiPages(url, token, fetchImpl, key) {
-  return collectGitHubPages((page,perPage)=>apiJson(url+(url.includes('?')?'&':'?')+'per_page='+perPage+'&page='+page,token,fetchImpl),key);
+async function apiPages(github, route, key, parameters = {}, options = {}) {
+  return github.paginate(route, parameters, key, key === null ? { maxItems: 1_000_000, ...options } : options);
 }
 
-async function latestBackendReleaseVersion(token, fetchImpl) {
-  const releases = [];
-  for (let page = 1; page <= 100; page++) {
-    const response = await apiJson('https://api.github.com/repos/'+REPOSITORY+'/releases?per_page=100&page='+page,token,fetchImpl);
-    assert.ok(Array.isArray(response), 'Invalid backend release inventory');
-    releases.push(...response);
-    if (response.length < 100) break;
-    assert.ok(page < 100, 'Backend release inventory exceeds limit');
-  }
+async function latestBackendReleaseVersion(github) {
+  const releases = await apiPages(github, `/repos/${REPOSITORY}/releases`, null, {}, { maxItems: 9_999 });
+  assert.ok(Array.isArray(releases) && releases.length <= 9_999, 'Invalid or over-limit backend release inventory');
   const versions = releases.filter(value => value &&
     typeof value.tag_name === 'string' && /^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(value.tag_name))
     .map(value=>value.tag_name.slice('backend-v'.length));
   return versions.reduce((latest, value)=>latest===null||compareComponentVersions(value,latest)>0?value:latest,null);
 }
 
-async function assertBackendVersionTagFree(version,token,fetchImpl){
-  const response=await fetchImpl('https://api.github.com/repos/'+REPOSITORY+'/git/ref/tags/backend-v'+version,{
-    headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},
-    redirect:'error',signal:AbortSignal.timeout(15_000),
-  });
+async function assertBackendVersionTagFree(version,github){
+  const response=await github.request('GET',`/repos/${REPOSITORY}/git/ref/tags/backend-v${version}`,{headers:{'X-GitHub-Api-Version':'2022-11-28'}});
   if(response.status===404)return;
-  if(!response.ok)throw new Error('Backend release tag availability lookup failed (HTTP '+response.status+')');
+  if(response.status<200||response.status>=300)throw new Error('Backend release tag availability lookup failed (HTTP '+response.status+')');
   throw new Error('Backend producer version tag is already reserved');
 }
 
@@ -110,26 +100,27 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),(env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA),'Backend promotion checkout differs from verified main');
   const token=env.GH_TOKEN;
   assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
+  const github=createGitHubRestClient({token,fetchImpl,timeout:20_000});
   const proof=await verifyFrontendMainPromotionProof({env,fetchImpl});
-  const workflow=await apiJson('https://api.github.com/repos/'+REPOSITORY+'/actions/workflows/backend-release.yml',token,fetchImpl);
+  const workflow=await apiJson(github,`/repos/${REPOSITORY}/actions/workflows/backend-release.yml`);
   assert.equal(workflow.path,'.github/workflows/backend-release.yml','Backend producer workflow path mismatch');
   const repositoryId=positive(env.CODEXIA_REPOSITORY_ID,'Backend repository ID');
-  const runs=await apiPages('https://api.github.com/repos/'+REPOSITORY+'/actions/workflows/'+workflow.id+'/runs?head_sha='+proof.headSha+'&event=pull_request',token,fetchImpl,'workflow_runs');
+  const runs=await apiPages(github,`/repos/${REPOSITORY}/actions/workflows/${workflow.id}/runs`,'workflow_runs',{head_sha:proof.headSha,event:'pull_request'});
   const run=selectBackendPromotionRun(runs,proof,repositoryId,positive(workflow.id,'Backend producer workflow ID'));
   const [latestJobs,artifacts]=await Promise.all([
-    apiPages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/jobs?filter=latest',token,fetchImpl,'jobs'),
-    apiPages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/artifacts',token,fetchImpl,'artifacts'),
+    apiPages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/jobs`,'jobs',{filter:'latest'}),
+    apiPages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/artifacts`,'artifacts'),
   ]);
   const selected=selectBackendArtifacts(run,artifacts,latestJobs,{runId:run.id,currentAttempt:run.run_attempt,sourceSha:proof.headSha,
     event:'pull_request',headBranch:proof.headRef});
   const producerAttempts=new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
-    attempt,await apiPages('https://api.github.com/repos/'+REPOSITORY+'/actions/runs/'+run.id+'/attempts/'+attempt+'/jobs',token,fetchImpl,'jobs'),
+    attempt,await apiPages(github,`/repos/${REPOSITORY}/actions/runs/${run.id}/attempts/${attempt}/jobs`,'jobs'),
   ])));
   for(const item of selected) assertBackendProducerAttempt(item,producerAttempts.get(item.producerAttempt),{runId:run.id,sourceSha:proof.headSha});
   const version=readComponentVersion('backend',String(run.run_number));
-  const latest=await latestBackendReleaseVersion(token,fetchImpl);
+  const latest=await latestBackendReleaseVersion(github);
   assertBackendPromotionVersion(version,latest);
-  await assertBackendVersionTagFree(version,token,fetchImpl);
+  await assertBackendVersionTagFree(version,github);
   const compatibility=JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json',import.meta.url),'utf8'));
   const migrationFingerprint=await expectedBackendMigrationFingerprint();
   const outputDir=env.CODEXIA_BACKEND_PROMOTION_DIR;

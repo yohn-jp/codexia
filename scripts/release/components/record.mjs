@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord } from './record-model.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const repository='yohn-jp/codexia';
 const digest=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -66,17 +67,17 @@ async function main(){
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Component release requires main or verified completion');
   const token=env.GH_TOKEN;assert.ok(token);
+  const github=createGitHubRestClient({token});
   const expectedTag=componentReleaseTagFromEnvironment(process.argv[2],env);
   const release=componentReleaseRecordFromEnvironment(env);
   assert.equal(release.tag,expectedTag,'Component release metadata differs from the trusted producer version');
   async function api(resource,method='GET',data){
-    const response=await fetch('https://api.github.com/repos/'+repository+'/'+resource,{
-      method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},
-      ...(data?{body:JSON.stringify(data)}:{}),redirect:'error',signal:AbortSignal.timeout(20000),
+    const response=await github.request(method,`/repos/${repository}/${resource}`,{
+      ...(data?{data}:{}),headers:{'X-GitHub-Api-Version':'2022-11-28'},
     });
     if(response.status===404&&method==='GET')return null;
-    if(!response.ok)throw Error('Component release API request failed: HTTP '+response.status);
-    return response.json();
+    if(response.status<200||response.status>=300)throw Error('Component release API request failed: HTTP '+response.status);
+    return response.data;
   }
   const resource='git/ref/tags/'+expectedTag;
   let ref=await api(resource);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Read-only observed timings. Unseparated legacy phases remain NOT_CHECKED.
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { seconds, summarizeCiTiming } from './timing.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 const args = process.argv.slice(2);
 const options = new Map();
 for (let index = 0; index < args.length; index += 2) {
@@ -16,17 +16,16 @@ const runId = options.get('--run') ?? process.env.GITHUB_RUN_ID;
 const attempt = options.get('--attempt');
 if (args.includes('--attempt') && !/^[1-9]\d*$/.test(attempt ?? '')) throw new Error('Attempt must be a positive integer');
 if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '') || !/^\d+$/.test(runId ?? '') || !process.env.GH_TOKEN) throw new Error('Repository, run and read token required');
+if (repository !== 'yohn-jp/codexia') throw new Error('Unexpected repository');
+const github = createGitHubRestClient({ token: process.env.GH_TOKEN });
 const request = async endpoint => {
-  const response = await fetch(`https://api.github.com/repos/${repository}/${endpoint}`, {
-    headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(15_000), redirect: 'error',
-  });
-  if (!response.ok) throw new Error(`Timing evidence unavailable (HTTP ${response.status})`);
-  return response.json();
+  const response = await github.request('GET', `/repos/${repository}/${endpoint}`);
+  if (response.status < 200 || response.status >= 300) throw new Error(`Timing evidence unavailable (HTTP ${response.status})`);
+  return response.data;
 };
 const runPath = `actions/runs/${runId}${attempt ? `/attempts/${attempt}` : ''}`;
 const run = await request(runPath);
-const jobs = await collectGitHubPages(page => request(`actions/runs/${runId}/attempts/${run.run_attempt}/jobs?per_page=100&page=${page}`), 'jobs');
+const jobs = await github.paginate(`/repos/${repository}/actions/runs/${runId}/attempts/${run.run_attempt}/jobs`, {}, 'jobs');
 const observations = jobs.map(job => {
   // The API may supply a non-null placeholder started_at even while still queued.
   const runnerAcquired = Object.hasOwn(job, 'runner_id') ?

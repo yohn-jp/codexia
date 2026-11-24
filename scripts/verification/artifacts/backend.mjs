@@ -8,8 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { readComponentVersion } from '../../release/components/version.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const PROFILES = ['core', 'full'];
@@ -111,13 +111,10 @@ async function sha256File(filename){
   return hash.digest('hex');
 }
 
-async function githubJson(url, token, fetchImpl) {
-  const response = await fetchImpl(url, {
-    headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    redirect: 'error', signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error('Backend artifact provenance lookup failed (HTTP ' + response.status + ')');
-  return response.json();
+async function githubJson(github, route) {
+  const response = await github.request('GET', route);
+  if (response.status < 200 || response.status >= 300) throw new Error('Backend artifact provenance lookup failed (HTTP ' + response.status + ')');
+  return response.data;
 }
 
 export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={}) {
@@ -131,20 +128,21 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub Actions read token required');
+  const github = createGitHubRestClient({ token, fetchImpl });
   const destination = env.CODEXIA_BACKEND_ARTIFACT_DIR;
   assert.ok(typeof destination === 'string' && path.isAbsolute(destination), 'Backend artifact destination must be absolute');
   const manifestPath=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
   assert.ok(typeof manifestPath==='string'&&path.isAbsolute(manifestPath),'Backend artifact manifest path must be absolute');
-  const api = 'https://api.github.com/repos/' + REPOSITORY + '/actions/runs/' + expected.runId;
-  const read = suffix => githubJson(api + suffix, token, fetchImpl);
+  const api = `/repos/${REPOSITORY}/actions/runs/${expected.runId}`;
+  const read = suffix => githubJson(github, api + suffix);
   const [run,artifacts,jobs] = await Promise.all([
     read(''),
-    collectGitHubPages((page,perPage)=>read('/artifacts?per_page='+perPage+'&page='+page),'artifacts'),
-    collectGitHubPages((page,perPage)=>read('/jobs?filter=latest&per_page='+perPage+'&page='+page),'jobs'),
+    github.paginate(api + '/artifacts', {}, 'artifacts'),
+    github.paginate(api + '/jobs', { filter: 'latest' }, 'jobs'),
   ]);
   const selected = selectBackendArtifacts(run,artifacts,jobs,expected);
   const attempts = new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
-    attempt,await collectGitHubPages((page,perPage)=>read('/attempts/'+attempt+'/jobs?per_page='+perPage+'&page='+page),'jobs'),
+    attempt,await github.paginate(api + '/attempts/' + attempt + '/jobs', {}, 'jobs'),
   ])));
   // Verify both producers before downloading; extract sequentially to keep
   // peak memory bounded by a single compressed image archive.

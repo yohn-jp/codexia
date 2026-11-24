@@ -10,12 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { selectBackendArtifacts, assertBackendProducerAttempt } from '../../verification/artifacts/backend.mjs';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
-import { collectGitHubArrayPages, collectGitHubPages } from '../../release/components/policy.mjs';
 import { expectedBackendMigrationFingerprint, assertBackendImageIdentity } from '../../release/backend/image-inspection.mjs';
 import { compareComponentVersions, readComponentVersion } from '../../release/components/version.mjs';
 import { selectPushDeploymentCertificateArtifact, validatePushDeploymentCertificatePair } from '../handoff/verify-push.mjs';
 import { publicationInWorkflowWindow } from '../../release/components/record-model.mjs';
 import { successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const repository = 'yohn-jp/codexia';
 const imagePrefix = 'ghcr.io/yohn-jp/codexia-backend';
@@ -81,19 +81,18 @@ export function publicError(error) {
   return value.replace(/(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})/gu, '[REDACTED]')
     .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/giu, 'Bearer [REDACTED]').slice(0, 1200);
 }
-async function api(resource, fetchImpl = fetch) {
-  const response = await fetchImpl(`https://api.github.com/repos/${repository}/${resource}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    redirect: 'error', signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`GitHub provenance lookup failed (HTTP ${response.status})`);
-  return response.json();
+let github;
+function rest() { return github ??= createGitHubRestClient({ token, timeout: 20_000 }); }
+async function api(resource) {
+  const response = await rest().request('GET', `/repos/${repository}/${resource}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
+  if (response.status < 200 || response.status >= 300) throw new Error(`GitHub provenance lookup failed (HTTP ${response.status})`);
+  return response.data;
 }
-async function apiPages(resource, key) {
-  return collectGitHubPages((page, perPage) => api(`${resource}${resource.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`), key);
+async function apiPages(resource, key, parameters = {}) {
+  return rest().paginate(`/repos/${repository}/${resource}`, parameters, key);
 }
-async function apiArrayPages(resource) {
-  return collectGitHubArrayPages((page, perPage) => api(`${resource}${resource.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`));
+async function apiArrayPages(resource, parameters = {}) {
+  return rest().paginate(`/repos/${repository}/${resource}`, parameters, null, { maxItems: 1_000_000 });
 }
 function imageIdentity(image, { expectedImage = false, disposableRegistry = false } = {}) {
   const observed = JSON.parse(rootlessPodman(['image', 'inspect', image]))[0];
@@ -131,9 +130,9 @@ function validateImageIdentity(identity, expectedSha) {
 async function waitForExactSourceBackendRun() {
   const deadline = Date.now() + 45 * 60_000;
   while (Date.now() < deadline) {
-    const response = await api(`actions/runs?head_sha=${sourceSha}&per_page=100`);
+    const workflowRuns = await apiPages('actions/runs', 'workflow_runs', { head_sha: sourceSha });
     const acceptedEvents = env.GITHUB_EVENT_NAME === 'pull_request' ? ['pull_request'] : ['pull_request', 'workflow_run'];
-    const matches = (response.workflow_runs || []).filter(run => run?.path === '.github/workflows/backend-release.yml' &&
+    const matches = workflowRuns.filter(run => run?.path === '.github/workflows/backend-release.yml' &&
       acceptedEvents.includes(run.event) && run.head_sha === sourceSha && run.repository?.full_name === repository &&
       (run.event !== 'workflow_run' || run.head_branch === 'main'))
       .sort((left, right) => right.run_number - left.run_number || right.id - left.id);
@@ -153,7 +152,7 @@ export async function readExactBackendProducerArtifacts(run, expected, { readCol
   let remainingRetries = 3;
   for (;;) {
     const [jobs, artifacts] = await Promise.all([
-      readCollection(`actions/runs/${run.id}/jobs?filter=latest`, 'jobs'),
+      readCollection(`actions/runs/${run.id}/jobs`, 'jobs', { filter: 'latest' }),
       readCollection(`actions/runs/${run.id}/artifacts`, 'artifacts'),
     ]);
     try {
@@ -238,14 +237,14 @@ async function certifiedCompatibleCandidate(head) {
     const workflowHead = metadata.publication?.workflowHeadSha ?? metadata.sourceSha;
     const runs = metadata.publication
       ? [await api(`actions/runs/${metadata.publication.workflowRunId}`)]
-      : await apiPages(`actions/workflows/backend-release.yml/runs?event=workflow_run&branch=main&head_sha=${workflowHead}`, 'workflow_runs');
+      : await apiPages('actions/workflows/backend-release.yml/runs', 'workflow_runs', { event: 'workflow_run', branch: 'main', head_sha: workflowHead });
     const publications = runs.filter(run => run.path === '.github/workflows/backend-release.yml' && run.event === 'workflow_run' &&
       run.head_branch === 'main' && run.head_sha === workflowHead && run.status === 'completed' &&
       run.conclusion === 'success' && publicationInWorkflowWindow(release, run));
     check(publications.length === 1, 'Backend release must bind one successful publication workflow');
     const [publicationRun] = publications;
     const [jobs, artifacts] = await Promise.all([
-      apiPages(`actions/runs/${publicationRun.id}/jobs?filter=latest`, 'jobs'),
+      apiPages(`actions/runs/${publicationRun.id}/jobs`, 'jobs', { filter: 'latest' }),
       apiPages(`actions/runs/${publicationRun.id}/artifacts`, 'artifacts'),
     ]);
     const certificateArtifact = selectPushDeploymentCertificateArtifact(artifacts, publicationRun, { sourceSha: metadata.sourceSha });

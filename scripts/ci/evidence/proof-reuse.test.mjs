@@ -15,13 +15,19 @@ const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execP
   cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' };
 const dimensions = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
 
+function responseFor(url, data, status = 200, headers = {}) {
+  const response = Response.json(data, { status, headers });
+  Object.defineProperty(response, 'url', { value: String(url) });
+  return response;
+}
+
 test('unavailable proof keeps the impact plan and runs selected coverage', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'codexia-proof-plan-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const planPath = path.join(dir, 'plan.json');
   const selected = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha });
   t.mock.property(process, 'argv', ['node', 'reuse-coverage-proof.mjs', 'plan']);
-  t.mock.property(process, 'env', { CODEXIA_CI_PLAN_PATH: planPath, GH_TOKEN: 'fixture', GITHUB_REPOSITORY: 'unit/fixture', GITHUB_RUN_ID: '1' });
+  t.mock.property(process, 'env', { CODEXIA_CI_PLAN_PATH: planPath, GH_TOKEN: 'fixture', GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_RUN_ID: '1' });
   for (const [name, fetch] of [
     ['timeout', async () => { throw new DOMException('Request timed out', 'TimeoutError'); }],
     ['HTTP failure', async () => new Response(null, { status: 503 })],
@@ -40,24 +46,25 @@ test('unavailable proof keeps the impact plan and runs selected coverage', async
 test('task proof HTTP client accepts only the canonical read-only API paths', async () => {
   const seen = [];
   const request = async (url, options) => {
-    seen.push({ url, options });
-    return { ok: true, json: async () => ({ accepted: true }) };
+    const address = String(url);
+    seen.push({ url: address, options });
+    const data = new URL(address).pathname.endsWith('/actions/workflows/7/runs')
+      ? { total_count: 0, workflow_runs: [] } : { accepted: true };
+    return responseFor(address, data);
   };
   const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });
   const paths = [
     'actions/workflows/verify.yml',
-    'actions/workflows/7/runs?head_sha=' + sourceSha + '&event=push&per_page=100&page=1',
-    'actions/workflows/7/runs?head_sha=' + candidateSha + '&event=pull_request&per_page=100&page=1',
-    'actions/runs/500', 'actions/runs/500/jobs?filter=latest&per_page=100&page=1',
-    'actions/runs/500/artifacts?per_page=100&page=1',
-    'actions/runs/500/attempts/2/jobs?per_page=100&page=1',
-    'commits/' + sourceSha + '/pulls?per_page=100&page=1', 'pulls/123',
+    'actions/runs/500', 'pulls/123', 'commits/' + sourceSha + '/pulls',
   ];
   for (const path of paths) assert.deepEqual(await client.get(path), { accepted: true });
-  assert.deepEqual(seen.map(item => item.url), paths.map(path =>
-    'https://api.github.com/repos/yohn-jp/codexia/' + path));
-  assert.ok(seen.every(item => item.options.headers.Authorization === 'Bearer test-token' &&
-    item.options.redirect === 'error'));
+  const runs = await client.paginate('actions/workflows/7/runs', { head_sha: sourceSha, event: 'push' }, 'workflow_runs');
+  assert.deepEqual(runs, []);
+  assert.deepEqual(await client.paginate('/repos/yohn-jp/codexia/actions/workflows/7/runs',
+    { head_sha: sourceSha, event: 'push' }, 'workflow_runs'), []);
+  assert.ok(seen.every(item => item.url.startsWith('https://api.github.com/repos/yohn-jp/codexia/')));
+  assert.ok(seen.every(item => new Headers(item.options.headers).get('authorization')?.includes('test-token')));
+  assert.ok(seen.every(item => item.options.redirect === 'error'));
 });
 
 test('task proof HTTP client blocks arbitrary file data and destinations without network I/O', async () => {
@@ -66,6 +73,7 @@ test('task proof HTTP client blocks arbitrary file data and destinations without
   const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });
   for (const path of [
     'https://evil.example/upload', '../user', '//evil.example/upload',
+    '/repos/other-owner/other-repo/actions/workflows/7/runs',
     'actions/runs/500?token=file-content',
     'actions/runs/500/jobs?filter=latest&per_page=100&page=1&secret=extra',
     'actions/workflows/7/runs?head_sha=../private&event=push&per_page=100&page=1',
@@ -147,8 +155,8 @@ function createHashDigit(value) {
 
 function mockRequest({ run, jobs, artifacts, latestRuns = [run] }) {
   return async (url, options) => {
-    assert.equal(options.headers.Authorization, 'Bearer test-token');
-    const parsed = new URL(url);
+    assert.ok(new Headers(options.headers).get('authorization')?.includes('test-token'));
+    const parsed = new URL(String(url));
     const prefix = '/repos/yohn-jp/codexia/';
     const endpoint = parsed.pathname.slice(prefix.length);
     let data;
@@ -157,7 +165,7 @@ function mockRequest({ run, jobs, artifacts, latestRuns = [run] }) {
     else if (endpoint === `actions/runs/${run.id}/jobs` || endpoint.startsWith(`actions/runs/${run.id}/attempts/`)) data = { total_count: jobs.length, jobs };
     else if (endpoint === `actions/runs/${run.id}/artifacts`) data = { total_count: artifacts.length, artifacts };
     else throw new Error(`Unexpected request ${endpoint}`);
-    return { ok: true, json: async () => data };
+    return responseFor(url, data);
   };
 }
 

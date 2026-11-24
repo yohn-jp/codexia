@@ -102,43 +102,43 @@ test('selection sees latest artifacts on later complete REST pages', async () =>
     artifact(12_572_824_349, 'ci-evidence-oci-core', '2026-10-24T20:00:04Z'),
   );
   assert.equal(artifacts.length, 102);
-  const paginated = await collectGitHubPages(async (page, perPage) => ({
-    total_count: artifacts.length,
-    artifacts: artifacts.slice((page - 1) * perPage, page * perPage),
-  }), 'artifacts');
+  const paginated = await collectGitHubPages({ paginate: async (endpoint, parameters, key) => {
+    assert.equal(endpoint, '/repos/yohn-jp/codexia/actions/runs/123/artifacts');
+    assert.deepEqual(parameters, {});
+    assert.equal(key, 'artifacts');
+    return artifacts;
+  } }, '/repos/yohn-jp/codexia/actions/runs/123/artifacts', 'artifacts');
   const selected = selectLatestEvidenceArtifacts(plan, paginated, successfulJobs, identity);
   assert.equal(selected.find(item => item.name === 'ci-evidence-oci-core').id, 12_572_824_349);
 });
 
-test('array-style GitHub REST pages are collected through the final short page', async () => {
+test('array-style GitHub REST inventories use the Octokit paginator', async () => {
   const releases = Array.from({ length: 201 }, (_, index) => ({ id: index + 1 }));
   const requested = [];
-  const actual = await collectGitHubArrayPages(async (page, perPage) => {
-    requested.push({ page, perPage });
-    return releases.slice((page - 1) * perPage, page * perPage);
-  });
+  const actual = await collectGitHubArrayPages({ paginate: async (endpoint, parameters, key) => {
+    requested.push({ endpoint, parameters, key });
+    return releases;
+  } }, '/repos/yohn-jp/codexia/releases');
   assert.deepEqual(actual, releases);
-  assert.deepEqual(requested, [{ page: 1, perPage: 100 }, { page: 2, perPage: 100 }, { page: 3, perPage: 100 }]);
-  await assert.rejects(collectGitHubArrayPages(async () => ({ releases: [] })), /Invalid GitHub array pagination response/u);
+  assert.deepEqual(requested, [{ endpoint: '/repos/yohn-jp/codexia/releases', parameters: {}, key: null }]);
+  await assert.rejects(collectGitHubArrayPages({}, '/repos/yohn-jp/codexia/releases'), /Invalid GitHub array pagination request/u);
 });
 
 test('producer restore inventories only the exact artifact name and still rejects incomplete pages', async () => {
   const artifactName='ci-profile-build-core';
   const records=Array.from({length:101},(_,index)=>artifact(index+1,artifactName,'2026-10-24T19:50:00Z'));
   const requested=[];
-  const request=async endpoint=>{
-    const url=new URL(endpoint,'https://api.github.com/');
-    assert.equal(url.pathname,`/actions/runs/${runId}/artifacts`);
-    assert.equal(url.searchParams.get('name'),artifactName);
-    const page=Number(url.searchParams.get('page'));
-    const perPage=Number(url.searchParams.get('per_page'));
-    requested.push(page);
-    return {total_count:records.length,artifacts:records.slice((page-1)*perPage,page*perPage)};
-  };
-  assert.deepEqual(await listProducerArtifacts(request,runId,artifactName),records);
-  assert.deepEqual(requested,[1,2]);
+  const github={async paginate(endpoint,parameters,key){
+    assert.equal(endpoint,`/repos/yohn-jp/codexia/actions/runs/${runId}/artifacts`);
+    assert.deepEqual(parameters,{name:artifactName});
+    assert.equal(key,'artifacts');
+    requested.push(endpoint);
+    return records;
+  }};
+  assert.deepEqual(await listProducerArtifacts(github,runId,artifactName),records);
+  assert.equal(requested.length,1);
   await assert.rejects(
-    listProducerArtifacts(async()=>({total_count:1,artifacts:[]}),runId,artifactName),
+    listProducerArtifacts({paginate:async()=>{throw new Error('Incomplete GitHub pagination');}},runId,artifactName),
     /Incomplete GitHub pagination/u,
   );
 });
@@ -210,15 +210,15 @@ test('partial rerun resolves a carried-over producer to its original execution a
   const fresh = {...job('build-full', '2026-11-17T03:37:00Z', '2026-11-17T03:38:00Z'), id: 201, run_attempt: 2};
   const failed = {...fresh, name: 'oci-core', conclusion: 'failure'};
   const run = {id: Number(runId), run_attempt: 2};
-  const request = async endpoint => {
+  const github = { paginate: async endpoint => {
     const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(endpoint)[1]);
     const rows = attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
-    return {total_count: rows.length, jobs: rows};
-  };
-  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, request, ['build-core','build-full','oci-core']);
+    return rows;
+  } };
+  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, github, ['build-core','build-full','oci-core']);
   assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
   assert.equal(resolved[2].conclusion, 'failure');
-  await assert.rejects(resolveProducerJobAttempts([carried], run, async () => ({total_count:0,jobs:[]}), ['build-core']), /history unavailable/u);
+  await assert.rejects(resolveProducerJobAttempts([carried], run, { paginate: async () => { throw new Error('history unavailable'); } }, ['build-core']), /history unavailable/u);
 });
 
 test('early browser waits only for its exact same-profile successful producer', async () => {

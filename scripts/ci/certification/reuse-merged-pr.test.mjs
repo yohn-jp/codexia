@@ -69,10 +69,18 @@ function fixture(files = ['package.json']) {
       return page('workflow_runs', state.runs);
     }
     if (endpoint === 'pulls/7') return state.pr;
-    if (endpoint === 'commits/' + sourceSha + '/pulls?per_page=100&page=1') return state.mergedPulls;
+    if (endpoint.startsWith('commits/' + sourceSha + '/pulls?')) return state.mergedPulls;
     if (endpoint.startsWith('actions/runs/20/jobs?')) return page('jobs', state.jobs);
     if (endpoint.startsWith('actions/runs/20/artifacts?')) return page('artifacts', state.artifacts);
     throw new Error('unexpected API endpoint: ' + endpoint);
+  };
+  request.paginate = async (endpoint, parameters = {}, key = null) => {
+    const url = new URL(endpoint, 'https://api.github.com/');
+    for (const [name, value] of Object.entries({ ...parameters, per_page: 100, page: 1 })) url.searchParams.set(name, String(value));
+    const prefix = '/repos/yohn-jp/codexia/';
+    const pathname = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : url.pathname.slice(1);
+    const result = await request(pathname + url.search);
+    return key === null ? result : result[key];
   };
   const args = { sourceSha, before: base, repository, currentRun, git, request, readArtifact: async item => structuredClone(state.contents.get(item.id)) };
   return { state, args, plan, git };
@@ -260,6 +268,7 @@ function dedicatedFixture(workflowPath, files, extraSteps = []) {
   } else state.jobs = [job];
   const request = args.request;
   args.request = endpoint => endpoint === 'actions/workflows/verify.yml' ? Promise.resolve({ id: workflow_id, path: workflowPath === '.github/workflows/full-model-oci-acceptance.yml' ? '.github/workflows/verify.yml' : workflowPath }) : request(endpoint);
+  args.request.paginate = request.paginate;
   return { state, args, job };
 }
 

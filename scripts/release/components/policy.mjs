@@ -99,55 +99,18 @@ export function assertVerificationJobs(jobs) {
   assertNamedJobs(jobs, required, skipped);
 }
 
-/**
- * Fetches every page of a GitHub Actions list response, failing closed if GitHub
- * returns an incomplete or inconsistent page set.
- * @param {(page: number, perPage: number) => Promise<unknown>} fetchPage
- * @param {string} itemsKey
- */
-export async function collectGitHubPages(fetchPage, itemsKey) {
-  if (typeof fetchPage !== 'function' || typeof itemsKey !== 'string' || itemsKey.length === 0) {
+/** @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null) => Promise<unknown[]> }} client */
+export async function collectGitHubPages(client, endpoint, itemsKey) {
+  if (typeof client?.paginate !== 'function' || typeof endpoint !== 'string' || typeof itemsKey !== 'string' || !itemsKey) {
     throw new Error('Invalid GitHub pagination request');
   }
-  const perPage = 100;
-  /** @type {unknown[]} */
-  const items = [];
-  /** @type {number | undefined} */
-  let expectedCount;
-  for (let page = 1; ; page++) {
-    const result = await fetchPage(page, perPage);
-    const pageItems = record(result) ? result[itemsKey] : undefined;
-    const totalCount = record(result) ? result.total_count : undefined;
-    if (typeof totalCount !== 'number' || !Number.isSafeInteger(totalCount) || totalCount < 0 || !Array.isArray(pageItems)) {
-      throw new Error(`Invalid GitHub pagination response for ${itemsKey}`);
-    }
-    if (expectedCount === undefined) expectedCount = totalCount;
-    if (totalCount !== expectedCount) throw new Error(`GitHub pagination count changed for ${itemsKey}`);
-    const expectedPageLength = Math.min(perPage, expectedCount - items.length);
-    if (pageItems.length !== expectedPageLength) throw new Error(`Incomplete GitHub pagination response for ${itemsKey}`);
-    items.push(...pageItems);
-    if (items.length === expectedCount) return items;
-  }
+  return client.paginate(endpoint, {}, itemsKey);
 }
-/**
- * Fetches every page of GitHub REST list endpoints that return arrays rather
- * than the total_count object used by Actions jobs and artifacts.
- * @param {(page: number, perPage: number) => Promise<unknown>} fetchPage
- */
-export async function collectGitHubArrayPages(fetchPage) {
-  if (typeof fetchPage !== 'function') throw new Error('Invalid GitHub array pagination request');
-  const perPage = 100;
-  /** @type {unknown[]} */
-  const items = [];
-  for (let page = 1; page <= 10_000; page++) {
-    const result = await fetchPage(page, perPage);
-    if (!Array.isArray(result) || result.length > perPage) {
-      throw new Error('Invalid GitHub array pagination response');
-    }
-    items.push(...result);
-    if (result.length < perPage) return items;
-  }
-  throw new Error('GitHub array pagination exceeded its safety limit');
+
+/** @param {{ paginate: (url: string, parameters: Record<string, unknown>, key: string|null) => Promise<unknown[]> }} client */
+export async function collectGitHubArrayPages(client, endpoint) {
+  if (typeof client?.paginate !== 'function' || typeof endpoint !== 'string') throw new Error('Invalid GitHub array pagination request');
+  return client.paginate(endpoint, {}, null, { maxItems: 1_000_000 });
 }
 /** @param {string} tag @param {string} expectedSha @param {string} actualSha */
 export function assertReleaseIdentity(tag, expectedSha, actualSha) {
