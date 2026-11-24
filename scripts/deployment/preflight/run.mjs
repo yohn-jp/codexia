@@ -6,12 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { digestEvidence } from '../cutover/coordinator.mjs';
-import { verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
-import { verifyCutoverFrontendArtifact } from '../../verification/artifacts/frontend.mjs';
-import { createCloudflareCutover } from '../../release/cutover/cloudflare.mjs';
-import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
-import { planFromObservations } from './observe.mjs';
 
 const run = promisify(execFile);
 const env = process.env;
@@ -111,6 +106,9 @@ async function certifiedAuthSchemas(sourceSha) {
 
 async function candidateObservation() {
   const binding = runBinding();
+  const { verifyCutoverBackendPublication } = await import('../handoff/verify-push.mjs');
+  const { verifyCutoverFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
+  const { selectReleaseSource } = await import('../../release/components/source-gate.mjs');
   const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
   const main = await mainSource();
   const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
@@ -155,6 +153,7 @@ async function planObservation() {
     const priorBackend = host.backend?.state === 'running' && host.backend.writer.image === candidateBackend.image
       ? candidateBackend : candidate.priorBackend;
     stage = 'edge-observation';
+    const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
     const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
     assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId','fenceRuleId',
       'acceptance','authorPolicyId','ciPolicyId','tunnelTeamName','publicProtocolEnabled'].includes(key)),
@@ -169,6 +168,7 @@ async function planObservation() {
       edge = await edgeReader.observeLifecycle({ backendExpected: host.backend?.state === 'running' });
     } catch { /* failed or unauthorized observation is never absence */ }
     stage = 'plan';
+    const { planFromObservations } = await import('./observe.mjs');
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
       candidateBackend, candidateFrontend, authSchemas, priorBackend,
       intent: request.intent, window: request.window ?? null });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { planFromObservations } from './observe.mjs';
+import { parsePreflightRequest } from './run.mjs';
 
 const h = c => c.repeat(64);
 const now = new Date('2026-11-24T00:00:00.000Z');
@@ -147,4 +148,16 @@ test('candidate pair must be Full, epoch compatible and carry an approved schema
     change(f);
     assert.throws(() => planFromObservations(f));
   }
+});
+
+test('dispatch accepts only artifact references and explicit intent, not fabricated observations or approvals', () => {
+  const request = { backendPublisherRunId: 123, priorBackendPublisherRunId: 122,
+    frontend: { runId: 2, verifyRunId: 3, artifactId: 4, artifactDigest: h('a') },
+    intent: 'maintenance', window };
+  assert.deepEqual(parsePreflightRequest(JSON.stringify(request)), request);
+  for (const extra of [
+    { host: {} }, { edge: {} }, { preservationReceipt: {} }, { approval: {} }, { transition: {} },
+    { frontend: { ...request.frontend, artifactDigest: 'unverified' } },
+    { intent: 'guess' }, { window: { ...window, notAfter: window.notBefore } },
+  ]) assert.throws(() => parsePreflightRequest(JSON.stringify({ ...request, ...extra })));
 });
