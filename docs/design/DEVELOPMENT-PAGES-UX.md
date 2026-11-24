@@ -27,7 +27,7 @@
 | `/graph/communities.html` | Community Overview / GRAPH-02 | Graphify の集約概観を閲覧 |
 | `/ci/` | CI Observatory / CI-01 | PR と実行 SHA を起点とする公開 CI テレメトリ、履歴、診断 JSON |
 | `/api/` | API Reference / API-01 | TypeSpec由来のOpenAPI契約からmethod、schema、security、error responseを参照 |
-| `/ux/` | UX Simulator / UX-01〜04（採用目標） | 正本の画面・操作・状態遷移を合成シナリオで操作し、体験・異常系・版差分を検証。[UX Simulator契約](UX-SIMULATOR-CONTRACT.md) |
+| `/ux/` | UX Simulator / UX-01〜04（採用目標） | 設計正本と正規コードから派生した画面構造・操作・遷移を汎用wireframeで辿り、体験・不足・版差分を検証。[UX Simulator契約](UX-SIMULATOR-CONTRACT.md) |
 | `/audit/` | Source Audit / AUDIT-01 | 観測したブランチ、snapshot、レビュー入力の索引と収録状況 |
 | `/reviews/<SHA>/` | Review Materials / AUDIT-02 | OCR が選定したレビュー入力、差分、収録の根拠 |
 | `/snapshots/<SHA>/` | Source Snapshot Artifacts / AUDIT-03 | Repomix の全体 JSON、分割 JSON、manifest |
@@ -232,7 +232,7 @@ flowchart LR
 
 ## UX Simulator（採用目標）
 
-開発ポータルの設計検証機能として `/ux/` を追加する。画面の意味・状態・権限は既存の画面正本、操作可能な派生モデル・検証・合成データ・版管理は[UX Simulator契約](UX-SIMULATOR-CONTRACT.md)が所有する。採用済み全画面と操作、platform別journeyを操作できることを要求し、製品実装や実機受入を代替しない。既存の唯一のPages publisher、非publish PR preview、site manifest、共通navigationを再利用する。未生成/partialは正確に表示する。
+開発ポータルの設計体験検証として `/ux/` を提供する。設計正本と正規製品コード/観測証拠から独立した投影を生成し、全採用画面・操作・遷移・journeyを汎用wireframeとグラフで俯瞰・操作・比較する。[UX Simulator契約](UX-SIMULATOR-CONTRACT.md) が派生・表示・coverage・公開を所有する。個別画面、状態機械、業務ロジックの二重実装は禁止。未実装/未抽出/未観測を明示し、製品preview・実機受入と区別する。既存の唯一のPages publisher、非publish PR preview、site manifest、共通navigationを再利用する。
 
 ## 7. データ、ナビゲーション、公開責務
 
