@@ -18,6 +18,8 @@ for project in "${projects[@]}"; do filters+=(--filter "$project..."); done
 project_csv="$(IFS=,; echo "${projects[*]}")"
 clear_outputs() {
   find packages modules -mindepth 2 -maxdepth 2 -type d -name dist -exec rm -rf -- {} +
+  # tsc -b may otherwise treat deleted dist outputs as current.
+  find packages modules -mindepth 2 -maxdepth 2 -type f -name '*.tsbuildinfo' -delete
 }
 snapshot() {
   find packages modules -path '*/dist/*' -type f -print0 | sort -z | xargs -0 -r sha256sum > "$RUNNER_TEMP/$1.sha256"

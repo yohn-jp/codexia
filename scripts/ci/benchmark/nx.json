@@ -3,7 +3,8 @@
     "default": [
       "{projectRoot}/**/*",
       "!{projectRoot}/dist/**/*",
-      "sharedGlobals"
+      "sharedGlobals",
+      "!{projectRoot}/**/*.tsbuildinfo"
     ],
     "sharedGlobals": [
       "{workspaceRoot}/package.json",
