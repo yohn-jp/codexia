@@ -91,7 +91,7 @@ def observe_transaction(state_dir):
                     and type(data.get("requiresRestore")) is bool)
         else:
             require(all(type(data.get(k)) is bool for k in
-                        ("hadUnit", "tunnelWasActive", "releasePresent")))
+                        ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")))
         journals.append({"format": expected, "phase": data["phase"], "sha256": digest(data)})
     require(len(journals) <= 1)
     # An orphan temporary journal or rollback snapshot is not proof of a clean slot.
@@ -141,7 +141,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         return result
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
-    definitions = sql("codexia", auth_query).splitlines()
+    definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
     result["authSchemaSha256"] = "sha256:" + hashlib.sha256(
         json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     if writer and writer.get("authMode") == "better-auth":
