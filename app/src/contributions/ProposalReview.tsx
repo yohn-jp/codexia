@@ -48,31 +48,8 @@ function dateLabel(value: number): string {
 }
 
 function PreviewRegion({ label, children }: { label: string; children: string }) {
-  return (
-    <textarea
-      aria-label={label}
-      className="module-proposal-preview"
-      readOnly
-      rows={12}
-      style={{
-        boxSizing: 'border-box',
-        width: '100%',
-        maxHeight: '18rem',
-        overflow: 'auto',
-        resize: 'vertical',
-        border: 0,
-        padding: 0,
-        color: 'var(--ink)',
-        background: 'transparent',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: '0.73rem',
-        lineHeight: 1.5,
-        whiteSpace: 'pre-wrap',
-        overflowWrap: 'anywhere',
-      }}
-      value={children}
-    />
-  );
+  const rows = Math.min(12, children.split('\n').length);
+  return <textarea aria-label={label} className="module-proposal-preview" readOnly rows={rows} value={children} />;
 }
 
 export function ProposalReview({
