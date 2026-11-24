@@ -60,13 +60,16 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   f.host.H = 'absent';
   f.host.database = { state: 'absent', authState: 'absent' };
   f.intent = 'install';
-  assert.equal(planFromObservations(f).plan.route, 'R4');
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R4');
+  assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
   f.host.H = 'partial';
-  assert.equal(planFromObservations(f).plan.route, 'R4');
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R4');
+  assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
   f.host.H = 'ready';
   f.host.database = { ...fixture().host.database, authState: 'pending' };
   f.host.backend = { state: 'setup' };
-  assert.equal(planFromObservations(f).plan.route, 'R5');
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R5');
+  assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
   f.host.backend = { state: 'absent' };
   f.host.database.authState = 'ready';
   const activation = planFromObservations(f).plan;
@@ -75,7 +78,8 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   assert.ok(activation.blockers.includes('missing-preservation-evidence'));
   const ui = fixture();
   absentFrontend(ui);
-  assert.equal(planFromObservations(ui).plan.route, 'R7');
+  assert.equal(planFromObservations(ui).plan.candidateRoute, 'R7');
+  assert.deepEqual(planFromObservations(ui).plan.blockers, ['approval-required']);
   assert.equal(planFromObservations(ui).plan.requiresPreservation, false);
 });
 test('epoch-only transition is distinct from persistence, schema and auth changes', () => {
@@ -93,7 +97,8 @@ test('epoch-only transition is distinct from persistence, schema and auth change
   assert.deepEqual(blocked.observation.changeAxes, ['backend', 'frontend', 'api-epoch']);
   f.resolveTransition = () => [{ contractSha256: h('7'), dataConversion: false }];
   f.preservationReceipt = { verified: true };
-  assert.equal(planFromObservations(f).plan.route, 'R7');
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R7');
+  assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
   f.resolveTransition = () => [{ contractSha256: h('7'), dataConversion: false }, { contractSha256: h('8'), dataConversion: false }];
   assert.ok(planFromObservations(f).plan.blockers.includes('ambiguous-transition'));
   const legacy = fixture();
@@ -105,6 +110,8 @@ test('epoch-only transition is distinct from persistence, schema and auth change
   const migration = planFromObservations(legacy).plan;
   assert.equal(migration.candidateRoute, 'R3');
   assert.ok(migration.observation.changeAxes.includes('persistence-format'));
+  assert.ok(!migration.observation.changeAxes.includes('sql-ledger'));
+  assert.equal(migration.observation.state.D, 'incompatible');
   assert.ok(migration.observation.changeAxes.includes('auth-mode'));
   const changed = fixture();
   changed.host.database.authSchemaSha256 = 'sha256:' + h('6');

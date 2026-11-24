@@ -166,11 +166,13 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
   if (candidateRoute === 'R4' && ['absent', 'pristine'].includes(state.D)) requiredApprovals.push('database-initialization');
+  const candidateSystem = candidateRoute === 'R3' && requiresTransition ? 'cutover' : systems[candidateRoute];
+  if (requiredApprovals.length) blockers.push('approval-required');
   const route = blockers.length ? 'R0' : candidateRoute;
   const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes },
     evidenceBlockers: [...evidenceBlockers].sort(),
-    target, intent, window, transition, candidateRoute, route,
-    system: route === 'R3' && requiresTransition ? 'cutover' : systems[route],
+    target, intent, window, transition, candidateRoute, candidateSystem, route,
+    system: route === 'R0' ? null : candidateSystem,
     requiredApprovals, blockers,
     noOp: route === 'R8' && changeAxes.length === 0,
     authorization: 'pending',
@@ -184,8 +186,9 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
 // a changed source is never treated as a retry of this initial snapshot.
 export function assertDeploymentPlanApproval({ plan, planSha256, approval, current,
   now = new Date(), maxAgeMs = 5 * 60_000 }) {
-  requireCondition(plan?.format === 'codexia-deployment-plan/v1' && plan.route !== 'R0' &&
-    Array.isArray(plan.blockers) && plan.blockers.length === 0 &&
+  const evidenceReady = value => value?.candidateRoute !== 'R0' && Array.isArray(value?.blockers) &&
+    value.blockers.every(reason => reason === 'approval-required');
+  requireCondition(plan?.format === 'codexia-deployment-plan/v1' && evidenceReady(plan) &&
     typeof planSha256 === 'string' && hashPattern.test(planSha256) && digestEvidence(plan) === planSha256,
   'Deployment plan is blocked or altered');
   requireCondition(record(approval, ['planSha256', 'grants']) && approval.planSha256 === planSha256 &&
@@ -195,7 +198,7 @@ export function assertDeploymentPlanApproval({ plan, planSha256, approval, curre
   const expected = createDeploymentPlan({ ...plan, now: new Date(plan.observation.observedAt), maxAgeMs });
   requireCondition(expected.planSha256 === planSha256, 'Deployment plan does not match route contract');
   const refreshed = createDeploymentPlan({ ...current, now, maxAgeMs });
-  requireCondition(refreshed.plan.route !== 'R0' &&
+  requireCondition(evidenceReady(refreshed.plan) &&
     isDeepStrictEqual({ ...plan, observation: { ...plan.observation, observedAt: null } },
       { ...refreshed.plan, observation: { ...refreshed.plan.observation, observedAt: null } }),
   'Deployment source, candidate, intent or evidence changed after approval');

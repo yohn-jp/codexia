@@ -214,7 +214,7 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
     const compatibility = usePublishedSourceCompatibility
       ? publishedBackendCompatibility(sourceSha)
       : JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json', import.meta.url), 'utf8'));
-    const migrationFingerprint = await expectedBackendMigrationFingerprint();
+    const migrationFingerprint = await expectedBackendMigrationFingerprint(usePublishedSourceCompatibility ? sourceSha : undefined);
     for (const certificate of [core, full]) {
       execFileSync('docker', ['pull', certificate.image], { stdio: 'ignore', timeout: 180_000 });
       const observed = await inspectBackendImageWithoutExecution(certificate.image, {

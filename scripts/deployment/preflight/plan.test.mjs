@@ -88,7 +88,9 @@ const baseline = () => ({
 test('non-compatible plan pins evidence, records missing contract or backup, and never implies mutation permission', () => {
   const input = baseline();
   const { plan, planSha256 } = createDeploymentPlan(input);
-  assert.equal(plan.route, 'R7');
+  assert.equal(plan.candidateRoute, 'R7');
+  assert.equal(plan.route, 'R0');
+  assert.deepEqual(plan.blockers, ['approval-required']);
   assert.deepEqual(plan.requiredApprovals, ['maintenance']);
   assert.deepEqual(plan.observation.changeAxes, ['backend', 'frontend', 'api-epoch']);
   assert.match(planSha256, /^[a-f0-9]{64}$/u);

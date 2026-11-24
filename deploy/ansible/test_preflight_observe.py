@@ -56,7 +56,7 @@ class ObserveDatabaseTests(unittest.TestCase):
         with patch.object(observer, "command", return_value=(0, "ok")) as command:
             self.assertEqual(observer.sql("codexia", "SELECT 1;"), "ok")
             args = command.call_args.args[0]
-            self.assertIn("default_transaction_read_only=on", args[5])
+            self.assertIn("default_transaction_read_only=on", args[6])
             self.assertEqual(command.call_args.kwargs["stdin"], "SELECT 1;\n")
 
 

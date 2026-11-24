@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateBackendIdentity } from './update-identity.mjs';
 
-export async function expectedBackendMigrationFingerprint(){
+export async function expectedBackendMigrationFingerprint(sourceSha, { cwd = process.cwd() } = {}){
+  if (sourceSha !== undefined) {
+    assert.match(sourceSha, /^[a-f0-9]{40}$/u, 'Invalid certified migration source');
+    const directory = sourceSha + ':packages/persistence-postgres/migrations';
+    const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 60_000 });
+    const filenames = git('ls-tree', '--name-only', '-z', directory).split('\0')
+      .filter(name => /^\d+[-\w]*\.sql$/u.test(name));
+    return migrationSetFingerprint(filenames.map(version => ({ version,
+      checksum: createHash('sha256').update(git('show', directory + '/' + version), 'utf8').digest('hex'),
+    })));
+  }
   const source=`import { readMigrationSet, migrationSetFingerprint } from './packages/persistence-postgres/src/migration-set.ts';
 console.log(migrationSetFingerprint(await readMigrationSet('./packages/persistence-postgres/migrations')));`;
   return execFileSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',source],{encoding:'utf8'}).trim();

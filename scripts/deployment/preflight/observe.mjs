@@ -90,7 +90,10 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
         if (compareComponentVersions(targetIdentity.backend.version, identity.version) <= 0) blockers.push('stale-backend-candidate');
       }
       if (identity.apiEpoch !== targetIdentity.backend.apiEpoch) changeAxes.push('api-epoch');
-      if (identity.persistenceFormat !== targetIdentity.backend.persistenceFormat) changeAxes.push('persistence-format');
+      if (identity.persistenceFormat !== targetIdentity.backend.persistenceFormat) {
+        changeAxes.push('persistence-format');
+        if (host.database?.state === 'initialized') state.D = 'incompatible';
+      }
       if (identity.migrationFingerprint !== targetIdentity.backend.migrationFingerprint) changeAxes.push('sql-ledger');
       if (writer.authMode !== 'better-auth') changeAxes.push('auth-mode');
       const publicIdentity = edge?.backend;
@@ -108,7 +111,9 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       state.B = installed.state;
       if (state.B === 'absent') changeAxes.push('backend');
     }
-    if (state.D === 'incompatible' && !changeAxes.includes('sql-ledger')) changeAxes.push('sql-ledger');
+    if (host.database?.state === 'initialized' &&
+        migrationSetFingerprint(host.database.ledger) !== targetIdentity.backend.migrationFingerprint &&
+        !changeAxes.includes('sql-ledger')) changeAxes.push('sql-ledger');
     if (['ready', 'pending', 'unprepared'].includes(state.A)) {
       if (!taggedHash.test(host.database.authSchemaSha256 ?? '')) {
         state.A = 'unknown';
