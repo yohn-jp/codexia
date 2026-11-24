@@ -1,5 +1,11 @@
 # CI/CD architecture and certification contract
 
+## Incompatible deployment admission and impact
+
+The [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md#共通制御と個別移行の境界) owns route selection, compatibility axes, explicit transition contracts, approval, checkpoint and recovery semantics. CI verifies those contracts using the existing single task/impact authority and disposable lifecycle/epoch-cutover fixtures. A PR that changes the API epoch, SQL migration fingerprint, persistence format or authentication compatibility must supply the applicable prior-source to candidate transition contract, its verification and restoration conditions (including an explicit no-data-conversion decision for API-only changes). Unknown or unsupported transitions must be rejected before mutation.
+
+Select transition-specific tests for changes to their compatibility/implementation inputs, and all deployment route regression proofs for shared observer/planner/executor/recovery contract changes. Do not start every migration fixture for ordinary compatible application changes or prose-only edits without an executable assertion dependency. Keep the existing input-closure, exact-source, mandatory main verification and release certificate rules; no new parallel task inventory or blanket skip. Production owner enrollment, independently controlled restore and live acceptance are not CI claims.
+
 ## Desktop toolchain — independent migration gates
 
 WEB-01 ([#790](https://github.com/yohn-jp/codexia/issues/790)) accepts TypeScript 7 native type checking with Vite 8 independently of CSS migration. Require workspace and test type checking, emitted declarations, Node built-in types, Core/Full builds and OCI, OAuth source boundaries, Desktop browser E2E and existing mandatory verification and security checks. Do not use TypeScript 5 fallback, suppressed diagnostics or skipped tasks as proof.
