@@ -1,0 +1,63 @@
+name: Benchmark remaining Python toolchains
+on:
+  pull_request:
+    paths:
+      - .github/workflows/python-toolchain-benchmark.yml
+      - scripts/ci/benchmark/python-toolchains.py
+permissions:
+  contents: read
+concurrency:
+  group: python-toolchain-benchmark-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  benchmark:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: graphify
+            runner: ubuntu-24.04
+            python: '3.12'
+          - target: ansible
+            runner: ubuntu-24.04
+          - target: ansible-mitogen
+            runner: ubuntu-26.04
+          - target: s3
+            runner: ubuntu-24.04
+            python: '3.12.12'
+          - target: huggingface
+            runner: ubuntu-26.04
+          - target: ios-yaml
+            runner: xcode-27
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        if: matrix.python != ''
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v7.1.0
+        if: matrix.target == 'graphify'
+        with:
+          node-version: 24.22.3
+      - name: Verify iOS runner identity
+        if: matrix.target == 'ios-yaml'
+        run: xcodebuild -version | grep -E '^Xcode 27\.'
+      - name: Compare isolated pip and uv environments
+        env:
+          BENCH_TARGET: ${{ matrix.target }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/ci/benchmark/python-toolchains.py
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: python-toolchain-${{ matrix.target }}
+          path: ${{ runner.temp }}/python-toolchain-results
+          retention-days: 2
+          if-no-files-found: error
