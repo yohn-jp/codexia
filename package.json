@@ -49,7 +49,6 @@
     "@codexia/contracts": "workspace:*",
     "@codexia/module-runtime": "workspace:*",
     "@codexia/persistence-contracts": "workspace:*",
-    "@codexia/persistence-postgres": "workspace:*",
-    "@octokit/rest": "22.0.1"
+    "@codexia/persistence-postgres": "workspace:*"
   }
 }

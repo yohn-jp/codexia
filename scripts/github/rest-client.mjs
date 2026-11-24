@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { Octokit } from '@octokit/rest';
+import { Octokit } from '../ci/evidence/github-rest-sdk.mjs';
 
 const API_ORIGIN = 'https://api.github.com';
 const CANONICAL_REPOSITORY = 'yohn-jp/codexia';
