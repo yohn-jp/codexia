@@ -1172,6 +1172,7 @@ private struct FixtureEditorDestination: View {
                     HStack {
                         Button("選択してコピー") {
                             let app = UIApplication.shared
+                            UIPasteboard.general.items = []
                             app.sendAction(#selector(UIResponderStandardEditActions.selectAll(_:)),
                                            to: nil, from: nil, for: nil)
                             app.sendAction(#selector(UIResponderStandardEditActions.copy(_:)),

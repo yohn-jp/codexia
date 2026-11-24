@@ -46,12 +46,12 @@ final class AuthoringFlowUITests: XCTestCase {
 
         editor.tap()
         app.buttons["fixture.clipboard.paste"].tap()
-        let pasted = NSPredicate { _, _ in
-            guard let after = editor.value as? String else { return false }
-            return after.utf16.count == before.utf16.count * 2 && after.contains(before)
-        }
+        let pasted = NSPredicate(format: "value.length == %d", before.utf16.count * 2)
         let expectation = XCTNSPredicateExpectation(predicate: pasted, object: editor)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed)
+        XCTAssertTrue((editor.value as? String ?? "").contains(before))
+        app.buttons["戻る"].tap()
+        XCTAssertTrue(app.alerts["原稿はまだ保護されていません"].waitForExistence(timeout: 5))
     }
 
     func testUnprotectedTextSurvivesBackGuardAndHomeRoundTrip() {
