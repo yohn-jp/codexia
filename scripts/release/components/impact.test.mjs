@@ -12,6 +12,9 @@ test('verified main release respects prior frontend and backend push path scopes
   assert.equal(componentReleaseAffected('backend', ['modules/story/src/browser.tsx', 'Dockerfile.backend']), true);
   assert.equal(componentReleaseAffected('backend', ['.github/workflows/frontend-release.yml']), false);
   assert.equal(componentReleaseAffected('frontend', ['.github/workflows/frontend-release.yml']), true);
+  for (const component of ['frontend', 'backend']) {
+    assert.equal(componentReleaseAffected(component, ['scripts/ci/evidence/package.json']), true);
+  }
 });
 test('test-only changes do not request runtime component release builds', () => {
   for (const file of [
