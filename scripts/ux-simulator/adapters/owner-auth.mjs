@@ -7,9 +7,9 @@ const consent = 'app/src/OAuthConsentPage.tsx';
 function routeFor(source, name) {
   if (!source.exists(launcher)) return null;
   const text = source.read(launcher);
-  const match = text.match(new RegExp('const ' + name + ' = window\\.location\\.pathname === "([^"]+)";'));
+  const match = text.match(new RegExp(String.raw`const ${name} = window\.location\.pathname === (["'])(.+?)\1;`));
   if (!match) return null;
-  return { route: match[1], location: source.location(launcher, match[0]) };
+  return { route: match[2], location: source.location(launcher, match[0]) };
 }
 
 export function projectAuth(source) {

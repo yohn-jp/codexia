@@ -70,7 +70,7 @@ test('owner projection points to canonical screens, controls, and static source 
 
 test('removing the canonical OAuth route changes regenerated projection and records the missing route', () => {
   const path = 'app/src/launcher.tsx';
-  const changed = withFileEdit(path, (text) => text.replace('const isOAuthLogin = window.location.pathname === "/oauth/login";', 'const isOAuthLogin = false;'));
+  const changed = withFileEdit(path, (text) => text.replace(/const isOAuthLogin = window\.location\.pathname === (["'])\/oauth\/login\1;/u, 'const isOAuthLogin = false;'));
   const projection = project(changed);
   assert.ok(!projection.screens.some(({ id }) => id === 'AUTH-01'));
   assert.ok(projection.gaps.some(({ id, status }) => id === 'AUTH-01' && status === 'unextracted'));
