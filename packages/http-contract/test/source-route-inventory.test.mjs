@@ -9,6 +9,7 @@ import { createVirtualFileSystem } from 'typescript/unstable/fs';
 import { API } from 'typescript/unstable/sync';
 import { parse } from 'yaml';
 import { toFastifyRoutes } from '../src/fastify-schema.mjs';
+import { discoverLiteralDispatcherOperations } from '../src/source-dispatcher-inventory.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repositoryRoot = path.resolve(packageRoot, '../..');
@@ -81,30 +82,7 @@ function assertAdmittedOperations(openapi) {
 }
 
 function dispatcherOperations(source) {
-  const sourceFile = parseSourceFile('server.ts', source);
-  const operations = [];
-  const comparisons = (node, variable, values = []) => {
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken) {
-      if (ts.isIdentifier(node.left) && node.left.text === variable && ts.isStringLiteral(node.right)) values.push(node.right.text);
-      if (ts.isIdentifier(node.right) && node.right.text === variable && ts.isStringLiteral(node.left)) values.push(node.left.text);
-    }
-    node.forEachChild(child => {
-      comparisons(child, variable, values);
-    });
-    return values;
-  };
-  const visit = node => {
-    if (ts.isIfStatement(node)) {
-      const paths = comparisons(node.expression, 'routePath');
-      const methods = comparisons(node.expression, 'method').filter(method =>
-        ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE'].includes(method),
-      );
-      for (const method of methods) for (const pathname of paths) operations.push(`${method} ${pathname}`);
-    }
-    node.forEachChild(visit);
-  };
-  visit(sourceFile);
-  return operations;
+  return discoverLiteralDispatcherOperations(source, 'server.ts');
 }
 
 function coreDispatcherEvidence(source) {
@@ -945,4 +923,9 @@ test('generated owner-session request, response, header, error and security sema
   const route = methods.routes.find(({ method, url }) => method === 'POST' && url === '/api/auth/codexia/owner-session');
   assert.deepEqual(route.contentTypes['403'], ['application/json']);
   assert.equal(route.responseHeaders['200']['cache-control'].schema.enum[0], 'no-store');
+  const consentContext = contract.paths['/api/auth/oauth2/consent-context'].post;
+  const consents = contract.paths['/api/auth/oauth2/get-consents'].get;
+  assert.match(consentContext['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
+  assert.match(consents['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
+  assert.match(consents['x-codexia-runtime-response-deviation'], /top-level array/u);
 });

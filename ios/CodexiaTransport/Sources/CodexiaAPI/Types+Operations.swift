@@ -13662,6 +13662,24 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/ready/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/ready/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/ready/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.api_ready_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.api_ready_get.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.api_ready_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/api/ready/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/api/ready/GET/responses/200/content/application\/json`.
@@ -13684,8 +13702,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.api_ready_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.api_ready_get.Output.Ok.Headers,
+                    body: Operations.api_ready_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -13707,6 +13730,80 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/ready/GET/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/ready/GET/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/api/ready/GET/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.api_ready_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.api_ready_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.api_ready_get.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/api/ready/GET/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/ready/GET/responses/503/content/application\/json`.
+                    case json(Components.Schemas.ReadinessResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ReadinessResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.api_ready_get.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.api_ready_get.Output.ServiceUnavailable.Headers,
+                    body: Operations.api_ready_get.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//api/ready/get(api_ready_get)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.api_ready_get.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.api_ready_get.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
                             response: self
                         )
                     }
@@ -24172,6 +24269,24 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/live/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/live/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/live/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_live_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.health_live_get.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_live_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/health/live/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/health/live/GET/responses/200/content/application\/json`.
@@ -24194,8 +24309,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.health_live_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.health_live_get.Output.Ok.Headers,
+                    body: Operations.health_live_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -24345,6 +24465,24 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/ready/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_ready_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.health_ready_get.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_ready_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/health/ready/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/health/ready/GET/responses/200/content/application\/json`.
@@ -24367,8 +24505,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.health_ready_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.health_ready_get.Output.Ok.Headers,
+                    body: Operations.health_ready_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -24471,6 +24614,125 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "tooManyRequests",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_ready_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.health_ready_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_ready_get.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/content/json`.
+                    public struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/content/json/value1`.
+                        public var value1: Components.Schemas.ReadinessResponse?
+                        /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/content/json/value2`.
+                        public var value2: Components.Schemas.OwnerSetupReadinessUnavailableBody?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - value1:
+                        ///   - value2:
+                        public init(
+                            value1: Components.Schemas.ReadinessResponse? = nil,
+                            value2: Components.Schemas.OwnerSetupReadinessUnavailableBody? = nil
+                        ) {
+                            self.value1 = value1
+                            self.value2 = value2
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            var errors: [any Swift.Error] = []
+                            do {
+                                self.value1 = try .init(from: decoder)
+                            } catch {
+                                errors.append(error)
+                            }
+                            do {
+                                self.value2 = try .init(from: decoder)
+                            } catch {
+                                errors.append(error)
+                            }
+                            try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                [
+                                    self.value1,
+                                    self.value2
+                                ],
+                                type: Self.self,
+                                codingPath: decoder.codingPath,
+                                errors: errors
+                            )
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try self.value1?.encode(to: encoder)
+                            try self.value2?.encode(to: encoder)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/health/ready/GET/responses/503/content/application\/json`.
+                    case json(Operations.health_ready_get.Output.ServiceUnavailable.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Operations.health_ready_get.Output.ServiceUnavailable.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.health_ready_get.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.health_ready_get.Output.ServiceUnavailable.Headers,
+                    body: Operations.health_ready_get.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//health/ready/get(health_ready_get)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.health_ready_get.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.health_ready_get.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
                             response: self
                         )
                     }
@@ -24649,6 +24911,24 @@ public enum Operations {
         }
         @frozen public enum Output: Sendable, Hashable {
             public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/startup/GET/responses/200/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/startup/GET/responses/200/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/startup/GET/responses/200/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_startup_get.Output.Ok.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.health_startup_get.Output.Ok.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_startup_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/health/startup/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/health/startup/GET/responses/200/content/application\/json`.
@@ -24671,8 +24951,13 @@ public enum Operations {
                 /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
+                ///   - headers: Received HTTP response headers
                 ///   - body: Received HTTP response body
-                public init(body: Operations.health_startup_get.Output.Ok.Body) {
+                public init(
+                    headers: Operations.health_startup_get.Output.Ok.Headers,
+                    body: Operations.health_startup_get.Output.Ok.Body
+                ) {
+                    self.headers = headers
                     self.body = body
                 }
             }
@@ -24694,6 +24979,80 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ServiceUnavailable: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/health/startup/GET/responses/503/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/startup/GET/responses/503/headers/Cache-Control`.
+                    @frozen public enum Cache_hyphen_ControlPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case no_hyphen_store = "no-store"
+                    }
+                    /// - Remark: Generated from `#/paths/health/startup/GET/responses/503/headers/Cache-Control`.
+                    public var Cache_hyphen_Control: Operations.health_startup_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Cache_hyphen_Control:
+                    public init(Cache_hyphen_Control: Operations.health_startup_get.Output.ServiceUnavailable.Headers.Cache_hyphen_ControlPayload) {
+                        self.Cache_hyphen_Control = Cache_hyphen_Control
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.health_startup_get.Output.ServiceUnavailable.Headers
+                /// - Remark: Generated from `#/paths/health/startup/GET/responses/503/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/health/startup/GET/responses/503/content/application\/json`.
+                    case json(Components.Schemas.ReadinessResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ReadinessResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.health_startup_get.Output.ServiceUnavailable.Body
+                /// Creates a new `ServiceUnavailable`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.health_startup_get.Output.ServiceUnavailable.Headers,
+                    body: Operations.health_startup_get.Output.ServiceUnavailable.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// Service unavailable.
+            ///
+            /// - Remark: Generated from `#/paths//health/startup/get(health_startup_get)/responses/503`.
+            ///
+            /// HTTP response code: `503 serviceUnavailable`.
+            case serviceUnavailable(Operations.health_startup_get.Output.ServiceUnavailable)
+            /// The associated value of the enum case if `self` is `.serviceUnavailable`.
+            ///
+            /// - Throws: An error if `self` is not `.serviceUnavailable`.
+            /// - SeeAlso: `.serviceUnavailable`.
+            public var serviceUnavailable: Operations.health_startup_get.Output.ServiceUnavailable {
+                get throws {
+                    switch self {
+                    case let .serviceUnavailable(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "serviceUnavailable",
                             response: self
                         )
                     }
