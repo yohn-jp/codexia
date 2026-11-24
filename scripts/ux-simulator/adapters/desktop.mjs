@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const SAVE = 'app/src/application/persistence-save-machine.ts';
 
 // Stable logical IDs point to canonical React/XState declarations. This table
@@ -65,6 +67,25 @@ function gapSource(source, path, symbol) {
     ?? { path: 'app/src/entries/desktop.tsx', line: 1 };
 }
 
+function jsxEventExpression(tag) {
+  const property = tag.match(/\bon(?:Click|Submit|Change|Select)\s*=\s*/);
+  if (!property) return null;
+  let cursor = property.index + property[0].length;
+  if (tag[cursor] !== '{') return null;
+  const close = balancedEnd(tag, cursor);
+  return tag.slice(cursor + 1, close).trim();
+}
+
+function simpleLabel(text, tagEnd, tag, element) {
+  const aria = tag.match(/\baria-label\s*=\s*["']([^"']+)["']/)?.[1];
+  if (aria) return aria;
+  if (element !== 'button') return undefined;
+  const close = text.indexOf('</button>', tagEnd);
+  if (close < 0) return undefined;
+  const content = text.slice(tagEnd + 1, close).trim();
+  return content && !/[<>{}]/.test(content) ? content : undefined;
+}
+
 function taggedControls(source) {
   const found = new Map();
   for (const path of source.list('app/src').filter((candidate) => /\.(tsx?|jsx?)$/.test(candidate)).sort()) {
@@ -87,16 +108,19 @@ function taggedControls(source) {
       const event = tag.match(/\bon(Click|Submit|Change|Select)\s*=/);
       const expectedHandler = controlSources.get(id)?.[1];
       if (!event || !expectedHandler) continue;
-      const calls = [...tag.matchAll(/\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\(/g)].map((call) => call[1]);
-      const direct = tag.match(/\bon(?:Click|Submit|Change|Select)\s*=\s*\{\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\}/)?.[1];
+      const expression = jsxEventExpression(tag);
+      if (!expression) continue;
+      const calls = [...expression.matchAll(/\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\(/g)].map((call) => call[1]);
+      const direct = expression.match(/^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)$/)?.[1];
       const linkedHandler = calls.find((call) => call === expectedHandler || call.endsWith(`.${expectedHandler}`));
-      const handler = direct || linkedHandler
-        || calls.find((call) => !['preventDefault', 'stopPropagation', 'confirm', 'then', 'requestAnimationFrame'].includes(call.split('.').at(-1)));
+      const handler = linkedHandler ?? (direct === expectedHandler ? direct : undefined)
+        ?? calls.find((call) => !['preventDefault', 'stopPropagation', 'confirm', 'then', 'requestAnimationFrame', 'mutate'].includes(call.split('.').at(-1)));
       if (!handler) continue;
       const reference = source.location(path, id);
       if (!reference) continue;
       found.set(id, {
-        id, platform: 'desktop', source: reference, role: element === 'form' ? 'form' : element === 'button' ? 'button' : 'control',
+        id, platform: 'desktop', source: reference,
+        label: simpleLabel(text, end, tag, element), role: element === 'form' ? 'form' : element === 'button' ? 'button' : 'control',
         handler,
       });
     }
@@ -163,14 +187,29 @@ function directProperties(text, open) {
     const valueType = text[cursor] === '{' || text[cursor] === '[' ? text[cursor] : null;
     properties.push({ key, keyStart, valueStart, valueType });
     if (valueType) cursor = balancedEnd(text, cursor, valueType, valueType === '{' ? '}' : ']') + 1;
-    else {
-      while (cursor < close && text[cursor] !== ',') {
-        if (text[cursor] === '"' || text[cursor] === "'" || text[cursor] === '`') cursor = skipQuoted(text, cursor);
-        else cursor += 1;
-      }
-    }
+    else cursor = expressionEnd(text, cursor, close);
   }
   return properties;
+}
+
+function expressionEnd(text, start, limit) {
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+  let cursor = start;
+  while (cursor < limit) {
+    const char = text[cursor];
+    if (char === '"' || char === "'" || char === '`') cursor = skipQuoted(text, cursor);
+    else if (char === '(') { parens += 1; cursor += 1; }
+    else if (char === ')' && parens) { parens -= 1; cursor += 1; }
+    else if (char === '{') { braces += 1; cursor += 1; }
+    else if (char === '}' && braces) { braces -= 1; cursor += 1; }
+    else if (char === '[') { brackets += 1; cursor += 1; }
+    else if (char === ']' && brackets) { brackets -= 1; cursor += 1; }
+    else if ((char === ',' || char === '}') && !parens && !braces && !brackets) return cursor;
+    else cursor += 1;
+  }
+  return cursor;
 }
 
 function transitionDetails(text, open) {
@@ -180,8 +219,13 @@ function transitionDetails(text, open) {
   const targetMatch = text.slice(target.valueStart).match(/^["']([^"']+)["']/);
   if (!targetMatch) return null;
   const guard = props.find(({ key }) => key === 'guard');
-  const guardMatch = guard ? text.slice(guard.valueStart).match(/^["']([^"']+)["']/) : null;
-  return { target: targetMatch[1], condition: guardMatch?.[1] };
+  let condition;
+  if (guard) {
+    const end = expressionEnd(text, guard.valueStart, balancedEnd(text, open));
+    const expression = text.slice(guard.valueStart, end).trim();
+    condition = expression.match(/^["']([^"']+)["']$/)?.[1] ?? (expression || 'unknown');
+  }
+  return { target: targetMatch[1], condition };
 }
 
 function transitionVariants(text, value) {
@@ -227,7 +271,8 @@ function saveTransitions(source) {
             : variant.target.startsWith('#') ? variant.target
               : [parent, variant.target].filter(Boolean).join('.');
           const line = text.slice(0, event.keyStart).split('\n').length;
-          const conditionSuffix = variant.condition ? `/guard-${variant.condition}` : '';
+          const conditionSuffix = variant.condition
+            ? `/guard-${createHash('sha256').update(variant.condition).digest('hex').slice(0, 12)}` : '';
           transitions.push({
             id: `WRT-01/${statePath}/${name}/${toPath}${conditionSuffix}`, platform: 'desktop',
             from: `WRT-01/${statePath}`, to: `WRT-01/${toPath}`, event: name,

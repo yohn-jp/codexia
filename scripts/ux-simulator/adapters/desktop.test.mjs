@@ -22,7 +22,7 @@ function fixture() {
     ['app/src/components/JobInbox.tsx', 'export function JobInbox() {}'],
     ['app/src/components/ThemeControl.tsx', 'export function ThemeControl() {}'],
     ['app/src/shells/desktop/DesktopShell.tsx', 'requestConsoleNavigation'],
-    ['app/src/application/persistence-save-machine.ts', 'createMachine({ id: "persistenceSave", states: { active: { on: { "SAVE.MANUAL": { guard: "canSaveCurrentGeneration", target: "saving" } } } } })'],
+    ['app/src/application/persistence-save-machine.ts', 'createMachine({ id: "persistenceSave", states: { active: { on: { "SAVE.MANUAL": { guard: ({ context, event }) => event.type === "SAVE.MANUAL" && context.dirty, target: "saving" } } } } })'],
   ]);
   return {
     read(path) { if (!files.has(path)) throw new Error(`missing ${path}`); return files.get(path); },
@@ -42,22 +42,30 @@ test('Desktop projection follows canonical React controls and XState references'
   const before = project(source);
   assert.ok(before.screens.some(({ id }) => id === 'LIB-01'));
   assert.equal(before.controls.find(({ id }) => id === 'WRT-01.A').handler, 'saveDocument');
+  assert.equal(before.controls.find(({ id }) => id === 'WRT-01.A').label, 'Save');
   assert.equal(before.controls.find(({ id }) => id === 'OUT-01.B').handler, 'item.primaryAction');
   assert.equal(before.controls.find(({ id }) => id === 'REV-02.A').handler, 'updateAfterAction');
-  assert.ok(before.transitions.some(({ event, from, condition }) => event === 'SAVE.MANUAL' && from === 'WRT-01/active' && condition === 'canSaveCurrentGeneration'));
+  assert.ok(before.transitions.some(({ event, from, condition }) => event === 'SAVE.MANUAL' && from === 'WRT-01/active' && condition.includes('context.dirty')));
 
   const entry = source.files.get('app/src/entries/desktop.tsx');
   source.files.set('app/src/entries/desktop.tsx', entry.replace('window.location.pathname', 'window.location.routePath'));
   source.files.set('app/src/persistence/PersistenceWorkspace.tsx', source.files.get('app/src/persistence/PersistenceWorkspace.tsx')
-    .replace('saveDocument()', 'submitCurrentDraft()')
+    .replace('saveDocument()', 'submitCurrentDraft()').replace('>Save</button>', '>Store</button>')
     .replace('data-ux-control="WRT-02.B" ', ''));
-  source.files.set('app/src/application/persistence-save-machine.ts', source.files.get('app/src/application/persistence-save-machine.ts').replace('SAVE.MANUAL', 'SAVE.RETRY'));
+  source.files.set('app/src/application/persistence-save-machine.ts', source.files.get('app/src/application/persistence-save-machine.ts')
+    .replace('SAVE.MANUAL', 'SAVE.RETRY').replace('context.dirty', 'context.remoteConflict'));
 
   const after = project(source);
   assert.equal(after.screens.find(({ id }) => id === 'ENTRY-01'), undefined);
   assert.equal(after.controls.find(({ id }) => id === 'WRT-01.A').handler, 'submitCurrentDraft');
+  assert.equal(after.controls.find(({ id }) => id === 'WRT-01.A').label, 'Store');
   assert.equal(after.controls.find(({ id }) => id === 'WRT-02.B'), undefined);
   assert.ok(after.gaps.some(({ id }) => id === 'WRT-02.B'));
-  assert.ok(after.transitions.some(({ event }) => event === 'SAVE.RETRY'));
+  assert.ok(after.transitions.some(({ event, condition }) => event === 'SAVE.RETRY' && condition.includes('context.remoteConflict')));
   assert.ok(!after.transitions.some(({ event }) => event === 'SAVE.MANUAL'));
+
+  source.files.set('app/src/persistence/PersistenceWorkspace.tsx', source.files.get('app/src/persistence/PersistenceWorkspace.tsx').replace('submitCurrentDraft()', 'undefined'));
+  const callbackRemoved = project(source);
+  assert.ok(!callbackRemoved.controls.some(({ id }) => id === 'WRT-01.A'));
+  assert.ok(callbackRemoved.gaps.some(({ id }) => id === 'WRT-01.A'));
 });
