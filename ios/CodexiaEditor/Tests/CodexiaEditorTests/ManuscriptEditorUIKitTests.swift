@@ -62,6 +62,71 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         window.isHidden = true
     }
 
+    func testMarkedTextReplacementAndConversionBoundariesKeepModelCommittedOnly() {
+        let box = Box()
+        let binding = Binding(get: { box.state }, set: { box.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: binding)
+        let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        defer {
+            view.resignFirstResponder()
+            window.isHidden = true
+        }
+
+        view.selectedRange = NSRange(location: 2, length: 0)
+        view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 2))
+        coordinator.textViewDidChange(view)
+        view.setMarkedText("仮名", selectedRange: NSRange(location: 2, length: 2))
+        coordinator.textViewDidChange(view)
+
+        XCTAssertNotNil(view.markedTextRange)
+        XCTAssertEqual(box.state.text, "原稿")
+        XCTAssertFalse(box.state.canLeave)
+
+        view.unmarkText()
+        coordinator.textViewDidChange(view)
+
+        XCTAssertNil(view.markedTextRange)
+        XCTAssertEqual(box.state.text, "原稿仮名")
+        XCTAssertFalse(box.state.canLeave)
+    }
+
+    func testRemoteResponseCannotReplaceTextCommittedFromComposition() {
+        let box = Box()
+        let request = box.state.beginRemoteRequest()
+        let binding = Binding(get: { box.state }, set: { box.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: binding)
+        let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        XCTAssertTrue(view.becomeFirstResponder())
+        defer {
+            view.resignFirstResponder()
+            window.isHidden = true
+        }
+        coordinator.textViewDidBeginEditing(view)
+        XCTAssertTrue(box.state.applyRemote("遅れて届いた本文", for: request))
+
+        view.selectedRange = NSRange(location: 2, length: 0)
+        view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 2))
+        coordinator.textViewDidChange(view)
+        view.unmarkText()
+        coordinator.textViewDidChange(view)
+        coordinator.textViewDidEndEditing(view)
+
+        XCTAssertEqual(box.state.text, "原稿かな")
+        XCTAssertFalse(box.state.canLeave)
+        XCTAssertEqual(view.text, "原稿かな")
+    }
+
     func testFixtureInputLayoutScrollAndMemoryObservation() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
@@ -94,7 +159,13 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
             }
             var usage = rusage()
             let memoryStatus = getrusage(RUSAGE_SELF, &usage)
-            print("FIXTURE_METRIC chars=\(count) samples=5 input_layout_ms=\(inputSamples) scroll_roundtrip_layout_ms=\(scrollSamples) process_peak_rss_bytes=\(memoryStatus == 0 ? usage.ru_maxrss : -1)")
+            let sortedInput = inputSamples.sorted()
+            let sortedScroll = scrollSamples.sorted()
+            let inputMedian = sortedInput[sortedInput.count / 2]
+            let scrollMedian = sortedScroll[sortedScroll.count / 2]
+            let inputP95 = sortedInput[Int(ceil(Double(sortedInput.count - 1) * 0.95))]
+            let scrollP95 = sortedScroll[Int(ceil(Double(sortedScroll.count - 1) * 0.95))]
+            print("FIXTURE_METRIC chars=\(count) samples=5 input_layout_ms[min/median/p95/max]=\(sortedInput[0])/\(inputMedian)/\(inputP95)/\(sortedInput[sortedInput.count - 1]) input_samples_ms=\(inputSamples) scroll_roundtrip_layout_ms[min/median/p95/max]=\(sortedScroll[0])/\(scrollMedian)/\(scrollP95)/\(sortedScroll[sortedScroll.count - 1]) scroll_samples_ms=\(scrollSamples) process_peak_rss_bytes_cumulative=\(memoryStatus == 0 ? usage.ru_maxrss : -1)")
             XCTAssertTrue(view.text.hasSuffix("あああああ"))
             view.resignFirstResponder()
             view.removeFromSuperview()
