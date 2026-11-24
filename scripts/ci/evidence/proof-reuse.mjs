@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import { assertPlanEvidence } from './validation.mjs';
 import { selectLatestEvidenceArtifacts, selectLatestPlanArtifact } from './artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-artifacts.mjs';
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { assertTaskProducerInventory, assertTrustedTaskInputProof, selectEquivalentTaskProofs } from './input-proof.mjs';
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
 import { VERIFICATION_TASKS } from '../impact/contract.mjs';
@@ -11,9 +10,9 @@ import { captureCoverageInputClosure, coverageInvocation } from './coverage-inpu
 import { readReusableMainEvidence } from '../certification/reuse-merged-pr.mjs';
 import { assertTrustedCertifiedSourceTaskInputProof } from './input-proof.mjs';
 import { coverageRuntime } from './coverage-inputs.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const PROOF_REPOSITORY = 'yohn-jp/codexia';
-const PROOF_API = 'https://api.github.com/repos/yohn-jp/codexia/';
 const VERIFY_PATH = '.github/workflows/verify.yml';
 const COVERAGE_JOB = 'types-tests';
 const COVERAGE_WORKFLOW_JOB = 'types';
@@ -25,12 +24,12 @@ const positive = value => Number.isSafeInteger(value) && value > 0;
 
 const PROOF_ENDPOINTS = [
   /^actions\/workflows\/verify\.yml$/u,
-  /^actions\/workflows\/[1-9]\d*\/runs\?head_sha=[a-f0-9]{40}&event=(?:push|pull_request)&per_page=[1-9]\d*&page=[1-9]\d*$/u,
+  /^actions\/workflows\/[1-9]\d*\/runs$/u,
   /^actions\/runs\/[1-9]\d*$/u,
-  /^actions\/runs\/[1-9]\d*\/jobs\?filter=latest&per_page=[1-9]\d*&page=[1-9]\d*$/u,
-  /^actions\/runs\/[1-9]\d*\/artifacts\?per_page=[1-9]\d*&page=[1-9]\d*$/u,
-  /^actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*\/jobs\?per_page=100&page=[1-9]\d*$/u,
-  /^commits\/[a-f0-9]{40}\/pulls\?per_page=100&page=1$/u,
+  /^actions\/runs\/[1-9]\d*\/jobs$/u,
+  /^actions\/runs\/[1-9]\d*\/artifacts$/u,
+  /^actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*\/jobs$/u,
+  /^commits\/[a-f0-9]{40}\/pulls$/u,
   /^pulls\/[1-9]\d*$/u,
 ];
 
@@ -38,17 +37,37 @@ const PROOF_ENDPOINTS = [
 export function createGitHubProofClient({ repository, token, request = fetch }) {
   assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
-  const send = async endpoint => {
+  const github = createGitHubRestClient({ token, fetchImpl: request });
+  const route = (endpoint, parameters = {}) => {
     if (typeof endpoint !== 'string' || !PROOF_ENDPOINTS.some(pattern => pattern.test(endpoint))) {
       throw new Error('Unexpected GitHub task proof API endpoint');
     }
-    const response = await request(PROOF_API + endpoint, {
-      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000), redirect: 'error',
-    });
-    return response;
+    const allowed = endpoint.startsWith('actions/workflows/') && endpoint.endsWith('/runs')
+      ? new Set(['head_sha', 'event', 'per_page', 'page'])
+      : endpoint.endsWith('/jobs') && endpoint.startsWith('actions/runs/')
+        ? new Set(['filter', 'per_page', 'page'])
+        : new Set(['per_page', 'page']);
+    for (const [key, value] of Object.entries(parameters)) {
+      if (!allowed.has(key) || (key === 'head_sha' && !/^[a-f0-9]{40}$/u.test(String(value))) ||
+          (key === 'event' && !['push', 'pull_request'].includes(value)) || (key === 'filter' && value !== 'latest') ||
+          (['per_page', 'page'].includes(key) && !/^[1-9]\d*$/u.test(String(value)))) {
+        throw new Error('Unexpected GitHub task proof API endpoint');
+      }
+    }
+    return `/repos/${repository}/${endpoint}`;
   };
-  return { send, get: endpoint => getJson(send, endpoint) };
+  const send = async (endpoint, parameters = {}) => github.request('GET', route(endpoint, parameters), parameters);
+  const get = async endpoint => {
+    const response = await send(endpoint);
+    assert.ok(response.status >= 200 && response.status < 300, `GitHub task proof lookup failed: HTTP ${response.status}`);
+    return response.data;
+  };
+  const paginate = async (endpoint, parameters, itemsKey) => {
+    const path = endpoint.startsWith(`/repos/${repository}/`) ? endpoint.slice(`/repos/${repository}/`.length) : endpoint;
+    return github.paginate(route(path, parameters), parameters, itemsKey);
+  };
+  get.paginate = paginate;
+  return { send, get, paginate };
 }
 
 
@@ -70,26 +89,20 @@ async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repos
   assert.equal(certSteps.length, 1, 'Missing or duplicate compact exact-main certification step');
   assert.equal(certSteps[0].conclusion, 'success', 'Compact exact-main certification failed');
   const before = execFileSync('git', ['rev-parse', `${plan.base}^1`], { encoding: 'utf8' }).trim();
-  const githubRequest = createGitHubProofClient({ repository, token, request }).send;
+  const githubRequest = createGitHubProofClient({ repository, token, request });
   const { receipt: mainProof, plan: sourcePlan, reports: sourceReports } = await readReusableMainEvidence({
     sourceSha: plan.base, before, repository, currentRun: run,
     checkoutSha: plan.sha,
     git: args => execFileSync('git', args, { encoding: 'utf8' }),
-    request: async endpoint => {
-      const response = await githubRequest(endpoint);
-      assert.ok(response.ok, `Merged PR proof lookup failed: HTTP ${response.status}`);
-      return response.json();
-    },
+    request: githubRequest.get,
     readArtifact: read,
   });
-  const sourceRun = await getJson(githubRequest, `actions/runs/${mainProof.runId}`);
-  const sourceJobs = await collectGitHubPages((page, perPage) => getJson(githubRequest,
-    `actions/runs/${mainProof.runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`), 'jobs');
+  const sourceRun = await githubRequest.get(`actions/runs/${mainProof.runId}`);
+  const sourceJobs = await githubRequest.paginate(`actions/runs/${mainProof.runId}/jobs`, { filter: 'latest' }, 'jobs');
   const sourceCoverageJob = sourceJobs.filter(job => job.name === COVERAGE_JOB);
   assert.equal(sourceCoverageJob.length, 1, 'Merged PR proof has no unique coverage producer job');
   const sourceJob = sourceCoverageJob[0];
-  const sourceArtifacts = await collectGitHubPages((page, perPage) => getJson(githubRequest,
-    `actions/runs/${mainProof.runId}/artifacts?per_page=${perPage}&page=${page}`), 'artifacts');
+  const sourceArtifacts = await githubRequest.paginate(`actions/runs/${mainProof.runId}/artifacts`, {}, 'artifacts');
   // Recheck live identities against the evidence just verified. Immutable bytes only need to be read once.
   const identity = { runId: mainProof.runId, sourceSha: mainProof.headSha };
   const inventory = { identity, artifacts: sourceArtifacts };
@@ -125,12 +138,6 @@ async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repos
   return coverage;
 }
 
-async function getJson(request, endpoint) {
-  const response = await request(endpoint);
-  assert.ok(response.ok, `GitHub task proof lookup failed: HTTP ${response.status}`);
-  return response.json();
-}
-
 /** Resolve optional static coverage reuse from an exact-base main certification. */
 export async function resolveExactMainCoverageProof({ plan: planValue, current, repository, token, request = fetch, readArtifact }) {
   const plan = validateVerificationPlan(planValue);
@@ -144,12 +151,12 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.equal(current?.head_sha, plan.sha, 'Current run source mismatch');
   assert.ok(positive(current?.workflow_id) && positive(current?.repository?.id), 'Current workflow identity is incomplete');
 
-  const get = createGitHubProofClient({ repository, token, request }).get;
+  const github = createGitHubProofClient({ repository, token, request });
+  const get = github.get;
   const workflow = await get('actions/workflows/verify.yml');
   assert.equal(workflow.id, current.workflow_id, 'Current run uses another workflow');
   assert.equal(workflow.path, VERIFY_PATH, 'Current workflow path changed');
-  const runs = await collectGitHubPages((page, perPage) => get(
-    `actions/workflows/${workflow.id}/runs?head_sha=${plan.base}&event=push&per_page=${perPage}&page=${page}`), 'workflow_runs');
+  const runs = await github.paginate(`actions/workflows/${workflow.id}/runs`, { head_sha: plan.base, event: 'push' }, 'workflow_runs');
   const exactRuns = runs.filter(run => run?.workflow_id === current.workflow_id && run.path === VERIFY_PATH &&
     run.event === 'push' && run.head_branch === 'main' && run.head_sha === plan.base &&
     run.repository?.id === current.repository.id && run.head_repository?.id === current.repository.id);
@@ -164,8 +171,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   // Never fall back to an older run or attempt when the newest exact-base proof failed.
   assert.equal(run.status, 'completed', 'Latest exact-base main run is unfinished');
   assert.equal(run.conclusion, 'success', 'Latest exact-base main run failed');
-  const jobs = await collectGitHubPages((page, perPage) => get(
-    `actions/runs/${run.id}/jobs?filter=latest&per_page=${perPage}&page=${page}`), 'jobs');
+  const jobs = await github.paginate(`actions/runs/${run.id}/jobs`, { filter: 'latest' }, 'jobs');
   const read = readArtifact ?? (async (artifact, filename) => JSON.parse(await extractJsonEntry(
     await downloadArtifact(artifact, repository, token, request), filename)));
   const certificationJob = exactJob(jobs, 'certification', run);
@@ -175,8 +181,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   const fullCertificationSteps = certificationJob.steps?.filter(step => step.name === CERTIFICATION_STEP) ?? [];
   assert.equal(fullCertificationSteps.length, 1, 'Task proof source lacks full exact-main certification');
   assert.equal(fullCertificationSteps[0].conclusion, 'success', 'Task proof source certification failed');
-  const artifacts = await collectGitHubPages((page, perPage) => get(
-    `actions/runs/${run.id}/artifacts?per_page=${perPage}&page=${page}`), 'artifacts');
+  const artifacts = await github.paginate(`actions/runs/${run.id}/artifacts`, {}, 'artifacts');
   const identity = { runId: run.id, sourceSha: plan.base };
   const selectedPlanArtifact = selectedArtifacts({ identity, artifacts }, [
     selectLatestPlanArtifact(artifacts, jobs, identity).id,

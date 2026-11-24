@@ -313,8 +313,7 @@ jobs:
           # Independent locked Python and browser prerequisites. The trace
           # acceptance launches Chromium headless; only its pinned shell is needed.
           (
-            python -m venv "$RUNNER_TEMP/strictdoc"
-            "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+            bash scripts/strictdoc/install.sh "$RUNNER_TEMP/strictdoc" scripts/strictdoc/requirements.lock.txt
           ) &
           strictdoc_pid=$!
           browser_status=0

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { collectGitHubPages } from '../../release/components/policy.mjs';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { validateVerificationPlan, assertExactPrImpact } from '../impact/plan.mjs';
 import { assertDeploymentFixtureJobs, assertPlanEvidence } from '../evidence/validation.mjs';
@@ -11,6 +10,7 @@ import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs'
 import { resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { deploymentImpactForSource } from '../impact/migration-contracts.mjs';
 import { assertReusedCoverageProof } from '../evidence/proof-reuse.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -24,13 +24,12 @@ assert.equal(outcomes.plan?.result, 'success', 'Impact planning did not succeed'
 assert.ok(Object.values(outcomes).every(value => ['success', 'skipped'].includes(value.result)), 'A required DAG group failed, was cancelled or unexecuted');
 const plan = validateVerificationPlan(JSON.parse(await readFile(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
 assert.equal(plan.sha, CODEXIA_EXPECTED_SHA);
+assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
+const github = createGitHubRestClient({ token: GH_TOKEN });
 const request = async endpoint => {
-  const response = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/${endpoint}`, {
-    headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(15_000), redirect: 'error',
-  });
-  assert.ok(response.ok, `GitHub evidence unavailable: HTTP ${response.status}`);
-  return response.json();
+  const response = await github.request('GET', `/repos/${GITHUB_REPOSITORY}/${endpoint}`);
+  assert.ok(response.status >= 200 && response.status < 300, `GitHub evidence unavailable: HTTP ${response.status}`);
+  return response.data;
 };
 const run = await request(`actions/runs/${GITHUB_RUN_ID}`);
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
@@ -44,7 +43,7 @@ if (run.event === 'pull_request') {
     : null;
   assertExactPrImpact(plan, process.env.CODEXIA_EXPECTED_BASE, changed);
 }
-const jobs = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`), 'jobs');
+const jobs = await github.paginate(`/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs`, { filter: 'latest' }, 'jobs');
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
@@ -69,10 +68,10 @@ const reusedCoverageReports = reports.filter(report => report.results?.some(resu
 assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption reports');
 if (reusedCoverageReports.length === 1) {
   await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
-    repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
+    repository: GITHUB_REPOSITORY, token: GH_TOKEN });
 }
-const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
-const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full', 'types-trace']);
+const artifacts = await github.paginate(`/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts`, {}, 'artifacts');
+const producerJobs = await resolveProducerJobAttempts(jobs, run, github, ['build-core', 'build-full', 'types-trace']);
 if (plan.tasks.includes('requirements-trace')) {
   const traceReport = reports.find(report => report.group === 'types-trace');
   const traceJob = producerJobs.find(job => job.name === 'types-trace');

@@ -7,10 +7,10 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { componentReleaseAffected } from './impact.mjs';
-import { collectGitHubPages } from './policy.mjs';
 import { selectLatestPlanArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry } from '../../ci/evidence/download-artifacts.mjs';
 import { validateVerificationPlan } from '../../ci/impact/plan.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 export function verifiedReleaseEvent(payload, env, checkoutSha) {
   const run = payload?.workflow_run;
@@ -55,17 +55,11 @@ export function selectReleaseSource(component, source, main, git, before) {
 async function readVerifiedPushBase(run, runId, repository, token) {
   assert.ok(token, 'Release requires Actions read permission');
   assert.ok(Number.isSafeInteger(runId) && runId > 0, 'Invalid trusted Verify run ID');
-  const request = async endpoint => {
-    const response = await fetch('https://api.github.com/repos/' + repository + '/actions/runs/' + runId + '/' + endpoint, {
-      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
-      redirect: 'error', signal: AbortSignal.timeout(15_000),
-    });
-    assert.ok(response.ok, 'Failed to read the verified push plan inventory');
-    return response.json();
-  };
+  assert.equal(repository, 'yohn-jp/codexia', 'Release repository mismatch');
+  const github = createGitHubRestClient({ token });
   const [jobs, artifacts] = await Promise.all([
-    collectGitHubPages((page, count) => request(`jobs?filter=latest&page=${page}&per_page=${count}`), 'jobs'),
-    collectGitHubPages((page, count) => request(`artifacts?page=${page}&per_page=${count}`), 'artifacts'),
+    github.paginate(`/repos/${repository}/actions/runs/${runId}/jobs`, { filter: 'latest' }, 'jobs'),
+    github.paginate(`/repos/${repository}/actions/runs/${runId}/artifacts`, {}, 'artifacts'),
   ]);
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId, sourceSha: run.head_sha });
   const data = await extractJsonEntry(await downloadArtifact(planArtifact, repository, token), 'ci-plan.json');

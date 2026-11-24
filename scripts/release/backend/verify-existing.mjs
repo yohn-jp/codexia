@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord, publicationInWorkflowWindow } from '../components/record-model.mjs';
-import { collectGitHubPages } from '../components/policy.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
 const digestImage=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -37,33 +37,30 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
   return metadata;
 }
 
-async function request(resource,token){
+async function request(github,resource){
   // Repository metadata can influence run identifiers, but never an arbitrary API endpoint.
   const safeResource =
     resource === 'git/matching-refs/tags/backend-v' ||
-    /^releases\?per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5}$/u.test(resource) ||
+    resource === 'releases' ||
     /^actions\/runs\/[1-9]\d{0,15}$/u.test(resource) ||
-    /^actions\/runs\/[1-9]\d{0,15}\/jobs\?filter=latest(?:&per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5})?$/u.test(resource) ||
-    /^actions\/workflows\/backend-release\.yml\/runs\?head_sha=[a-f0-9]{40}&branch=main&event=(?:push|workflow_run)(?:&per_page=[1-9]\d{0,2}&page=[1-9]\d{0,5})?$/u.test(resource);
+    /^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource) ||
+    resource === 'actions/workflows/backend-release.yml/runs';
   assert.ok(safeResource, 'Unapproved backend release proof API resource');
-  const response=await fetch('https://api.github.com/repos/'+REPOSITORY+'/'+resource,{headers:{Authorization:'Bearer '+token,
-    Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(20_000)});
-  if(!response.ok)throw new Error('Existing backend release proof lookup failed (HTTP '+response.status+')');
-  return response.json();
+  const response=await github.request('GET',`/repos/${REPOSITORY}/${resource}`,{headers:{'X-GitHub-Api-Version':'2022-11-28'}});
+  if(response.status<200||response.status>=300)throw new Error('Existing backend release proof lookup failed (HTTP '+response.status+')');
+  return response.data;
 }
-async function pages(resource,key,token){
-  const separator=resource.includes('?')?'&':'?';
-  return collectGitHubPages((page,perPage)=>request(resource+separator+'per_page='+perPage+'&page='+page,token),key);
+async function pages(github,resource,key,parameters={},options={}){
+  const safeResource=resource==='releases'||resource==='git/matching-refs/tags/backend-v'||
+    resource==='actions/workflows/backend-release.yml/runs'||/^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource);
+  assert.ok(safeResource,'Unapproved backend release pagination resource');
+  return github.paginate(`/repos/${REPOSITORY}/${resource}`,parameters,key,
+    key===null?{maxItems:1_000_000,...options}:options);
 }
-async function listBackendReleases(token){
-  const releases=[];
-  for(let page=1;page<=20;page++){
-    const response=await request('releases?per_page=100&page='+page,token);
-    assert.ok(Array.isArray(response),'GitHub release inventory is invalid');
-    releases.push(...response);
-    if(response.length<100)return releases;
-  }
-  throw new Error('Backend release inventory exceeds the supported bound');
+async function listBackendReleases(github){
+  const releases=await pages(github,'releases',null,{}, {maxItems:1999});
+  assert.ok(Array.isArray(releases)&&releases.length<=1999,'GitHub release inventory is invalid or exceeds the supported bound');
+  return releases;
 }
 export function successfulPublicationJobs(jobs,promoted,hasPromotion=promoted){
   if(!Array.isArray(jobs))return false;
@@ -103,11 +100,12 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   const publicationEvent=env.GITHUB_EVENT_NAME;
   assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
+  const github=createGitHubRestClient({token});
   const tag='backend-v'+version;
-  const releaseMatches=(await listBackendReleases(token)).filter(item=>item?.tag_name===tag);
+  const releaseMatches=(await listBackendReleases(github)).filter(item=>item?.tag_name===tag);
   assert.equal(releaseMatches.length,1,'Expected one exact backend release record');
   const release=releaseMatches[0];
-  const refMatches=(await request('git/matching-refs/tags/backend-v',token))
+  const refMatches=(await pages(github,'git/matching-refs/tags/backend-v',null))
     .filter(item=>item?.ref==='refs/tags/'+tag);
   assert.equal(refMatches.length,1,'Expected one exact backend release tag');
   const tagRef=refMatches[0];
@@ -140,14 +138,14 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   if(event==='pull_request')assert.equal(metadata.producer.sourceSha,producerSha,'Existing release producer SHA mismatch');
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
   const workflowHeadSha=publication?.workflowHeadSha??mainSha;
-  const runs=publication ? [await request('actions/runs/'+publication.workflowRunId,token)] :
-    await pages('actions/workflows/backend-release.yml/runs?head_sha='+workflowHeadSha+'&branch=main&event='+publicationEvent,'workflow_runs',token);
+  const runs=publication ? [await request(github,'actions/runs/'+publication.workflowRunId)] :
+    await pages(github,'actions/workflows/backend-release.yml/runs','workflow_runs',{head_sha:workflowHeadSha,branch:'main',event:publicationEvent});
   for(const run of runs){
     if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==workflowHeadSha||
       run.status!=='completed'||run.conclusion!=='success'||!publicationInWorkflowWindow(release,run))continue;
     if(publication&&run.id!==publication.workflowRunId)continue;
     if(event!=='pull_request'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
-    const jobs=await pages('actions/runs/'+run.id+'/jobs?filter=latest','jobs',token);
+    const jobs=await pages(github,'actions/runs/'+run.id+'/jobs','jobs',{filter:'latest'});
     if(successfulPublicationJobs(jobs,event==='pull_request',true))return {release,metadata,publicationRunId:run.id};
   }
   throw new Error('No successful main backend publication run binds the existing immutable digest');

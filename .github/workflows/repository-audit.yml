@@ -223,8 +223,7 @@ jobs:
           corepack enable
           corepack pnpm@12.21.0 --version
           pnpm install --frozen-lockfile
-          python -m venv "$RUNNER_TEMP/strictdoc"
-          "$RUNNER_TEMP/strictdoc/bin/python" -m pip install --disable-pip-version-check --requirement scripts/strictdoc/requirements.lock.txt
+          bash scripts/strictdoc/install.sh "$RUNNER_TEMP/strictdoc" scripts/strictdoc/requirements.lock.txt
       - name: Detect the installed Chromium browser
         run: |
           CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)"

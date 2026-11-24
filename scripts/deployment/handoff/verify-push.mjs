@@ -6,11 +6,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
-import { assertVerificationJobs, collectGitHubPages } from '../../release/components/policy.mjs';
+import { assertVerificationJobs } from '../../release/components/policy.mjs';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { publishedBackendCompatibility, successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from '../../release/backend/image-inspection.mjs';
 import { validatePushDeploymentCertificate } from '../admission/validate.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const WORKFLOW_PATH = '.github/workflows/backend-release.yml';
@@ -103,12 +104,15 @@ export function createHandoffDeploymentOutputs({ fullImage, producerSha, fullCer
 }
 
 async function githubJson(resource, token, fetchImpl = fetch) {
-  const response = await fetchImpl(`https://api.github.com/repos/${REPOSITORY}/${resource}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    redirect: 'error', signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error('Backend deployment handoff provenance lookup failed (HTTP ' + response.status + ')');
-  return response.json();
+  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
+  const response = await github.request('GET', `/repos/${REPOSITORY}/${resource}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
+  if (response.status < 200 || response.status >= 300) throw new Error('Backend deployment handoff provenance lookup failed (HTTP ' + response.status + ')');
+  return response.data;
+}
+
+async function githubPages(resource, token, fetchImpl, key, parameters = {}) {
+  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
+  return github.paginate(`/repos/${REPOSITORY}/${resource}`, parameters, key);
 }
 
 async function verifyVerifyRun(runId, certificate, token, fetchImpl) {
@@ -123,8 +127,7 @@ async function verifyVerifyRun(runId, certificate, token, fetchImpl) {
   assert.equal(run.head_sha, certificate.verifiedMainSha, 'Certificate Verify source SHA mismatch');
   assert.equal(run.id, certificate.verifyRun.id, 'Certificate Verify run ID mismatch');
   assert.equal(run.run_attempt, certificate.verifyRun.attempt, 'Certificate Verify run attempt mismatch');
-  const jobs = await collectGitHubPages((page, perPage) =>
-    githubJson(`actions/runs/${runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs');
+  const jobs = await githubPages(`actions/runs/${runId}/jobs`, token, fetchImpl, 'jobs', { filter: 'latest' });
   assertVerificationJobs(jobs);
 }
 
@@ -155,8 +158,8 @@ function publisherSkippedRelease(publisher) {
 async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = fetch, usePublishedSourceCompatibility = false }) {
   const runId = run.id;
   const [jobs, artifacts] = await Promise.all([
-    collectGitHubPages((page, perPage) => githubJson(`actions/runs/${runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs'),
-    collectGitHubPages((page, perPage) => githubJson(`actions/runs/${runId}/artifacts?per_page=${perPage}&page=${page}`, token, fetchImpl), 'artifacts'),
+    githubPages(`actions/runs/${runId}/jobs`, token, fetchImpl, 'jobs', { filter: 'latest' }),
+    githubPages(`actions/runs/${runId}/artifacts`, token, fetchImpl, 'artifacts'),
   ]);
   const publishers = jobs.filter(job => job?.name === 'Publish immutable GHCR image');
   assert.equal(publishers.length, 1, 'Expected exactly one backend publication job');

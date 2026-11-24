@@ -31,7 +31,7 @@ test('commit publication CLI requires exact main source and the complete success
         });
       };
     `);
-    const env = { ...process.env, GH_TOKEN: 'test', GITHUB_REPOSITORY: 'owner/repo', GITHUB_SHA: sha, GITHUB_REF: 'refs/heads/main', GITHUB_REF_NAME: 'main', CODEXIA_COMMIT_RELEASE: '1', CODEXIA_SOURCE_SHA: '', CODEXIA_VERIFY_RUN_ID: '' };
+    const env = { ...process.env, GH_TOKEN: 'test', GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_SHA: sha, GITHUB_REF: 'refs/heads/main', GITHUB_REF_NAME: 'main', CODEXIA_COMMIT_RELEASE: '1', CODEXIA_SOURCE_SHA: '', CODEXIA_VERIFY_RUN_ID: '' };
     const run = changes => {
       const result = spawnSync(process.execPath, ['--import', mock, 'scripts/release/components/verify-source.mjs'], { env: { ...env, ...changes }, encoding: 'utf8', timeout: 15_000 });
       assert.ifError(result.error);

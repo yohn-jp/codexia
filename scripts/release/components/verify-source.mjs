@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Read-only gates for tag and commit-addressed publication.
 import { execFileSync } from 'node:child_process';
-import { assertReleaseIdentity, assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './policy.mjs';
+import { assertReleaseIdentity, assertVerificationJobs, verifiedSourceRun } from './policy.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const repository = process.env.GITHUB_REPOSITORY;
 const tag = process.env.GITHUB_REF_NAME;
@@ -13,13 +14,12 @@ const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8
 if (commitRelease) {
   if (!/^[a-f0-9]{40}$/.test(expectedSha) || checkoutSha !== expectedSha || process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Commit publication requires exact main source');
 } else assertReleaseIdentity(tag, expectedSha, checkoutSha);
-const request = async path => {
-  const response = await fetch(`https://api.github.com/repos/${repository}/${path}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    signal: AbortSignal.timeout(15_000), redirect: 'error',
-  });
-  if (!response.ok) throw new Error(`Release verification read failed (HTTP ${response.status})`);
-  return response.json();
+if(repository!=='yohn-jp/codexia') throw new Error('Release repository mismatch');
+const github=createGitHubRestClient({token});
+const request=async path=>{
+  const response=await github.request('GET',`/repos/${repository}/${path}`);
+  if(response.status<200||response.status>=300) throw new Error(`Release verification read failed (HTTP ${response.status})`);
+  return response.data;
 };
 if (!commitRelease) {
   let reference = (await request(`git/ref/tags/${encodeURIComponent(tag)}`)).object;
@@ -44,15 +44,10 @@ if (commitRelease && exactId) {
   }
   runs = [run];
 } else {
-  runs = await collectGitHubPages(
-    (page, perPage) => request(`actions/workflows/verify.yml/runs?head_sha=${encodeURIComponent(expectedSha)}&branch=main&event=push&per_page=${perPage}&page=${page}`),
-    'workflow_runs',
-  );
+  runs = await github.paginate(`/repos/${repository}/actions/workflows/verify.yml/runs`,
+    { head_sha: expectedSha, branch: 'main', event: 'push' }, 'workflow_runs');
 }
 const verified = verifiedSourceRun(runs, expectedSha);
-const jobs = await collectGitHubPages(
-  (page, perPage) => request(`actions/runs/${verified.id}/jobs?filter=latest&per_page=${perPage}&page=${page}`),
-  'jobs',
-);
+const jobs = await github.paginate(`/repos/${repository}/actions/runs/${verified.id}/jobs`, { filter: 'latest' }, 'jobs');
 assertVerificationJobs(jobs);
 console.log(`Verified release ${tag} source ${expectedSha} with run ${verified.id}. No publication performed by this gate.`);

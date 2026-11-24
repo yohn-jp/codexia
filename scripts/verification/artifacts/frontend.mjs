@@ -10,9 +10,10 @@ import { compareComponentVersions, readComponentVersion } from '../../release/co
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from '../../ci/evidence/download-artifacts.mjs';
 import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../../build/frontend/oauth-config.mjs';
-import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from '../../release/components/policy.mjs';
+import { assertVerificationJobs, verifiedSourceRun } from '../../release/components/policy.mjs';
 import { assertFrontendIdentity } from '../../release/frontend/verify-compatibility.mjs';
 import { verifyReusableMainProof } from '../../ci/certification/reuse-merged-pr.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const repository = 'yohn-jp/codexia';
 const shaPattern = /^[a-f0-9]{40}$/u;
@@ -214,29 +215,19 @@ export function selectExactMainVerifyRun(runs, expected) {
   return selected;
 }
 
-/** @param {string} url @param {string} token @param {typeof fetch} fetchImpl */
-async function githubJson(url, token, fetchImpl) {
-  let response;
-  try {
-    response = await fetchImpl(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch {
-    throw new Error('Could not verify frontend artifact provenance with the GitHub Actions API.');
-  }
-  if (!response.ok) throw new Error(`Frontend artifact provenance lookup failed (HTTP ${response.status}).`);
-  try {
-    return await response.json();
-  } catch {
-    throw new Error('GitHub returned invalid frontend artifact provenance metadata.');
-  }
+function createFrontendApi(token, fetchImpl) {
+  const github = createGitHubRestClient({ token, fetchImpl });
+  const request = async endpoint => {
+    const response = await github.request('GET', `/repos/${repository}/${endpoint}`);
+    if (response.status < 200 || response.status >= 300) throw new Error(`Frontend artifact provenance lookup failed (HTTP ${response.status}).`);
+    return response.data;
+  };
+  request.paginate = (endpoint, parameters, key) => github.paginate(
+    endpoint.startsWith(`/repos/${repository}/`) ? endpoint : `/repos/${repository}/${endpoint}`, parameters, key);
+  return request;
 }
 
-const apiBase = 'https://api.github.com/repos/' + repository;
-const apiPages = (request, endpoint, key) => collectGitHubPages((page, perPage) =>
-  request(endpoint + (endpoint.includes('?') ? '&' : '?') + 'per_page=' + perPage + '&page=' + page), key);
+const apiPages = (request, endpoint, key, parameters = {}) => request.paginate(endpoint, parameters, key);
 
 /** Re-run the canonical merged-tree/full-plan resolver from the exact current main Verify run. */
 export async function verifyFrontendMainPromotionProof({env=process.env,fetchImpl=fetch}={}) {
@@ -248,7 +239,7 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceSha,'Frontend promotion checkout source mismatch');
   const configuredRunId=env.CODEXIA_VERIFY_RUN_ID;
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required for frontend promotion');
-  const request=endpoint=>githubJson(apiBase+'/'+endpoint,token,fetchImpl);
+  const request=createFrontendApi(token,fetchImpl);
   const payload=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
   let before;
   if(env.GITHUB_EVENT_NAME==='push'){
@@ -280,9 +271,8 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
     currentRun=await request('actions/runs/'+verifyRunId);
     assert.equal(String(currentRun.id),String(verifyRunId));
   }else{
-    const runInventory=await request('actions/workflows/verify.yml/runs?head_sha='+sourceSha+'&event=push&per_page=100');
-    assert.ok(Array.isArray(runInventory.workflow_runs),'Invalid exact-source main Verify run inventory');
-    currentRun=selectExactMainVerifyRun(runInventory.workflow_runs,{sourceSha:sourceSha,repository,repositoryId:currentRepositoryId(env)});
+    const runInventory=await apiPages(request,'actions/workflows/verify.yml/runs','workflow_runs',{head_sha:sourceSha,event:'push'});
+    currentRun=selectExactMainVerifyRun(runInventory,{sourceSha:sourceSha,repository,repositoryId:currentRepositoryId(env)});
   }
   const verifyRunId=positiveInteger(currentRun.id,'Exact main Verify run ID');
   if(protectedConsumer) verifiedSourceRun([currentRun],sourceSha);
@@ -299,7 +289,7 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
   assert.equal(currentRun.repository?.id,currentRepositoryId(env),'Exact source proof repository ID mismatch');
   assert.equal(currentRun.head_repository?.id,currentRepositoryId(env),'Exact source proof head repository mismatch');
   if(protectedConsumer){
-    const jobs=await apiPages(request,'actions/runs/'+verifyRunId+'/jobs?filter=latest','jobs');
+    const jobs=await apiPages(request,'actions/runs/'+verifyRunId+'/jobs','jobs',{filter:'latest'});
     assertVerificationJobs(jobs);
   }
   const proof=await verifyReusableMainProof({sourceSha:sourceSha,before,repository:env.GITHUB_REPOSITORY,currentRun,request,
@@ -309,12 +299,12 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
 }
 
 async function selectMergedFrontendArtifact({proof,env,fetchImpl}) {
-  const workflow=await githubJson(apiBase+'/actions/workflows/frontend-release.yml',env.GH_TOKEN,fetchImpl);
+  const request=createFrontendApi(env.GH_TOKEN,fetchImpl);
+  const workflow=await request('actions/workflows/frontend-release.yml');
   assert.equal(workflow.path,'.github/workflows/frontend-release.yml','Frontend producer workflow path mismatch');
   assert.ok(Number.isSafeInteger(workflow.id)&&workflow.id>0,'Frontend producer workflow ID is invalid');
-  const request=endpoint=>githubJson(apiBase+'/'+endpoint,env.GH_TOKEN,fetchImpl);
   const repositoryId=currentRepositoryId(env);
-  const runs=await apiPages(request,'actions/workflows/'+workflow.id+'/runs?head_sha='+proof.headSha+'&event=pull_request','workflow_runs');
+  const runs=await apiPages(request,'actions/workflows/'+workflow.id+'/runs','workflow_runs',{head_sha:proof.headSha,event:'pull_request'});
   const producerRun=selectFrontendProducerRun(runs,{repositoryId,workflowId:workflow.id,sourceSha:proof.headSha,prNumber:proof.prNumber});
   const [producerJobs,artifacts]=await Promise.all([
     apiPages(request,'actions/runs/'+producerRun.id+'/attempts/'+producerRun.run_attempt+'/jobs','jobs'),
@@ -433,13 +423,13 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   const verifyRunId = positiveInteger(input.verifyRunId, 'Frontend Verify run ID');
   const token = env.GH_TOKEN;
   assert.ok(token, 'Actions read token is required');
-  const request = endpoint => githubJson(apiBase + '/actions/' + endpoint, token, fetchImpl);
+  const request = createFrontendApi(token,fetchImpl);
   const [run, artifact, verifyRun, jobs, verifyJobs] = await Promise.all([
-    request('runs/' + runId),
-    request('artifacts/' + id),
-    request('runs/' + verifyRunId),
-    apiPages(request, 'runs/' + runId + '/jobs?filter=latest', 'jobs'),
-    apiPages(request, 'runs/' + verifyRunId + '/jobs?filter=latest', 'jobs'),
+    request('actions/runs/' + runId),
+    request('actions/artifacts/' + id),
+    request('actions/runs/' + verifyRunId),
+    apiPages(request, 'actions/runs/' + runId + '/jobs', 'jobs', { filter: 'latest' }),
+    apiPages(request, 'actions/runs/' + verifyRunId + '/jobs', 'jobs', { filter: 'latest' }),
   ]);
   assert.equal(run.path, '.github/workflows/frontend-release.yml', 'Unexpected frontend producer workflow');
   assert.equal(run.repository?.id, currentRepositoryId(env), 'Frontend producer repository mismatch');
@@ -457,7 +447,7 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   const producerJobs = jobs.filter(job => job?.name === 'Build and verify UI assets');
   assert.equal(producerJobs.length, 1, 'Frontend producer job is ambiguous');
   const attempt = positiveInteger(producerJobs[0].run_attempt, 'Frontend producer attempt');
-  const producerAttemptJobs = await apiPages(request, 'runs/' + runId + '/attempts/' + attempt + '/jobs', 'jobs');
+  const producerAttemptJobs = await apiPages(request, 'actions/runs/' + runId + '/attempts/' + attempt + '/jobs', 'jobs');
   assert.equal(artifact.expired, false, 'Frontend archive is expired');
   assert.equal(artifact.workflow_run?.id, runId, 'Frontend archive belongs to another run');
   assert.equal(artifact.workflow_run?.head_sha, sourceSha, 'Frontend archive belongs to another source');
@@ -521,12 +511,11 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
     assert.equal(expected.artifactName,`codexia-frontend-${expected.sourceSha}-attempt-${expected.producerAttempt}`,'Frontend artifact name does not bind source and producer attempt');
     expected.event=env.GITHUB_EVENT_NAME;
     expected.workflowSha=env.GITHUB_SHA;
-    const producerApi=apiBase+'/actions';
-    const request=endpoint=>githubJson(producerApi+'/'+endpoint,token,fetchImpl);
+    const request=createFrontendApi(token,fetchImpl);
     const [run,selectedArtifact,jobs,producerAttemptJobs]=await Promise.all([
-      request('runs/'+expected.runId),request('artifacts/'+expected.artifactId),
-      apiPages(request,'runs/'+expected.runId+'/jobs?filter=latest','jobs'),
-      apiPages(request,'runs/'+expected.runId+'/attempts/'+expected.producerAttempt+'/jobs','jobs'),
+      request('actions/runs/'+expected.runId),request('actions/artifacts/'+expected.artifactId),
+      apiPages(request,'actions/runs/'+expected.runId+'/jobs','jobs',{filter:'latest'}),
+      apiPages(request,'actions/runs/'+expected.runId+'/attempts/'+expected.producerAttempt+'/jobs','jobs'),
     ]);
     expected.currentAttempt=positiveInteger(run.run_attempt,'Frontend producer workflow attempt');
     assert.equal(expected.currentAttempt,positiveInteger(env.GITHUB_RUN_ATTEMPT,'Current frontend release attempt'),'Frontend release attempt mismatch');

@@ -4,17 +4,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { assertTrustedBackendPublicationRun } from './verify-push.mjs';
+import { createGitHubRestClient } from '../../github/rest-client.mjs';
 
 const repository = 'yohn-jp/codexia';
 const sha = /^[a-f0-9]{40}$/u;
 
 async function readPublisherRun(id, token, fetchImpl = fetch) {
-  const response = await fetchImpl(`https://api.github.com/repos/${repository}/actions/runs/${id}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    redirect: 'error', signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error('Requested backend publisher run could not be verified (HTTP ' + response.status + ')');
-  return response.json();
+  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
+  const response = await github.request('GET', `/repos/${repository}/actions/runs/${id}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
+  if (response.status < 200 || response.status >= 300) throw new Error('Requested backend publisher run could not be verified (HTTP ' + response.status + ')');
+  return response.data;
 }
 
 export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = fetch }) {

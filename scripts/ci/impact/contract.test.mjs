@@ -125,7 +125,9 @@ test('the certified graph covers every declared obligation within the twenty-two
     assert.equal(createVerificationPlan({ files, event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) }).tasks.includes('requirements-trace'),
       expected, `StrictDoc admission for ${files.join(', ')}`);
   }
+  assert.match(strictdocSetup.run, /bash scripts\/strictdoc\/install\.sh/u);
   assert.match(strictdocSetup.run, /requirements\.lock\.txt/u);
+  assert.doesNotMatch(strictdocSetup.run, /(?:-m pip|\/bin\/pip) install/u);
   assert.match(strictdocSetup.run, /playwright install --with-deps --only-shell chromium/u);
   assert.match(strictdocSetup.run, /wait "\$strictdoc_pid"/u);
   assert.match(strictdocSetup.run, /strictdoc_status != 0 \|\| browser_status != 0/u);
