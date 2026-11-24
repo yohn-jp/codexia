@@ -174,11 +174,12 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         return result
     intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
     marker = state_dir / "owner-setup.installation"
-    has_marker = metadata(marker) is not None
+    marker_info = metadata(marker)
+    has_marker = marker_info is not None
     if intent is None and not has_marker:
         return result  # Existing schema alone is not a fresh-install authorization.
     if has_marker:
-        require(private_text(marker).strip() == cluster["clusterId"])
+        require(stat.S_IMODE(marker_info.st_mode) == 0o600 and private_text(marker).strip() == cluster["clusterId"])
     if intent is not None:
         result["databaseOid"] = intent["databaseOid"]
         result["setupImage"] = intent["image"]
@@ -195,6 +196,8 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         'grant', COALESCE(grant_id IS NOT NULL AND grant_digest IS NOT NULL
           AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL, false),
         'hasGrant', grant_id IS NOT NULL,
+        'grantBinding', CASE WHEN grant_id IS NOT NULL
+          THEN encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex') END,
         'consumed', consumed_at IS NOT NULL,
         'pristine', NOT EXISTS (SELECT FROM codexia_auth."user")
           AND NOT EXISTS (SELECT FROM codexia_auth."account")
@@ -209,27 +212,41 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
           THEN 'sha256:' || encode(sha256(convert_to(owner_id::text,'UTF8')),'hex') END)
         FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner';""")
     require(isinstance(owner, dict))
-    promoted = metadata(state_dir / "owner-setup.promoted") is not None
+    grant_binding = owner["grantBinding"]
+    require((grant_binding is None and not owner["hasGrant"]) or
+            (owner["hasGrant"] and isinstance(grant_binding, str) and re.fullmatch(r"[a-f0-9]{64}", grant_binding)))
+    promotion_marker = state_dir / "owner-setup.promoted"
+    promotion_info = metadata(promotion_marker)
+    promoted = promotion_info is not None
+    if promoted:
+        require(has_marker and stat.S_IMODE(promotion_info.st_mode) == 0o600)
+        promotion = private_text(promotion_marker)
+        require(promotion == "activation-ready\n" or (intent is None and promotion == ""))
+    handoff = metadata(state_dir / "owner-setup.age")
+    has_envelope = bool(handoff and stat.S_ISREG(handoff.st_mode) and handoff.st_uid == os.getuid()
+                        and stat.S_IMODE(handoff.st_mode) == 0o600 and handoff.st_size > 0)
+    pending_handoff = metadata(state_dir / "owner-setup.age.pending") is not None
+    result["ownerSetupCheckpoint"] = {
+        "setupMarkerPresent": has_marker, "grantBindingSha256": grant_binding,
+        "pendingHandoff": pending_handoff, "encryptedHandoffPresent": has_envelope,
+    }
     if not promoted and not owner["hasGrant"] and owner["pristine"] and intent is not None:
-        require(metadata(state_dir / "owner-setup.age") is None)
+        require(handoff is None)
         result["authState"] = "pending"
     elif owner["grant"] and not owner["consumed"] and owner["ownerCount"] == 0 and not promoted:
-        handoff = metadata(state_dir / "owner-setup.age")
-        has_envelope = (handoff and stat.S_ISREG(handoff.st_mode) and handoff.st_uid == os.getuid()
-                        and stat.S_IMODE(handoff.st_mode) == 0o600 and handoff.st_size > 0)
-        result["authState"] = "pending" if has_marker and has_envelope and metadata(
-            state_dir / "owner-setup.age.pending") is None else "recovery"
+        result["authState"] = "pending" if has_marker and has_envelope and not pending_handoff else "recovery"
     elif owner["consumed"] and owner["ownerCount"] == 1 and owner["ownerBinding"]:
         require(has_marker)
         result["ownerBindingSha256"] = owner["ownerBinding"]
         result["authState"] = "unprepared"
-        if promoted:
-            runtime = private_text(auth_dir / "runtime.env")
-            subjects = [line.split("=", 1)[1] for line in runtime.splitlines()
-                        if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+        runtime = private_text(auth_dir / "runtime.env")
+        subjects = [line.split("=", 1)[1] for line in runtime.splitlines()
+                    if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+        if subjects or promoted:
             require(len(subjects) == 1 and "sha256:" + hashlib.sha256(subjects[0].encode()).hexdigest()
                     == owner["ownerBinding"])
             result["settingsSha256"] = hashlib.sha256(runtime.encode()).hexdigest()
+        if promoted:
             # The marker is created only after the canonical prepare-activation
             # operation verifies owner and clients. Actual admission rechecks them.
             result["authState"] = "ready"

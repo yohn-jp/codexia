@@ -150,6 +150,18 @@ const schemaWithoutMarker = {
 const setupBeforeGrant = {
   authState: 'pending', authSchemaSha256: schema, ownerBindingSha256: null,
   databaseOid: installation.databaseOid, setupImage: backendImage,
+  ownerSetupCheckpoint: {
+    setupMarkerPresent: false, grantBindingSha256: null,
+    pendingHandoff: false, encryptedHandoffPresent: false,
+  },
+};
+const setupWithMarker = {
+  ...setupBeforeGrant, ownerSetupCheckpoint: { ...setupBeforeGrant.ownerSetupCheckpoint, setupMarkerPresent: true },
+};
+const setupWithGrant = {
+  ...setupWithMarker, ownerSetupCheckpoint: {
+    ...setupWithMarker.ownerSetupCheckpoint, grantBindingSha256: 'e'.repeat(64), encryptedHandoffPresent: true,
+  },
 };
 
 test('Preflight and R4 restart interrupted schema initialization only with exact installation intent and database approval', () => {
@@ -188,15 +200,13 @@ test('Preflight stops at R0 when an initialized database lacks matching installa
   assert.throws(() => admitBootstrap({ ...changedLedger, mode: 'bootstrap', initializeDatabase: true }), /does not admit/u);
 });
 
-test('Preflight admits setup after the schema/marker boundary and resumes an intact grant or staged setup API', () => {
-  // Before the setup unit is installed the observer reports the same pending
-  // state for a missing grant and a complete encrypted grant handoff.
+test('Preflight resumes an intact grant or staged setup API through newly approved R5 evidence', () => {
   for (const [checkpoint, backend] of Object.entries({
     'before setup Quadlet installation': { state: 'absent' },
     'after setup Quadlet installation': { state: 'setup', unitSha256: hash },
     'after setup API start': { state: 'setup', containerSha256: hash },
   })) {
-    const input = observedSetup(setupBeforeGrant, backend);
+    const input = observedSetup(setupWithGrant, backend);
     assert.equal(input.plan.candidateRoute, 'R5', checkpoint);
     assert.deepEqual(admitBootstrap({ ...input, mode: 'owner-setup' }), {
       route: 'R5', stages: [], installIntent: false,
@@ -204,9 +214,33 @@ test('Preflight admits setup after the schema/marker boundary and resumes an int
   }
 });
 
+test('R5 rejects reusing approvals across marker, grant issuance and grant replacement', () => {
+  const checkpoints = [
+    observedSetup(setupBeforeGrant),
+    observedSetup(setupWithMarker),
+    observedSetup(setupWithGrant),
+    observedSetup({ ...setupWithGrant, ownerSetupCheckpoint: {
+      ...setupWithGrant.ownerSetupCheckpoint, grantBindingSha256: 'f'.repeat(64),
+    } }),
+  ];
+  assert.equal(new Set(checkpoints.map(({ plan }) => plan.observation.binding.databaseSha256)).size, checkpoints.length);
+  for (const [index, reviewed] of checkpoints.entries()) {
+    assert.equal(reviewed.plan.candidateRoute, 'R5');
+    assert.deepEqual(admitBootstrap({ ...reviewed, mode: 'owner-setup' }), {
+      route: 'R5', stages: [], installIntent: false,
+    });
+    for (const later of checkpoints.slice(index + 1)) {
+      assert.throws(() => admitBootstrap({ ...reviewed, current: later.current, mode: 'owner-setup' }),
+        /changed after approval/u);
+    }
+  }
+});
+
 test('Preflight stops when grant issuance is incomplete and invalidates earlier approval after observation changes', () => {
-  const before = observedSetup(setupBeforeGrant);
-  const interrupted = observedSetup({ ...setupBeforeGrant, authState: 'recovery' });
+  const before = observedSetup(setupWithMarker);
+  const interrupted = observedSetup({ ...setupWithGrant, authState: 'recovery', ownerSetupCheckpoint: {
+    ...setupWithGrant.ownerSetupCheckpoint, pendingHandoff: true, encryptedHandoffPresent: false,
+  } });
   assert.equal(interrupted.plan.route, 'R0');
   assert.throws(() => admitBootstrap({ ...interrupted, mode: 'owner-setup' }), /does not admit/u);
   assert.throws(() => admitBootstrap({ ...before, current: interrupted.current, mode: 'owner-setup' }),
@@ -214,7 +248,7 @@ test('Preflight stops when grant issuance is incomplete and invalidates earlier 
 });
 
 test('Preflight admits resuming activation preparation without owner reissuance across setup shutdown', () => {
-  const enrolled = { ...setupBeforeGrant, authState: 'unprepared', ownerBindingSha256: 'sha256:' + hash };
+  const enrolled = { ...setupWithGrant, authState: 'unprepared', ownerBindingSha256: 'sha256:' + hash };
   for (const [checkpoint, backend] of Object.entries({
     'after owner enrolls and before setup shutdown': { state: 'setup', containerSha256: hash },
     'after setup shutdown and before preparation marker': { state: 'absent' },
@@ -226,6 +260,14 @@ test('Preflight admits resuming activation preparation without owner reissuance 
       route: 'R5', stages: [], installIntent: false,
     });
   }
+  const beforeSettings = observedSetup(enrolled);
+  const afterSettings = observedSetup({ ...enrolled, settingsSha256: hash });
+  assert.equal(afterSettings.plan.candidateRoute, 'R5');
+  assert.throws(() => admitBootstrap({ ...beforeSettings, current: afterSettings.current, mode: 'prepare-activation' }),
+    /changed after approval/u);
+  assert.deepEqual(admitBootstrap({ ...afterSettings, mode: 'prepare-activation' }), {
+    route: 'R5', stages: [], installIntent: false,
+  });
   const prepared = observedSetup({ ...enrolled, authState: 'ready', settingsSha256: hash });
   assert.equal(prepared.plan.candidateRoute, 'R6');
   assert.equal(prepared.plan.route, 'R0');

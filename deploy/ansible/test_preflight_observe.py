@@ -1,4 +1,5 @@
 """Read-only lifecycle observer contract tests (no VM or Podman required)."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -95,12 +96,14 @@ class ObserveDatabaseTests(unittest.TestCase):
         cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
         ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
         image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
-        no_grant = {"grant": False, "hasGrant": False, "consumed": False,
+        no_grant = {"grant": False, "hasGrant": False, "grantBinding": None, "consumed": False,
                     "ownerCount": 0, "ownerBinding": None, "pristine": True}
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             intent = directory / "owner-setup.intent"
-            (directory / "owner-setup.installation").write_text("123\n")
+            marker = directory / "owner-setup.installation"
+            marker.write_text("123\n")
+            marker.chmod(0o600)
             (directory / "owner-setup.container").write_text(f"Image={image}\n")
             for intent_database, expected in [(None, "recovery"), ("456", "pending")]:
                 if intent_database:
@@ -122,6 +125,77 @@ class ObserveDatabaseTests(unittest.TestCase):
                     ]):
                 with self.assertRaises(ValueError):
                     self.observe(directory=directory)
+
+    def test_owner_setup_checkpoints_bind_marker_and_encrypted_grant(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        db = {"ledgerExists": True, "authExists": True, "appRelations": 5}
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        no_grant = {"grant": False, "hasGrant": False, "grantBinding": None, "consumed": False,
+                    "ownerCount": 0, "ownerBinding": None, "pristine": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+            intent.write_text(f"123:456:{image}\n")
+            intent.chmod(0o600)
+
+            def observe_owner(owner):
+                with patch.object(observer, "command", return_value=(0, "true")), \
+                        patch.object(observer, "sql", return_value="t"), \
+                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger, owner]):
+                    return self.observe(directory=directory)
+
+            before_marker = observe_owner(no_grant)
+            self.assertEqual(before_marker["authState"], "pending")
+            self.assertEqual(before_marker["ownerSetupCheckpoint"], {
+                "setupMarkerPresent": False, "grantBindingSha256": None,
+                "pendingHandoff": False, "encryptedHandoffPresent": False,
+            })
+            marker = directory / "owner-setup.installation"
+            marker.write_text("123\n")
+            marker.chmod(0o600)
+            before_grant = observe_owner(no_grant)
+            self.assertEqual(before_grant["authState"], "pending")
+            self.assertTrue(before_grant["ownerSetupCheckpoint"]["setupMarkerPresent"])
+            envelope = directory / "owner-setup.age"
+            envelope.write_text("fixture-ciphertext")
+            envelope.chmod(0o600)
+            issued = {**no_grant, "grant": True, "hasGrant": True, "grantBinding": "b" * 64}
+            after_grant = observe_owner(issued)
+            self.assertEqual(after_grant["authState"], "pending")
+            self.assertEqual(after_grant["ownerSetupCheckpoint"], {
+                "setupMarkerPresent": True, "grantBindingSha256": "b" * 64,
+                "pendingHandoff": False, "encryptedHandoffPresent": True,
+            })
+            (directory / "owner-setup.age.pending").write_text("handoff-in-progress\n")
+            interrupted = observe_owner(issued)
+            self.assertEqual(interrupted["authState"], "recovery")
+            self.assertTrue(interrupted["ownerSetupCheckpoint"]["pendingHandoff"])
+
+            promoted = directory / "owner-setup.promoted"
+            promoted.write_text("invalid\n")
+            promoted.chmod(0o600)
+            with self.assertRaises(ValueError):
+                observe_owner(issued)
+
+            promoted.unlink()
+            subject = "fixture-owner"
+            enrolled = {**issued, "grant": False, "consumed": True, "ownerCount": 1,
+                        "ownerBinding": "sha256:" + hashlib.sha256(subject.encode()).hexdigest()}
+            runtime = directory / "runtime.env"
+            settings = "CODEXIA_PUBLIC_ORIGIN=https://setup.example.test\n"
+            runtime.write_text(settings)
+            self.assertNotIn("settingsSha256", observe_owner(enrolled))
+            runtime.write_text(settings + f"CODEXIA_OAUTH_OWNER_SUBJECT={subject}\n")
+            preparing = observe_owner(enrolled)
+            self.assertEqual(preparing["authState"], "unprepared")
+            self.assertEqual(preparing["settingsSha256"], hashlib.sha256(runtime.read_bytes()).hexdigest())
+            promoted.write_text("activation-ready\n")
+            promoted.chmod(0o600)
+            self.assertEqual(observe_owner(enrolled)["authState"], "ready")
+            promoted.chmod(0o644)
+            with self.assertRaises(ValueError):
+                observe_owner(enrolled)
 
 
 class TransactionTests(unittest.TestCase):
