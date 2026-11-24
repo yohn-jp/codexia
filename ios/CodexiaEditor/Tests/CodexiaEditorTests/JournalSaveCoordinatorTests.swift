@@ -43,7 +43,10 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         var editor = EditorState(documentID: "document", text: "基準稿")
         editor.edit("一度目")
         _ = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
-        var relaunchedEditor = EditorState(documentID: "document", text: "基準稿")
+        let recoveredBeforeRestart = try await coordinator.recover(documentID: "document")
+        let durable = try XCTUnwrap(recoveredBeforeRestart)
+        var relaunchedEditor = EditorState(recoveringDocumentID: durable.documentID, text: durable.text,
+            version: durable.version, sessionID: durable.sessionID)
         relaunchedEditor.edit("新しい起動後入力")
         _ = try await coordinator.protect(snapshot: relaunchedEditor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
 
@@ -76,5 +79,29 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         } catch DraftJournalError.corruptRecord {
             // Expected: stored digest no longer matches the journal payload.
         }
+    }
+
+    func testOutOfOrderProtectionCannotReplaceNewerSnapshot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let api = try APITransport(origin: URL(string: "https://api.example.test")!).client
+        let journal = try ProtectedDraftJournal(directory: root)
+        let coordinator = try JournalSaveCoordinator(authorID: "author-a", apiOrigin: URL(string: "https://api.example.test")!,
+            projectID: "project", clientID: "ios-test", journal: journal, api: api)
+        var editor = EditorState(documentID: "document", text: "base")
+        editor.edit("version one")
+        let older = editor.snapshot
+        editor.edit("version two")
+        let newer = editor.snapshot
+        _ = try await coordinator.protect(snapshot: newer, baseRevisionID: "revision-1", baseText: "base")
+        do {
+            _ = try await coordinator.protect(snapshot: older, baseRevisionID: "revision-1", baseText: "base")
+            XCTFail("A stale callback must not replace a newer protected snapshot")
+        } catch DraftJournalError.staleSnapshot {
+            // Expected: durable protection is monotonic within an editor session.
+        }
+        let recovered = try await coordinator.recover(documentID: "document")
+        XCTAssertEqual(recovered?.text, "version two")
+        XCTAssertEqual(recovered?.version, newer.version)
     }
 }

@@ -19,6 +19,7 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public let text: String
     public let operationID: String
     public let clientID: String
+    public let expectedReceiptAuthorID: String
     public let contentSHA256: String
     public var state: State
     public var saveRequest: Components.Schemas.SaveDocumentRequest
@@ -45,6 +46,7 @@ public enum DraftJournalError: Error, Equatable {
     case corruptRecord
     case sessionChanged
     case staleConflict
+    case staleSnapshot
 }
 
 private enum DocumentChangeBuilder {
@@ -171,7 +173,8 @@ public actor ProtectedDraftJournal {
                 && $0.projectID == scope.projectID && $0.documentID == scope.documentID
                 && $0.contentSHA256 == Self.sha256($0.text)
                 && $0.saveRequest.resultingSha256 == $0.contentSHA256
-                && $0.saveRequest.baseRevisionId == $0.baseRevisionID }) else {
+                && $0.saveRequest.baseRevisionId == $0.baseRevisionID
+                && !$0.expectedReceiptAuthorID.isEmpty }) else {
                 throw DraftJournalError.corruptRecord
             }
             return records
@@ -198,6 +201,9 @@ public actor ProtectedDraftJournal {
             && latest.contentSHA256 == record.contentSHA256
             && Data(latest.text.utf8).elementsEqual(Data(record.text.utf8))
             && latest.baseRevisionID == record.baseRevisionID { return latest }
+        if let latest = current.last, latest.sessionID == record.sessionID, record.version < latest.version {
+            throw DraftJournalError.staleSnapshot
+        }
         if let unresolved = current.last, unresolved.sessionID != record.sessionID {
             throw DraftJournalError.sessionChanged
         }
@@ -213,6 +219,7 @@ public actor ProtectedDraftJournal {
         var current = try records(scope: scope)
         guard let index = current.firstIndex(where: { $0.state != .committed }) else { return .nothing }
         var record = current[index]
+        if record.state == .protected && reconcile { return .nothing }
         if record.state == .conflict { return .conflict }
         if (record.state == .unknown || record.state == .inFlight) && !reconcile { return .pending }
         record.state = .inFlight
@@ -311,9 +318,9 @@ public actor JournalSaveCoordinator {
     private let journal: ProtectedDraftJournal
     private let api: any APIProtocol
 
-    public init(authorID: String, apiOrigin: URL, projectID: String, clientID: String,
+    public init(authorID: String, apiOrigin: URL, projectID: String, clientID: String, expectedReceiptAuthorID: String = "owner",
                 journal: ProtectedDraftJournal, api: any APIProtocol) throws {
-        guard !authorID.isEmpty, !projectID.isEmpty, !clientID.isEmpty,
+        guard !authorID.isEmpty, !projectID.isEmpty, !clientID.isEmpty, !expectedReceiptAuthorID.isEmpty,
               let canonical = canonicalOrigin(apiOrigin.absoluteString) else {
             throw DraftJournalError.invalidScope
         }
@@ -321,6 +328,7 @@ public actor JournalSaveCoordinator {
         self.apiOrigin = canonical
         self.projectID = projectID
         self.clientID = clientID
+        self.expectedReceiptAuthorID = expectedReceiptAuthorID
         self.journal = journal
         self.api = api
     }
@@ -342,7 +350,8 @@ public actor JournalSaveCoordinator {
             documentID: snapshot.documentID, sessionID: snapshot.sessionID, version: snapshot.version,
             baseRevisionID: baseRevisionID,
             baseText: baseText, text: snapshot.text, operationID: UUID().uuidString, clientID: clientID,
-            contentSHA256: hash, state: .protected, saveRequest: request)
+            expectedReceiptAuthorID: expectedReceiptAuthorID, contentSHA256: hash,
+            state: .protected, saveRequest: request)
         return try await journal.insert(record, scope: scope)
     }
 
@@ -382,7 +391,8 @@ public actor JournalSaveCoordinator {
         let replacement = DraftRecord(authorID: authorID, apiOrigin: apiOrigin, projectID: projectID,
             documentID: documentID, sessionID: snapshot.sessionID, version: snapshot.version,
             baseRevisionID: currentRevisionID, baseText: currentText, text: snapshot.text,
-            operationID: UUID().uuidString, clientID: clientID, contentSHA256: hash,
+            operationID: UUID().uuidString, clientID: clientID, expectedReceiptAuthorID: expectedReceiptAuthorID,
+            contentSHA256: hash,
             state: .protected, saveRequest: request)
         return try await journal.resolveConflict(scope: key, operationID: expectedOperationID, replacement: replacement)
     }
@@ -407,7 +417,7 @@ public actor JournalSaveCoordinator {
                 switch try await save.submit(using: api) {
                 case .committed(let receipt):
                     let accepted = try await journal.finish(scope: key, operationID: record.operationID,
-                        state: .committed, receipt: receipt, expectedAuthorID: authorID)
+                        state: .committed, receipt: receipt, expectedAuthorID: record.expectedReceiptAuthorID)
                     result = accepted ? .saved(receipt) : .atRisk
                 case .unknown(let uncertainty):
                     try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
