@@ -10,7 +10,7 @@ final class AuthoringFlowUITests: XCTestCase {
         app.buttons["CTRL-OUT-01.B.fixture.10000"].tap()
     }
 
-    func testSignedOutShellOffersSystemAccountEntryWithoutClaimingAuthoringIsReady() {
+    func testSignedOutShellOffersSystemAccountEntryAndHidesFixture() {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
@@ -22,7 +22,7 @@ final class AuthoringFlowUITests: XCTestCase {
 
         app.buttons["account.entry"].tap()
         XCTAssertTrue(app.navigationBars["アカウント"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["原稿の保存と編集機能は準備中です。利用できない機能を使用可能として表示しません。"].exists)
+        XCTAssertTrue(app.staticTexts["サインインしていません"].exists)
     }
 
     private func menuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
