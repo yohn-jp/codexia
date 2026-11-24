@@ -205,6 +205,45 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         XCTAssertEqual(box.state.text, "原日本語😀")
     }
 
+    func testNativeCopyAndPasteUpdatesManuscript() async throws {
+        let box = Box()
+        box.state = EditorState(documentID: "copy-paste", text: "原稿😀")
+        let binding = Binding(get: { box.state }, set: { box.state = $0 })
+        let coordinator = ManuscriptEditor.Coordinator(state: binding)
+        let view = ManuscriptEditor.makeTextView(text: box.state.text, coordinator: coordinator)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        view.frame = controller.view.bounds
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+
+        let pasteboard = UIPasteboard.general
+        let previousItems = pasteboard.items
+        defer {
+            pasteboard.items = previousItems
+            view.resignFirstResponder()
+            window.isHidden = true
+        }
+        XCTAssertTrue(view.becomeFirstResponder())
+        pasteboard.items = []
+        let text = box.state.text
+        let target = text + text
+        view.selectedRange = NSRange(location: 0, length: text.utf16.count)
+        view.copy(nil)
+        XCTAssertEqual(pasteboard.string, text)
+        view.selectedRange = NSRange(location: text.utf16.count, length: 0)
+        view.paste(nil)
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while box.state.text != target, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(view.text, target)
+        XCTAssertEqual(box.state.text, target)
+        XCTAssertFalse(box.state.canLeave)
+    }
+
     func testFocusDefersRemoteUntilEditingEnds() {
         let box = Box()
         let request = box.state.beginRemoteRequest()
