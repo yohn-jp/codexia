@@ -2,10 +2,14 @@
 - name: Observe production lifecycle without converging the target
   hosts: codexia
   gather_facts: false
-  become: false
+  become: "{{ lifecycle_observe_as_service | default(false) }}"
+  become_user: codexia
   any_errors_fatal: true
   vars:
     codexia_service_user: codexia
+    # Administrator observations also run before the host stage installs ACL
+    # tooling. Pipelining keeps temporary script files out of the target home.
+    ansible_pipelining: true
     runtime_environment:
       HOME: "{{ ansible_facts.user_dir }}"
       XDG_CONFIG_HOME: "{{ ansible_facts.user_dir }}/.config"
@@ -22,6 +26,16 @@
           - codexia_preflight_observation_file is match('^/[^\\r\\n]+$')
           - codexia_preflight_auth_schema_query is defined
           - not ansible_check_mode
+    - name: Resolve the rootless account before changing observation identity
+      ansible.builtin.command:
+        argv: [getent, passwd, codexia]
+      register: lifecycle_service_account
+      changed_when: false
+      failed_when: lifecycle_service_account.rc not in [0, 2]
+      become: false
+    - name: Observe an existing rootless runtime using its owning identity
+      ansible.builtin.set_fact:
+        lifecycle_observe_as_service: "{{ lifecycle_service_account.rc == 0 and ansible_user != 'codexia' }}"
     - name: Read platform and account facts
       ansible.builtin.setup:
         gather_subset: ['!all', '!min', 'user', 'distribution', 'architecture', 'service_mgr']
@@ -98,9 +112,10 @@
           when: inspect_containers.results[1].rc == 0
           block:
             - name: Read the existing Full writer
-              ansible.builtin.script:
-                cmd: cutover-observe.sh
-                executable: /bin/bash
+              ansible.builtin.command:
+                argv: [/bin/bash, -s]
+                stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/cutover-observe.sh', rstrip=false) }}"
+                expand_argument_vars: false
               register: lifecycle_writer_result
               changed_when: false
               no_log: true
@@ -111,12 +126,15 @@
             - ansible.builtin.set_fact:
                 lifecycle_writer: null
     - name: Observe missing, setup, installed and recovery state under the existing shared lock
-      ansible.builtin.script:
-        cmd: preflight-observe.py
-        executable: /usr/bin/python3
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/preflight-observe.py', rstrip=false) }}"
+        expand_argument_vars: false
       environment: "{{ (runtime_environment if ansible_facts.user_id == 'codexia' else {}) | combine({
         'CODEXIA_INSPECT_FACTS': {'accountPresent': inspect_account.rc == 0,
           'storagePresent': (inspect_files.results[0].stat.exists | default(false)) if inspect_account.rc == 0 else false,
+          'hostReady': (inspect_tools.results | selectattr('rc', 'ne', 0) | list | length == 0)
+            and (inspect_linger.stdout | default('') == 'yes'),
           'baseDrift': lifecycle_base_drift, 'volumeLayout': lifecycle_volume_layout,
           'quadlets': codexia_preflight_quadlets,
           'baseEvidence': {'database': lifecycle_database_verified, 'tunnel': lifecycle_tunnel_verified}} | to_json,
@@ -132,4 +150,5 @@
         dest: "{{ codexia_preflight_observation_file }}"
         mode: '0600'
       delegate_to: localhost
+      become: false
       no_log: true

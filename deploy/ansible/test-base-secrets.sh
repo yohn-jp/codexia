@@ -7,14 +7,15 @@ service_user=$(id -un)
 service_uid=$(id -u)
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 mkdir "$tmp/bin" "$tmp/store"
-export BASE_SECRET_STORE="$tmp/store" BASE_SECRET_LOG="$tmp/commands" BASE_SECRET_EXISTING="$tmp/has-runtime"
+export BASE_SECRET_TUNNEL="$tmp/has-tunnel" BASE_SECRET_STORE="$tmp/store" BASE_SECRET_LOG="$tmp/commands" BASE_SECRET_EXISTING="$tmp/has-runtime"
 cat > "$tmp/bin/podman" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$BASE_SECRET_LOG"
 case "$1 $2" in
   'info --format') printf 'true\n';;
-  'volume exists'|'container exists') test "$3" = codexia-postgres && test -f "$BASE_SECRET_EXISTING";;
+  'container exists') [[ "$3" == codexia-tunnel && -f "$BASE_SECRET_TUNNEL" ]];;
+  'volume exists') test "$3" = codexia-postgres && test -f "$BASE_SECRET_EXISTING";;
   'secret exists') test -f "$BASE_SECRET_STORE/$3";;
   'secret inspect') test "$3" = --showsecret; jq -n --arg name "$4" --rawfile value "$BASE_SECRET_STORE/$4" '[{Spec:{Name:$name},SecretData:$value}]';;
   'secret create') test "$4" = -; test ! -e "$BASE_SECRET_STORE/$3"; cat > "$BASE_SECRET_STORE/$3"; printf 'created\n';;
@@ -91,6 +92,19 @@ printf '%064d' 3 > "$tmp/admin"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"
 mv "$tmp/admin.original" "$tmp/admin"
+# A positively identified Tunnel-only host may add its first database
+# credentials. It must retain the existing Tunnel secret exactly.
+mv "$tmp/missing" "$tmp/store/codexia-tunnel-token"
+mv "$tmp/store/codexia-postgres-admin-password" "$tmp/old-admin"
+mv "$tmp/store/codexia-postgres-app-password" "$tmp/old-app"
+touch "$BASE_SECRET_TUNNEL"
+apply > "$tmp/tunnel-only.log" || { cat "$tmp/tunnel-only.log"; exit 1; }
+cmp "$tmp/tunnel" "$tmp/store/codexia-tunnel-token"
+cmp "$tmp/old-admin" "$tmp/store/codexia-postgres-admin-password"
+cmp "$tmp/old-app" "$tmp/store/codexia-postgres-app-password"
+mv "$tmp/store/codexia-tunnel-token" "$tmp/missing"
+expect_fail
+test ! -e "$tmp/store/codexia-tunnel-token"
 touch "$BASE_SECRET_EXISTING"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"

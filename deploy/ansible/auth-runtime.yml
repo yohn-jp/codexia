@@ -1,4 +1,22 @@
 ---
+- name: Identify approved initial-install owner setup staging
+  ansible.builtin.set_fact:
+    owner_setup_requested: "{{ (codexia_owner_setup_install_intent | default(false)) or (codexia_owner_setup_approved | default(false)) }}"
+
+- name: Pin protected bootstrap resumption to the selected Full image
+  when: codexia_expected_bootstrap_resume is defined
+  ansible.builtin.assert:
+    that:
+      - codexia_owner_setup_install_intent is sameas true
+      - not (codexia_owner_setup_approved | default(false))
+      - codexia_database_initialization_approved | default(false) is sameas true
+      - codexia_expected_bootstrap_resume is mapping
+      - codexia_expected_bootstrap_resume.image == codexia_auth_bootstrap_image
+      - codexia_expected_bootstrap_resume.clusterId is match('^[1-9][0-9]{0,19}$')
+      - codexia_expected_bootstrap_resume.databaseOid is match('^[1-9][0-9]{0,9}$')
+      - codexia_expected_bootstrap_resume.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+    fail_msg: Resuming an approved installation requires its exact database, image and application ledger.
+
 - name: Require explicit Better Auth runtime provisioning on the codexia service identity
   ansible.builtin.assert:
     that:
@@ -27,7 +45,9 @@
       - codexia_oauth_introspection_client_id is string and codexia_oauth_introspection_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
       - codexia_auth_enrollment_files_dir is not defined or (codexia_auth_enrollment_files_dir is string and codexia_auth_enrollment_files_dir is match('^/[^\r\n]+\Z'))
       - (codexia_auth_registration_pending | default(false)) is boolean
-      - (codexia_auth_registration_pending | default(false)) or (codexia_owner_setup_approved | default(false)) or (codexia_oauth_owner_subject | default('')) is match('^[a-zA-Z0-9._@:/|+-]+$')
+      - (codexia_owner_setup_install_intent | default(false)) is boolean
+      - (codexia_owner_setup_approved | default(false)) is boolean
+      - (codexia_auth_registration_pending | default(false)) or owner_setup_requested or (codexia_oauth_owner_subject | default('')) is match('^[a-zA-Z0-9._@:/|+-]+$')
       - not (codexia_auth_registration_pending | default(false)) or codexia_oauth_owner_subject is not defined
       - >-
         ((codexia_auth_passkey_bootstrap_owner_id is defined and codexia_auth_passkey_bootstrap_owner_email is defined and codexia_auth_passkey_bootstrap_owner_name is defined) or
@@ -41,12 +61,11 @@
       - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
     fail_msg: Better Auth provisioning requires explicit approval, the rootless Codexia account, protected secret files and validated public configuration.
 
-- name: Validate the independently approved first-owner browser setup
-  when: codexia_owner_setup_approved | default(false)
+- name: Validate the approved fresh installation settings for owner setup
+  when: owner_setup_requested
   ansible.builtin.assert:
     that:
-      - codexia_owner_setup_approved is sameas true
-      - codexia_owner_setup_edge_approved | default(false) is sameas true
+      - not (codexia_owner_setup_approved | default(false)) or codexia_owner_setup_edge_approved | default(false) is sameas true
       - codexia_database_initialization_approved | default(false) is sameas true
       - not (codexia_auth_registration_pending | default(false))
       - codexia_auth_passkey_bootstrap_owner_id is not defined
@@ -59,17 +78,17 @@
       - codexia_owner_setup_web_redirect_uris is sequence and codexia_owner_setup_web_redirect_uris is not string
       - codexia_owner_setup_web_redirect_uris | length > 0
       - codexia_owner_setup_web_redirect_uris | reject('match', '^' + (codexia_public_origin | regex_escape) + '/[a-zA-Z0-9._/-]*$') | list | length == 0
-    fail_msg: Browser setup requires separate fresh-install and Cloudflare path approvals, a reviewed immutable Full image, a protected recipient and exact Web redirects.
+    fail_msg: Fresh owner setup requires approved database initialization, a reviewed immutable Full image, a protected recipient and exact Web redirects. Opening the browser setup also requires independent Cloudflare path approval.
 
 - name: Observe completed browser setup before rewriting the protected runtime settings
-  when: codexia_owner_setup_approved | default(false)
+  when: owner_setup_requested
   ansible.builtin.stat:
     path: "{{ home }}/.local/state/codexia-deploy/owner-setup.promoted"
     follow: false
   register: owner_setup_promoted
 
 - name: Keep the prepared owner configuration when bootstrap is repeated
-  when: codexia_owner_setup_approved | default(false)
+  when: owner_setup_requested
   ansible.builtin.assert:
     that:
       - not owner_setup_promoted.stat.exists
@@ -164,7 +183,7 @@
       - codexia_auth_database_parts.fragment == ''
       - codexia_auth_secret_value | length >= 32 and codexia_auth_secret_value is match('^[!-~]+$')
       - codexia_oidc_client_secret_file is not defined or (codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$'))
-      - codexia_oauth_introspection_client_secret_value | length >= (32 if (codexia_auth_registration_pending | default(false) or codexia_owner_setup_approved | default(false)) else 16)
+      - codexia_oauth_introspection_client_secret_value | length >= (32 if (codexia_auth_registration_pending | default(false) or owner_setup_requested) else 16)
       - codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
     fail_msg: The Better Auth URL must target codexia_auth_runtime on the existing codexia database; secret inputs must be nonempty printable values.
   no_log: true
@@ -260,6 +279,42 @@
   ansible.builtin.set_fact:
     codexia_auth_database_state_value: "{{ codexia_auth_database_state.stdout | from_json }}"
 
+- name: Look for a previously approved installation on an initialized database
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists
+  ansible.builtin.stat:
+    path: "{{ home }}/.local/state/codexia-deploy/{{ item }}"
+    follow: false
+  loop: [owner-setup.intent, owner-setup.installation]
+  register: owner_setup_existing_installation
+
+- name: Reject owner setup on an initialized database without installation evidence
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists
+  ansible.builtin.assert:
+    that: owner_setup_existing_installation.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length > 0
+    fail_msg: An initialized database without approved installation evidence is outside first-owner setup.
+
+- name: Restrict resume to the approved initialized application with no Auth schema
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists and not codexia_auth_database_state_value.schemaExists
+  ansible.builtin.assert:
+    that: codexia_expected_bootstrap_resume is defined
+    fail_msg: An interrupted initial bootstrap requires fresh Preflight admission for the application ledger.
+
+- name: Bind the observed installation and exact ledger before Auth secret or schema changes
+  when: codexia_expected_bootstrap_resume is defined
+  vars:
+    resume: "{{ codexia_expected_bootstrap_resume }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
+      - verify-bootstrap-resume
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - "{{ resume.image }}"
+      - "{{ resume.clusterId }}:{{ resume.databaseOid }}"
+      - "{{ resume.migrationFingerprint }}"
+    expand_argument_vars: false
+  changed_when: false
+  no_log: true
+
 - name: Refuse to adopt an existing auth schema with an unknown owner or missing login role
   ansible.builtin.assert:
     that:
@@ -329,11 +384,10 @@
 
 - name: Initialize only a pristine application schema under the shared host lock
   ansible.builtin.command:
-    argv:
-      - "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
-      - initialize-application
-      - "{{ home }}/.local/state/codexia-deploy/host.lock"
-      - "{{ codexia_auth_bootstrap_image }}"
+    argv: >-
+      {{ [home + '/.local/bin/codexia-auth-runtime-bootstrap', 'initialize-application',
+          home + '/.local/state/codexia-deploy/host.lock', codexia_auth_bootstrap_image]
+         + (['OWNER_SETUP'] if owner_setup_requested else []) }}
     expand_argument_vars: false
   register: codexia_auth_application_schema
   changed_when: "'INITIALIZED_FRESH_SCHEMA' in codexia_auth_application_schema.stdout"
@@ -351,8 +405,13 @@
   no_log: true
 
 - name: Create or verify the least-privilege auth role and schema under the shared deployment lock
+  vars:
+    resume: "{{ codexia_expected_bootstrap_resume | default({}) }}"
   ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", converge, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+    argv: >-
+      {{ [home + '/.local/bin/codexia-auth-runtime-bootstrap', 'converge',
+          home + '/.local/state/codexia-deploy/host.lock']
+          + ([resume.image, resume.clusterId + ':' + resume.databaseOid, resume.migrationFingerprint] if resume else []) }}
     stdin: "{{ codexia_auth_database_password_b64 }}"
     stdin_add_newline: true
     expand_argument_vars: false
@@ -360,31 +419,14 @@
   changed_when: not codexia_auth_database_state_value.roleExists or not codexia_auth_database_state_value.schemaExists
   no_log: true
 
-- name: Identify a genuinely new application database for browser setup
-  when: codexia_owner_setup_approved | default(false)
-  ansible.builtin.set_fact:
-    owner_setup_fresh_database: >-
-      {{ not codexia_auth_database_state_value.applicationLedgerExists
-         and not codexia_auth_database_state_value.schemaExists
-         and 'INITIALIZED_FRESH_SCHEMA' in (codexia_auth_application_schema.stdout | default('')) }}
-
-- name: Verify an existing setup installation before rewriting its settings
-  when: codexia_owner_setup_approved | default(false) and not owner_setup_fresh_database
-  ansible.builtin.command:
-    argv:
-      - "{{ home }}/.local/bin/codexia-owner-setup"
-      - --inspect
-      - "{{ codexia_auth_bootstrap_image }}"
-    expand_argument_vars: false
-  changed_when: false
-
-- name: Write only nonsecret Better Auth runtime settings for the API Quadlet
+- name: Stage nonsecret Better Auth runtime settings for the API Quadlet
   ansible.builtin.template:
     src: "{{ repo_root }}/deploy/ansible/auth-runtime.env.j2"
     dest: "{{ home }}/.config/codexia-auth/runtime.env"
     owner: "{{ codexia_service_user }}"
     group: "{{ codexia_service_group | default(codexia_service_user) }}"
     mode: '0600'
+    force: "{{ not owner_setup_requested }}"
 
 - name: Stage the private enrollment inputs from the declared control-node directory
   ansible.builtin.copy:
@@ -448,10 +490,11 @@
     group: "{{ codexia_service_group | default(codexia_service_user) }}"
     mode: '0700'
 
-- name: Converge the explicitly approved first-owner browser setup
-  when: codexia_owner_setup_approved | default(false)
+- name: Stage the explicitly approved first-owner installation
+  when: owner_setup_requested
   ansible.builtin.include_tasks: owner-setup.yml
 
 - name: Report staged auth role, schema and environment without enabling runtime
+  when: not (codexia_owner_setup_approved | default(false))
   ansible.builtin.debug:
     msg: Better Auth role and owned schema are verified; secret identities are provisioned without rotation; nonsecret runtime settings are staged. No API service was started or restarted.

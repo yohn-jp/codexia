@@ -40,7 +40,10 @@ async function ansible(scratch, inventory, playbook, vars, outputKey) {
 
 function assertPairRoute(plan) {
   requireCondition(plan?.candidateRoute === 'R6'
-    ? plan.observation.state.B === 'absent' && plan.observation.state.F !== 'compatible'
+    ? plan.observation.state.M === 'ready' && plan.observation.state.H === 'ready' &&
+      plan.observation.state.D === 'compatible' && plan.observation.state.A === 'ready' &&
+      plan.observation.state.B === 'absent' && ['absent', 'incompatible'].includes(plan.observation.state.F) &&
+      plan.observation.state.T === 'none'
     : ['R3', 'R7'].includes(plan?.candidateRoute) && plan.candidateSystem === 'cutover' &&
       ['compatible', 'incompatible'].includes(plan.observation.state.B),
   'The approved plan does not select a supported pair activation or cutover');
@@ -117,6 +120,7 @@ function pairInputs(deployment, artifacts, retained, current, references) {
     image: candidateBackend.image, identity: candidateBackend.identity,
     frontend: publicFrontendEvidence(candidateFrontend.identity),
     frontendArtifact: { artifactDigest: candidateFrontend.artifactDigest },
+    ...(current.initialControls ? { initialControls: current.initialControls } : {}),
     unitSha256: references?.candidate.unitSha256 ?? null,
     workerVersion: references?.candidate.workerVersion ?? null,
   };
@@ -136,32 +140,41 @@ export function assertReactivationObservation({ host, current, original, target,
 
 // The protected lifecycle caller supplies the approved Preflight envelope and
 // artifact references. All mutations share the production queue and host journal.
-export async function executePairCutover(operation, input, scratch) {
+export async function executePairCutover(operation, input, scratch, {
+  createEdge = createCloudflareCutover, runAnsible = ansible,
+  readHost = readLifecycleHost, readCandidate = readLifecycleCandidate,
+} = {}) {
   requireCondition(['stage', 'advance', 'recover', 'reconcile'].includes(operation), 'Unknown maintenance operation');
   requireCondition(env.CODEXIA_EPOCH_CUTOVER_PAUSED === 'true', 'Ordinary production releases and bootstrap must be paused');
   const origin = new URL(env.CODEXIA_PUBLIC_ORIGIN).origin;
   const inventory = join(env.RUNNER_TEMP, 'codexia-cutover-inventory.yml');
-  const edge = createCloudflareCutover({
+  const edge = createEdge({
     ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET), origin,
     accessEnv: env, readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
     workerToken: env.CODEXIA_CUTOVER_WORKER_TOKEN, fenceToken: env.CODEXIA_CUTOVER_FENCE_TOKEN,
   });
-  const host = (action, request) => ansible(scratch, inventory, 'cutover-host.yml',
+  const host = (action, request) => runAnsible(scratch, inventory, 'cutover-host.yml',
     { cutover_operation: action, cutover_request: request }, 'cutover_output_file');
   const initialObservation = async (deployment, artifacts) => {
     const preflight = parsePreflightRequest(JSON.stringify({ ...artifacts, intent: deployment.plan.intent,
       window: deployment.plan.window }));
     const [{ host, hostPinSha256 }, releases] = await Promise.all([
-      readLifecycleHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
-      readLifecycleCandidate(preflight),
+      readHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
+      readCandidate(preflight),
     ]);
     const network = await edge.observeLifecycle({ backendExpected: host.backend.state === 'running' });
+    if (deployment.plan.candidateRoute === 'R6') {
+      requireCondition(network.ownerSetup === null && preflight.priorBackendPublisherRunId === undefined,
+        'First pair activation requires detached owner setup and no prior Backend release');
+    }
     const { plan } = planFromObservations({ host, edge: network, hostPinSha256, ...releases,
       intent: preflight.intent, window: preflight.window,
       preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
     assertDeploymentPlanApproval({ ...deployment, current: plan });
     requireCondition(!network.fence.enabled, 'Unexpected maintenance fence before admission');
-    return { host, network, ...releases };
+    const initialControls = network.deployment === null && network.scriptPresent && network.routesReady
+      ? await edge.readInitialWorkerControls() : null;
+    return { host, network, ...releases, initialControls };
   };
 
   if (operation === 'stage') {
@@ -180,6 +193,8 @@ export async function executePairCutover(operation, input, scratch) {
       stageFrontend ? edge.stage({ previousVersionId: plan.prior.workerVersion,
         artifactDigest: 'sha256:' + plan.candidate.frontendArtifact.artifactDigest }) : { versionId: plan.prior.workerVersion },
     ]);
+    requireCondition(isDeepStrictEqual(stagedFrontend.initialControls ?? null, current.initialControls),
+      'The staged first Worker version differs from the certified publication controls');
     plan.candidate.unitSha256 = stagedBackend.candidateUnitSha256;
     plan.candidate.workerVersion = stagedFrontend.versionId;
     return { status: 'staged', plan, planSha256: digestEvidence(plan) };
@@ -190,6 +205,12 @@ export async function executePairCutover(operation, input, scratch) {
     plan.environment.origin === origin, 'Maintenance approval does not match the staged plan and origin');
   const { deployment, prior, candidate } = plan;
   assertPairRoute(deployment.plan);
+  if (prior.workerVersion === null) {
+    const controls = candidate.initialControls;
+    requireCondition(controls && Object.keys(controls).length === 2 &&
+      ['_headers', '_redirects'].every(name => rawHash.test(controls[name] ?? '')),
+    'First Worker activation requires certified publication controls');
+  }
   requireCondition(reactivation === undefined || (reactivation && prior.image === null && operation !== 'recover'),
     'A renewed window is available only for first activation advance or reconciliation');
   const verifyApproval = ({ opening } = {}) => {
@@ -204,20 +225,22 @@ export async function executePairCutover(operation, input, scratch) {
   const verifyIngress = async () => {
     const observation = await edge.observeIngress({ lifecycle: true });
     requireCondition(observation.origin === origin && observation.ingressDigest === plan.environment.ingressDigest &&
-      observation.scriptPresent && observation.routesReady, 'Reviewed ingress topology changed');
+      observation.scriptPresent && observation.routesReady && observation.ownerSetup === null,
+    'Reviewed ingress topology changed');
     requireCondition([prior.workerVersion, candidate.workerVersion].includes(observation.deployment?.versionId ?? null),
       'Active Worker is outside the approved maintenance pair');
     return observation;
   };
   const verifyPair = async outcome => {
     const [network, machine] = await Promise.all([edge.observe({ allowLegacyBackend: plan[outcome].protocol === 'legacy' }),
-      ansible(scratch, inventory, 'cutover-observe.yml', {}, 'codexia_cutover_observation_file')]);
+      runAnsible(scratch, inventory, 'cutover-observe.yml', {}, 'codexia_cutover_observation_file')]);
     const edgeEvidence = { ...network, frontend: publicFrontendEvidence(network.frontend) };
     if (outcome === 'candidate') {
       assertFrontendOAuthConfigIdentity(network.frontend, env);
       if (prior.workerVersion !== candidate.workerVersion) {
         await edge.assertWorkerArtifact({ versionId: candidate.workerVersion,
-          artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest });
+          artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest,
+          ...(candidate.initialControls ? { initialControls: candidate.initialControls } : {}) });
       }
     }
     assertPairedObservation({ edge: edgeEvidence, host: machine, pinned: plan[outcome], environment: plan.environment });
@@ -235,8 +258,8 @@ export async function executePairCutover(operation, input, scratch) {
       const artifacts = parsePreflightRequest(JSON.stringify({ ...plan.artifacts, intent: deployment.plan.intent,
         window: deployment.plan.window }));
       const [{ host, hostPinSha256 }, releases] = await Promise.all([
-        readLifecycleHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
-        readLifecycleCandidate(artifacts),
+        readHost({ inventory, targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST }),
+        readCandidate(artifacts),
       ]);
       const { plan: refreshed } = planFromObservations({ host, edge: null, hostPinSha256, ...releases,
         intent: artifacts.intent, window: artifacts.window });

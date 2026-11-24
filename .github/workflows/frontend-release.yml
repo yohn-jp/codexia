@@ -54,6 +54,7 @@ on:
       - scripts/release/frontend/promotion-handoff.test.mjs
       - scripts/build/frontend/oauth-config.mjs
       - scripts/build/frontend/oauth-config.test.mjs
+      - scripts/build/frontend/owner-setup-assets.mjs
       - scripts/release/components/record-model*.mjs
       - scripts/ci/certification/reuse-merged-pr*.mjs
       - scripts/release/frontend/verify-compatibility*.mjs
@@ -260,6 +261,8 @@ jobs:
         run: node edge/frontend/test/static-smoke.mjs
       - name: Exercise OAuth authorization from static browser shells
         run: node edge/frontend/test/oauth-static-smoke.mjs
+      - name: Exercise the isolated owner setup assets in the browser
+        run: node edge/frontend/test/owner-setup-static-smoke.mjs
       - name: Identify immutable frontend artifact for this producer attempt
         id: producer
         env:

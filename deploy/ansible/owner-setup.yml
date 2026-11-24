@@ -4,12 +4,14 @@
     content: "CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS={{ codexia_owner_setup_web_redirect_uris | join(',') }}\n"
     dest: "{{ home }}/.config/codexia-auth/owner-setup.env"
     mode: '0600'
+    force: false
 
 - name: Stage the exact immutable setup-only Quadlet for the protected API slot
   ansible.builtin.template:
     src: "{{ repo_root }}/deploy/ansible/owner-setup.container.j2"
     dest: "{{ home }}/.config/codexia-auth/owner-setup.container"
     mode: '0600'
+    force: false
 
 - name: Install the protected owner setup operator operation
   ansible.builtin.copy:
@@ -17,13 +19,28 @@
     dest: "{{ home }}/.local/bin/codexia-owner-setup"
     mode: '0700'
 
+- name: Initialize a verified new setup installation without issuing the grant
+  environment:
+    CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin | default('') }}"
+    CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id | default('') }}"
+    CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | default([]) | join(',') }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-owner-setup"
+      - --initialize
+      - "{{ codexia_auth_bootstrap_image }}"
+    expand_argument_vars: false
+  register: owner_setup_initialization
+  changed_when: owner_setup_initialization.stdout != ''
+
 - name: Converge owner setup without passing the key to Ansible
+  when: codexia_owner_setup_approved | default(false)
   ansible.builtin.command:
     argv:
       - "{{ home }}/.local/bin/codexia-owner-setup"
       - --converge
       - "{{ codexia_auth_bootstrap_image }}"
-      - "{{ 'NEW_APPROVED' if owner_setup_fresh_database else 'OBSERVE_ONLY' }}"
+      - NEW_APPROVED
       - "{{ codexia_owner_setup_age_recipient }}"
     expand_argument_vars: false
-  changed_when: owner_setup_fresh_database
+  changed_when: true

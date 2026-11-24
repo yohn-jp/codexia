@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -44,6 +45,16 @@ FILE_VARS = {
 }
 IMMUTABLE_FULL_IMAGE = re.compile(r"ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}\Z")
 USERNAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}\Z")
+HOST_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+MAIN_SHA = re.compile(r"[a-f0-9]{40}\Z")
+RUN_NUMBER = re.compile(r"[1-9][0-9]*\Z")
+MUTATING_MODES = frozenset({"bootstrap", "owner-setup", "prepare-activation"})
+CONTROLLER_VARS = frozenset({
+    "codexia_stage", "codexia_bootstrap_stages", "codexia_auth_bootstrap_image",
+    "codexia_expected_bootstrap_resume", "codexia_expected_owner_setup_checkpoint",
+    "codexia_owner_setup_install_intent", "codexia_owner_setup_operation", "codexia_database_initialization_approved",
+    "codexia_recreate_missing_app_database_approved", "codexia_initial_install_approved",
+})
 
 
 class InvalidBootstrapInput(ValueError):
@@ -118,16 +129,27 @@ def unpack_bundle(encoded: str, directory: Path) -> set[str]:
 def inventory_vars(path: Path, host: str, user: str, operation: str) -> dict:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        group = data["all"]["children"]["codexia"]
+        all_hosts = data["all"]
+        children = all_hosts["children"]
+        group = children["codexia"]
         hosts = group["hosts"]
         vars_ = group["vars"]
     except (OSError, UnicodeError, yaml.YAMLError, KeyError, TypeError) as exc:
         raise InvalidBootstrapInput("Private inventory must declare a single codexia group, host and vars mapping") from exc
-    if not isinstance(hosts, dict) or len(hosts) != 1 or not isinstance(vars_, dict):
+    if (set(data) != {"all"} or set(all_hosts) != {"children"} or set(children) != {"codexia"}
+            or set(group) != {"hosts", "vars"} or not isinstance(hosts, dict)
+            or len(hosts) != 1 or not isinstance(vars_, dict)):
         raise InvalidBootstrapInput("Private inventory must contain exactly one Codexia target")
-    host_config = next(iter(hosts.values()))
-    if not isinstance(host_config, dict) or host_config.get("ansible_host") != host or host_config.get("ansible_user") != user:
+    alias, host_config = next(iter(hosts.items()))
+    if not isinstance(alias, str) or not HOST_ALIAS.fullmatch(alias):
+        raise InvalidBootstrapInput("Private inventory must use one literal host alias")
+    if not isinstance(host_config, dict) or set(host_config) != {"ansible_host", "ansible_user"}:
+        raise InvalidBootstrapInput("Private inventory host may declare only the pinned host and user")
+    if host_config["ansible_host"] != host or host_config["ansible_user"] != user:
         raise InvalidBootstrapInput("Private inventory host/user differ from independently pinned bootstrap target")
+    if any(not isinstance(key, str) or not key.startswith("codexia_") or key in CONTROLLER_VARS or key.startswith("codexia_owner_setup_expected_")
+           for key in vars_):
+        raise InvalidBootstrapInput("Private inventory cannot set connection, stage, or protected controller inputs")
     if vars_.get("codexia_service_user") != "codexia" or vars_.get("codexia_service_home") != "/home/codexia":
         raise InvalidBootstrapInput("Private inventory must retain the existing rootless Codexia identity")
     uid = vars_.get("codexia_service_uid")
@@ -137,14 +159,49 @@ def inventory_vars(path: Path, host: str, user: str, operation: str) -> dict:
         approvals = ("codexia_host_approved", "codexia_secrets_approved", "codexia_base_approved", "codexia_auth_runtime_approved")
         if any(vars_.get(flag) is not True for flag in approvals):
             raise InvalidBootstrapInput("Private inventory must explicitly approve host, secrets, base and auth-runtime stages")
+    if operation in ("owner-setup", "prepare-activation") and vars_.get("codexia_owner_setup_approved") is not True:
+        raise InvalidBootstrapInput("Private inventory must explicitly approve owner setup")
+    if operation == "owner-setup" and vars_.get("codexia_owner_setup_edge_approved") is not True:
+        raise InvalidBootstrapInput("Private inventory must explicitly approve the restricted owner setup edge")
     return vars_
 
 
+def certified_image(env: dict[str, str], runner_temp: Path) -> str:
+    image = env.get("CODEXIA_BOOTSTRAP_FULL_IMAGE", "")
+    if not IMMUTABLE_FULL_IMAGE.fullmatch(image):
+        raise InvalidBootstrapInput("Bootstrap requires the reviewed immutable Full image digest")
+    source = required(env, "GITHUB_SHA")
+    run_id = required(env, "GITHUB_RUN_ID")
+    attempt = required(env, "GITHUB_RUN_ATTEMPT")
+    if not MAIN_SHA.fullmatch(source) or not RUN_NUMBER.fullmatch(run_id) or not RUN_NUMBER.fullmatch(attempt):
+        raise InvalidBootstrapInput("Invalid protected workflow identity")
+    # This receipt comes from the protected preflight candidate verifier, which
+    # checks the producer, Git tree, certificate and embedded image identity.
+    # Dispatch inputs select a candidate and cannot supply a receipt.
+    path = runner_temp / "codexia-lifecycle-candidate.json"
+    if path.is_symlink() or not path.is_file():
+        raise InvalidBootstrapInput("Bootstrap requires the verified lifecycle candidate receipt")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        candidate = receipt["candidateBackend"]
+        profile = candidate["identity"]["profile"]
+        certified = candidate["image"]
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+        raise InvalidBootstrapInput("Bootstrap requires the verified lifecycle candidate receipt") from exc
+    if (receipt.get("sourceSha") != source or type(receipt.get("runId")) is not int or str(receipt["runId"]) != run_id
+            or type(receipt.get("attempt")) is not int or str(receipt["attempt"]) != attempt):
+        raise InvalidBootstrapInput("Verified lifecycle candidate does not match the current workflow run and attempt")
+    if certified != image or profile != "full":
+        raise InvalidBootstrapInput("Verified lifecycle candidate does not match the reviewed digest and Full profile")
+    return certified
+
+
 def prepare(env: dict[str, str]) -> dict[str, str]:
-    if env.get("GITHUB_ACTIONS") != "true" or env.get("GITHUB_REPOSITORY") != "yohn-jp/codexia":
-        raise InvalidBootstrapInput("Production bootstrap preparation is restricted to the repository's GitHub Actions")
+    if (env.get("GITHUB_ACTIONS") != "true" or env.get("GITHUB_REPOSITORY") != "yohn-jp/codexia" or
+            env.get("GITHUB_REF") != "refs/heads/main" or env.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
+        raise InvalidBootstrapInput("Production bootstrap preparation is restricted to manual runs on protected main")
     operation = required(env, "CODEXIA_BOOTSTRAP_MODE")
-    if operation not in ("preflight", "bootstrap"):
+    if operation != "preflight" and operation not in MUTATING_MODES:
         raise InvalidBootstrapInput("Unsupported bootstrap operation")
     host = required(env, "CODEXIA_BOOTSTRAP_HOST")
     validate_host(host)
@@ -152,16 +209,11 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
     if not USERNAME.fullmatch(user) or user in ("root", "codexia"):
         raise InvalidBootstrapInput("Bootstrap must use an independent non-root administrator SSH identity")
     init_approved = truth(required(env, "CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED"), "Database initialization approval")
-    recreate_approved = truth(required(env, "CODEXIA_BOOTSTRAP_RECREATE_MISSING_DATABASE_APPROVED"), "Missing database recreation approval")
-    if recreate_approved and not init_approved:
-        raise InvalidBootstrapInput("Missing database recreation requires database initialization approval")
-    image = env.get("CODEXIA_BOOTSTRAP_FULL_IMAGE", "")
-    if operation == "bootstrap" and not IMMUTABLE_FULL_IMAGE.fullmatch(image):
-        raise InvalidBootstrapInput("Bootstrap requires the reviewed immutable Full image digest")
-    if operation == "preflight" and (init_approved or recreate_approved):
-        raise InvalidBootstrapInput("Read-only preflight must not include mutation approvals")
+    if operation != "bootstrap" and init_approved:
+        raise InvalidBootstrapInput("Read-only preflight and owner operations must not include mutation approvals for database initialization")
 
     runner_temp = Path(required(env, "RUNNER_TEMP")).resolve(strict=True)
+    image = certified_image(env, runner_temp) if operation in MUTATING_MODES else None
     root = runner_temp / "codexia-bootstrap"
     if root.exists() or root.is_symlink():
         raise InvalidBootstrapInput("Refusing to reuse an existing bootstrap controller directory")
@@ -208,22 +260,31 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
 """, encoding="utf-8")
     config.chmod(0o600)
 
-    overrides: dict[str, object] = {
+    # Scope connection settings to the SSH host. Global extra-vars would also
+    # redirect plays' delegate_to: localhost tasks to the VM.
+    connection = {
         "ansible_host": "codexia-bootstrap-target",
         "ansible_user": user,
         "ansible_connection": "ssh",
-        "ansible_ssh_common_args": f"-F {config}",
+        "ansible_ssh_common_args": f"-F {shlex.quote(str(config))}",
         "ansible_ssh_private_key_file": str(key),
-        "codexia_stage": "bootstrap",
+        "ansible_ssh_use_tty": False,
+    }
+    inventory = {"all": {"children": {"codexia": {
+        "hosts": {"codexia-target": connection}, "vars": vars_,
+    }}}}
+    (control / "inventory.yml").write_text(yaml.safe_dump(inventory, sort_keys=False), encoding="utf-8")
+
+    overrides: dict[str, object] = {
+        "codexia_stage": "inspect" if operation == "preflight" else operation,
         "codexia_database_initialization_approved": init_approved,
-        "codexia_recreate_missing_app_database_approved": recreate_approved,
     }
     overrides.update({name: str(control / path) for name, path in FILE_VARS.items()})
     if oidc:
         overrides["codexia_oidc_client_secret_file"] = str(control / "private/codexia-oidc-client-secret")
     if enrollment:
         overrides["codexia_auth_enrollment_files_dir"] = str(control / "private/enrollment")
-    if operation == "bootstrap":
+    if image is not None:
         overrides["codexia_auth_bootstrap_image"] = image
     runtime = control / "runtime-vars.json"
     runtime.write_text(json.dumps(overrides, separators=(",", ":")) + "\n", encoding="utf-8")

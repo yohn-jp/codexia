@@ -213,6 +213,31 @@ NODE
   sed 's/codexia_stage: bootstrap/codexia_stage: auth-runtime/' "$tmp/auth-stage.yml" > "$tmp/auth-final.yml"
   run_playbook "$tmp/auth-final.yml" auth-stage-final
   for enrollment_file in bootstrap.env tls.crt tls.key; do rootless test ! -e "$auth_dir/$enrollment_file"; done
+  if [[ "${1:-auth}" == auth ]]; then
+    # Setup admission cannot reinterpret a genuine, initialized owner database
+    # as a fresh installation, even with approval for an empty database.
+    sed -e '/^codexia_.*oidc_client_secret_file:/d' -e '/^codexia_oidc_/d' \
+      -e '/^codexia_oauth_owner_subject:/d' -e '/^codexia_auth_enrollment_files_dir:/d' \
+      "$tmp/auth-final.yml" >"$tmp/auth-existing-owner-setup.yml"
+    cat >>"$tmp/auth-existing-owner-setup.yml" <<YAML
+codexia_owner_setup_install_intent: true
+codexia_owner_setup_age_recipient: "$backup_recipient"
+codexia_owner_setup_web_redirect_uris: ["$origin/desktop"]
+YAML
+    local existing_owner_database existing_owner_runtime
+    existing_owner_database=$(observe_auth_database)
+    existing_owner_runtime=$(rootless sha256sum "$auth_dir/runtime.env")
+    if run_playbook "$tmp/auth-existing-owner-setup.yml" auth-existing-owner-rejected; then
+      echo 'Initialized owner database was accepted as a new installation' >&2
+      return 1
+    fi
+    require_approval_rejection auth-existing-owner-rejected \
+      'Reject owner setup on an initialized database without installation evidence'
+    [[ "$(rootless sha256sum "$auth_dir/runtime.env")" == "$existing_owner_runtime" ]]
+    [[ "$(observe_auth_database)" == "$existing_owner_database" ]]
+    rootless test ! -e "$fixture_home/.local/state/codexia-deploy/owner-setup.intent"
+    require_inactive_api
+  fi
   local before_reapply
   before_reapply=$(observe_auth_database)
   run_playbook "$tmp/auth-stage.yml" bootstrap-reapply "$tmp/bootstrap.yml"

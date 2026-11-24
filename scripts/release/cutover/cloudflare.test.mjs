@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { buildFenceExpression, createCloudflareCutover, FENCE_RESPONSE } from './cloudflare.mjs';
 
@@ -11,8 +12,13 @@ const tunnelId = '10000000-0000-4000-8000-000000000000';
 const oldVersion = '10000000-0000-4000-8000-000000000001';
 const newVersion = '10000000-0000-4000-8000-000000000002';
 const deploymentId = '10000000-0000-4000-8000-000000000003';
+const workerId = 'e'.repeat(32);
+const ownerSetupWorkerId = 'f'.repeat(32);
 const artifactDigest = 'sha256:' + 'e'.repeat(64);
 const workerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-frontend`;
+const workerResource = `/client/v4/accounts/${accountId}/workers/workers/codexia-frontend`;
+const workerResourceById = `/client/v4/accounts/${accountId}/workers/workers/${workerId}`;
+const setupWorkerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-owner-setup`;
 const accountPath = `/client/v4/accounts/${accountId}`;
 const zonePath = `/client/v4/zones/${zoneId}`;
 const rulesPath = `/client/v4/zones/${zoneId}/rulesets`;
@@ -27,11 +33,16 @@ const apps = ['', '/api/version', '/desktop/update-identity.json'].map((path, in
   aud: String(index).repeat(64),
   type: 'self_hosted',
 }));
+const controls = { _headers: 'certified headers', _redirects: 'certified redirects' };
+const controlsSha256 = Object.fromEntries(Object.entries(controls).map(([name, content]) =>
+  [name, createHash('sha256').update(content).digest('hex')]));
 
 function fixture() {
   const writes = [];
   const state = { enabled: false, preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false, ipAllow: false,
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
+    workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
+    setupRoutes: false, setupPreview: false, setupAlias: false, setupTag: null, setupExposed: false,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
     id: fenceRuleId,
@@ -52,10 +63,17 @@ function fixture() {
       state.uploadTag = tag;
       return newVersion;
     },
+    readInitialWorkerControls: async () => controlsSha256,
+    uploadInitialVersion: async ({ workerId: targetWorker, tag, initialControls }) => {
+      state.initialUpload = { targetWorker, tag, initialControls };
+      state.uploadTag = tag;
+      return newVersion;
+    },
     async fetchImpl(url, init) {
       const target = new URL(url);
       const method = init.method ?? 'GET';
       if (target.origin === origin) {
+        if (state.setupExposed && target.pathname === '/console/setup') return new Response('Setup UI');
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/api/version') {
           if (state.backendAbsent) return new Response('Unavailable', { status: 502 });
           return Response.json({ name: 'codexia', profile: 'full', version: '1.0.0', apiEpoch: state.publicEpoch, auth: state.publicAuth });
@@ -73,9 +91,14 @@ function fixture() {
       } else {
         assert.equal(init.headers.Authorization, 'Bearer read-secret');
       }
-      if (path === accountPath + '/workers/scripts') {
+      if (path === accountPath + '/workers/workers') {
         if (state.inventoryDenied) return new Response('Denied', { status: 403 });
-        return apiResponse(state.scriptAbsent ? [] : [{ id: 'codexia-frontend' }]);
+        return apiResponse([
+          ...(!state.scriptAbsent ? [{ id: state.workerId, name: 'codexia-frontend',
+            deployed_on: state.activeVersion || state.previousDeploymentEvidence ? '2026-11-23T12:00:00Z' : null,
+            subdomain: { enabled: false, previews_enabled: state.preview } }] : []),
+          ...(state.setupTag ? [{ id: ownerSetupWorkerId, name: 'codexia-owner-setup' }] : []),
+        ]);
       }
       if (path === workerPath + '/deployments') {
         if (method === 'POST') {
@@ -85,16 +108,38 @@ function fixture() {
         const deployment = { id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage', versions: [{ version_id: state.activeVersion, percentage: 100 }] };
         return apiResponse(method === 'GET' ? { deployments: state.activeVersion === null ? [] : [deployment] } : deployment);
       }
-      if (path === workerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.preview });
-      if (path === workerPath + '/versions/' + newVersion) {
-        return apiResponse({ id: newVersion, metadata: { hasPreview: false }, annotations: { 'workers/tag': state.uploadTag } });
+      if (path === workerResource || path.startsWith(workerResource + '/versions/')) {
+        return new Response('Worker ID required', { status: 404 });
       }
-      if (path === workerPath + '/versions/' + oldVersion) return apiResponse({ id: oldVersion });
+      if (path === workerResourceById + '/versions/' + newVersion) {
+        const includeModules = target.searchParams.get('include') === 'modules';
+        return apiResponse({ id: newVersion, urls: [], annotations: { 'workers/tag': state.uploadTag },
+          ...(includeModules ? { assets: { config: { html_handling: 'none', not_found_handling: 'none' } },
+            modules: Object.entries(controls).map(([name, content]) => ({ name, content_type: 'text/plain',
+              content_base64: Buffer.from(state.controlsChanged && name === '_headers' ? 'altered' : content).toString('base64') })),
+          } : {}),
+        });
+      }
+      if (path === workerResourceById + '/versions/' + oldVersion) return apiResponse({ id: oldVersion, urls: [] });
+      if (path === setupWorkerPath + '/deployments') return apiResponse({ deployments: [{
+        id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage',
+        versions: [{ version_id: newVersion, percentage: 100 }],
+      }] });
+      if (path === setupWorkerPath + '/versions/' + newVersion) return apiResponse({ id: newVersion,
+        metadata: { hasPreview: false }, annotations: { 'workers/tag': state.setupTag } });
+      if (path === setupWorkerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.setupPreview });
       if (path.endsWith('/firewall/access_rules/rules')) {
         return apiResponse(path.startsWith(zonePath) && state.ipAllow ? [{ mode: 'whitelist' }] : []);
       }
       if (path === zonePath + '/dns_records') return apiResponse([{ id: 'f'.repeat(32), name: hostname, proxied: true, type: 'CNAME', content: tunnelId + '.cfargotunnel.com' }]);
       if (path === zonePath + '/workers/routes') {
+        if (state.setupRoutes) return apiResponse([
+          ...['/console/setup', '/console/setup/', '/console/setup/assets/*'].map(route => ({
+            pattern: hostname + route, script: 'codexia-owner-setup',
+          })),
+          ...(!state.scriptAbsent ? [{ pattern: hostname + '/desktop/update-identity.json', script: 'codexia-frontend' }] : []),
+          ...(state.setupAlias ? [{ pattern: 'alias.example.com/*', script: 'codexia-owner-setup' }] : []),
+        ]);
         if (state.scriptAbsent) return apiResponse([]);
         const routes = [{ pattern: hostname + '/*', script: 'codexia-frontend' },
           ...['/api*', '/health*', '/mcp*', '/.well-known/*'].map(route => ({ pattern: hostname + route, script: null }))];
@@ -130,6 +175,36 @@ function fixture() {
   return { client, state, writes };
 }
 
+test('lifecycle observes only the exact certified limited owner setup without a normal frontend', async () => {
+  const { client, state, writes } = fixture();
+  state.scriptAbsent = true;
+  state.backendAbsent = true;
+  state.setupRoutes = true;
+  state.setupTag = 'owner-setup-' + artifactDigest.slice(7);
+  const request = { backendExpected: false, ownerSetupArtifactDigest: artifactDigest.slice(7) };
+  const result = await client.observeLifecycle(request);
+  assert.equal(result.frontendState, 'absent');
+  assert.equal(result.routesReady, false);
+  assert.equal(result.publicProtocolEnabled, false);
+  assert.deepEqual(result.ownerSetup, { deploymentId, versionId: newVersion, artifactDigest: request.ownerSetupArtifactDigest });
+  await assert.rejects(client.observeLifecycle({ ...request, ownerSetupArtifactDigest: 'a'.repeat(64) }), /setup.*artifact/iu);
+  await assert.rejects(client.assertOwnerSetupDetached(), /setup/iu);
+  state.setupExposed = true;
+  await assert.rejects(client.observeLifecycle(request), /ACCESS_BOUNDARY/u);
+  state.setupExposed = false;
+  state.scriptAbsent = false;
+  const previous = await client.observeLifecycle(request);
+  assert.equal(previous.frontendState, 'running');
+  assert.equal(previous.deployment.versionId, oldVersion);
+  assert.deepEqual(previous.ownerSetup, result.ownerSetup);
+  state.setupAlias = true;
+  await assert.rejects(client.observeLifecycle(request), /alternate ingress/u);
+  state.setupAlias = false;
+  state.setupPreview = true;
+  await assert.rejects(client.observeLifecycle(request), /preview URLs/u);
+  assert.deepEqual(writes, []);
+});
+
 test('fence limits a maintenance exception to a single source IP, exact method and raw and normalized path', () => {
   assert.equal(buildFenceExpression(origin), expression);
   assert.match(buildFenceExpression(origin, [{ ip: '192.0.2.1', method: 'POST', path: '/mcp' }]),
@@ -150,12 +225,36 @@ test('upload binds archive digest to a version while the old version stays the o
 
 test('first activation stages a version with no deployment and promotes only behind the fence', async () => {
   const { client, state, writes } = fixture();
+  state.scriptAbsent = true;
   state.activeVersion = null;
   state.backendAbsent = true;
+  const missing = await client.observeLifecycle({ backendExpected: false });
+  assert.equal(missing.workerId, null);
+  assert.equal(missing.routesReady, false);
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /unused private Worker/u);
+  assert.equal(state.initialUpload, null);
+  state.scriptAbsent = false; // A separately approved infrastructure apply creates the worker and its canonical routes.
   const pending = await client.observeLifecycle({ backendExpected: false });
   assert.equal(pending.frontendState, 'absent');
+  assert.equal(pending.workerId, workerId);
   assert.equal(pending.routesReady, true);
-  assert.equal((await client.stage({ previousVersionId: null, artifactDigest })).versionId, newVersion);
+  state.previousDeploymentEvidence = true;
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /unused private Worker/u);
+  assert.equal(state.initialUpload, null);
+  state.previousDeploymentEvidence = false;
+  state.controlsChanged = true;
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /certified archive/u);
+  state.controlsChanged = false;
+  const staged = await client.stage({ previousVersionId: null, artifactDigest });
+  assert.equal(staged.versionId, newVersion);
+  assert.deepEqual(staged.initialControls, controlsSha256);
+  assert.deepEqual(state.initialUpload, { targetWorker: workerId, tag: 'cutover-' + artifactDigest.slice(7), initialControls: controlsSha256 });
+  const expected = { versionId: newVersion, artifactDigest, initialControls: await client.readInitialWorkerControls() };
+  assert.equal((await client.assertStaged(expected)).versionId, newVersion);
+  state.controlsChanged = true;
+  await assert.rejects(client.assertStaged(expected), /certified archive/u);
+  await assert.rejects(client.assertWorkerArtifact(expected), /certified archive/u);
+  state.controlsChanged = false;
   assert.equal(state.activeVersion, null);
   await assert.rejects(client.deploy({ fromVersionId: null, toVersionId: newVersion }), /fence/u);
   await client.fence();

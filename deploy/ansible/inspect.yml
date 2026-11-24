@@ -21,7 +21,7 @@
 - name: Observe tool paths without installing packages
   ansible.builtin.command:
     argv: [sh, -c, 'if command -v "$1"; then exit 0; else exit 1; fi', sh, "{{ item }}"]
-  loop: [podman, node, flock, age, findmnt, loginctl, systemctl]
+  loop: [podman, node, flock, age, findmnt, loginctl, systemctl, setfacl]
   register: inspect_tools
   changed_when: false
   failed_when: inspect_tools.rc not in [0, 1]

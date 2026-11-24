@@ -15,6 +15,8 @@ import stat
 import subprocess
 from datetime import datetime, timezone
 
+FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
+
 
 def require(ok):
     if not ok:
@@ -62,6 +64,16 @@ def sql(database, query):
 
 def json_sql(database, query):
     return json.loads(sql(database, query))
+
+def read_owner_installation_intent(path, cluster):
+    info = metadata(path)
+    if info is None:
+        return None
+    require(stat.S_IMODE(info.st_mode) == 0o600)
+    system_id, database_oid, image = private_text(path).removesuffix("\n").split(":", 2)
+    require(system_id == cluster["clusterId"] and database_oid == cluster["databaseOid"]
+            and re.fullmatch(r"[1-9][0-9]{0,9}", database_oid) and re.fullmatch(FULL_IMAGE, image))
+    return {"clusterId": system_id, "databaseOid": database_oid, "image": image}
 
 
 def user_exists(name):
@@ -112,6 +124,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         return {"state": "unknown", "authState": "unknown"}
     cluster = json_sql("postgres", """SELECT json_build_object(
         'clusterId', (SELECT system_identifier::text FROM pg_control_system()),
+        'databaseOid', (SELECT oid::text FROM pg_database WHERE datname='codexia'),
         'appExists', EXISTS (SELECT FROM pg_database WHERE datname='codexia'),
         'rolesValid', EXISTS (SELECT FROM pg_roles WHERE rolname='codexia_admin' AND rolcanlogin AND rolsuper)
           AND EXISTS (SELECT FROM pg_roles r WHERE rolname='codexia' AND rolcanlogin AND NOT rolsuper
@@ -134,10 +147,17 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         'version', version, 'checksum', btrim(checksum)) ORDER BY version COLLATE "C"), '[]'::json)
         FROM public.codexia_schema_migrations;""")
     require(isinstance(ledger, list) and len(ledger) > 0 and len(ledger) <= 1000)
-    result = {"state": "initialized", "clusterId": cluster["clusterId"], "ledger": ledger,
+    require(re.fullmatch(r"[1-9][0-9]{0,9}", cluster["databaseOid"]))
+    result = {"state": "initialized", "clusterId": cluster["clusterId"], "databaseOid": cluster["databaseOid"], "ledger": ledger,
               "authState": "unknown", "authSchemaSha256": None, "ownerBindingSha256": None}
     if not db["authExists"]:
         result["authState"] = "legacy" if writer and writer.get("authMode") == "legacy" else "absent"
+        if (writer is None and not containers.get("codexia-api")
+                and all(metadata(state_dir / name) is None for name in (
+                    "owner-setup.installation", "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending"))):
+            intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
+            if intent is not None:
+                result["bootstrapIntent"] = intent
         return result
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
@@ -152,35 +172,80 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
                              "/app/node_modules/@codexia/api/dist/verify-auth-clients.js"], (0, 1))
         result["authState"] = "ready" if status == 0 else "unknown"
         return result
+    intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
     marker = state_dir / "owner-setup.installation"
-    if metadata(marker) is None:
+    marker_info = metadata(marker)
+    has_marker = marker_info is not None
+    if intent is None and not has_marker:
         return result  # Existing schema alone is not a fresh-install authorization.
-    require(private_text(marker).strip() == cluster["clusterId"])
+    if has_marker:
+        require(stat.S_IMODE(marker_info.st_mode) == 0o600 and private_text(marker).strip() == cluster["clusterId"])
+    if intent is not None:
+        result["setupImage"] = intent["image"]
+    else:
+        # Earlier setup operations wrote the installation marker only after
+        # migration. An existing grant can resume with the exact staged unit.
+        lines = private_text(auth_dir / "owner-setup.container").splitlines()
+        images = [line.removeprefix("Image=") for line in lines if line.startswith("Image=")]
+        require(len(images) == 1 and re.fullmatch(FULL_IMAGE, images[0]))
+        result["setupImage"] = images[0]
     if sql("codexia", "SELECT to_regclass('codexia_auth.owner_setup') IS NOT NULL;") != "t":
         return result
     owner = json_sql("codexia", """SELECT json_build_object(
-        'grant', grant_id IS NOT NULL AND grant_digest IS NOT NULL
-          AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL,
+        'grant', COALESCE(grant_id IS NOT NULL AND grant_digest IS NOT NULL
+          AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL, false),
+        'hasGrant', grant_id IS NOT NULL,
+        'grantBinding', CASE WHEN grant_id IS NOT NULL
+          THEN encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex') END,
         'consumed', consumed_at IS NOT NULL,
+        'pristine', NOT EXISTS (SELECT FROM codexia_auth."user")
+          AND NOT EXISTS (SELECT FROM codexia_auth."account")
+          AND NOT EXISTS (SELECT FROM codexia_auth."passkey")
+          AND NOT EXISTS (SELECT FROM codexia_auth."session")
+          AND NOT EXISTS (SELECT FROM codexia_auth."verification")
+          AND NOT EXISTS (SELECT FROM codexia_auth."oauthClient")
+          AND NOT EXISTS (SELECT FROM codexia_auth."jwks"),
         'ownerCount', (SELECT count(*) FROM codexia_auth."user"),
         'ownerBinding', CASE WHEN EXISTS (SELECT FROM codexia_auth."user" u
           JOIN codexia_auth."passkey" p ON p."userId"=u.id WHERE u.id=owner_id)
           THEN 'sha256:' || encode(sha256(convert_to(owner_id::text,'UTF8')),'hex') END)
-        FROM codexia_auth.owner_setup WHERE id='first-owner';""")
+        FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner';""")
     require(isinstance(owner, dict))
-    promoted = metadata(state_dir / "owner-setup.promoted") is not None
-    if owner["grant"] and not owner["consumed"] and owner["ownerCount"] == 0 and not promoted:
+    grant_binding = owner["grantBinding"]
+    require((grant_binding is None and not owner["hasGrant"]) or
+            (owner["hasGrant"] and isinstance(grant_binding, str) and re.fullmatch(r"[a-f0-9]{64}", grant_binding)))
+    promotion_marker = state_dir / "owner-setup.promoted"
+    promotion_info = metadata(promotion_marker)
+    promoted = promotion_info is not None
+    if promoted:
+        require(has_marker and stat.S_IMODE(promotion_info.st_mode) == 0o600)
+        promotion = private_text(promotion_marker)
+        require(promotion == "activation-ready\n" or (intent is None and promotion == ""))
+    handoff = metadata(state_dir / "owner-setup.age")
+    has_envelope = bool(handoff and stat.S_ISREG(handoff.st_mode) and handoff.st_uid == os.getuid()
+                        and stat.S_IMODE(handoff.st_mode) == 0o600 and handoff.st_size > 0)
+    pending_handoff = metadata(state_dir / "owner-setup.age.pending") is not None
+    result["ownerSetupCheckpoint"] = {
+        "setupMarkerPresent": has_marker, "grantBindingSha256": grant_binding,
+        "pendingHandoff": pending_handoff, "encryptedHandoffPresent": has_envelope,
+    }
+    if not promoted and not owner["hasGrant"] and owner["pristine"] and intent is not None:
+        require(handoff is None)
         result["authState"] = "pending"
+    elif owner["grant"] and not owner["consumed"] and owner["ownerCount"] == 0 and not promoted:
+        result["authState"] = "pending" if has_marker and has_envelope and not pending_handoff else "recovery"
     elif owner["consumed"] and owner["ownerCount"] == 1 and owner["ownerBinding"]:
+        require(has_marker)
         result["ownerBindingSha256"] = owner["ownerBinding"]
         result["authState"] = "unprepared"
-        if promoted:
-            runtime = private_text(auth_dir / "runtime.env")
-            subjects = [line.split("=", 1)[1] for line in runtime.splitlines()
-                        if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+        runtime = private_text(auth_dir / "runtime.env")
+        subjects = [line.split("=", 1)[1] for line in runtime.splitlines()
+                    if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+        if subjects or promoted:
             require(len(subjects) == 1 and "sha256:" + hashlib.sha256(subjects[0].encode()).hexdigest()
                     == owner["ownerBinding"])
             result["settingsSha256"] = hashlib.sha256(runtime.encode()).hexdigest()
+        if promoted:
             # The marker is created only after the canonical prepare-activation
             # operation verifies owner and clients. Actual admission rechecks them.
             result["authState"] = "ready"
@@ -228,10 +293,11 @@ def observe():
         if store is None:
             require(not residue and transaction is None and
                     all(metadata(p) is None for p in (state_dir / "owner-setup.installation",
+                                                      state_dir / "owner-setup.intent",
                                                       auth_dir / "runtime.env")))
             return {**base, "H": "partial", "database": {"state": "absent", "authState": "absent"},
                     "backend": {"state": "absent"}, "transaction": None,
-                    "topology": {"accountPresent": True, "storagePresent": False}}
+                    "topology": {"accountPresent": True, "storagePresent": False, "hostReady": facts["hostReady"]}}
         require(stat.S_ISDIR(store.st_mode))
         require(command(["podman", "info", "--format", "{{.Host.Security.Rootless}}"])[1] == "true")
 
@@ -276,7 +342,7 @@ def observe():
             if exists:
                 container_hashes[name] = digest(command(["podman", "inspect", "--format",
                     "{{.Id}} {{.State.Running}} {{.Image}}", name])[1])
-        topology = {"accountPresent": True, "storagePresent": True, "uid": account.pw_uid,
+        topology = {"accountPresent": True, "storagePresent": True, "hostReady": facts["hostReady"], "uid": account.pw_uid,
                     "gid": account.pw_gid, "networks": networks, "volumes": volumes,
                     "secrets": secrets, "containers": containers, "baseEvidence": facts["baseEvidence"],
                     "unitHashes": unit_hashes, "networkHashes": network_hashes, "volumeHashes": volume_hashes,
@@ -284,6 +350,13 @@ def observe():
         # Reuse the already validated full-writer observation rather than
         # inferring authentication or a release identity from a container name.
         full = writer.get("writer") if writer and writer.get("hostId") == host_id else None
+        setup_file = auth_dir / "owner-setup.container"
+        setup_unit = None
+        if metadata(residues[0]) is not None and metadata(setup_file) is not None and not any(
+                os.path.lexists(p) for p in residues[1:]):
+            unit = private_text(residues[0])
+            if "Environment=CODEXIA_AUTH_MODE=setup-only" in unit.splitlines() and unit == private_text(setup_file):
+                setup_unit = unit
         backend = {"state": "unknown"}
         if containers["codexia-api"]:
             info = command(["podman", "inspect", "--format",
@@ -291,16 +364,12 @@ def observe():
             require(len(info) == 3)
             if full and info == [full["containerId"], "true", full["image"]]:
                 backend = {"state": "running", "writer": full}
-            elif info[1] == "true" and metadata(units / "codexia-api.container") is not None:
-                unit = private_text(units / "codexia-api.container")
-                setup_file = auth_dir / "owner-setup.container"
-                if ("Environment=CODEXIA_AUTH_MODE=setup-only" in unit.splitlines()
-                        and metadata(setup_file) is not None and unit == private_text(setup_file)):
-                    backend = {"state": "setup", "containerSha256": digest(info)}
-                else:
-                    backend = {"state": "unknown"}
+            elif setup_unit and re.fullmatch(FULL_IMAGE, info[2]) and "Image=" + info[2] in setup_unit.splitlines():
+                backend = {"state": "setup", "containerSha256": digest(info)}
             else:
                 backend = {"state": "fault"} if info[1] == "false" else {"state": "unknown"}
+        elif setup_unit:
+            backend = {"state": "setup", "unitSha256": digest(setup_unit)}
         elif residue:
             backend = {"state": "fault"}
         else:
@@ -313,7 +382,7 @@ def observe():
         if full:
             require(database.get("clusterId") == writer["database"]["clusterId"])
         base_unknown = facts["baseDrift"] or (containers["codexia-tunnel"] and not facts["baseEvidence"]["tunnel"])
-        h = "drift" if drift else "unknown" if base_unknown else "ready" if all(networks.values()) and all(volumes.values()) \
+        h = "drift" if drift else "unknown" if base_unknown else "ready" if facts["hostReady"] and all(networks.values()) and all(volumes.values()) \
             and all(secrets.values()) and containers["codexia-db"] and facts["baseEvidence"]["database"] \
             and set(unit_hashes) == set(facts["quadlets"]) else "partial"
         return {**base, "H": h, "database": database, "backend": backend,

@@ -88,6 +88,14 @@ jobs:
       - name: Install the pinned Wrangler used by the frontend release
         if: inputs.operation == 'stage'
         run: npm ci --prefix edge/frontend
+      - name: Install pinned Terraform for staging the first version of a prepared Worker
+        if: >-
+          inputs.operation == 'stage' &&
+          fromJSON(inputs.request).deployment.plan.observation.state.F == 'absent'
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
       - name: Execute and verify the selected maintenance phase
         env:
           GH_TOKEN: ${{ github.token }}

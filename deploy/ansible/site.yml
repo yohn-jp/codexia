@@ -71,9 +71,23 @@
         fail_msg: An unfinished coordinated cutover must be recovered before ordinary convergence.
       when: codexia_stage in ['bootstrap', 'host', 'secrets', 'base', 'auth-runtime']
 
+    - name: Require the certified browser client before fresh install convergence
+      ansible.builtin.assert:
+        that:
+          - codexia_public_origin == codexia_owner_setup_expected_origin
+          - (codexia_oauth_owner_client_ids.split(',') | first) == codexia_owner_setup_expected_web_client_id
+          - (codexia_owner_setup_web_redirect_uris | unique | sort) == (codexia_owner_setup_expected_web_redirect_uris | sort)
+        fail_msg: Browser setup origin, Web client or callback list differs from the certified frontend.
+      when:
+        - codexia_stage == 'bootstrap'
+        - codexia_bootstrap_stages is defined
+        - codexia_owner_setup_install_intent | default(false)
+
     - name: Converge the rootless host account and dependencies
       ansible.builtin.include_tasks: host.yml
-      when: codexia_stage in ['bootstrap', 'host']
+      when: >-
+        codexia_stage == 'host' or
+        (codexia_stage == 'bootstrap' and 'host' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Install only explicitly authorized base credentials
       ansible.builtin.include_tasks:
@@ -82,7 +96,9 @@
           become: true
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage in ['bootstrap', 'secrets']
+      when: >-
+        codexia_stage == 'secrets' or
+        (codexia_stage == 'bootstrap' and 'secrets' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Recreate only a separately approved absent Codexia logical database
       ansible.builtin.include_tasks:
@@ -100,7 +116,9 @@
           become: true
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage in ['bootstrap', 'base']
+      when: >-
+        codexia_stage == 'base' or
+        (codexia_stage == 'bootstrap' and 'base' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
     - name: Provision Better Auth runtime role, schema, and protected secrets before first activation
       ansible.builtin.include_tasks:
@@ -109,7 +127,10 @@
           become: "{{ ansible_facts.user_id != codexia_service_user }}"
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage == 'auth-runtime' or (codexia_stage == 'bootstrap' and codexia_auth_runtime_approved | default(false) | bool)
+      when: >-
+        codexia_stage == 'auth-runtime' or (codexia_stage == 'bootstrap' and
+        'auth-runtime' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime']))
+        and codexia_auth_runtime_approved | default(false) | bool)
 
     - name: Require a certified immutable release for the push deployment
       ansible.builtin.assert:

@@ -1,4 +1,5 @@
 """Read-only lifecycle observer contract tests (no VM or Podman required)."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -12,10 +13,10 @@ spec.loader.exec_module(observer)
 
 
 class ObserveDatabaseTests(unittest.TestCase):
-    def observe(self, *, volume=True, container=True, layout="ready", writer=None):
+    def observe(self, *, volume=True, container=True, layout="ready", writer=None, directory=Path("/unused")):
         return observer.observe_database(
             {"codexia-postgres": volume}, {"codexia-db": container},
-            Path("/unused"), Path("/unused"), writer, "", layout)
+            directory, directory, writer, "", layout)
 
     def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
         with patch.object(observer, "command") as command:
@@ -31,7 +32,7 @@ class ObserveDatabaseTests(unittest.TestCase):
             self.assertEqual(self.observe()["state"], "unknown")
 
     def test_missing_database_and_legacy_writer(self):
-        cluster = {"clusterId": "123", "appExists": True, "rolesValid": True}
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
         ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
         with patch.object(observer, "command", return_value=(0, "true")):
             with patch.object(observer, "json_sql", return_value={**cluster, "appExists": False}):
@@ -42,6 +43,7 @@ class ObserveDatabaseTests(unittest.TestCase):
                 result = self.observe(writer={"authMode": "legacy"})
                 self.assertEqual(result["authState"], "legacy")
                 self.assertEqual(result["ledger"], ledger)
+                self.assertEqual(result["databaseOid"], "456")
 
     def test_unrecognized_objects_do_not_establish_pristine_database(self):
         with patch.object(observer, "command", return_value=(0, "true")):
@@ -52,12 +54,149 @@ class ObserveDatabaseTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.observe()
 
+    def test_bootstrap_resume_evidence_requires_bound_installation_and_no_auth(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        db = {"ledgerExists": True, "authExists": False, "appRelations": 5}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+
+            def observe_initialized(**kwargs):
+                with patch.object(observer, "command", return_value=(0, "true")), \
+                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger]):
+                    return self.observe(directory=directory, **kwargs)
+
+            self.assertNotIn("bootstrapIntent", observe_initialized())
+            intent.write_text(f"123:456:{image}\n")
+            intent.chmod(0o600)
+            result = observe_initialized()
+            self.assertEqual(result["authState"], "absent")
+            self.assertEqual(result["databaseOid"], "456")
+            self.assertEqual(result["bootstrapIntent"], {"clusterId": "123", "databaseOid": "456", "image": image})
+            self.assertEqual(result["ledger"], ledger)
+            self.assertNotIn("bootstrapIntent", observe_initialized(writer={"authMode": "legacy"}))
+            handoff = directory / "owner-setup.age"
+            handoff.write_text("fixture-ciphertext")
+            self.assertNotIn("bootstrapIntent", observe_initialized())
+            handoff.unlink()
+            for cluster_id, database_oid in [("321", "456"), ("123", "654")]:
+                intent.write_text(f"{cluster_id}:{database_oid}:{image}\n")
+                with self.subTest(cluster=cluster_id, database=database_oid), self.assertRaises(ValueError):
+                    observe_initialized()
+
     def test_sql_forces_read_only_and_never_exports_password(self):
         with patch.object(observer, "command", return_value=(0, "ok")) as command:
             self.assertEqual(observer.sql("codexia", "SELECT 1;"), "ok")
             args = command.call_args.args[0]
             self.assertIn("default_transaction_read_only=on", args[6])
             self.assertEqual(command.call_args.kwargs["stdin"], "SELECT 1;\n")
+
+    def test_initialized_setup_without_grant_needs_matching_fresh_intent(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        no_grant = {"grant": False, "hasGrant": False, "grantBinding": None, "consumed": False,
+                    "ownerCount": 0, "ownerBinding": None, "pristine": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+            marker = directory / "owner-setup.installation"
+            marker.write_text("123\n")
+            marker.chmod(0o600)
+            (directory / "owner-setup.container").write_text(f"Image={image}\n")
+            for intent_database, expected in [(None, "recovery"), ("456", "pending")]:
+                if intent_database:
+                    intent.write_text(f"123:{intent_database}:{image}\n")
+                    intent.chmod(0o600)
+                with self.subTest(intent_database=intent_database):
+                    with patch.object(observer, "command", return_value=(0, "true")), \
+                            patch.object(observer, "sql", return_value="t"), \
+                            patch.object(observer, "json_sql", side_effect=[
+                                cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                            ]):
+                        result = self.observe(directory=directory)
+                        self.assertEqual(result["authState"], expected)
+            intent.write_text(f"123:999:{image}\n")
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "sql", return_value="t"), \
+                    patch.object(observer, "json_sql", side_effect=[
+                        cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                    ]):
+                with self.assertRaises(ValueError):
+                    self.observe(directory=directory)
+
+    def test_owner_setup_checkpoints_bind_marker_and_encrypted_grant(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        db = {"ledgerExists": True, "authExists": True, "appRelations": 5}
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        no_grant = {"grant": False, "hasGrant": False, "grantBinding": None, "consumed": False,
+                    "ownerCount": 0, "ownerBinding": None, "pristine": True}
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+            intent.write_text(f"123:456:{image}\n")
+            intent.chmod(0o600)
+
+            def observe_owner(owner):
+                with patch.object(observer, "command", return_value=(0, "true")), \
+                        patch.object(observer, "sql", return_value="t"), \
+                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger, owner]):
+                    return self.observe(directory=directory)
+
+            before_marker = observe_owner(no_grant)
+            self.assertEqual(before_marker["authState"], "pending")
+            self.assertEqual(before_marker["ownerSetupCheckpoint"], {
+                "setupMarkerPresent": False, "grantBindingSha256": None,
+                "pendingHandoff": False, "encryptedHandoffPresent": False,
+            })
+            marker = directory / "owner-setup.installation"
+            marker.write_text("123\n")
+            marker.chmod(0o600)
+            before_grant = observe_owner(no_grant)
+            self.assertEqual(before_grant["authState"], "pending")
+            self.assertTrue(before_grant["ownerSetupCheckpoint"]["setupMarkerPresent"])
+            envelope = directory / "owner-setup.age"
+            envelope.write_text("fixture-ciphertext")
+            envelope.chmod(0o600)
+            issued = {**no_grant, "grant": True, "hasGrant": True, "grantBinding": "b" * 64}
+            after_grant = observe_owner(issued)
+            self.assertEqual(after_grant["authState"], "pending")
+            self.assertEqual(after_grant["ownerSetupCheckpoint"], {
+                "setupMarkerPresent": True, "grantBindingSha256": "b" * 64,
+                "pendingHandoff": False, "encryptedHandoffPresent": True,
+            })
+            (directory / "owner-setup.age.pending").write_text("handoff-in-progress\n")
+            interrupted = observe_owner(issued)
+            self.assertEqual(interrupted["authState"], "recovery")
+            self.assertTrue(interrupted["ownerSetupCheckpoint"]["pendingHandoff"])
+
+            promoted = directory / "owner-setup.promoted"
+            promoted.write_text("invalid\n")
+            promoted.chmod(0o600)
+            with self.assertRaises(ValueError):
+                observe_owner(issued)
+
+            promoted.unlink()
+            subject = "fixture-owner"
+            enrolled = {**issued, "grant": False, "consumed": True, "ownerCount": 1,
+                        "ownerBinding": "sha256:" + hashlib.sha256(subject.encode()).hexdigest()}
+            runtime = directory / "runtime.env"
+            settings = "CODEXIA_PUBLIC_ORIGIN=https://setup.example.test\n"
+            runtime.write_text(settings)
+            self.assertNotIn("settingsSha256", observe_owner(enrolled))
+            runtime.write_text(settings + f"CODEXIA_OAUTH_OWNER_SUBJECT={subject}\n")
+            preparing = observe_owner(enrolled)
+            self.assertEqual(preparing["authState"], "unprepared")
+            self.assertEqual(preparing["settingsSha256"], hashlib.sha256(runtime.read_bytes()).hexdigest())
+            promoted.write_text("activation-ready\n")
+            promoted.chmod(0o600)
+            self.assertEqual(observe_owner(enrolled)["authState"], "ready")
+            promoted.chmod(0o644)
+            with self.assertRaises(ValueError):
+                observe_owner(enrolled)
 
 
 class TransactionTests(unittest.TestCase):

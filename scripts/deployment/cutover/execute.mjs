@@ -29,6 +29,11 @@ export async function advancePair({
   let ingress = await verifyIngress();
   let journal = await host('observe', request);
   const { prior, candidate } = plan;
+  const candidateWorkerProof = {
+    versionId: candidate.workerVersion,
+    artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest,
+    ...(candidate.initialControls ? { initialControls: candidate.initialControls } : {}),
+  };
   const matchesJournal = () => journal.planSha256 === planSha256;
   if (operation !== 'recover' && !(matchesJournal() && journal.phase === 'safe-stopped')) {
     const recordedWindow = matchesJournal() ? journal.reactivationWindow ?? null : null;
@@ -61,10 +66,8 @@ export async function advancePair({
   };
   const proveStagedWorker = async () => {
     if (prior.workerVersion === candidate.workerVersion) return;
-    const evidence = { versionId: candidate.workerVersion,
-      artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest };
-    if (id(ingress) !== candidate.workerVersion) await edge.assertStaged(evidence);
-    else if (firstActivationWorkerRetained()) await edge.assertWorkerArtifact(evidence);
+    if (id(ingress) !== candidate.workerVersion) await edge.assertStaged(candidateWorkerProof);
+    else if (firstActivationWorkerRetained()) await edge.assertWorkerArtifact(candidateWorkerProof);
   };
   const promote = async outcome => {
     await verifyFence();
@@ -190,8 +193,7 @@ export async function advancePair({
     'Worker drifted before first activation retry');
     const retainedCandidateWorker = id(ingress) === candidate.workerVersion;
     if (retainedCandidateWorker) {
-      await edge.assertWorkerArtifact({ versionId: candidate.workerVersion,
-        artifactDigest: 'sha256:' + candidate.frontendArtifact.artifactDigest });
+      await edge.assertWorkerArtifact(candidateWorkerProof);
     } else {
       await proveStagedWorker();
     }

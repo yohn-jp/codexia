@@ -15,41 +15,144 @@ unit="$unit_dir/codexia-api.container"
 setup_unit="$config_dir/owner-setup.container"
 handoff="$state_dir/owner-setup.age"
 marker="$state_dir/owner-setup.installation"
+intent="$state_dir/owner-setup.intent"
+pending_handoff="$state_dir/owner-setup.age.pending"
 promoted="$state_dir/owner-setup.promoted"
 runtime="$config_dir/runtime.env"
 setup_env="$config_dir/owner-setup.env"
 
 exec 9>"$state_dir/host.lock"
 flock --exclusive --nonblock 9 || die 'Another Codexia operation holds the deployment host lock'
-[[ ! -e "$state_dir/deployed-release.json" && ! -e "$state_dir/deploy-transaction.json" ]] ||
-  die 'Owner setup requires a pre-activation deployment'
-[[ -f "$runtime" && ! -L "$runtime" && -f "$setup_env" && ! -L "$setup_env" ]] ||
+present() { [[ -e "$1" || -L "$1" ]]; }
+private_file() { [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 600 ]]; }
+for journal in {deployed-release,deploy-transaction,cutover-transaction}.json; do
+  if present "$state_dir/$journal"; then die 'Owner setup requires a pre-activation deployment'; fi
+done
+private_file "$runtime" && private_file "$setup_env" && private_file "$setup_unit" ||
   die 'Protected owner setup inputs are missing'
+grep -Fxq "Image=$image" "$setup_unit" || die 'The reviewed Full image does not match the staged setup'
+
+# The protected controller supplies these from the verified frontend proof.
+expected_origin="${CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN:-}"
+expected_web_client="${CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID:-}"
+expected_redirects="${CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS:-}"
+if [[ -n "$expected_origin$expected_web_client$expected_redirects" ]]; then
+  origin="$(sed -n 's/^CODEXIA_PUBLIC_ORIGIN=//p' "$runtime")"
+  clients="$(sed -n 's/^CODEXIA_OAUTH_OWNER_CLIENT_IDS=//p' "$runtime")"
+  redirects="$(sed -n 's/^CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS=//p' "$setup_env")"
+  [[ -n "$expected_origin" && "$origin" == "$expected_origin" &&
+     -n "$expected_web_client" && ! "$clients" =~ [[:cntrl:]] && "${clients%%,*}" == "$expected_web_client" &&
+     -n "$expected_redirects" && ! "$redirects" =~ [[:cntrl:]] &&
+     "$(tr ',' '\n' <<<"$redirects" | LC_ALL=C sort -u)" == "$(tr ',' '\n' <<<"$expected_redirects" | LC_ALL=C sort -u)" ]] ||
+    die 'Staged owner setup origin, client or redirect configuration differs from the certified frontend'
+fi
 
 run_image() {
-  podman run --rm --pull=missing --read-only --network codexia-data     --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL     --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET     --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET     --env-file "$runtime" --env-file "$setup_env" --env CODEXIA_AUTH_MODE=setup-only     --entrypoint=node "$image" "$@"
+  podman run --rm --pull=missing --read-only --network codexia-data \
+    --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
+    --secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET \
+    --secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET \
+    --env-file "$runtime" --env-file "$setup_env" --env CODEXIA_AUTH_MODE=setup-only \
+    --entrypoint=node "$image" "$@"
 }
 
 operator_script=/app/node_modules/@codexia/api/dist/owner-setup-operator.js
 
-cluster_identity() {
+read_database() {
   podman exec -i codexia-db sh -ec '
     export PGPASSWORD="$(cat /run/secrets/admin-password)"
-    exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "SELECT system_identifier FROM pg_control_system()"
-  '
+    export PGOPTIONS="-c default_transaction_read_only=on"
+    exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
+  ' sh "$1"
+}
+
+database="$(read_database 'SELECT system_identifier || chr(58) || (SELECT oid FROM pg_database WHERE datname=current_database()) FROM pg_control_system()')"
+[[ "$database" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ ]] ||
+  die 'Could not verify PostgreSQL cluster and database identity'
+
+assert_intent() {
+  private_file "$intent" && [[ "$(cat -- "$intent")" == "$database:$image" ]] ||
+    die 'The approved fresh installation does not match the current database and reviewed Full image'
 }
 
 assert_installation() {
-  [[ -f "$marker" && ! -L "$marker" ]] || die 'This VM has no approved initial setup record'
-  [[ "$(cat "$marker")" == "$(cluster_identity)" ]] || die 'Owner setup cannot be adopted on a replacement PostgreSQL cluster'
+  private_file "$marker" || die 'This VM has no approved initial setup record'
+  [[ "$(cat -- "$marker")" == "${database%%:*}" ]] ||
+    die 'Owner setup cannot be adopted on a replacement PostgreSQL cluster'
+  if present "$intent"; then assert_intent; fi
+}
+
+assert_approved_checkpoint() {
+  [[ -v CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT ]] || return 0
+  ! present "$promoted" || die 'The owner setup checkpoint changed after approval'
+
+  local setup_marker=false pending=false encrypted=false grant settings='' observed
+  if present "$marker"; then setup_marker=true; fi
+  if present "$pending_handoff"; then pending=true; fi
+  if private_file "$handoff" && [[ -s "$handoff" ]]; then encrypted=true; fi
+  # Match Preflight's grant identity without reading the key or the grant digest.
+  grant="$(read_database "SELECT CASE WHEN grant_id IS NOT NULL
+    THEN encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex') END
+    FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner'")"
+  if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$runtime"; then
+    settings="$(sha256sum -- "$runtime")"
+    settings="${settings%% *}"
+  fi
+  observed="$(jq -cn --argjson marker "$setup_marker" --argjson pending "$pending" --argjson encrypted "$encrypted" \
+    --arg grant "$grant" --arg settings "$settings" '{
+      setupMarkerPresent: $marker,
+      grantBindingSha256: (if $grant == "" then null else $grant end),
+      pendingHandoff: $pending,
+      encryptedHandoffPresent: $encrypted,
+      settingsSha256: (if $settings == "" then null else $settings end)
+    }')"
+  jq -e --argjson observed "$observed" '. == $observed' <<<"$CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT" >/dev/null 2>&1 ||
+    die 'The owner setup checkpoint changed after approval'
 }
 
 assert_setup_unit_or_clean() {
-  if [[ -f "$unit" && ! -L "$unit" ]]; then
-    cmp -s "$setup_unit" "$unit" || die 'The active API unit differs from the approved setup unit'
+  if present "$unit"; then
+    private_file "$unit" && cmp -s "$setup_unit" "$unit" || die 'The active API unit differs from the approved setup unit'
   else
     "$HOME/.local/bin/codexia-require-clean-api-target"
   fi
+}
+
+assert_tunnel_stopped() {
+  local status=0 active
+  active="$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" || status=$?
+  [[ ( "$status" == 0 || "$status" == 4 ) && "$active" == inactive ]] ||
+    die 'Activation preparation requires a stopped setup Tunnel'
+}
+
+verify_setup_api() {
+  timeout 30s podman exec codexia-api node --input-type=module -e '
+    import { setTimeout as delay } from "node:timers/promises";
+    const get = path => fetch("http://127.0.0.1:3000" + path, { signal: AbortSignal.timeout(1500) });
+    let ready = false;
+    for (let attempt = 0; attempt < 15 && !ready; attempt++) {
+      try {
+        const response = await get("/health/ready");
+        ready = response.ok && (await response.json()).status === "ready";
+      } catch { /* The Quadlet may still be starting. */ }
+      if (!ready) await delay(500);
+    }
+    if (!ready) process.exit(1);
+    const setup = await get("/api/auth/codexia/setup/status");
+    if (!setup.ok || !["setup-pending", "owner-enrolled"].includes((await setup.json()).state)) process.exit(1);
+    for (const path of ["/api/session", "/api/auth/oauth2/authorize", "/mcp"]) {
+      const response = await get(path);
+      if (response.status !== 403 || (await response.json()).code !== "SETUP_ONLY") process.exit(1);
+    }
+  ' >/dev/null 2>&1
+}
+
+write_marker() {
+  local temporary
+  temporary="$(mktemp "$state_dir/.owner-setup.XXXXXX")"
+  printf '%s\n' "$2" >"$temporary"
+  mv -fT -- "$temporary" "$1"
+  sync -f -- "$state_dir"
 }
 
 encrypt_grant() {
@@ -57,6 +160,7 @@ encrypt_grant() {
   shift
   [[ "$recipient" =~ ^age1[0-9a-z]+$ ]] || die 'Owner setup requires a reviewed age recipient'
   local encrypted
+  write_marker "$pending_handoff" 'handoff-in-progress'
   encrypted="$(mktemp "$state_dir/.owner-setup.XXXXXX")"
   if ! (
     set -o pipefail
@@ -65,64 +169,125 @@ encrypt_grant() {
     rm -f -- "$encrypted"
     die 'Owner grant could not be handed off. Inspect its state before independently approving reissue'
   fi
-  mv -f -- "$encrypted" "$handoff"
+  mv -fT -- "$encrypted" "$handoff"
+  sync -f -- "$state_dir"
+  rm -f -- "$pending_handoff"
+  sync -f -- "$state_dir"
 }
 
 case "$operation" in
-  --converge)
-    [[ $# == 4 && ( "$3" == NEW_APPROVED || "$3" == OBSERVE_ONLY ) && ! -e "$promoted" ]] ||
-      die 'Owner setup convergence requires an approved fresh or existing setup installation'
-    assert_setup_unit_or_clean
-    if [[ "$3" == NEW_APPROVED ]]; then
-      [[ ! -e "$marker" && ! -e "$handoff" ]] || die 'An installation record already exists'
-      cluster="$(cluster_identity)"
-      [[ "$cluster" =~ ^[0-9]+$ ]] || die 'Could not verify the PostgreSQL cluster identity'
-      run_image /app/node_modules/@codexia/api/dist/migrate-auth.js --apply
-      printf '%s\n' "$cluster" >"$marker"
-      encrypt_grant "$4" --issue-new-approved
-    else
+  --initialize)
+    [[ $# == 2 ]] && ! present "$promoted" ||
+      die 'Owner setup initialization requires an unprepared installation'
+    if present "$marker"; then
       assert_installation
-      state="$(run_image "$operator_script" --describe | jq -er .state)"
-      [[ "$state" == SETUP_PENDING || "$state" == OWNER_ENROLLED ]] ||
-        die 'The current database has no issued setup grant'
+    else
+      assert_intent
+      "$HOME/.local/bin/codexia-require-clean-api-target"
+      run_image /app/node_modules/@codexia/api/dist/migrate-auth.js --apply
+      run_image "$operator_script" --describe >/dev/null
+      write_marker "$marker" "${database%%:*}"
     fi
-    if [[ ! -e "$unit" ]]; then
-      install -m 0600 "$setup_unit" "$unit"
-      systemctl --user daemon-reload
+    ;;
+  --converge)
+    [[ $# == 4 && ( "$3" == NEW_APPROVED || "$3" == OBSERVE_ONLY ) ]] && ! present "$promoted" ||
+      die 'Owner setup convergence requires an approved fresh or existing setup installation'
+    assert_approved_checkpoint
+    assert_setup_unit_or_clean
+    if present "$marker"; then
+      assert_installation
+    else
+      assert_intent
     fi
+    description="$(run_image "$operator_script" --describe)"
+    state="$(jq -er .state <<<"$description")"
+    case "$state" in
+      BLOCKED)
+        [[ "$3" == NEW_APPROVED ]] && ! present "$handoff" &&
+          jq -e '.grantId == null' <<<"$description" >/dev/null ||
+          die 'The current database has no issued setup grant'
+        assert_intent
+        if ! present "$marker"; then write_marker "$marker" "${database%%:*}"; fi
+        encrypt_grant "$4" --issue-new-approved
+        ;;
+      SETUP_PENDING)
+        assert_installation
+        [[ "$(read_database "SELECT EXISTS (SELECT FROM codexia_auth.owner_setup WHERE id='first-owner' AND expires_at > now() AND consumed_at IS NULL)")" == t ]] ||
+          die 'Existing owner grant is expired or unavailable. Inspect before independently approving reissue'
+        private_file "$handoff" && [[ -s "$handoff" ]] && ! present "$pending_handoff" ||
+          die 'Existing owner grant handoff is incomplete. Verify the grant before independently approving reissue'
+        ;;
+      OWNER_ENROLLED) die 'The owner is already enrolled. Run activation preparation' ;;
+      *) die 'Owner setup returned an unrecognized state' ;;
+    esac
+    if ! present "$unit"; then
+      staged_unit="$(mktemp "$unit_dir/.codexia-owner-setup.XXXXXX")"
+      install -m 0600 "$setup_unit" "$staged_unit"
+      mv -fT -- "$staged_unit" "$unit"
+    fi
+    systemctl --user daemon-reload
     systemctl --user start codexia-api.service
+    if ! verify_setup_api; then
+      systemctl --user stop codexia-api.service
+      die 'The setup-only API did not prove readiness and disabled application routes'
+    fi
     systemctl --user start codexia-tunnel.service
     printf '%s\n' 'Setup-only API and Tunnel started. Check the approved browser origin before delivering the encrypted grant.'
     ;;
   --inspect)
-    [[ $# == 2 && ! -e "$promoted" ]] || die 'The setup operation is closed'
+    [[ $# == 2 ]] && ! present "$promoted" || die 'The setup operation is closed'
     assert_installation
     run_image "$operator_script" --describe
     ;;
   --replace-explicitly-approved)
-    [[ $# == 4 && ! -e "$promoted" && "$3" =~ ^[a-f0-9-]{36}$ ]] || die 'Explicit replacement requires the previous grant ID'
+    [[ $# == 4 && "$3" =~ ^[a-f0-9-]{36}$ ]] && ! present "$promoted" ||
+      die 'Explicit replacement requires the previous grant ID'
     assert_installation
     assert_setup_unit_or_clean
     encrypt_grant "$4" --replace-explicitly-approved "$3"
     printf '%s\n' 'The selected grant was replaced. Hand off the newly encrypted grant.'
     ;;
   --prepare-activation)
-    [[ $# == 2 && ! -e "$promoted" ]] || die 'Activation has already been prepared'
+    [[ $# == 2 ]] || die 'Activation preparation requires the reviewed Full image'
     assert_installation
-    assert_setup_unit_or_clean
-    owner="$(run_image "$operator_script" --prepare-activation)"
-    [[ "$owner" =~ ^[a-f0-9-]{36}$ ]] || die 'Could not verify the enrolled owner and approved OAuth clients'
-    if [[ -e "$unit" ]]; then
-      systemctl --user stop codexia-tunnel.service codexia-api.service
-      rm -f -- "$unit"
-      systemctl --user daemon-reload
+    assert_approved_checkpoint
+    if present "$promoted"; then
+      private_file "$promoted" || die 'Owner activation preparation evidence is not a private regular file'
+      "$HOME/.local/bin/codexia-require-clean-api-target"
+      assert_tunnel_stopped
+      run_image /app/node_modules/@codexia/api/dist/verify-auth-clients.js
+      exit 0
     fi
-    "$HOME/.local/bin/codexia-require-clean-api-target"
-    settings="$(mktemp "$config_dir/.runtime.XXXXXX")"
-    awk '!/^CODEXIA_OAUTH_OWNER_SUBJECT=/' "$runtime" >"$settings"
-    printf 'CODEXIA_OAUTH_OWNER_SUBJECT=%s\n' "$owner" >>"$settings"
-    mv -f -- "$settings" "$runtime"
-    touch "$promoted"
+    if present "$unit"; then
+      assert_setup_unit_or_clean
+    else
+      # A previous attempt may have removed the unit just before reloading.
+      systemctl --user daemon-reload
+      "$HOME/.local/bin/codexia-require-clean-api-target"
+      assert_tunnel_stopped
+    fi
+    # An interrupted atomic runtime promotion already has the derived subject.
+    # The normal read-only verifier binds it to the enrolled owner and clients.
+    if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$runtime"; then
+      ! present "$unit" || die 'Prepared owner settings coexist with a setup unit'
+      run_image /app/node_modules/@codexia/api/dist/verify-auth-clients.js
+    else
+      owner="$(run_image "$operator_script" --prepare-activation)"
+      [[ "$owner" =~ ^[a-f0-9-]{36}$ ]] || die 'Could not verify the enrolled owner and approved OAuth clients'
+      if present "$unit"; then
+        systemctl --user stop codexia-tunnel.service codexia-api.service
+        rm -f -- "$unit"
+        systemctl --user daemon-reload
+      fi
+      "$HOME/.local/bin/codexia-require-clean-api-target"
+      assert_tunnel_stopped
+      settings="$(mktemp "$config_dir/.runtime.XXXXXX")"
+      cat -- "$runtime" >"$settings"
+      printf 'CODEXIA_OAUTH_OWNER_SUBJECT=%s\n' "$owner" >>"$settings"
+      mv -fT -- "$settings" "$runtime"
+      sync -f -- "$config_dir"
+    fi
+    write_marker "$promoted" 'activation-ready'
     printf '%s\n' 'Owner and OAuth clients verified. Awaiting the separately approved protected first deployment.'
     ;;
   *) die 'Unknown owner setup operation' ;;

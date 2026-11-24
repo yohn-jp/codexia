@@ -1,0 +1,101 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { appendFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { selectReleaseSource } from '../../release/components/source-gate.mjs';
+import { createHandoffDeploymentOutputs, verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
+import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
+
+const hash = /^[a-f0-9]{64}$/u;
+
+export function assertManualActivationSource(certified, dispatch, liveMain, git) {
+  assert.equal(git('rev-parse', 'HEAD').trim(), dispatch, 'Deployment checkout differs from the reviewed dispatch revision');
+  assert.equal(liveMain, dispatch, 'The reviewed dispatch revision differs from live main');
+  assert.ok(selectReleaseSource('backend', certified, liveMain, git, null).affected,
+    'The certified publication has been superseded by newer Backend inputs');
+}
+
+function assertBackendOnly(plan) {
+  const state = plan?.observation?.state;
+  assert.ok(plan?.candidateRoute === 'R6' && state?.B === 'absent' && state.F === 'compatible',
+    'Backend-only first activation requires R6 with a clean API slot and compatible deployed Frontend');
+}
+
+export function admitBackendActivation({ deployment, current, host, flags, now = new Date() }) {
+  const { plan } = deployment;
+  assertBackendOnly(plan);
+  assert.ok(flags.initialInstall === true && flags.databaseUse === true,
+    'First installation and database use require protected approvals');
+  assertDeploymentPlanApproval({ ...deployment, current, now });
+  const { clusterId, databaseOid, ownerBindingSha256, settingsSha256 } = host.database;
+  assert.ok(host.hostId === current.observation.binding.hostId && hash.test(host.hostId) &&
+    /^[1-9][0-9]{0,19}$/u.test(clusterId) && /^[1-9][0-9]{0,9}$/u.test(databaseOid) &&
+    /^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) && hash.test(settingsSha256),
+  'First activation requires the exact host, PostgreSQL database and prepared owner settings');
+  return { hostId: host.hostId, clusterId, databaseOid, ownerBindingSha256, settingsSha256,
+    notBeforeMs: Date.parse(plan.window.notBefore), notAfterMs: Date.parse(plan.window.notAfter) };
+}
+
+async function main(stage, env) {
+  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main');
+  assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
+  if (stage === 'freshness') {
+    const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
+    const liveMain = execFileSync('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
+      { encoding: 'utf8', timeout: 30_000 }).trim();
+    assertManualActivationSource(env.CODEXIA_VERIFIED_MAIN_SHA, env.GITHUB_SHA, liveMain, git);
+    await appendFile(env.GITHUB_OUTPUT, 'current=true\n');
+    return;
+  }
+  const input = JSON.parse(env.CODEXIA_FIRST_ACTIVATION_REQUEST);
+  assert.deepEqual(Object.keys(input).sort(), ['artifacts', 'deployment']);
+  const { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } = await import('../preflight/run.mjs');
+  const deployment = input.deployment;
+  assertBackendOnly(deployment?.plan);
+  assertDeploymentPlanBinding(deployment);
+  const request = parsePreflightRequest(JSON.stringify({ ...input.artifacts, intent: deployment.plan.intent,
+    window: deployment.plan.window }));
+  if (stage === 'certify') {
+    const release = createHandoffDeploymentOutputs(await verifyCutoverBackendPublication(request.backendPublisherRunId));
+    await appendFile(env.GITHUB_OUTPUT, `full-image=${release.fullImage}\nfull-api-epoch=${release.fullApiEpoch}\n` +
+      `verified-main-sha=${release.verifiedMainSha}\nproducer-sha=${release.producerSha}\nfull-certificate=${release.fullCertificate}\n`);
+    return;
+  }
+
+  assert.equal(stage, 'admit');
+  assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
+  const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
+  const { planFromObservations } = await import('../preflight/observe.mjs');
+  const { readPreservationEvidence } = await import('../cutover/preservation.mjs');
+  const releases = await readLifecycleCandidate(request);
+  assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
+    'Reverified backend certificate differs from the verified deployment handoff');
+  const { host, hostPinSha256 } = await readLifecycleHost({
+    inventory: join(env.RUNNER_TEMP, 'codexia-first-activation-inventory.yml'), targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST,
+  });
+  const edge = await createCloudflareCutover({ ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET),
+    origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
+    readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+  }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
+  const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
+    intent: request.intent, window: request.window,
+    preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
+  const evidence = admitBackendActivation({ deployment, current, host, flags: {
+    initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
+    databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+  } });
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify(evidence) + '\n',
+    { flag: 'wx', mode: 0o600 });
+  console.log('Protected R6 Backend-only activation admitted against the deployed Frontend.');
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    await main(process.argv[2], process.env);
+  } catch {
+    console.error('Protected R6 Backend-only activation stopped at source freshness, candidate certification or exact plan admission.');
+    process.exitCode = 1;
+  }
+}

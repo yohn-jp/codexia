@@ -144,10 +144,33 @@ test('the convergence step forwards the certified identity, private certificate 
       codexia_deployed_ui_epoch: 17,
       codexia_backup_destination: '/fixture/backups',
       codexia_backup_recipient: 'age1fixture',
-      codexia_initial_install_approved: installApproved,
-      codexia_database_initialization_approved: databaseApproved,
+      codexia_initial_install_approved: false,
+      codexia_database_initialization_approved: false,
     });
   }
+
+  rmSync(invocation, { force: true });
+  const manual = {
+    ...admitted, CODEXIA_MANUAL_ACTIVATION: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'true',
+    GITHUB_SHA: 'd'.repeat(40), GITHUB_REPOSITORY: 'yohn-jp/codexia',
+  };
+  writeFileSync(path.join(bin, 'gh'), '#!/bin/bash\nprintf "%s\\n" "$GITHUB_SHA"\n', { mode: 0o700 });
+  let result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: manual, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(invocation), false, 'manual invocation needs the verified R6 receipt');
+  const binding = {
+    hostId: 'a'.repeat(64), clusterId: '123', databaseOid: '456', settingsSha256: 'b'.repeat(64),
+    ownerBindingSha256: 'sha256:' + 'c'.repeat(64), notBeforeMs: 1, notAfterMs: 2,
+  };
+  writeFileSync(path.join(directory, 'codexia-first-activation.json'), JSON.stringify(binding), { mode: 0o600 });
+  result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: manual, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const vars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
+  assert.deepEqual(vars.codexia_expected_first_activation, binding);
+  assert.equal(vars.codexia_initial_install_approved, true);
+  assert.equal(vars.codexia_database_initialization_approved, true);
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
@@ -198,6 +221,133 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'].cmd, /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
   assert.match(transaction['ansible.builtin.shell'].cmd, /current_image.*candidate_image/su, 'same-digest application must be idempotent');
   assert.match(transaction['ansible.builtin.shell'].cmd, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
+});
+
+test('manual first Backend activation uses protected admission and the existing deployment transaction', () => {
+  assert.equal(handoff.on.workflow_dispatch.inputs.approval_phrase.required, true);
+  const verify = handoff.jobs['verify-handoff'];
+  const deploy = handoff.jobs['deploy-production'];
+  assert.equal(verify.environment, undefined);
+  assert.equal(verify.permissions['id-token'], undefined);
+  assert.match(deploy.if, /github\.ref == 'refs\/heads\/main'/u);
+  assert.match(deploy.if, /inputs\.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND'/u);
+  assert.equal(deploy.concurrency.group, 'codexia-production');
+  const checkout = deploy.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  assert.match(checkout.with.ref, /github\.event_name == 'workflow_dispatch' && github\.sha/u);
+  const admit = deploy.steps.find(step => step.name === 'Reverify the R6 plan after entering the production queue');
+  const apply = deploy.steps.find(step => step.name === 'Converge certified backend digest');
+  assert.ok(deploy.steps.indexOf(admit) < deploy.steps.indexOf(apply));
+  assert.doesNotMatch(JSON.stringify(admit), /CUTOVER_(WORKER|FENCE)_TOKEN/u);
+  assert.match(apply.run, /codexia_expected_first_activation/u);
+  assert.match(apply.run, /deploy\/ansible\/site\.yml/u);
+
+  const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'].cmd;
+  const lock = shell.indexOf('flock --exclusive --nonblock 9');
+  const binding = shell.indexOf('the prepared first activation database or owner changed');
+  assert.ok(lock >= 0 && binding > lock && binding < shell.indexOf('backup-locked'));
+  const prepare = parse(readFileSync(new URL('../../../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
+  assert.equal(prepare.find(task => task.name === 'Recover interrupted deployment before preparing target state').when,
+    'codexia_expected_first_activation is not defined');
+});
+
+test('locked production admission refuses a clean API slot without the approved R6 evidence', () => {
+  const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null ]]; then');
+  const gateEnd = shell.indexOf('first_activation_window_current(){', gateStart);
+  assert.ok(gateStart > shell.indexOf('flock --exclusive --nonblock 9') &&
+    gateEnd > gateStart && gateEnd < shell.indexOf('backup-locked'));
+  const gate = shell.slice(gateStart, gateEnd);
+  const prefix = 'set -eu\nstale_admission(){ printf "%s\\n" "$1" >&2; exit 1; }\n';
+  for (const [hadUnit, production, evidence, expected] of [
+    ['false', 'true', 'null', 1],
+    ['false', 'true', '{}', 0],
+    ['true', 'true', 'null', 0],
+    ['false', 'false', 'null', 0],
+  ]) {
+    const result = spawnSync('bash', ['-c', prefix + gate], {
+      encoding: 'utf8', env: { ...process.env, had_unit: hadUnit, require_tunnel: production, first_activation: evidence },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, expected, result.stderr);
+    if (expected) assert.match(result.stderr, /first activation requires an approved R6 plan/u);
+  }
+});
+
+test('first activation checks the real transaction window after backup and readiness, and rolls back before publication', t => {
+  const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  const clockStart = shell.indexOf('first_activation_window_current(){');
+  const clockEnd = shell.indexOf('if [[ "$first_activation" != null ]]; then', clockStart);
+  const transactionStart = shell.indexOf('restore_previous(){');
+  const transactionEnd = shell.indexOf('if ! node - "$candidate_image" "$current_image"', transactionStart);
+  assert.ok(clockStart >= 0 && clockEnd > clockStart && transactionStart > clockEnd && transactionEnd > transactionStart);
+  const clock = shell.slice(clockStart, clockEnd);
+  const transaction = shell.slice(transactionStart, transactionEnd)
+    .replaceAll("{{ '{{' }}", '{{').replaceAll("{{ '}}' }}", '}}');
+  assert.match(transaction, /require_activation_window_or_restore\nif ! install -m 0644/u);
+  assert.match(transaction, /require_activation_window_or_restore\n\s*if ! systemctl --user start codexia-tunnel\.service/u);
+
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-first-activation-window-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const prefix = [
+    'set -eu -o pipefail',
+    'state_dir="$FIXTURE"',
+    'active_unit="$FIXTURE/active.container"',
+    'candidate_unit="$FIXTURE/candidate.container"',
+    'api_wants_link="$FIXTURE/api.service"',
+    'tunnel_wants_link="$FIXTURE/tunnel.service"',
+    'transaction_intent="$FIXTURE/deploy-transaction.json"',
+    'release_state="$FIXTURE/deployed-release.json"',
+    'trace="$FIXTURE/trace"',
+    'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false',
+    'api_link_created=true; tunnel_link_created=true',
+    'candidate_image=fixture-image; first_activation="{}"; approved_not_before=1000; approved_not_after=2000',
+    'clock=1500; backup_program=backup_fixture; backup_destination="$FIXTURE"; backup_recipient=fixture; lock_file="$FIXTURE/lock"',
+    'date() { printf "%s\\n" "$clock"; }',
+    'backup_fixture() { echo backup >> "$trace"; if [[ "$SCENARIO" == backup ]]; then clock=2001; fi; }',
+    'run_auth_cli() { echo auth >> "$trace"; }',
+    'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace";; *) return 99;; esac; }',
+    'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == startup ]]; then clock=2001; fi; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == stop-failure ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
+    'test -f "$candidate_unit"',
+  ].join('\n') + '\n';
+  for (const scenario of ['backup', 'startup', 'stop-failure', 'within-window']) {
+    const fixture = path.join(directory, scenario);
+    mkdirSync(fixture);
+    for (const name of ['candidate.container', 'api.service', 'tunnel.service', 'deploy-transaction.json',
+      'owner-setup.installation', 'owner-setup.promoted', 'database-sentinel', 'backup-sentinel']) {
+      writeFileSync(path.join(fixture, name), name);
+    }
+    const result = spawnSync('bash', ['-c', prefix + clock + transaction], {
+      encoding: 'utf8', env: { ...process.env, FIXTURE: fixture, SCENARIO: scenario },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, scenario === 'within-window' ? 0 : 1, scenario + ': ' + result.stderr);
+    const calls = readFileSync(path.join(fixture, 'trace'), 'utf8');
+    assert.match(calls, /^backup$/mu);
+    assert.match(calls, /^ledger$/mu);
+    assert.equal(calls.includes('--user start codexia-api.service'), scenario !== 'backup');
+    assert.equal(calls.includes('--user start codexia-tunnel.service'), scenario === 'within-window');
+    if (scenario !== 'within-window') assert.match(result.stderr, /First activation approval window expired before publication/u);
+    const retained = scenario === 'within-window' || scenario === 'stop-failure';
+    assert.equal(existsSync(path.join(fixture, 'active.container')), retained);
+    for (const name of ['deploy-transaction.json', 'api.service', 'tunnel.service']) {
+      assert.equal(existsSync(path.join(fixture, name)), retained, scenario + ': ' + name);
+    }
+    for (const name of ['owner-setup.installation', 'owner-setup.promoted', 'database-sentinel', 'backup-sentinel']) {
+      assert.equal(readFileSync(path.join(fixture, name), 'utf8'), name);
+    }
+  }
+
+  // The ordinary compatible-update and disposable-fixture paths carry no R6
+  // window. Invalid or unavailable clock evidence fails closed only for R6.
+  for (const [evidence, current, expected] of [['null', 'invalid', 0], ['{}', '999', 1],
+    ['{}', '1000', 0], ['{}', '2000', 0], ['{}', '2001', 1], ['{}', 'invalid', 1]]) {
+    const result = spawnSync('bash', ['-c', 'set -eu\napproved_not_before=1000; approved_not_after=2000\ndate(){ printf "%s\\n" "$CLOCK"; }\n' + clock + '\nfirst_activation_window_current'], {
+      encoding: 'utf8', env: { ...process.env, first_activation: evidence, CLOCK: current },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, expected, evidence + ': ' + current);
+  }
 });
 
 test('rollback clears candidate start-limit failures before restarting the prior API', () => {
@@ -312,6 +462,7 @@ test('first activation verifies the initialized database after backup under both
   assert.deepEqual(approval['ansible.builtin.assert'].that, [
     'codexia_initial_install_approved | default(false) | bool',
     'codexia_database_initialization_approved | default(false) | bool',
+    '(codexia_lifecycle_fixture | default(false) | bool) or (codexia_expected_first_activation | default(none)) is mapping',
   ]);
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;

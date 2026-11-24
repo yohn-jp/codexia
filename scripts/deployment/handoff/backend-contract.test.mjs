@@ -23,16 +23,22 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(job.environment, undefined);
   assert.equal(job.permissions['id-token'], undefined);
   assert.deepEqual(job.permissions, { contents: 'read', actions: 'read', packages: 'read' });
-  assert.equal(job.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
-  assert.equal(job.outputs['certified-full-api-epoch'], '${{ steps.verify.outputs.full-api-epoch }}');
-  assert.equal(job.outputs['verified-main-sha'], '${{ steps.verify.outputs.verified-main-sha }}');
-  assert.equal(job.outputs['producer-sha'], '${{ steps.verify.outputs.producer-sha }}');
-  assert.equal(job.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
-  assert.equal(handoff.jobs['verify-handoff'].steps[0].with.ref, '${{ github.event.workflow_run.head_sha }}');
+  for (const [output, field] of Object.entries({
+    'certified-full-image': 'full-image', 'certified-full-api-epoch': 'full-api-epoch',
+    'verified-main-sha': 'verified-main-sha', 'producer-sha': 'producer-sha', 'deployment-certificate': 'full-certificate',
+  })) {
+    assert.equal(job.outputs[output], '${{ steps.verify.outputs.' + field + ' || steps.manual.outputs.' + field + ' }}');
+  }
+  assert.equal(handoff.jobs['verify-handoff'].steps[0].with.ref, '${{ github.event.workflow_run.head_sha || github.sha }}');
   assert.equal(handoff.jobs['verify-handoff'].steps[0].with['persist-credentials'], false);
   const verifyStep = job.steps.find(step => step.run === 'node scripts/deployment/handoff/verify-push.mjs');
   assert.ok(verifyStep);
   assert.equal(verifyStep.id, 'verify');
+  assert.equal(verifyStep.if, "github.event_name == 'workflow_run'");
+  const manualStep = job.steps.find(step => step.id === 'manual');
+  assert.equal(manualStep.if, "github.event_name == 'workflow_dispatch'");
+  assert.equal(manualStep.run, 'node scripts/deployment/bootstrap/activate-backend.mjs certify');
+  assert.match(job.if, /inputs\.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND'/u);
   for (const step of job.steps) {
     for (const value of Object.values(step.env ?? {})) assert.doesNotMatch(String(value), /secrets\./u);
   }
@@ -46,9 +52,10 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.verified-main-sha != ''/u);
   const deployCheckout = deploy.steps.find(step => step.uses?.startsWith('actions/checkout@'));
-  assert.equal(deployCheckout.with.ref, '${{ needs.verify-handoff.outputs.verified-main-sha }}');
+  const verifiedSource = '${{ needs.verify-handoff.outputs.verified-main-sha }}';
+  assert.equal(deployCheckout.with.ref, "${{ github.event_name == 'workflow_dispatch' && github.sha || needs.verify-handoff.outputs.verified-main-sha }}");
   const converge = deploy.steps.find(step => step.name === 'Converge certified backend digest');
-  assert.equal(converge.env.CODEXIA_VERIFIED_MAIN_SHA, deployCheckout.with.ref);
+  assert.equal(converge.env.CODEXIA_VERIFIED_MAIN_SHA, verifiedSource);
   assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u,
     'Environment-scoped variables must not be evaluated before Environment attachment');
   const deploymentGate = deploy.steps.find(step => step.id === 'deployment-gate');
@@ -56,16 +63,20 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(deploymentGate.env.CODEXIA_PUSH_DEPLOYMENT_ENABLED, '${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}');
   const freshness = deploy.steps.find(step => step.id === 'freshness');
   assert.equal(deployCheckout.with['fetch-depth'], 0);
-  assert.equal(freshness.run, 'node scripts/release/components/source-gate.mjs backend-deployment');
-  assert.equal(freshness.env.CODEXIA_VERIFIED_MAIN_SHA, deployCheckout.with.ref);
+  assert.match(freshness.run, /if \[\[ "\$CODEXIA_MANUAL_ACTIVATION" == true \]\]; then\s+node scripts\/deployment\/bootstrap\/activate-backend\.mjs freshness\s+else\s+node scripts\/release\/components\/source-gate\.mjs backend-deployment/u);
+  assert.equal(freshness.env.CODEXIA_MANUAL_ACTIVATION, "${{ github.event_name == 'workflow_dispatch' }}");
+  assert.equal(freshness.env.CODEXIA_VERIFIED_MAIN_SHA, verifiedSource);
   const afterEnablement = deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1);
   const freshnessIndex = afterEnablement.indexOf(freshness);
   assert.ok(freshnessIndex >= afterEnablement.indexOf(deployCheckout));
   assert.ok(afterEnablement.slice(0, freshnessIndex + 1).every(step =>
     step.if === "steps.deployment-gate.outputs.enabled == 'true'"));
-  assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step =>
-    step.if === "steps.freshness.outputs.current == 'true'"),
-    'Stale or disabled deployments must not connect to the target or run Ansible');
+  assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step => [
+    "steps.freshness.outputs.current == 'true'",
+    "github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'",
+  ].includes(step.if)), 'Stale or disabled deployments must not connect to the target or run Ansible');
+  const manualAdmission = deploy.steps.find(step => step.run?.includes('activate-backend.mjs admit'));
+  assert.ok(manualAdmission && deploy.steps.indexOf(manualAdmission) < deploy.steps.indexOf(converge));
 });
 
 test('the protected enablement step opts in only for the literal true and records a skipped deployment', t => {
@@ -91,6 +102,31 @@ test('the protected enablement step opts in only for the literal true and record
       assert.match(report, /deployment safely skipped/u);
     }
   }
+});
+
+test('manual first activation fails closed when publication is disabled or maintenance is paused', t => {
+  const step = handoff.jobs['deploy-production'].steps.find(step => step.id === 'deployment-gate');
+  const directory = mkdtempSync(join(tmpdir(), 'codexia-first-deployment-gate-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const output = join(directory, 'output');
+  const env = {
+    PATH: process.env.PATH, GITHUB_OUTPUT: output, CODEXIA_MANUAL_ACTIVATION: 'true',
+    CODEXIA_INITIAL_INSTALL_APPROVED: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'true',
+  };
+  function runGate(overrides) {
+    execFileSync('bash', ['-c', step.run], { cwd: directory, env: { ...env, ...overrides }, stdio: 'pipe' });
+  }
+  const rejectsWith = expected => error => {
+    assert.match(String(error.stderr), expected);
+    return true;
+  };
+  assert.throws(() => runGate({}), rejectsWith(/requires CODEXIA_PUSH_DEPLOYMENT_ENABLED=true/u));
+  assert.throws(() => runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: '' }),
+    rejectsWith(/requires first-install and database-use approvals/u));
+  assert.throws(() => runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true', CODEXIA_EPOCH_CUTOVER_PAUSED: 'true' }),
+    rejectsWith(/paused/u));
+  runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true' });
+  assert.equal(readFileSync(output, 'utf8'), 'enabled=true\n');
 });
 
 test('backend release emits certificate files only after exact-source publish and component release recording', () => {

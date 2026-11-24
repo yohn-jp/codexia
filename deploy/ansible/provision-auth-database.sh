@@ -3,15 +3,22 @@ set -Eeuo pipefail
 umask 077
 
 die(){ printf '%s\n' "$1" >&2; exit 1; }
-[[ $# == 2 || $# == 3 ]] || die 'Usage: codexia-auth-runtime-bootstrap <operation> /absolute/lock-file [reviewed immutable Full image]'
+[[ $# -ge 2 && $# -le 5 ]] || die 'An auth bootstrap operation and its protected inputs are required'
 operation="$1"
 lock_file="$2"
+image="${3:-}"
 [[ "$lock_file" == /* && ! "$lock_file" =~ [[:cntrl:]] ]] || die 'Invalid auth bootstrap lock path'
 case "$operation" in
-  inspect|verify|verify-permissions|converge) [[ $# == 2 ]] || die 'Unexpected auth bootstrap argument' ;;
+  inspect|verify|verify-permissions) [[ $# == 2 ]] || die 'Unexpected auth bootstrap argument' ;;
   initialize-application)
-    [[ $# == 3 && "$3" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] ||
+    [[ "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+       ( $# == 3 || ( $# == 4 && "$4" == OWNER_SETUP ) ) ]] ||
       die 'Application initialization requires a reviewed immutable Full image' ;;
+  verify-bootstrap-resume|converge)
+    [[ ( "$operation" == converge && $# == 2 ) ||
+       ( $# == 5 && "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+         "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ && "$5" =~ ^sha256:[a-f0-9]{64}$ ) ]] ||
+      die 'Bootstrap resumption requires the approved database, Full image and migration fingerprint' ;;
   *) die 'Invalid auth bootstrap operation' ;;
 esac
 
@@ -20,6 +27,60 @@ flock --exclusive --nonblock 9 || die 'Another Codexia deployment or backup hold
 
 admin_psql(){
   podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'
+}
+
+application_schema(){
+  podman run --rm --pull=missing --network codexia-data \
+    --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
+    --entrypoint=node "$image" --input-type=module -e '
+      import { readFileSync } from "node:fs";
+      import { initializeFreshPostgresSchema, inspectFreshPostgresSchema } from "@codexia/persistence-postgres";
+      const identity = JSON.parse(readFileSync("/app/update-identity.json", "utf8"));
+      if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full") {
+        throw new Error("Application initialization requires a packaged Full image");
+      }
+      const password = readFileSync("/run/secrets/app-password", "utf8").trim();
+      if (!/^[a-fA-F0-9]{64}$/.test(password)) throw new Error("Database application secret is invalid");
+      const connection = `postgres://codexia:${password}@codexia-db:5432/codexia`;
+      const [operation, fingerprint] = process.argv.slice(1);
+      if (operation === "apply") {
+        const applied = await initializeFreshPostgresSchema(connection);
+        console.log(applied.length ? "INITIALIZED_FRESH_SCHEMA" : "VERIFIED_EXACT_SCHEMA");
+      } else {
+        const observed = await inspectFreshPostgresSchema(connection);
+        if (operation === "require-pristine" && !observed.pristine) {
+          throw new Error("Fresh owner setup refuses an existing application ledger");
+        }
+        if (operation === "require-ledger" && (observed.pristine || observed.fingerprint !== fingerprint ||
+            identity.migrationFingerprint !== fingerprint)) {
+          throw new Error("Bootstrap resumption requires the exact approved application ledger");
+        }
+      }
+    ' "$@"
+}
+
+verify_bootstrap_resume(){
+  local expected_database="$1" fingerprint="$2" database intent
+  local state_dir="$HOME/.local/state/codexia-deploy"
+  "$HOME/.local/bin/codexia-require-clean-api-target"
+  intent="$state_dir/owner-setup.intent"
+  [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
+     "$(cat -- "$intent")" == "$expected_database:$image" ]] ||
+    die 'Bootstrap resumption requires the exact recorded initial installation'
+  for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending cutover-transaction.json; do
+    [[ ! -e "$state_dir/$evidence" && ! -L "$state_dir/$evidence" ]] ||
+      die 'Bootstrap resumption requires a target without owner setup or cutover evidence'
+  done
+  database="$(admin_psql <<'SQL'
+SELECT system_identifier || chr(58) || (SELECT oid FROM pg_database WHERE datname=current_database())
+FROM pg_control_system()
+WHERE to_regclass('public.codexia_schema_migrations') IS NOT NULL
+  AND NOT EXISTS (SELECT FROM pg_namespace WHERE nspname='codexia_auth');
+SQL
+)"
+  [[ "$database" == "$expected_database" ]] ||
+    die 'Bootstrap resumption no longer matches the current database or Auth schema state'
+  application_schema require-ledger "$fingerprint"
 }
 
 assert_role_security(){
@@ -165,22 +226,40 @@ SELECT json_build_object(
 SQL
     ;;
   initialize-application)
-    image="$3"
     "$HOME/.local/bin/codexia-require-clean-api-target"
-    podman run --rm --pull=missing --network codexia-data \
-      --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
-      --entrypoint=node "$image" --input-type=module -e '
-        import { readFileSync } from "node:fs";
-        import { initializeFreshPostgresSchema } from "@codexia/persistence-postgres";
-        const identity = JSON.parse(readFileSync("/app/update-identity.json", "utf8"));
-        if (identity.format !== "codexia-backend-identity/v1" || identity.profile !== "full") {
-          throw new Error("Application initialization requires a packaged Full image");
-        }
-        const password = readFileSync("/run/secrets/app-password", "utf8").trim();
-        if (!/^[a-fA-F0-9]{64}$/.test(password)) throw new Error("Database application secret is invalid");
-        const applied = await initializeFreshPostgresSchema(`postgres://codexia:${password}@codexia-db:5432/codexia`);
-        console.log(applied.length ? "INITIALIZED_FRESH_SCHEMA" : "VERIFIED_EXACT_SCHEMA");
-      '
+    if [[ $# == 4 ]]; then
+      state_dir="$HOME/.local/state/codexia-deploy"
+      intent="$state_dir/owner-setup.intent"
+      database="$(admin_psql <<'SQL'
+SELECT system_identifier || chr(58) || (SELECT oid FROM pg_database WHERE datname=current_database())
+FROM pg_control_system()
+WHERE NOT EXISTS (SELECT FROM pg_namespace WHERE nspname='codexia_auth');
+SQL
+)"
+      [[ "$database" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ ]] ||
+        die 'Fresh owner setup requires a known PostgreSQL database without an auth schema'
+      if [[ -e "$intent" || -L "$intent" ]]; then
+        [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
+           "$(cat -- "$intent")" == "$database:$image" ]] ||
+          die 'Fresh owner setup must match the recorded database and Full image'
+      else
+        for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending; do
+          [[ ! -e "$state_dir/$evidence" && ! -L "$state_dir/$evidence" ]] ||
+            die 'Fresh owner setup refuses existing owner installation evidence'
+        done
+        [[ ! -e "$HOME/.config/codexia-auth/runtime.env" && ! -L "$HOME/.config/codexia-auth/runtime.env" ]] ||
+          die 'Fresh owner setup refuses existing runtime configuration'
+        application_schema require-pristine
+        temporary="$(mktemp "$state_dir/.owner-setup.XXXXXX")"
+        printf '%s\n' "$database:$image" >"$temporary"
+        mv -fT -- "$temporary" "$intent"
+        sync -f -- "$state_dir"
+      fi
+    fi
+    application_schema apply
+    ;;
+  verify-bootstrap-resume)
+    verify_bootstrap_resume "$4" "$5"
     ;;
   verify)
     IFS= read -r auth_password_b64 || die 'Auth password input is missing'
@@ -206,6 +285,7 @@ SQL
     printf '%s\n' 'AUTH_RUNTIME_ROLE_PERMISSIONS_VERIFIED'
     ;;
   converge)
+    if [[ $# == 5 ]]; then verify_bootstrap_resume "$4" "$5"; fi
     IFS= read -r auth_password_b64 || die 'Auth password input is missing'
     [[ "$auth_password_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || die 'Auth password input is invalid'
     auth_password="$(printf '%s' "$auth_password_b64" | base64 --decode)" || die 'Auth password input is invalid'

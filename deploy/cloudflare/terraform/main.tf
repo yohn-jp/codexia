@@ -1,6 +1,7 @@
 locals {
   ui_routes             = jsondecode(file("${path.module}/../ui-routes.json")).routes
   origin_routes         = jsondecode(file("${path.module}/../ui-routes.json")).originRoutes
+  owner_setup           = jsondecode(file("${path.module}/../owner-setup.json"))
   identity_probes       = jsondecode(file("${path.module}/../identity-probes.json"))
   public_protocol_paths = jsondecode(file("${path.module}/../public-protocol-paths.json"))
   public_access_paths = {
@@ -176,16 +177,56 @@ resource "cloudflare_zero_trust_access_application" "public_protocol" {
   ]
 }
 
+# A new site can prepare the production Worker resource before it has a release.
+resource "cloudflare_worker" "frontend" {
+  count      = var.manage_frontend_worker ? 1 : 0
+  account_id = var.account_id
+  name       = "codexia-frontend"
+  subdomain = {
+    enabled          = false
+    previews_enabled = false
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # Scriptless exclusions win over the static catch-all, including query-string URLs.
 resource "cloudflare_workers_route" "frontend" {
-  for_each = var.frontend_route_enabled ? toset(local.ui_routes) : toset([])
+  for_each = var.frontend_route_enabled && !var.owner_setup_route_enabled ? toset(local.ui_routes) : toset([])
   zone_id  = var.zone_id
   pattern  = "${var.app_hostname}${each.value}"
   script   = "codexia-frontend"
+
+  depends_on = [cloudflare_worker.frontend]
 }
 
 resource "cloudflare_workers_route" "origin" {
-  for_each = var.frontend_route_enabled ? toset(local.origin_routes) : toset([])
+  for_each = var.frontend_route_enabled && !var.owner_setup_route_enabled ? toset(local.origin_routes) : toset([])
   zone_id  = var.zone_id
   pattern  = "${var.app_hostname}${each.value}"
+}
+
+# The separately deployed assets-only Worker has no route until this approved
+# Terraform change. Keep the previous normal Worker deployment intact.
+resource "cloudflare_workers_route" "owner_setup" {
+  for_each = var.owner_setup_route_enabled ? toset(local.owner_setup.routes) : toset([])
+  zone_id  = var.zone_id
+  pattern  = "${var.app_hostname}${each.value}"
+  script   = local.owner_setup.worker
+
+  lifecycle {
+    precondition {
+      condition     = !var.public_oauth_edge_enabled
+      error_message = "Owner setup requires public OAuth and MCP bypass applications to be disabled."
+    }
+  }
+}
+
+resource "cloudflare_workers_route" "owner_setup_frontend_identity" {
+  count   = var.owner_setup_route_enabled && var.frontend_route_enabled ? 1 : 0
+  zone_id = var.zone_id
+  pattern = "${var.app_hostname}${local.identity_probes.frontend.path}"
+  script  = "codexia-frontend"
 }

@@ -54,7 +54,7 @@ function validAxes(state) {
 
 // Ordered lifecycle decision table. Admission evidence and change details are
 // checked separately; no R0 result confers permission to mutate.
-export function selectRoute(state, intent, frontendAdmission) {
+export function selectRoute(state, intent, frontendAdmission, bootstrapResume = false) {
   requireCondition(validAxes(state) && intents.includes(intent) &&
     ['allowed', 'denied', 'not-applicable', 'unknown'].includes(frontendAdmission),
   'Invalid normalized deployment observation');
@@ -71,6 +71,8 @@ export function selectRoute(state, intent, frontendAdmission) {
   if (['compatible', 'incompatible'].includes(B) && ['absent', 'pending', 'unprepared'].includes(A)) return 'R0';
   if (H === 'drift' || D === 'incompatible' || ['legacy', 'incompatible', 'recovery'].includes(A) ||
       B === 'fault' || F === 'fault') return 'R3';
+  if (bootstrapResume && intent === 'install' && H === 'ready' && D === 'compatible' &&
+      A === 'absent' && B === 'absent') return 'R4';
   if (['absent', 'partial'].includes(H) || ['absent', 'pristine'].includes(D) || A === 'absent') {
     if (!['install', 'adopt'].includes(intent)) return 'R0';
     if (intent === 'adopt' && ['absent', 'pristine'].includes(D)) return 'R0';
@@ -95,11 +97,21 @@ export function selectRoute(state, intent, frontendAdmission) {
 }
 
 function validateObservation(observation) {
-  requireCondition(record(observation, ['state', 'observedAt', 'binding', 'frontendAdmission', 'changeAxes']),
+  const fields = ['state', 'observedAt', 'binding', 'frontendAdmission', 'changeAxes'];
+  if (Object.hasOwn(observation ?? {}, 'bootstrapResume')) fields.push('bootstrapResume');
+  requireCondition(record(observation, fields),
     'Invalid deployment observation envelope');
   requireCondition(validAxes(observation.state), 'Invalid deployment state');
   timestamp(observation.observedAt);
-  const { binding, changeAxes } = observation;
+  const { binding, changeAxes, bootstrapResume } = observation;
+  if (fields.includes('bootstrapResume')) {
+    requireCondition(record(bootstrapResume, ['clusterId', 'databaseOid', 'image', 'migrationFingerprint']) &&
+      typeof bootstrapResume.clusterId === 'string' && /^[1-9][0-9]{0,19}$/u.test(bootstrapResume.clusterId) &&
+      typeof bootstrapResume.databaseOid === 'string' && /^[1-9][0-9]{0,9}$/u.test(bootstrapResume.databaseOid) &&
+      typeof bootstrapResume.image === 'string' && /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(bootstrapResume.image) &&
+      typeof bootstrapResume.migrationFingerprint === 'string' && /^sha256:[a-f0-9]{64}$/u.test(bootstrapResume.migrationFingerprint),
+    'Invalid bootstrap continuation evidence');
+  }
   // Digests refer to verified redacted evidence held by the existing owning
   // components. No credential, raw probe response or arbitrary text belongs here.
   requireCondition(record(binding, ['environment', 'hostPinSha256', 'hostId', 'databaseSha256',
@@ -139,7 +151,7 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
       typeof transition.contractSha256 === 'string' && hashPattern.test(transition.contractSha256) &&
       typeof transition.dataConversion === 'boolean', 'Invalid resolved transition');
   }
-  const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission);
+  const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission, observation.bootstrapResume !== undefined);
   const { binding, state } = observation;
   const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
     'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'ambiguous-transition', 'recovery-plan-required'];
@@ -169,7 +181,9 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   if (['R1', 'R2', 'R3', 'R6', 'R7'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
-  if (candidateRoute === 'R4' && ['absent', 'pristine'].includes(state.D)) requiredApprovals.push('database-initialization');
+  if (candidateRoute === 'R4' && (observation.bootstrapResume || ['absent', 'pristine'].includes(state.D))) {
+    requiredApprovals.push('database-initialization');
+  }
   const candidateSystem = candidateRoute === 'R3' && requiresTransition ? 'cutover' : systems[candidateRoute];
   if (requiredApprovals.length) blockers.push('approval-required');
   const route = blockers.length ? 'R0' : candidateRoute;
