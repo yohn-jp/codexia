@@ -53,7 +53,7 @@ Quiet Pageでは、DesktopのWriting初期配置を構成20%・原稿80%とし�
 
 ## 当時の基礎トークン案（検討資料）
 
-既存 `app/styles.css` の `--page-bg`、`--paper`、`--ink`、`--muted`、`--line`、`--accent`、`--focus-ring`、`--surface-selected`、`--error`、`--success`、diff用変数を第一の基準とする。既存のeditorial.css等にある `--st-canvas`、`--st-folio`、`--st-rail` は必要な見た目の役割に対応付け、同じ意味の色を各Shellに重複定義しない。新しいUIライブラリや独立テーマパッケージは要件ではない。
+`app/src/theme-tokens.ts` の `themeTokens` から生成する semantic token（`--page-bg`、`--paper`、`--ink`、`--muted`、`--line`、`--accent`、`--focus-ring`、`--surface-selected`、`--error`、`--success`、diff用変数）を第一の基準とする。`editorialShellTokens` と `writingShellTokens` が定義する値から `shell-theme.css.ts` で `--st-canvas`、`--st-folio`、`--st-rail` を生成し、同じ意味の色を各Shellに重複定義しない。`theme.css.ts` と `shell-theme.css.ts` はこのtoken mapから静的CSSを生成し、別のテーマ値を持たない。
 
 | 意味 | 初期の視覚方向 |
 | --- | --- |

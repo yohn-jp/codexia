@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, type InboxItem, type JobEvent, type PublicJob } from '../api';
+import { buttonSize } from "./button.css";
 
 type StreamState = 'connected' | 'reconnecting' | 'unavailable';
 
@@ -340,7 +341,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
     <>
       <button
         type="button"
-        className="quiet-button compact-button"
+        className={`quiet-button ${buttonSize({ size: "compact" })}`}
         onClick={() => {
           setOpen(true);
           void refresh();
@@ -378,7 +379,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
           <button
             type="button"
             data-ux-control="JOB-01.A"
-            className="quiet-button compact-button"
+            className={`quiet-button ${buttonSize({ size: "compact" })}`}
             onClick={() => void refresh()}
             disabled={loading}
           >
@@ -444,7 +445,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
                     {!item.read ? (
                       <button
                         type="button"
-                        className="quiet-button compact-button"
+                        className={`quiet-button ${buttonSize({ size: "compact" })}`}
                         onClick={() => void markRead(item.id)}
                         disabled={!canWrite || busyInboxAction !== null}
                       >
@@ -461,13 +462,13 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginTop: '1rem' }}>
           <button
             type="button"
-            className="quiet-button compact-button"
+            className={`quiet-button ${buttonSize({ size: "compact" })}`}
             onClick={() => void markAllRead()}
             disabled={!canWrite || unreadCount === 0 || busyInboxAction !== null}
           >
             すべて既読
           </button>
-          <button type="button" className="compact-button" onClick={() => dialogRef.current?.close()}>
+          <button type="button" className={buttonSize({ size: "compact" })} onClick={() => dialogRef.current?.close()}>
             閉じる
           </button>
         </div>

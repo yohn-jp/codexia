@@ -1,4 +1,4 @@
-import "../../styles.css";
+import "../styles.css";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { installNativeSelectCspCompatibility } from "../browser/nativeSelect";

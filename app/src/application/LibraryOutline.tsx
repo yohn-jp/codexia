@@ -3,6 +3,7 @@ import type { Project } from "@codexia/persistence-contracts";
 import type { Tree } from "../api";
 import { formatHandoffHint, sceneTitleInTree, type ContinueCandidate } from "../resume/continueCandidates";
 import type { JournalEntry } from "../storage/journal";
+import { buttonSize } from "../components/button.css";
 
 export function LibraryOutline({ projects, activeProjectId, tree, selectedSceneId, continueCandidates, deviceType, continueError, recoverableEntries, onActivateProject, onContinue, onSelectScene }: {
   projects: Project[]; activeProjectId: string | null; tree: Tree | null; selectedSceneId: string; continueCandidates: ContinueCandidate[]; deviceType: RecentActivityDeviceType; continueError: string; recoverableEntries: JournalEntry[];
@@ -40,11 +41,11 @@ function ContinuePanel({
               <li key={candidate.sceneId}>
                 <strong>{sceneTitleInTree(tree, candidate.sceneId)}</strong>
                 {handoff && <small>{handoff}</small>}
-                <button type="button" className="quiet-button compact-button" onClick={() => onContinue(candidate)}>
+                <button type="button" className={`quiet-button ${buttonSize({ size: "compact" })}`} onClick={() => onContinue(candidate)}>
                   {index === 0 ? "続きを書く" : "こちらを開く"}
                 </button>
                 {candidate.pageIndex !== null && (
-                  <button type="button" className="quiet-button compact-button" onClick={() => onRead(candidate)}>
+                  <button type="button" className={`quiet-button ${buttonSize({ size: "compact" })}`} onClick={() => onRead(candidate)}>
                     読書位置を開く
                   </button>
                 )}

@@ -1,4 +1,4 @@
-import "../../styles.css";
+import "../styles.css";
 import { createRoot } from "react-dom/client";
 import { installNativeSelectCspCompatibility } from "../browser/nativeSelect";
 import { ConsoleEntry } from "../console/ConsoleEntry";

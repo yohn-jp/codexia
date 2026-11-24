@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
+import { vanillaExtractPlugin } from '@vanilla-extract/vite-plugin';
 import { defineConfig, type Plugin } from 'vite';
 
 const appRoot = fileURLToPath(new URL('.', import.meta.url));
@@ -32,8 +33,12 @@ const oauthSourceFiles = new Set(
     'auth-client.ts',
     'oauth-consent.ts',
     'oauth-login.ts',
-    'oauth.css',
+    'oauth.css.ts',
+    'oauth.css.ts.vanilla.css',
     'theme.ts',
+    'oauth-theme.css.ts',
+    'oauth-theme.css.ts.vanilla.css',
+    'theme-tokens.ts',
     'entries/oauth-consent.tsx',
     'entries/oauth-login.tsx',
   ].map(file => resolve(appRoot, 'src', file)),
@@ -66,6 +71,7 @@ export default defineConfig({
   root: appRoot,
   publicDir: ui === 'oauth' || ui === 'owner-setup' ? false : resolve(appRoot, 'public'),
   plugins: [
+    vanillaExtractPlugin(),
     react(),
     {
       name: 'codexia-ui-entry',

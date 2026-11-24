@@ -4,7 +4,7 @@ import { PublicModuleView, publicModuleIdForPath } from "./contributions/PublicM
 import { applyThemeMode, loadThemeMode, persistThemeMode, type ThemeMode } from "./theme";
 import { OAuthLoginPage } from "./OAuthLoginPage";
 import { OAuthConsentPage } from "./OAuthConsentPage";
-import "../styles.css";
+import "./styles.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing React root");

@@ -92,13 +92,13 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@scalar/api-reference` | `1.83.0` | `scripts/pages-api`・TypeSpec由来OpenAPI 3.1の静的表示 | **新規採用**: MIT。API serverなし、Try It／認証入力／AI操作を非表示、認証operation例の削除、外部fetch禁止をChromiumで確認 |
 | `esbuild` | `0.28.2` | `scripts/pages-api`・ScalarのローカルJS/CSS bundle | **連動**: Pages生成だけで使用し、Scalarと一緒にlockを固定 |
 
-### Desktop CSS基盤（採用目標・未導入）
+### Desktop CSS基盤（vanilla-extract採用済み）
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `@vanilla-extract/css` | 未導入 → 最新安定版 | Desktop Web・型付きテーマ／静的CSS | **採用確定・未実装**: Light/Dark/Paperのtheme contractとsemantic tokensを正本化 |
-| `@vanilla-extract/vite-plugin` | 未導入 → 最新安定版 | Vite 8・CSSビルド統合 | **採用確定・未実装**: Vite 8との互換性、CSS出力とOAuthビルド分離を実証 |
-| `@vanilla-extract/recipes` | 未導入 → 最新安定版 | Desktop UI・型付きvariants | **採用確定・未実装**: 再利用可能なvariantsのみ採用し、重複スタイルを撤去 |
+| `@vanilla-extract/css` | `1.21.3` (`app` build-only) | Desktop Web・型付きテーマ／静的CSS | **採用済み**: Light/Dark/Paper semantic token contractを生成時にCSSへ展開 |
+| `@vanilla-extract/vite-plugin` | `5.2.6` (`app` build-only) | Vite 8・CSSビルド統合 | **採用済み**: Vite 8をpeer dependencyとして許可し、OAuth source boundaryを維持 |
+| `@vanilla-extract/recipes` | `0.5.7` (`app` build-only) | Desktop UI・型付きvariants | **採用済み**: 既存compact button variantを静的CSSとして生成 |
 
 既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
