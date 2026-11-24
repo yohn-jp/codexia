@@ -234,4 +234,3 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
   if (rows.some((row) => row.status === 'VERIFIED')) violations.push('Reverse trace cannot certify VERIFIED; only the project certifier may assign that status.');
   return { rows, gaps, violations };
 }
-
