@@ -2290,6 +2290,26 @@ paths:
       responses:
         '200':
           description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
           content:
             application/json:
               schema:
@@ -4096,6 +4116,13 @@ paths:
       responses:
         '200':
           description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
           content:
             application/json:
               schema:
@@ -4128,6 +4155,13 @@ paths:
       responses:
         '200':
           description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
           content:
             application/json:
               schema:
@@ -4149,10 +4183,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OwnerSetupError'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ReadinessResponse'
+                  - $ref: '#/components/schemas/OwnerSetupReadinessUnavailableBody'
       tags:
         - health
       security:
         - {}
+      x-codexia-runtime-response-deviation: 'In setup-only runtime mode, HTTP 200 returns `{ status: "ready" }` instead of the approved ReadinessResponse shape; keep this mismatch explicit until an approved compatibility correction.'
+      x-codexia-contract-status: incomplete
     head:
       operationId: health_ready_head
       parameters: []
@@ -4186,6 +4237,26 @@ paths:
       responses:
         '200':
           description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Service unavailable.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
           content:
             application/json:
               schema:
@@ -5467,6 +5538,17 @@ components:
           type: string
           maxLength: 254
           format: email
+      unevaluatedProperties:
+        not: {}
+    OwnerSetupReadinessUnavailableBody:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          enum:
+            - SETUP_UNAVAILABLE
       unevaluatedProperties:
         not: {}
     OwnerSetupState:

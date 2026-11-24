@@ -945,4 +945,9 @@ test('generated owner-session request, response, header, error and security sema
   const route = methods.routes.find(({ method, url }) => method === 'POST' && url === '/api/auth/codexia/owner-session');
   assert.deepEqual(route.contentTypes['403'], ['application/json']);
   assert.equal(route.responseHeaders['200']['cache-control'].schema.enum[0], 'no-store');
+  const consentContext = contract.paths['/api/auth/oauth2/consent-context'].post;
+  const consents = contract.paths['/api/auth/oauth2/get-consents'].get;
+  assert.match(consentContext['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
+  assert.match(consents['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
+  assert.match(consents['x-codexia-runtime-response-deviation'], /top-level array/u);
 });
