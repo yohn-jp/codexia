@@ -281,11 +281,11 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       continue;
     }
     if (uxProjectionDocuments.has(file)) add('unit-root');
+    if (isRequirementsTraceInput(file) || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('requirements-trace');
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
     }
-    if (isRequirementsTraceInput(file) || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('requirements-trace');
     if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
     if (file === 'deploy/backup/backup.sh') add('db-contract');
     if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||

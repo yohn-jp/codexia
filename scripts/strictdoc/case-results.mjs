@@ -3,7 +3,7 @@ import path from 'node:path';
 export default async function* reportCases(events) {
   for await (const { type, data } of events) {
     if (type !== 'test:pass' && type !== 'test:fail') continue;
-    if (!data.file || !Number.isSafeInteger(data.line) || data.name === data.file) continue;
+    if (data.details?.type !== 'test' || !data.file || !Number.isSafeInteger(data.line) || data.name === data.file) continue;
     let result = type === 'test:pass' ? 'PASSED' : 'FAILED';
     if (Object.hasOwn(data, 'skip') && data.skip !== false) result = 'SKIPPED';
     else if (Object.hasOwn(data, 'todo') && data.todo !== false) result = 'TODO';
