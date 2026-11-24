@@ -12,6 +12,7 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public let apiOrigin: String
     public let projectID: String
     public let documentID: String
+    public let sessionID: UUID
     public let version: UInt64
     public var baseRevisionID: String
     public var baseText: String
@@ -22,6 +23,7 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public var state: State
     public var saveRequest: Components.Schemas.SaveDocumentRequest
     public var receipt: Components.Schemas.SaveDocumentResponse?
+    public var conflict: Components.Schemas.SaveConflictResponse?
 
 }
 
@@ -31,7 +33,7 @@ public enum SaveDisposition: Sendable {
     case accepted
     case unauthorized
     case forbidden
-    case conflict
+    case conflict(Components.Schemas.SaveConflictResponse?)
     case preconditionFailed
     case rejected(Int)
     case nothingToSave
@@ -41,6 +43,91 @@ public enum SaveDisposition: Sendable {
 public enum DraftJournalError: Error, Equatable {
     case invalidScope
     case corruptRecord
+    case sessionChanged
+    case staleConflict
+}
+
+private enum DocumentChangeBuilder {
+    static func make(from base: String, to text: String) -> [Components.Schemas.DocumentChange] {
+        let old = Array(base.unicodeScalars)
+        let new = Array(text.unicodeScalars)
+        var offsets = [Int32](repeating: 0, count: old.count + 1)
+        for index in old.indices {
+            offsets[index + 1] = offsets[index] + (old[index].value > 0xFFFF ? 2 : 1)
+        }
+        guard old != new else { return [] }
+        if max(old.count, new.count) <= 2_048 {
+            return lcsChanges(old: old, new: new, oldOffsets: offsets)
+        }
+
+        // Bound worst-case memory and time for large manuscripts. The unchanged
+        // prefix and suffix remain outside the replacement span.
+        var prefix = 0
+        while prefix < min(old.count, new.count), old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count - prefix, suffix < new.count - prefix,
+              old[old.count - suffix - 1] == new[new.count - suffix - 1] { suffix += 1 }
+        return [.init(fromUtf16: offsets[prefix], toUtf16: offsets[old.count - suffix],
+                      insert: scalarString(new[prefix..<(new.count - suffix)]))]
+    }
+
+    private static func lcsChanges(old: [Unicode.Scalar], new: [Unicode.Scalar], oldOffsets: [Int32])
+        -> [Components.Schemas.DocumentChange] {
+        let width = new.count + 1
+        var table = [UInt16](repeating: 0, count: (old.count + 1) * width)
+        if !old.isEmpty && !new.isEmpty {
+            for i in old.indices.reversed() {
+                for j in new.indices.reversed() {
+                    let at = i * width + j
+                    if old[i] == new[j] {
+                        table[at] = table[(i + 1) * width + j + 1] + 1
+                    } else {
+                        table[at] = max(table[(i + 1) * width + j], table[i * width + j + 1])
+                    }
+                }
+            }
+        }
+
+        var changes: [Components.Schemas.DocumentChange] = []
+        var oldIndex = 0
+        var newIndex = 0
+        var hunkStart: Int?
+        var hunkEnd = 0
+        var inserted: [Unicode.Scalar] = []
+        func flush() {
+            guard let start = hunkStart else { return }
+            changes.append(.init(fromUtf16: oldOffsets[start], toUtf16: oldOffsets[hunkEnd],
+                                 insert: scalarString(inserted[...])))
+            hunkStart = nil
+            hunkEnd = oldIndex
+            inserted.removeAll(keepingCapacity: true)
+        }
+
+        while oldIndex < old.count || newIndex < new.count {
+            if oldIndex < old.count && newIndex < new.count && old[oldIndex] == new[newIndex] {
+                flush()
+                oldIndex += 1
+                newIndex += 1
+            } else if newIndex == new.count || (oldIndex < old.count
+                && table[(oldIndex + 1) * width + newIndex] >= table[oldIndex * width + newIndex + 1]) {
+                if hunkStart == nil { hunkStart = oldIndex }
+                oldIndex += 1
+                hunkEnd = oldIndex
+            } else {
+                if hunkStart == nil { hunkStart = oldIndex; hunkEnd = oldIndex }
+                inserted.append(new[newIndex])
+                newIndex += 1
+            }
+        }
+        flush()
+        return changes
+    }
+
+    private static func scalarString<S: Sequence>(_ scalars: S) -> String where S.Element == Unicode.Scalar {
+        var view = String.UnicodeScalarView()
+        for scalar in scalars { view.append(scalar) }
+        return String(view)
+    }
 }
 
 fileprivate enum JournalBegin {
@@ -57,6 +144,7 @@ public actor ProtectedDraftJournal {
     private let fileManager: FileManager
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var activeScopes: Set<String> = []
 
     public init(directory: URL? = nil, fileManager: FileManager = .default) throws {
         self.fileManager = fileManager
@@ -91,6 +179,9 @@ public actor ProtectedDraftJournal {
         catch { throw DraftJournalError.corruptRecord }
     }
 
+    fileprivate func acquire(scope: JournalScope) -> Bool { activeScopes.insert(scopeKey(scope)).inserted }
+    fileprivate func release(scope: JournalScope) { activeScopes.remove(scopeKey(scope)) }
+
     fileprivate func write(_ records: [DraftRecord], scope: JournalScope) throws {
         let url = try fileURL(scope: scope)
         let data = try encoder.encode(records)
@@ -103,8 +194,13 @@ public actor ProtectedDraftJournal {
 
     fileprivate func insert(_ record: DraftRecord, scope: JournalScope) throws -> DraftRecord {
         var current = try records(scope: scope)
-        if let existing = current.first(where: { $0.version == record.version && $0.text == record.text
-            && $0.baseRevisionID == record.baseRevisionID }) { return existing }
+        if let latest = current.last, latest.sessionID == record.sessionID
+            && latest.contentSHA256 == record.contentSHA256
+            && Data(latest.text.utf8).elementsEqual(Data(record.text.utf8))
+            && latest.baseRevisionID == record.baseRevisionID { return latest }
+        if let unresolved = current.last, unresolved.sessionID != record.sessionID {
+            throw DraftJournalError.sessionChanged
+        }
         // Keep the submitted operation immutable, but coalesce all unsubmitted
         // typing to the newest snapshot so the journal stays bounded.
         current.removeAll(where: { $0.state == .protected })
@@ -125,34 +221,58 @@ public actor ProtectedDraftJournal {
         return .record(record)
     }
 
+    @discardableResult
     fileprivate func finish(scope: JournalScope, operationID: String, state: DraftRecord.State,
-                            receipt: Components.Schemas.SaveDocumentResponse? = nil) throws {
+                            receipt: Components.Schemas.SaveDocumentResponse? = nil,
+                            conflict: Components.Schemas.SaveConflictResponse? = nil,
+                            expectedAuthorID: String? = nil) throws -> Bool {
         var current = try records(scope: scope)
         guard let index = current.firstIndex(where: { $0.operationID == operationID }) else {
             throw DraftJournalError.corruptRecord
         }
         var record = current[index]
-        if record.state == .committed || record.state == .conflict { return }
+        if record.state == .committed || record.state == .conflict { return false }
         if state == .committed, let receipt {
+            guard expectedAuthorID == nil || receipt.revision.authorId == expectedAuthorID else {
+                record.state = .unknown
+                current[index] = record
+                try write(current, scope: scope)
+                return false
+            }
             current.remove(at: index)
             guard index < current.count, current[index].state == .protected else {
                 try write(current, scope: scope)
-                return
+                return true
             }
             var next = current[index]
             next.baseRevisionID = receipt.revision.id
             next.baseText = record.text
             next.saveRequest = Components.Schemas.SaveDocumentRequest(
                 baseRevisionId: receipt.revision.id,
-                changes: [.init(fromUtf16: 0, toUtf16: Int32(record.text.utf16.count), insert: next.text)],
+                changes: DocumentChangeBuilder.make(from: record.text, to: next.text),
                 resultingSha256: next.contentSHA256, clientId: next.clientID
             )
             current[index] = next
         } else {
             record.state = state
+            record.conflict = conflict
             current[index] = record
         }
         try write(current, scope: scope)
+        return true
+    }
+
+    fileprivate func resolveConflict(scope: JournalScope, operationID: String, replacement: DraftRecord) throws -> DraftRecord {
+        var current = try records(scope: scope)
+        guard let index = current.firstIndex(where: { $0.operationID == operationID && $0.state == .conflict }),
+              current[index].sessionID == replacement.sessionID else { throw DraftJournalError.staleConflict }
+        guard current.filter({ $0.state == .protected }).allSatisfy({
+            $0.sessionID == replacement.sessionID && $0.version <= replacement.version
+        }) else { throw DraftJournalError.staleConflict }
+        current.removeAll(where: { $0.state == .conflict || $0.state == .protected })
+        current.append(replacement)
+        try write(current, scope: scope)
+        return replacement
     }
 
     private func fileURL(scope: JournalScope) throws -> URL {
@@ -160,8 +280,12 @@ public actor ProtectedDraftJournal {
               canonicalOrigin(scope.apiOrigin) == scope.apiOrigin else {
             throw DraftJournalError.invalidScope
         }
-        let name = Self.sha256(try JSONEncoder().encode([scope.authorID, scope.apiOrigin, scope.projectID, scope.documentID]))
+        let name = scopeKey(scope)
         return directory.appendingPathComponent(name).appendingPathExtension("json")
+    }
+
+    private func scopeKey(_ scope: JournalScope) -> String {
+        Self.sha256((try? JSONEncoder().encode([scope.authorID, scope.apiOrigin, scope.projectID, scope.documentID])) ?? Data())
     }
 
     fileprivate static func sha256(_ text: String) -> String { sha256(Data(text.utf8)) }
@@ -186,7 +310,6 @@ public actor JournalSaveCoordinator {
     private let clientID: String
     private let journal: ProtectedDraftJournal
     private let api: any APIProtocol
-    private var inFlightScopes: Set<String> = []
 
     public init(authorID: String, apiOrigin: URL, projectID: String, clientID: String,
                 journal: ProtectedDraftJournal, api: any APIProtocol) throws {
@@ -211,12 +334,13 @@ public actor JournalSaveCoordinator {
         let hash = ProtectedDraftJournal.sha256(snapshot.text)
         let request = Components.Schemas.SaveDocumentRequest(
             baseRevisionId: baseRevisionID,
-            changes: [.init(fromUtf16: 0, toUtf16: Int32(baseText.utf16.count), insert: snapshot.text)],
+            changes: DocumentChangeBuilder.make(from: baseText, to: snapshot.text),
             resultingSha256: hash,
             clientId: clientID
         )
         let record = DraftRecord(authorID: authorID, apiOrigin: apiOrigin, projectID: projectID,
-            documentID: snapshot.documentID, version: snapshot.version, baseRevisionID: baseRevisionID,
+            documentID: snapshot.documentID, sessionID: snapshot.sessionID, version: snapshot.version,
+            baseRevisionID: baseRevisionID,
             baseText: baseText, text: snapshot.text, operationID: UUID().uuidString, clientID: clientID,
             contentSHA256: hash, state: .protected, saveRequest: request)
         return try await journal.insert(record, scope: scope)
@@ -231,53 +355,96 @@ public actor JournalSaveCoordinator {
         try await journal.records(scope: scope(documentID: documentID)).filter { $0.state != .committed }
     }
 
+    /// Replaces a conflicted operation only after the caller explicitly supplies
+    /// the fetched server head and an author-approved merged editor snapshot.
+    @discardableResult
+    public func resolveConflict(documentID: String, expectedOperationID: String, snapshot: EditorState.Snapshot,
+                                currentRevisionID: String, currentText: String) async throws -> DraftRecord {
+        guard snapshot.documentID == documentID, !currentRevisionID.isEmpty,
+              snapshot.text.utf16.count <= Int(Int32.max), currentText.utf16.count <= Int(Int32.max) else {
+            throw DraftJournalError.invalidScope
+        }
+        let key = scope(documentID: documentID)
+        guard let conflicted = try await journal.records(scope: key).first(where: {
+            $0.operationID == expectedOperationID && $0.state == .conflict
+        }), conflicted.sessionID == snapshot.sessionID else { throw DraftJournalError.staleConflict }
+        if let serverRevision = conflicted.conflict?.current?.revision,
+           (serverRevision.id != currentRevisionID || !Data(serverRevision.markdown.utf8).elementsEqual(Data(currentText.utf8))) {
+            throw DraftJournalError.staleConflict
+        }
+        let hash = ProtectedDraftJournal.sha256(snapshot.text)
+        let request = Components.Schemas.SaveDocumentRequest(
+            baseRevisionId: currentRevisionID,
+            changes: DocumentChangeBuilder.make(from: currentText, to: snapshot.text),
+            resultingSha256: hash,
+            clientId: clientID
+        )
+        let replacement = DraftRecord(authorID: authorID, apiOrigin: apiOrigin, projectID: projectID,
+            documentID: documentID, sessionID: snapshot.sessionID, version: snapshot.version,
+            baseRevisionID: currentRevisionID, baseText: currentText, text: snapshot.text,
+            operationID: UUID().uuidString, clientID: clientID, contentSHA256: hash,
+            state: .protected, saveRequest: request)
+        return try await journal.resolveConflict(scope: key, operationID: expectedOperationID, replacement: replacement)
+    }
+
     public func save(documentID: String) async -> SaveDisposition { await submit(documentID: documentID, reconcile: false) }
     public func reconcile(documentID: String) async -> SaveDisposition { await submit(documentID: documentID, reconcile: true) }
 
     private func submit(documentID: String, reconcile: Bool) async -> SaveDisposition {
         let key = scope(documentID: documentID)
-        let gate = scopeKey(key)
-        guard inFlightScopes.insert(gate).inserted else { return .pending(.responseLost) }
-        defer { inFlightScopes.remove(gate) }
+        guard await journal.acquire(scope: key) else { return .pending(.responseLost) }
+        let result: SaveDisposition
         do {
-            let record: DraftRecord
             switch try await journal.begin(scope: key, reconcile: reconcile) {
-            case .nothing: return .nothingToSave
-            case .pending: return .pending(.responseLost)
-            case .conflict: return .conflict
-            case .record(let inFlight): record = inFlight
-            }
-            let save = try DocumentSave(projectID: projectID, documentID: documentID,
-                operationID: record.operationID, clientID: clientID, body: record.saveRequest)
-            switch try await save.submit(using: api) {
-            case .committed(let receipt):
-                try await journal.finish(scope: key, operationID: record.operationID, state: .committed, receipt: receipt)
-                return .saved(receipt)
-            case .unknown(let uncertainty):
-                try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
-                return .pending(uncertainty)
-            case .accepted: try await journal.finish(scope: key, operationID: record.operationID, state: .unknown); return .accepted
-            case .unauthorized: try await journal.finish(scope: key, operationID: record.operationID, state: .protected); return .unauthorized
-            case .forbidden: try await journal.finish(scope: key, operationID: record.operationID, state: .protected); return .forbidden
-            case .conflict: try await journal.finish(scope: key, operationID: record.operationID, state: .conflict); return .conflict
-            case .preconditionFailed: try await journal.finish(scope: key, operationID: record.operationID, state: .conflict); return .preconditionFailed
-            case .rejected(let status): try await journal.finish(scope: key, operationID: record.operationID, state: .protected); return .rejected(status)
+            case .nothing: result = .nothingToSave
+            case .pending: result = .pending(.responseLost)
+            case .conflict:
+                let conflictRecord = try await journal.records(scope: key).first(where: { $0.state == .conflict })
+                result = .conflict(conflictRecord?.conflict)
+            case .record(let record):
+                let save = try DocumentSave(projectID: projectID, documentID: documentID,
+                    operationID: record.operationID, clientID: record.clientID, body: record.saveRequest)
+                switch try await save.submit(using: api) {
+                case .committed(let receipt):
+                    let accepted = try await journal.finish(scope: key, operationID: record.operationID,
+                        state: .committed, receipt: receipt, expectedAuthorID: authorID)
+                    result = accepted ? .saved(receipt) : .atRisk
+                case .unknown(let uncertainty):
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
+                    result = .pending(uncertainty)
+                case .accepted:
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
+                    result = .accepted
+                case .unauthorized:
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
+                    result = .unauthorized
+                case .forbidden:
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
+                    result = .forbidden
+                case .conflict(let response):
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .conflict, conflict: response)
+                    result = .conflict(response)
+                case .preconditionFailed:
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .conflict)
+                    result = .preconditionFailed
+                case .rejected(let status):
+                    try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
+                    result = .rejected(status)
+                }
             }
         } catch OAuthError.signInRequired {
-            return .unauthorized
+            result = .unauthorized
         } catch {
-            return .atRisk
+            result = .atRisk
         }
+        await journal.release(scope: key)
+        return result
     }
 
     private func scope(documentID: String) -> JournalScope {
         JournalScope(authorID: authorID, apiOrigin: apiOrigin, projectID: projectID, documentID: documentID)
     }
 
-    private func scopeKey(_ scope: JournalScope) -> String {
-        let data = (try? JSONEncoder().encode([scope.authorID, scope.apiOrigin, scope.projectID, scope.documentID])) ?? Data()
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
 }
 
 private func canonicalOrigin(_ value: String) -> String? {
