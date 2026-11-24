@@ -1,3 +1,10 @@
+const renderable = (children) => children.flat(Infinity)
+  .filter((child) => child !== null && child !== undefined && child !== false);
+
+export function replace(node, ...children) {
+  node.replaceChildren(...renderable(children));
+}
+
 export function h(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attributes)) {
@@ -5,7 +12,7 @@ export function h(tag, attributes = {}, ...children) {
     else if (value === true) node.setAttribute(name, '');
     else if (value !== false && value != null) node.setAttribute(name, value);
   }
-  node.append(...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false));
+  node.append(...renderable(children));
   return node;
 }
 

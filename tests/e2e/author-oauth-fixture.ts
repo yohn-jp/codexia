@@ -42,12 +42,12 @@ export const test = base.extend<{
           }
           // Still obtain a real Better Auth OAuth code-flow token, without rendering
           // the login/consent UI twice for every unrelated authoring scenario.
-          return sessionFor(await base.step("CI phase: api-auth", () => authorServer.issueOwnerAccessToken()));
+          return sessionFor(await authorServer.issueOwnerAccessToken());
         }
         const previous = navigation.continueCurrentPage && sessions.get(targetPage);
         const view = navigation.expectedView ?? targetPage.getByRole("heading", { name: "Database workspace" });
         if (previous && new URL(targetPage.url()).origin === origin && await view.isVisible()) return previous;
-        const session = sessionFor(await base.step("CI phase: browser-auth", () => signInAuthorBrowser(targetPage, origin, shell, navigation)));
+        const session = sessionFor(await signInAuthorBrowser(targetPage, origin, shell, navigation));
         sessions.set(targetPage, session);
         return session;
       });

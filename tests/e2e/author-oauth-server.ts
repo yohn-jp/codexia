@@ -122,29 +122,82 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
   }
 }
 
+// Classify observed requests without retaining query strings, codes, tokens, headers or project IDs.
+const observedAuthContexts = new WeakSet<ReturnType<Page["context"]>>();
+
 export async function signInAuthorBrowser(page: Page, origin: string, shell: Shell, navigation: AuthorNavigation = {}): Promise<string> {
   const destination = new URL(navigation.continueCurrentPage ? page.url() : navigation.path ?? `/${shell}/`, origin);
   if (destination.origin !== origin || (destination.pathname !== `/${shell}` && !destination.pathname.startsWith(`/${shell}/`))) {
     throw new Error(`Author sign-in requires a ${shell} route on the fixture origin`);
   }
-  if (!navigation.continueCurrentPage) await page.goto(destination.href);
-  const provider = page.getByRole("button", { name: "IDプロバイダーでサインイン" });
-  const consent = page.getByRole("button", { name: "許可して続ける" });
-  const expectedView = navigation.expectedView ?? page.getByRole("heading", { name: "Database workspace" });
-  const [issued] = await Promise.all([
-    page.waitForResponse((response) => response.url() === `${origin}/api/auth/oauth2/token` && response.ok()),
-    (async () => {
-      await page.getByRole("button", { name: /^(?:OAuthでサインイン|OAuthで再認証)$/u }).click();
-      await provider.or(consent).or(expectedView).first().waitFor();
-      if (await provider.isVisible()) {
-        await provider.click();
-        await consent.or(expectedView).first().waitFor();
-      }
-      if (await consent.isVisible()) await consent.click();
-      await expect(expectedView).toBeVisible();
-    })(),
-  ]);
-  const body = await issued.json() as { access_token?: unknown };
-  if (typeof body.access_token !== "string") throw new Error("Better Auth did not issue an API access token for the test author");
-  return body.access_token;
+  const context = page.context();
+  const firstContextAuth = !observedAuthContexts.has(context);
+  observedAuthContexts.add(context);
+  const started = performance.now();
+  const phases: Record<string, number> = {};
+  const requests: Record<string, { count: number; durationMs: number }> = {};
+  const now = () => Math.round(performance.now() - started);
+  let outcome = "failed";
+  const observe = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    const type = request.resourceType();
+    const key = url.origin !== origin ? "external"
+      : url.pathname.includes("/.well-known/") ? "discovery"
+      : url.pathname === "/api/auth/oauth2/token" ? "token-exchange"
+      : url.pathname.startsWith("/api/auth/") ? "auth-api"
+      : url.pathname === "/api/version" ? "version"
+      : url.pathname === "/api/session" ? "session"
+      : url.pathname.startsWith("/api/") ? "data-api"
+      : type === "document" ? "document"
+      : type === "script" ? "script" : "other";
+    const row = requests[key] ??= { count: 0, durationMs: 0 };
+    row.count++;
+    row.durationMs += Math.max(0, Math.round(request.timing().responseEnd));
+  };
+  page.on("requestfinished", observe);
+  try {
+    if (!navigation.continueCurrentPage) await page.goto(destination.href);
+    phases.navigation = now();
+    const provider = page.getByRole("button", { name: "IDプロバイダーでサインイン" });
+    const consent = page.getByRole("button", { name: "許可して続ける" });
+    const expectedView = navigation.expectedView ?? page.getByRole("heading", { name: "Database workspace" });
+    const signIn = page.getByRole("button", { name: /^(?:OAuthでサインイン|OAuthで再認証)$/u });
+    await signIn.waitFor({ state: "visible" });
+    phases.loginReady = now();
+    const [issued] = await Promise.all([
+      page.waitForResponse((response) => response.url() === `${origin}/api/auth/oauth2/token` && response.ok()).then(response => {
+        phases.tokenResponse = now();
+        return response;
+      }),
+      (async () => {
+        await signIn.click();
+        phases.signInClicked = now();
+        await provider.or(consent).or(expectedView).first().waitFor();
+        phases.firstPrompt = now();
+        if (await provider.isVisible()) {
+          phases.providerStart = now();
+          await provider.click();
+          await consent.or(expectedView).first().waitFor();
+          phases.providerEnd = now();
+        }
+        if (await consent.isVisible()) {
+          phases.consentStart = now();
+          await consent.click();
+          phases.consentClicked = now();
+        }
+        await expect(expectedView).toBeVisible();
+        phases.workspaceReady = now();
+      })(),
+    ]);
+    const body = await issued.json() as { access_token?: unknown };
+    if (typeof body.access_token !== "string") throw new Error("Better Auth did not issue an API access token for the test author");
+    outcome = "passed";
+    return body.access_token;
+  } finally {
+    page.off("requestfinished", observe);
+    if (process.env.CI === "true") console.log(JSON.stringify({
+      phase: "browser-auth-detail", shell, firstContextAuth, continueCurrentPage: Boolean(navigation.continueCurrentPage),
+      outcome, durationMs: now(), phases, requests,
+    }));
+  }
 }
